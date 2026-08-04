@@ -1,0 +1,108 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import defaultToolsExtension, {
+  removePiDocumentationGuide,
+  removeRedundantToolCatalog,
+  trimNativeSystemPrompt,
+} from "../extensions/default-tools.ts";
+
+function createHarness() {
+  const handlers = new Map<string, Array<(...args: any[]) => any>>();
+  let activeTools = ["read", "bash"];
+
+  const pi = {
+    on(event: string, handler: (...args: any[]) => any) {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    getActiveTools() {
+      return activeTools;
+    },
+    setActiveTools(tools: string[]) {
+      activeTools = tools;
+    },
+  };
+
+  defaultToolsExtension(pi as any);
+  return { handlers, activeTools: () => activeTools };
+}
+
+test("native tool catalog is removed while behavioral guidelines remain", () => {
+  const prompt = `You are a coding assistant.
+
+Available tools:
+- read: Read file contents
+- bash: Execute commands
+
+In addition to the tools above, custom tools may be available.
+
+Guidelines:
+- Be concise
+
+Current working directory: /project`;
+
+  assert.equal(
+    removeRedundantToolCatalog(prompt),
+    `You are a coding assistant.
+
+Guidelines:
+- Be concise
+
+Current working directory: /project`,
+  );
+});
+
+test("custom prompts without the native catalog are left unchanged", () => {
+  const prompt = "Custom system prompt\n\nRules:\n- Keep changes focused";
+  assert.equal(trimNativeSystemPrompt(prompt), prompt);
+});
+
+test("native Pi documentation guide is removed without removing skills", () => {
+  const prompt = `Guidelines:
+- Be concise
+
+Pi documentation (read only when asked about pi):
+- Main documentation: /pi/README.md
+- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)
+
+The following skills provide specialized instructions.
+<available_skills />`;
+
+  assert.equal(
+    removePiDocumentationGuide(prompt),
+    `Guidelines:
+- Be concise
+
+The following skills provide specialized instructions.
+<available_skills />`,
+  );
+});
+
+test("extension keeps extra tools active and strips the catalog per turn", async () => {
+  const harness = createHarness();
+  await harness.handlers.get("session_start")?.[0]({}, {});
+  assert.deepEqual(harness.activeTools(), ["read", "bash", "grep", "find"]);
+
+  const result = await harness.handlers.get("before_agent_start")?.[0]({
+    systemPrompt: `Base
+
+Available tools:
+- read: Read
+
+Guidelines:
+- Concise
+
+Pi documentation (read only when asked about pi):
+- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)
+
+Current working directory: /project`,
+  }, {});
+
+  assert.deepEqual(result, {
+    systemPrompt: `Base
+
+Guidelines:
+- Concise
+
+Current working directory: /project`,
+  });
+});
