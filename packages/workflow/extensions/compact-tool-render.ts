@@ -7,8 +7,8 @@ import { stripVTControlCharacters } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PACKAGE_NAME = "@earendil-works/pi-coding-agent";
-const PATCH_STATE = Symbol.for("hao-pi-workflow.compact-tool-render.patch");
-const PURPOSE_REGISTRY = Symbol.for("hao-pi-workflow.tool-purpose-registry");
+const PATCH_STATE = Symbol.for("suocode-workflow.compact-tool-render.patch");
+const PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
 const PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"];
 const OUTPUT_TAIL_LINES = 3;
 

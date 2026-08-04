@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const AUDIT_ENTRY_TYPE = "hao-tool-purpose-audit";
-const SCHEMA_MARKER = Symbol.for("hao-pi-workflow.tool-purpose-field");
-const PURPOSE_REGISTRY = Symbol.for("hao-pi-workflow.tool-purpose-registry");
+const AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
+const SCHEMA_MARKER = Symbol.for("suocode-workflow.tool-purpose-field");
+const PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
 const MAX_PURPOSE_LENGTH = 100;
 const PURPOSE_DESCRIPTION = `本次工具调用的具体目的，1至${MAX_PURPOSE_LENGTH}字`;
 const PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;

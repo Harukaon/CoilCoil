@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
-const BASH_CWD_MARKER = Symbol.for("hao-pi-workflow.bash-cwd-schema");
+const BASH_CWD_MARKER = Symbol.for("suocode-workflow.bash-cwd-schema");
 const BASH_CWD_DESCRIPTION =
   "Optional working directory for this command (relative to the project root or absolute)";
 

@@ -26,7 +26,5 @@ repository while remaining traceable and updateable. See
 
 ## Current status
 
-The existing workflow has been copied into `packages/workflow`. The original
-`hao-pi-workflow` directory remains untouched while the product repository is
-being established.
-
+The existing workflow has been copied into `packages/workflow`. The standalone
+development copy is maintained separately as `pi-workflow`.
