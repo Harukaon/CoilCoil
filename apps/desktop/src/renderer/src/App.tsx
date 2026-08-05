@@ -866,7 +866,7 @@ export default function App(): React.JSX.Element {
     <>
       <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
         <aside className="sidebar">
-          <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /><button className="icon-button sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><PanelLeft size={17} /></button></div>
+          <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
           <nav className="primary-nav"><button className="nav-button" type="button" disabled={!project} onClick={() => void startNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
           <section className="project-section">
             <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={() => void openProject()}><FolderOpen size={15} strokeWidth={1.7} /></button></div>
@@ -884,6 +884,7 @@ export default function App(): React.JSX.Element {
           </section>
           <div className="sidebar-footer"><div className="brand-mark">S</div><div className="brand-copy"><strong>SuoCode</strong><span>{snapshot?.model ? `${snapshot.model.provider}/${snapshot.model.name}` : "本地 Agent"}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={() => setSettingsOpen(true)}><Settings size={17} strokeWidth={1.7} /></button></div>
         </aside>
+        {leftOpen ? <button className="icon-button sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><PanelLeft size={17} /></button> : null}
         {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
 
         <section className="conversation-pane">

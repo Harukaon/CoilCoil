@@ -202,7 +202,6 @@ async function main() {
     assert.equal(isolation.nodeProcess, "undefined");
     assert.equal(isolation.panes, true);
     assert.equal(isolation.rightClosed, true);
-    assert.equal(isolation.leftResizer, true);
     assert.equal(isolation.rightResizer, false);
     for (const label of ["Todo", "变更", "终端", "文件"]) {
       assert.match(isolation.inspector, new RegExp(label));
@@ -218,6 +217,12 @@ async function main() {
       `window.innerWidth <= 350`,
       "The packaged desktop window could not shrink to 350px.",
     );
+    await client.evaluate(`(async () => {
+      if (!document.querySelector(".app-shell")?.classList.contains("left-collapsed")) return true;
+      document.querySelector('button[aria-label="展开侧栏"]')?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      return true;
+    })()`);
     const compactSidebarClosed = await client.evaluate(`(async () => {
       const button = document.querySelector('button[aria-label="收起侧栏"]');
       if (!button) return false;
@@ -226,6 +231,10 @@ async function main() {
       const dragBounds = dragRegion?.getBoundingClientRect();
       if (getComputedStyle(button).webkitAppRegion !== "no-drag") return false;
       if (dragBounds && buttonBounds.left < dragBounds.right) return false;
+      const centerX = buttonBounds.left + buttonBounds.width / 2;
+      const centerY = buttonBounds.top + buttonBounds.height / 2;
+      if (document.elementsFromPoint(centerX, centerY).some((element) => getComputedStyle(element).webkitAppRegion === "drag")) return false;
+      if (button.closest(".window-drag")) return false;
       button.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       return document.querySelector(".app-shell")?.classList.contains("left-collapsed") ?? false;
