@@ -61,7 +61,7 @@ type ActivityEntry =
   | { kind: "thinking"; id: string; text: string }
   | { kind: "tool"; id: string; tool: ToolRun };
 
-const PROJECT_STORAGE_KEY = "suocode.selected-project";
+const PROJECT_STORAGE_KEY = "suocode.selected-workspace";
 const LEFT_WIDTH_KEY = "suocode.left-panel-width";
 const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -79,8 +79,8 @@ function loadStoredProject(): ProjectSelection | null {
     const stored = window.localStorage.getItem(PROJECT_STORAGE_KEY);
     if (!stored) return null;
     const parsed = JSON.parse(stored) as Partial<ProjectSelection>;
-    return typeof parsed.name === "string" && typeof parsed.path === "string"
-      ? { name: parsed.name, path: parsed.path }
+    return typeof parsed.name === "string" && typeof parsed.path === "string" && parsed.kind === "workspace"
+      ? { name: parsed.name, path: parsed.path, kind: "workspace" }
       : null;
   } catch {
     return null;
@@ -96,6 +96,11 @@ function relativeTime(value: string): string {
   if (hours < 24) return `${hours} 小时`;
   const days = Math.floor(hours / 24);
   return days < 7 ? `${days} 天` : new Date(value).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+function truncateTitle(value: string, maximum = 10): string {
+  const characters = Array.from(value);
+  return characters.length > maximum ? `${characters.slice(0, maximum).join("")}…` : value;
 }
 
 function storedWidth(key: string, fallback: number): number {
@@ -683,8 +688,7 @@ export default function App(): React.JSX.Element {
         const bootstrap = await window.suocode.request<RuntimeBootstrap>({ type: "bootstrap" });
         setConfiguration(bootstrap.configuration);
         const stored = loadStoredProject();
-        if (stored) await activateProject(stored);
-        else setLoading(false);
+        await activateProject(stored ?? await window.suocode.homeProject());
         if (!bootstrap.configuration.configuredProviders.length) setSettingsOpen(true);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
@@ -760,7 +764,13 @@ export default function App(): React.JSX.Element {
     document.body.classList.add("resizing-panels");
     const move = (pointer: PointerEvent): void => {
       const raw = side === "left" ? startWidth + pointer.clientX - startX : startWidth + startX - pointer.clientX;
-      const width = Math.round(Math.max(side === "left" ? 210 : 280, Math.min(side === "left" ? 420 : 560, raw)));
+      const compact = window.innerWidth <= 700;
+      const minimum = side === "left" ? 210 : compact ? 180 : 280;
+      const available = side === "left"
+        ? window.innerWidth - (rightOpen ? rightWidth : 0) - 320
+        : window.innerWidth - (compact ? 120 : (leftOpen ? leftWidth : 0) + 320);
+      const maximum = Math.max(minimum, Math.min(side === "left" ? 420 : 560, available));
+      const width = Math.round(Math.max(minimum, Math.min(maximum, raw)));
       finalWidth = width;
       if (side === "left") setLeftWidth(width); else setRightWidth(width);
     };
@@ -890,7 +900,7 @@ export default function App(): React.JSX.Element {
         <section className="conversation-pane">
           <header className="conversation-header window-drag">
             {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={() => setLeftOpen(true)}><PanelLeft size={17} /></button> : null}
-            <div className="conversation-title"><strong>{activeConversation?.title ?? "新建对话"}</strong>{project ? <span>{project.name}</span> : null}</div>
+            <div className="conversation-title"><strong title={activeConversation?.title ?? "新建对话"}>{truncateTitle(activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
             <div className="header-actions no-drag">
               {!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={() => setRightOpen(true)}><PanelRight size={17} /></button> : null}
             </div>

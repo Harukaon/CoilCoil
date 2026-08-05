@@ -3,6 +3,7 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
 export interface ProjectSelection {
   name: string;
   path: string;
+  kind: "home" | "workspace";
 }
 
 export interface ModelOption {

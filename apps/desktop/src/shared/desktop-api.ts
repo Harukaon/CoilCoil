@@ -10,6 +10,7 @@ export type DesktopPlatform = "darwin" | "linux" | "win32";
 
 export interface SuoCodeDesktopApi {
   platform: DesktopPlatform;
+  homeProject(): Promise<ProjectSelection>;
   selectProject(): Promise<ProjectSelection | null>;
   request<T = unknown>(command: RuntimeCommand): Promise<T>;
   onRuntimeEvent(listener: (event: RuntimeEvent) => void): () => void;

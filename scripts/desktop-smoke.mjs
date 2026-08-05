@@ -184,6 +184,24 @@ async function main() {
       `document.readyState === "complete" && typeof window.suocode === "object"`,
       "The renderer or preload bridge did not become ready.",
     );
+    await client.waitFor(
+      `document.querySelector(".project-row span")?.textContent === "Home" && Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]:not([disabled])'))`,
+      "The desktop app did not initialize its private Home workspace.",
+      45_000,
+    );
+    const homeState = await client.evaluate(`(async () => {
+      const home = await window.suocode.homeProject();
+      return {
+        home,
+        projectName: document.querySelector(".project-row span")?.textContent || "",
+        status: document.querySelector(".workspace-status")?.textContent || "",
+      };
+    })()`);
+    assert.equal(homeState.home.name, "Home");
+    assert.equal(homeState.home.kind, "home");
+    assert.match(homeState.home.path, /\/Home$/);
+    assert.equal(homeState.projectName, "Home");
+    assert.match(homeState.status, new RegExp(homeState.home.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
     const isolation = await client.evaluate(`({
       title: document.title,
@@ -275,12 +293,58 @@ async function main() {
       return !document.querySelector(".app-shell")?.classList.contains("left-collapsed");
     })()`);
     assert.equal(compactSidebarOpened, true);
+    const compactInspectorLayout = await client.evaluate(`(async () => {
+      document.querySelector('button[aria-label="展开作业栏"]')?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      const shell = document.querySelector(".app-shell");
+      const conversation = document.querySelector(".conversation-pane");
+      const inspector = document.querySelector(".inspector-pane");
+      const conversationBounds = conversation?.getBoundingClientRect();
+      const inspectorBounds = inspector?.getBoundingClientRect();
+      const result = {
+        shellTransition: shell ? getComputedStyle(shell).transitionDuration : "",
+        sidebarTransition: getComputedStyle(document.querySelector(".sidebar")).transitionDuration,
+        inspectorPosition: inspector ? getComputedStyle(inspector).position : "",
+        conversationWidth: conversationBounds?.width ?? 0,
+        conversationRight: conversationBounds?.right ?? 0,
+        inspectorLeft: inspectorBounds?.left ?? 0,
+        inspectorWidth: inspectorBounds?.width ?? 0,
+        rightResizer: Boolean(document.querySelector(".right-resizer")),
+      };
+      document.querySelector('button[aria-label="收起作业栏"]')?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      return result;
+    })()`);
+    assert.equal(compactInspectorLayout.shellTransition, "0s");
+    assert.equal(compactInspectorLayout.sidebarTransition, "0s");
+    assert.notEqual(compactInspectorLayout.inspectorPosition, "absolute");
+    assert.ok(compactInspectorLayout.conversationWidth >= 119);
+    assert.ok(compactInspectorLayout.inspectorWidth >= 180);
+    assert.ok(compactInspectorLayout.inspectorLeft >= compactInspectorLayout.conversationRight - 1);
+    assert.equal(compactInspectorLayout.rightResizer, true);
     await client.evaluate(`(() => { window.resizeTo(1440, 900); return true; })()`);
 
+    const todoOverlayLayout = await client.evaluate(`(() => {
+      const stack = document.querySelector(".composer-stack");
+      if (!stack) return null;
+      const before = stack.getBoundingClientRect().height;
+      const plan = document.createElement("section");
+      plan.className = "composer-plan expanded";
+      plan.innerHTML = '<button class="composer-plan-toggle"><span>Todo</span></button><div class="composer-plan-body"><ol><li>测试</li></ol></div>';
+      stack.prepend(plan);
+      const after = stack.getBoundingClientRect().height;
+      const position = getComputedStyle(plan).position;
+      plan.remove();
+      return { before, after, position };
+    })()`);
+    assert.equal(todoOverlayLayout?.position, "absolute");
+    assert.equal(todoOverlayLayout?.after, todoOverlayLayout?.before);
+
     await client.evaluate(`(() => {
-      localStorage.setItem("suocode.selected-project", ${JSON.stringify(JSON.stringify({
+      localStorage.setItem("suocode.selected-workspace", ${JSON.stringify(JSON.stringify({
         name: basename(projectDirectory),
         path: projectDirectory,
+        kind: "workspace",
       }))});
       location.reload();
       return true;

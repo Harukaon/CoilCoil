@@ -7,6 +7,7 @@ import type {
 } from "../shared/desktop-api";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
+const PROJECT_HOME_CHANNEL = "project:home";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
 
@@ -18,6 +19,8 @@ const platform = ((): DesktopPlatform => {
 
 const api: SuoCodeDesktopApi = {
   platform,
+  homeProject: () =>
+    ipcRenderer.invoke(PROJECT_HOME_CHANNEL) as Promise<ProjectSelection>,
   selectProject: () =>
     ipcRenderer.invoke(PROJECT_SELECT_CHANNEL) as Promise<ProjectSelection | null>,
   request: <T>(command: RuntimeCommand) =>

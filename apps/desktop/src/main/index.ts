@@ -6,11 +6,13 @@ import type {
 } from "@suocode/runtime-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import type { ProjectSelection } from "../shared/desktop-api";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
+const PROJECT_HOME_CHANNEL = "project:home";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
 let isQuitting = false;
@@ -141,6 +143,11 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   runtime.start();
+  ipcMain.handle(PROJECT_HOME_CHANNEL, async (): Promise<ProjectSelection> => {
+    const path = join(app.getPath("userData"), "Home");
+    await mkdir(path, { recursive: true });
+    return { name: "Home", path, kind: "home" };
+  });
   ipcMain.handle(PROJECT_SELECT_CHANNEL, async (): Promise<ProjectSelection | null> => {
     const result = await dialog.showOpenDialog({
       title: "打开项目",
@@ -148,7 +155,7 @@ app.whenReady().then(() => {
     });
     const path = result.filePaths[0];
     if (result.canceled || !path) return null;
-    return { name: basename(path), path };
+    return { name: basename(path), path, kind: "workspace" };
   });
   ipcMain.handle(RUNTIME_REQUEST_CHANNEL, (_event, command: RuntimeCommand) => runtime.request(command));
   createWindow();
