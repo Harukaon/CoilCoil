@@ -160,6 +160,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .composer-plan-body { max-height: 103px; overflow: hidden; opacity: 1; transition: max-height 180ms cubic-bezier(.16, 1, .3, 1), opacity 120ms ease; }
 .composer-plan.collapsed .composer-plan-body { max-height: 0; opacity: 0; }
 .composer-plan ol { display: grid; gap: 1px; max-height: 103px; margin: 0; overflow-y: auto; padding: 0 8px 14px; list-style: none; }
+.composer-plan ol::-webkit-scrollbar { width: 5px; }
+.composer-plan ol::-webkit-scrollbar-track { background: transparent; }
+.composer-plan ol::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 5px; background: #c7c7c2; background-clip: padding-box; }
+.composer-plan ol::-webkit-scrollbar-thumb:hover { background: #aaa9a3; background-clip: padding-box; }
 .composer-plan li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 7px; align-items: start; padding: 5px 4px; color: #696964; font-size: 11px; line-height: 1.4; }
 .composer-plan li svg { margin-top: 1px; color: #92928d; }
 .composer-plan li.in_progress { color: #292927; font-weight: 550; }

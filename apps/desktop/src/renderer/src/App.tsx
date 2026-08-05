@@ -57,6 +57,9 @@ type TimelineItem =
 type ConversationTimelineItem =
   | { kind: "user"; order: number; message: ChatMessage }
   | { kind: "agent"; order: number; items: TimelineItem[] };
+type ActivityEntry =
+  | { kind: "thinking"; id: string; text: string }
+  | { kind: "tool"; id: string; tool: ToolRun };
 
 const PROJECT_STORAGE_KEY = "suocode.selected-project";
 const LEFT_WIDTH_KEY = "suocode.left-panel-width";
@@ -237,7 +240,7 @@ function lineStats(tool: ToolRun): { additions: number; deletions: number } {
   };
 }
 
-function toolSummary(tools: ToolRun[]): string {
+function toolSummary(tools: ToolRun[], thinkingCount: number): string {
   const edited = new Set<string>();
   let explored = 0;
   let searches = 0;
@@ -252,6 +255,7 @@ function toolSummary(tools: ToolRun[]): string {
     else other += 1;
   }
   const parts: string[] = [];
+  if (thinkingCount) parts.push(`思考了 ${thinkingCount} 次`);
   if (edited.size) parts.push(`编辑了 ${edited.size} 个文件`);
   if (explored) parts.push(`查看了 ${explored} 个文件`);
   if (searches) parts.push(`搜索 ${searches} 次`);
@@ -260,7 +264,9 @@ function toolSummary(tools: ToolRun[]): string {
   return parts.join("，") || `调用了 ${tools.length} 个工具`;
 }
 
-function ToolGroupView({ tools }: { tools: ToolRun[] }): React.JSX.Element {
+function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX.Element {
+  const tools = entries.flatMap((entry) => entry.kind === "tool" ? [entry.tool] : []);
+  const thinkingCount = entries.filter((entry) => entry.kind === "thinking").length;
   const stats = tools.reduce((total, tool) => {
     const next = lineStats(tool);
     return { additions: total.additions + next.additions, deletions: total.deletions + next.deletions };
@@ -269,18 +275,17 @@ function ToolGroupView({ tools }: { tools: ToolRun[] }): React.JSX.Element {
   return (
     <details className="tool-activity" open={running}>
       <summary>
-        <span>{running ? "正在执行工具" : toolSummary(tools)}</span>
+        <span>{running ? "正在执行工具" : toolSummary(tools, thinkingCount)}</span>
         {stats.additions ? <b className="additions">+{stats.additions}</b> : null}
         {stats.deletions ? <b className="deletions">-{stats.deletions}</b> : null}
         <ChevronRight className="tool-chevron" size={14} />
       </summary>
       <div className="tool-activity-list">
-        {tools.map((tool) => {
+        {entries.map((entry) => {
+          if (entry.kind === "thinking") return <details className="tool-activity-row thinking" key={entry.id}><summary><code>think</code><span>Reasoning</span></summary><pre>{entry.text}</pre></details>;
+          const tool = entry.tool;
           const itemStats = lineStats(tool);
-          return <details className={`tool-activity-row ${tool.status}`} key={tool.id}>
-            <summary><code>{tool.name}</code><span>{tool.label}</span>{itemStats.additions ? <b className="additions">+{itemStats.additions}</b> : null}{itemStats.deletions ? <b className="deletions">-{itemStats.deletions}</b> : null}{tool.status === "running" ? <LoaderCircle className="spin" size={13} /> : tool.status === "failed" ? <AlertCircle size={13} /> : null}</summary>
-            {tool.output || Object.keys(tool.args).length ? <pre>{tool.output || JSON.stringify(tool.args, null, 2)}</pre> : null}
-          </details>;
+          return <details className={`tool-activity-row ${tool.status}`} key={tool.id}><summary><code>{tool.name}</code><span>{tool.label}</span>{itemStats.additions ? <b className="additions">+{itemStats.additions}</b> : null}{itemStats.deletions ? <b className="deletions">-{itemStats.deletions}</b> : null}{tool.status === "running" ? <LoaderCircle className="spin" size={13} /> : tool.status === "failed" ? <AlertCircle size={13} /> : null}</summary>{tool.output || Object.keys(tool.args).length ? <pre>{tool.output || JSON.stringify(tool.args, null, 2)}</pre> : null}</details>;
         })}
       </div>
     </details>
@@ -288,13 +293,31 @@ function ToolGroupView({ tools }: { tools: ToolRun[] }): React.JSX.Element {
 }
 
 function AgentTurnView({ items, modelName }: { items: TimelineItem[]; modelName: string }): React.JSX.Element {
+  const rendered: React.JSX.Element[] = [];
+  let activity: ActivityEntry[] = [];
+  const flushActivity = (): void => {
+    if (!activity.length) return;
+    const entries = activity;
+    activity = [];
+    rendered.push(<ActivityGroupView key={`activity-${entries[0].id}`} entries={entries} />);
+  };
+  for (const item of items) {
+    if (item.kind === "tools") {
+      activity.push(...item.tools.map((tool) => ({ kind: "tool" as const, id: tool.id, tool })));
+      continue;
+    }
+    if (item.message.thinking?.trim()) activity.push({ kind: "thinking", id: `${item.message.id}-thinking`, text: item.message.thinking });
+    if (item.message.text) {
+      flushActivity();
+      rendered.push(<AssistantSegment key={`message-${item.message.id}`} message={{ ...item.message, thinking: undefined }} />);
+    }
+  }
+  flushActivity();
   return (
     <article className="agent-turn">
       <div className="message-label">{modelName}</div>
       <div className="agent-turn-content">
-        {items.map((item) => item.kind === "message"
-          ? <AssistantSegment key={`message-${item.message.id}`} message={item.message} />
-          : <ToolGroupView key={`tools-${item.order}`} tools={item.tools} />)}
+        {rendered}
       </div>
     </article>
   );
