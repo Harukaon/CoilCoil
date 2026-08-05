@@ -122,7 +122,7 @@ async function clickInspector(client, label) {
 
 async function submitPrompt(client, prompt, responseToken, timeout = 120_000) {
   const submitted = await client.evaluate(`(async () => {
-    const input = document.querySelector('textarea[aria-label="Message SuoCode"]');
+    const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
     if (!input) return false;
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
     setter.call(input, ${JSON.stringify(prompt)});
@@ -138,7 +138,7 @@ async function submitPrompt(client, prompt, responseToken, timeout = 120_000) {
     timeout,
   );
   await client.waitFor(
-    `document.querySelector(".run-indicator")?.textContent.includes("Ready")`,
+    `!document.querySelector(".agent-activity")`,
     `The Agent run for ${responseToken} did not settle.`,
     30_000,
   );
@@ -191,6 +191,9 @@ async function main() {
       nodeRequire: typeof window.require,
       nodeProcess: typeof window.process,
       panes: [".sidebar", ".conversation-pane", ".inspector-pane"].every((selector) => Boolean(document.querySelector(selector))),
+      rightClosed: document.querySelector(".app-shell")?.classList.contains("right-collapsed"),
+      leftResizer: Boolean(document.querySelector(".left-resizer")),
+      rightResizer: Boolean(document.querySelector(".right-resizer")),
       inspector: document.querySelector(".inspector-nav")?.textContent || ""
     })`);
     assert.equal(isolation.title, "SuoCode");
@@ -198,7 +201,10 @@ async function main() {
     assert.equal(isolation.nodeRequire, "undefined");
     assert.equal(isolation.nodeProcess, "undefined");
     assert.equal(isolation.panes, true);
-    for (const label of ["Plan", "Changes", "Terminal", "Files"]) {
+    assert.equal(isolation.rightClosed, true);
+    assert.equal(isolation.leftResizer, true);
+    assert.equal(isolation.rightResizer, false);
+    for (const label of ["计划", "变更", "终端", "文件"]) {
       assert.match(isolation.inspector, new RegExp(label));
     }
 
@@ -211,17 +217,15 @@ async function main() {
       return true;
     })()`);
     await client.waitFor(
-      `Boolean(document.querySelector('textarea[aria-label="Message SuoCode"]:not([disabled])'))`,
+      `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]:not([disabled])'))`,
       "The packaged app could not create a project session through IPC.",
       45_000,
     );
     const projectState = await client.evaluate(`({
       status: document.querySelector(".workspace-status")?.textContent || "",
-      ready: document.querySelector(".run-indicator")?.textContent || "",
       session: document.querySelector(".conversation-title")?.textContent || ""
     })`);
     assert.match(projectState.status, new RegExp(projectDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.match(projectState.ready, /Ready/);
     assert.ok(projectState.session.length > 0);
 
     if (live) {
@@ -260,9 +264,9 @@ async function main() {
       await client.evaluate(`window.suocode.request({ type: "refresh_project" })`);
 
       const toolState = await client.evaluate(`({
-        count: document.querySelectorAll(".tool-card").length,
-        failed: document.querySelectorAll(".tool-card.failed").length,
-        text: [...document.querySelectorAll(".tool-card")].map((item) => item.textContent).join("\\n")
+        count: document.querySelectorAll(".tool-activity-row").length,
+        failed: document.querySelectorAll(".tool-activity-row.failed").length,
+        text: [...document.querySelectorAll(".tool-activity-row")].map((item) => item.textContent).join("\\n")
       })`);
       assert.ok(toolState.count >= 3, `Expected at least three tool calls, received ${toolState.count}: ${toolState.text}`);
       assert.equal(toolState.failed, 0);
@@ -279,25 +283,25 @@ async function main() {
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === true), true);
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === false), true);
 
-      await clickInspector(client, "Plan");
+      await clickInspector(client, "计划");
       await client.waitFor(
         `document.querySelectorAll(".plan-list li.completed").length >= 2`,
         "Completed todo state was not projected into Plan.",
       );
 
-      await clickInspector(client, "Changes");
+      await clickInspector(client, "变更");
       await client.waitFor(
         `[...document.querySelectorAll(".change-path")].some((item) => item.textContent.includes(${JSON.stringify(fileName)}))`,
         "The Agent-written file was not projected into Changes.",
       );
 
-      await clickInspector(client, "Terminal");
+      await clickInspector(client, "终端");
       await client.waitFor(
         `[...document.querySelectorAll(".terminal-card")].some((item) => item.textContent.includes(${JSON.stringify(terminalToken)}))`,
         "Bash output was not projected into Terminal.",
       );
 
-      await clickInspector(client, "Files");
+      await clickInspector(client, "文件");
       await client.waitFor(
         `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes(${JSON.stringify(fileName)}))`,
         "The Agent-written file was not projected into Files.",

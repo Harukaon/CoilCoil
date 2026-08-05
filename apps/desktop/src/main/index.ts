@@ -72,13 +72,13 @@ class RuntimeHost {
     if (!pending) return;
     this.pending.delete(response.id);
     if (response.ok) pending.resolve(response.result);
-    else pending.reject(new Error(response.error || "Runtime request failed."));
+    else pending.reject(new Error(response.error || "运行时请求失败。"));
   }
 
   request<T>(command: RuntimeCommand): Promise<T> {
     this.start();
     const child = this.child;
-    if (!child?.connected) return Promise.reject(new Error("SuoCode runtime is unavailable."));
+    if (!child?.connected) return Promise.reject(new Error("SuoCode 运行时不可用。"));
     const id = randomUUID();
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
@@ -100,7 +100,7 @@ class RuntimeHost {
     child.removeAllListeners("exit");
     if (child.connected) child.disconnect();
     child.kill("SIGTERM");
-    for (const request of this.pending.values()) request.reject(new Error("SuoCode is closing."));
+    for (const request of this.pending.values()) request.reject(new Error("SuoCode 正在关闭。"));
     this.pending.clear();
   }
 }
@@ -143,7 +143,7 @@ app.whenReady().then(() => {
   runtime.start();
   ipcMain.handle(PROJECT_SELECT_CHANNEL, async (): Promise<ProjectSelection | null> => {
     const result = await dialog.showOpenDialog({
-      title: "Open project",
+      title: "打开项目",
       properties: ["openDirectory"],
     });
     const path = result.filePaths[0];

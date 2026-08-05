@@ -83,6 +83,8 @@ interface ActiveSession {
   project: ProjectSnapshot;
   messageIds: WeakMap<object, string>;
   activeAssistantId?: string;
+  activeAssistantOrder?: number;
+  nextTimelineOrder: number;
 }
 
 interface WorkflowManifest {
@@ -149,19 +151,20 @@ function messageTimestamp(message: Record<string, unknown>): number {
   return Date.now();
 }
 
-function mapMessage(message: unknown, id: string): ChatMessage | undefined {
+function mapMessage(message: unknown, id: string, order: number): ChatMessage | undefined {
   if (!isRecord(message) || typeof message.role !== "string") return undefined;
   const role = message.role;
   const parts = contentParts(message.content);
 
   if (role === "user") {
-    return { id, role: "user", text: parts.text, timestamp: messageTimestamp(message) };
+    return { id, order, role: "user", text: parts.text, timestamp: messageTimestamp(message) };
   }
   if (role === "assistant") {
     const stopReason = stringValue(message.stopReason);
     const failed = stopReason === "error" || stopReason === "aborted";
     return {
       id,
+      order,
       role: "assistant",
       text: parts.text || (failed ? stringValue(message.errorMessage) : ""),
       thinking: parts.thinking || undefined,
@@ -173,6 +176,7 @@ function mapMessage(message: unknown, id: string): ChatMessage | undefined {
   if (role === "toolResult") {
     return {
       id,
+      order,
       role: "tool",
       text: parts.text,
       timestamp: messageTimestamp(message),
@@ -185,6 +189,7 @@ function mapMessage(message: unknown, id: string): ChatMessage | undefined {
   if (role === "bashExecution") {
     return {
       id,
+      order,
       role: "tool",
       text: stringValue(message.output),
       timestamp: messageTimestamp(message),
@@ -193,14 +198,14 @@ function mapMessage(message: unknown, id: string): ChatMessage | undefined {
     };
   }
   if (role === "custom" && message.display !== false) {
-    return { id, role: "system", text: parts.text, timestamp: messageTimestamp(message) };
+    return { id, order, role: "system", text: parts.text, timestamp: messageTimestamp(message) };
   }
   return undefined;
 }
 
 function titleFromText(text: string): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
-  if (!oneLine) return "New chat";
+  if (!oneLine) return "新建对话";
   return oneLine.length > 64 ? `${oneLine.slice(0, 61)}…` : oneLine;
 }
 
@@ -267,7 +272,7 @@ function ensureInside(root: string, path: string): string {
   const target = existsSync(candidate) ? safeRealPath(candidate) : candidate;
   const rel = relative(resolvedRoot, target);
   if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
-    throw new Error("The requested file is outside the active project.");
+    throw new Error("请求的文件不在当前项目中。");
   }
   return target;
 }
@@ -584,7 +589,7 @@ export class SuoCodeRuntime {
   async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
     const resolvedCwd = safeRealPath(cwd);
     const resolvedSession = ensureInside(this.sessionDir, sessionPath);
-    if (!existsSync(resolvedSession)) throw new Error("The selected session no longer exists.");
+    if (!existsSync(resolvedSession)) throw new Error("所选会话已不存在。");
     return this.installSession(resolvedCwd, SessionManager.open(resolvedSession, this.sessionDir, resolvedCwd));
   }
 
@@ -648,6 +653,7 @@ export class SuoCodeRuntime {
       plan: reconstructed.plan,
       project,
       messageIds: new WeakMap(),
+      nextTimelineOrder: reconstructed.nextTimelineOrder,
     };
     this.active = active;
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
@@ -659,17 +665,26 @@ export class SuoCodeRuntime {
   }
 
   private reconstructState(session: AgentSession): {
+    messages: ChatMessage[];
     tools: Map<string, ToolRun>;
     terminals: Map<string, TerminalRun>;
     plan: TodoItem[];
+    nextTimelineOrder: number;
   } {
+    const messages: ChatMessage[] = [];
     const tools = new Map<string, ToolRun>();
     const terminals = new Map<string, TerminalRun>();
     let plan: TodoItem[] = [];
     const calls = new Map<string, { name: string; args: Record<string, unknown>; timestamp: number }>();
+    let order = 0;
 
-    for (const rawMessage of session.messages) {
+    for (const [index, rawMessage] of session.messages.entries()) {
       if (!isRecord(rawMessage)) continue;
+      const mapped = mapMessage(rawMessage, `history-${index}-${messageTimestamp(rawMessage)}`, order);
+      if (mapped && mapped.role !== "tool" && (mapped.role === "user" || mapped.text || mapped.thinking)) {
+        messages.push(mapped);
+        order += 1;
+      }
       if (rawMessage.role === "assistant" && Array.isArray(rawMessage.content)) {
         for (const block of rawMessage.content) {
           if (!isRecord(block) || block.type !== "toolCall") continue;
@@ -687,6 +702,7 @@ export class SuoCodeRuntime {
       const failed = rawMessage.isError === true;
       tools.set(id, {
         id,
+        order: order++,
         name,
         label: this.toolLabel(name, args),
         args,
@@ -710,19 +726,20 @@ export class SuoCodeRuntime {
         });
       }
     }
-    return { tools, terminals, plan };
+    return { messages, tools, terminals, plan, nextTimelineOrder: order };
   }
 
   private toolLabel(name: string, args: Record<string, unknown>): string {
-    if (name === "bash") return stringValue(args.command) || "Run command";
-    if (name === "read") return `Read ${stringValue(args.path) || "file"}`;
-    if (name === "write") return `Write ${stringValue(args.path) || "file"}`;
-    if (name === "edit") return `Edit ${stringValue(args.path) || "file"}`;
-    if (name === "grep") return `Search ${stringValue(args.pattern) || "project"}`;
-    if (name === "find") return `Find ${stringValue(args.pattern) || "files"}`;
-    if (name === "todo") return "Update plan";
-    if (name === "terminal") return stringValue(args.command) || `Terminal ${stringValue(args.action)}`;
-    return name.replace(/[_-]+/g, " ");
+    if (name === "bash") return `运行 ${stringValue(args.command) || "命令"}`;
+    if (name === "read") return `查看 ${stringValue(args.path) || "文件"}`;
+    if (name === "write") return `写入 ${stringValue(args.path) || "文件"}`;
+    if (name === "edit") return `编辑 ${stringValue(args.path) || "文件"}`;
+    if (name === "grep") return `搜索 ${stringValue(args.pattern) || "项目"}`;
+    if (name === "find") return `查找 ${stringValue(args.pattern) || "文件"}`;
+    if (name === "ls") return `查看 ${stringValue(args.path) || "目录"}`;
+    if (name === "todo") return "更新计划";
+    if (name === "terminal") return `运行 ${stringValue(args.command) || stringValue(args.action) || "终端命令"}`;
+    return `调用 ${name.replace(/[_-]+/g, " ")}`;
   }
 
   private messageId(message: unknown, prefix: string): string {
@@ -745,6 +762,7 @@ export class SuoCodeRuntime {
           break;
         case "agent_settled":
           active.activeAssistantId = undefined;
+          active.activeAssistantOrder = undefined;
           this.emitEvent({ type: "run_state", running: false });
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
           this.scheduleProjectRefresh();
@@ -758,8 +776,12 @@ export class SuoCodeRuntime {
           const raw = event.message as unknown;
           const role = isRecord(raw) ? stringValue(raw.role) : "message";
           const id = this.messageId(raw, role || "message");
-          if (role === "assistant") active.activeAssistantId = id;
-          const mapped = mapMessage(raw, id);
+          const order = active.nextTimelineOrder++;
+          if (role === "assistant") {
+            active.activeAssistantId = id;
+            active.activeAssistantOrder = order;
+          }
+          const mapped = mapMessage(raw, id, order);
           if (mapped && mapped.role !== "tool") this.emitEvent({ type: "message_started", message: mapped });
           break;
         }
@@ -780,7 +802,10 @@ export class SuoCodeRuntime {
           const id = role === "assistant" && active.activeAssistantId
             ? active.activeAssistantId
             : this.messageId(raw, role || "message");
-          const mapped = mapMessage(raw, id);
+          const order = role === "assistant" && active.activeAssistantOrder !== undefined
+            ? active.activeAssistantOrder
+            : active.nextTimelineOrder++;
+          const mapped = mapMessage(raw, id, order);
           if (mapped && mapped.role !== "tool") this.emitEvent({ type: "message_finished", message: mapped });
           break;
         }
@@ -788,6 +813,7 @@ export class SuoCodeRuntime {
           const args = isRecord(event.args) ? { ...event.args } : {};
           const tool: ToolRun = {
             id: event.toolCallId,
+            order: active.nextTimelineOrder++,
             name: event.toolName,
             label: this.toolLabel(event.toolName, args),
             args,
@@ -824,6 +850,7 @@ export class SuoCodeRuntime {
         case "tool_execution_end": {
           const tool = active.tools.get(event.toolCallId) ?? {
             id: event.toolCallId,
+            order: active.nextTimelineOrder++,
             name: event.toolName,
             label: this.toolLabel(event.toolName, {}),
             args: {},
@@ -858,7 +885,7 @@ export class SuoCodeRuntime {
           const id = event.id ?? "session-bash";
           const current = active.terminals.get(id) ?? {
             id,
-            command: "Shell command",
+            command: "Shell 命令",
             cwd: active.cwd,
             output: "",
             status: "running" as const,
@@ -880,7 +907,7 @@ export class SuoCodeRuntime {
   async prompt(text: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
     const prompt = text.trim();
-    if (!prompt) throw new Error("Prompt cannot be empty.");
+    if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) return this.steer(prompt);
 
     const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
@@ -896,7 +923,7 @@ export class SuoCodeRuntime {
   async steer(text: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
     const prompt = text.trim();
-    if (!prompt) throw new Error("Prompt cannot be empty.");
+    if (!prompt) throw new Error("消息不能为空。");
     await active.session.prompt(prompt, { streamingBehavior: "steer" });
     return { accepted: true };
   }
@@ -910,7 +937,7 @@ export class SuoCodeRuntime {
   }
 
   private requireActive(): ActiveSession {
-    if (!this.active) throw new Error("Open a project and create a session first.");
+    if (!this.active) throw new Error("请先打开项目并创建会话。");
     return this.active;
   }
 
@@ -954,7 +981,7 @@ export class SuoCodeRuntime {
     const active = this.requireActive();
     const target = ensureInside(active.cwd, path);
     const fileStat = await stat(target);
-    if (!fileStat.isFile()) throw new Error("The selected path is not a file.");
+    if (!fileStat.isFile()) throw new Error("所选路径不是文件。");
     const buffer = await readFile(target);
     const limit = Math.max(1, Math.min(maxBytes, 2 * 1024 * 1024));
     const truncated = buffer.byteLength > limit;
@@ -974,20 +1001,18 @@ export class SuoCodeRuntime {
           id: active.session.sessionId,
           path: active.session.sessionFile ?? "",
           cwd: active.cwd,
-          title: active.session.sessionName || "New chat",
+          title: active.session.sessionName || "新建对话",
           createdAt: header?.timestamp ?? now.toISOString(),
           updatedAt: now.toISOString(),
           messageCount: active.session.messages.length,
         };
-    const messages = active.session.messages.flatMap((message, index) => {
-      const mapped = mapMessage(message, `history-${index}-${messageTimestamp(message as unknown as Record<string, unknown>)}`);
-      return mapped ? [mapped] : [];
-    });
+    const reconstructed = this.reconstructState(active.session);
+    const messages = reconstructed.messages;
     const model = active.session.model;
     return {
       session: summary,
       messages,
-      tools: [...active.tools.values()].sort((a, b) => a.startedAt - b.startedAt),
+      tools: [...reconstructed.tools.values()].sort((a, b) => a.order - b.order),
       project: active.project,
       model: model
         ? { provider: model.provider, id: model.id, name: model.name || model.id, reasoning: Boolean(model.reasoning) }

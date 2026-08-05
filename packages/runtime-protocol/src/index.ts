@@ -38,6 +38,7 @@ export type ChatRole = "user" | "assistant" | "tool" | "system";
 
 export interface ChatMessage {
   id: string;
+  order: number;
   role: ChatRole;
   text: string;
   thinking?: string;
@@ -55,6 +56,7 @@ export interface TodoItem {
 
 export interface ToolRun {
   id: string;
+  order: number;
   name: string;
   label: string;
   args: Record<string, unknown>;
