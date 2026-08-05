@@ -211,6 +211,24 @@ async function main() {
       return bounds ? { width: bounds.width, height: bounds.height } : null;
     })()`);
     assert.deepEqual(regularToggleSize, { width: 30, height: 30 });
+    const macTrafficLightSpacing = await client.evaluate(`(async () => {
+      document.querySelector('button[aria-label="收起侧栏"]')?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      const header = document.querySelector(".conversation-header");
+      const openButton = document.querySelector('button[aria-label="展开侧栏"]');
+      const result = {
+        platform: window.suocode.platform,
+        paddingLeft: header ? Number.parseFloat(getComputedStyle(header).paddingLeft) : 0,
+        buttonLeft: openButton?.getBoundingClientRect().left ?? 0,
+      };
+      openButton?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      return result;
+    })()`);
+    if (macTrafficLightSpacing.platform === "darwin") {
+      assert.ok(macTrafficLightSpacing.paddingLeft >= 82);
+      assert.ok(macTrafficLightSpacing.buttonLeft >= 82);
+    }
 
     await client.evaluate(`(() => { window.resizeTo(350, 700); return true; })()`);
     await client.waitFor(
