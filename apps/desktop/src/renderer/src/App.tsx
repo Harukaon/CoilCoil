@@ -37,16 +37,19 @@ import remarkGfm from "remark-gfm";
 import type {
   ChangedFile,
   ChatMessage,
+  ContextUsage,
   FileNode,
   ProjectSelection,
   ProjectSnapshot,
   RuntimeBootstrap,
   RuntimeConfiguration,
   RuntimeEvent,
+  ResponseMetrics,
   ModelOption,
   SessionSnapshot,
   SessionSummary,
   ThinkingLevel,
+  TokenUsage,
   ToolRun,
 } from "@suocode/runtime-protocol";
 
@@ -61,7 +64,9 @@ type ActivityEntry =
   | { kind: "thinking"; id: string; text: string }
   | { kind: "tool"; id: string; tool: ToolRun };
 
-const PROJECT_STORAGE_KEY = "suocode.selected-workspace";
+const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
+const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
+const ACTIVE_PROJECT_STORAGE_KEY = "suocode.active-project";
 const LEFT_WIDTH_KEY = "suocode.left-panel-width";
 const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -74,17 +79,48 @@ const EMPTY_PROJECT: ProjectSnapshot = {
   refreshedAt: 0,
 };
 
-function loadStoredProject(): ProjectSelection | null {
+function isWorkspace(value: Partial<ProjectSelection>): value is ProjectSelection {
+  return typeof value.name === "string" && typeof value.path === "string" && value.kind === "workspace";
+}
+
+function loadStoredProjects(): ProjectSelection[] {
   try {
-    const stored = window.localStorage.getItem(PROJECT_STORAGE_KEY);
-    if (!stored) return null;
-    const parsed = JSON.parse(stored) as Partial<ProjectSelection>;
-    return typeof parsed.name === "string" && typeof parsed.path === "string" && parsed.kind === "workspace"
-      ? { name: parsed.name, path: parsed.path, kind: "workspace" }
-      : null;
+    const stored = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Array<Partial<ProjectSelection>>;
+      if (Array.isArray(parsed)) return parsed.filter(isWorkspace);
+    }
+    const legacy = window.localStorage.getItem(LEGACY_PROJECT_STORAGE_KEY);
+    if (!legacy) return [];
+    const parsed = JSON.parse(legacy) as Partial<ProjectSelection>;
+    return isWorkspace(parsed) ? [parsed] : [];
   } catch {
-    return null;
+    return [];
   }
+}
+
+function pathLabel(path: string): string {
+  const normalized = path.replace(/[\\/]+$/, "");
+  return normalized.split(/[\\/]/).at(-1) || path;
+}
+
+function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
+  const seen = new Set<string>();
+  return projects.filter((project) => {
+    if (seen.has(project.path)) return false;
+    seen.add(project.path);
+    return true;
+  });
+}
+
+function formatMetricDuration(milliseconds: number | undefined): string {
+  return milliseconds === undefined ? "—" : `${(milliseconds / 1_000).toFixed(2)}s`;
+}
+
+function formatTokens(tokens: number | null | undefined): string {
+  if (tokens === null || tokens === undefined) return "—";
+  if (tokens < 1_000) return String(Math.round(tokens));
+  return `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
 }
 
 function relativeTime(value: string): string {
@@ -414,7 +450,7 @@ function TerminalPanel({ project }: { project: ProjectSnapshot }): React.JSX.Ele
   );
 }
 
-function FileTreeNode({ node, depth, onOpen }: { node: FileNode; depth: number; onOpen: (node: FileNode) => void }): React.JSX.Element {
+function FileTreeNode({ node, depth }: { node: FileNode; depth: number }): React.JSX.Element {
   const [open, setOpen] = useState(depth < 1);
   if (node.kind === "directory") {
     return (
@@ -424,43 +460,92 @@ function FileTreeNode({ node, depth, onOpen }: { node: FileNode; depth: number; 
           <Folder size={14} />
           <span>{node.name}</span>
         </button>
-        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} onOpen={onOpen} />) : null}
+        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} />) : null}
       </div>
     );
   }
   return (
-    <button className="file-leaf" type="button" style={{ paddingLeft: 21 + depth * 13 }} onClick={() => onOpen(node)}>
+    <div className="file-leaf" style={{ paddingLeft: 21 + depth * 13 }}>
       <File size={13} /><span>{node.name}</span>
-    </button>
+    </div>
   );
 }
 
 function FilesPanel({ project }: { project: ProjectSnapshot }): React.JSX.Element {
-  const [preview, setPreview] = useState<{ path: string; content: string; truncated: boolean }>();
-  const [error, setError] = useState<string>();
-  const openFile = async (node: FileNode): Promise<void> => {
-    try {
-      setError(undefined);
-      setPreview(await window.suocode.request({ type: "read_file", path: node.path }));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-
   if (!project.cwd) {
     return <EmptyState icon={Files} title="未打开项目" detail="打开项目后即可查看文件。" />;
   }
   return (
     <div className="files-panel">
       <div className="file-tree">
-        {project.files.length ? project.files.map((node) => <FileTreeNode key={node.path} node={node} depth={0} onOpen={(item) => void openFile(item)} />) : <p className="panel-note">此文件夹为空。</p>}
+        {project.files.length ? project.files.map((node) => <FileTreeNode key={node.path} node={node} depth={0} />) : <p className="panel-note">此文件夹为空。</p>}
       </div>
-      {preview || error ? (
-        <div className="file-preview">
-          <div className="preview-heading"><FileCode2 size={13} /><span>{preview?.path || "无法读取文件"}</span><button type="button" onClick={() => { setPreview(undefined); setError(undefined); }}><X size={13} /></button></div>
-          <pre>{error || `${preview?.content || ""}${preview?.truncated ? "\n… 文件内容已截断 …" : ""}`}</pre>
-        </div>
-      ) : null}
+    </div>
+  );
+}
+
+function WorkspaceStatus({
+  project,
+  responseMetrics,
+  contextUsage,
+  tokenUsage,
+}: {
+  project: ProjectSelection | null;
+  responseMetrics?: ResponseMetrics;
+  contextUsage?: ContextUsage;
+  tokenUsage: TokenUsage;
+}): React.JSX.Element {
+  const [pathOpen, setPathOpen] = useState(false);
+  const percent = Math.max(0, Math.min(100, contextUsage?.percent ?? 0));
+  return (
+    <div className="workspace-status">
+      <Popover.Root open={pathOpen} onOpenChange={setPathOpen}>
+        <Popover.Trigger asChild>
+          <button className="workspace-path" type="button" title={project?.path ?? "未选择项目"}>
+            <FileCode2 size={13} />
+            <span>{project ? pathLabel(project.path) : "未选择项目"}</span>
+          </button>
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content className="path-popover" side="top" align="start" sideOffset={7}>
+            {project?.path ?? "未选择项目"}
+            <Popover.Arrow className="model-popover-arrow" />
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+      <div className="composer-metrics">
+        {responseMetrics ? (
+          <span className="response-metrics">
+            首字 {formatMetricDuration(responseMetrics.firstTokenMs)} · {responseMetrics.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s
+          </span>
+        ) : null}
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <button
+              className="context-trigger"
+              type="button"
+              aria-label="查看上下文 Token 详情"
+              title={`上下文 ${contextUsage?.percent === null || contextUsage?.percent === undefined ? "未知" : `${contextUsage.percent.toFixed(1)}%`}`}
+            >
+              <span className="context-ring" style={{ "--context-percent": `${percent}%` } as CSSProperties}><i /></span>
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content className="context-popover" side="top" align="end" sideOffset={7}>
+              <strong>Token 使用情况</strong>
+              <dl>
+                <div><dt>当前上下文</dt><dd>{formatTokens(contextUsage?.tokens)} / {formatTokens(contextUsage?.contextWindow)}</dd></div>
+                <div><dt>上下文占用</dt><dd>{contextUsage?.percent === null || contextUsage?.percent === undefined ? "—" : `${contextUsage.percent.toFixed(1)}%`}</dd></div>
+                <div><dt>累计输入</dt><dd>{formatTokens(tokenUsage.input)}</dd></div>
+                <div><dt>累计输出</dt><dd>{formatTokens(tokenUsage.output)}</dd></div>
+                <div><dt>缓存读取</dt><dd>{formatTokens(tokenUsage.cacheRead)}</dd></div>
+                <div><dt>本次输出</dt><dd>{formatTokens(responseMetrics?.outputTokens)}</dd></div>
+              </dl>
+              <Popover.Arrow className="model-popover-arrow" />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      </div>
     </div>
   );
 }
@@ -568,9 +653,10 @@ function SettingsDialog({ configuration, open, onClose, onSaved }: {
 }
 
 export default function App(): React.JSX.Element {
-  const [project, setProject] = useState<ProjectSelection | null>(loadStoredProject);
+  const [projects, setProjects] = useState<ProjectSelection[]>([]);
+  const [project, setProject] = useState<ProjectSelection | null>(null);
   const projectRef = useRef<ProjectSelection | null>(project);
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessionsByProject, setSessionsByProject] = useState<Record<string, SessionSummary[]>>({});
   const [snapshot, setSnapshot] = useState<SessionSnapshot>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [tools, setTools] = useState<ToolRun[]>([]);
@@ -580,7 +666,7 @@ export default function App(): React.JSX.Element {
   const [draft, setDraft] = useState("");
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
-  const [projectExpanded, setProjectExpanded] = useState(true);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT_WIDTH_KEY, 268));
   const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352));
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
@@ -607,7 +693,7 @@ export default function App(): React.JSX.Element {
         setConfiguration(event.configuration);
         break;
       case "sessions_updated":
-        if (projectRef.current?.path === event.cwd) setSessions(event.sessions);
+        setSessionsByProject((current) => ({ ...current, [event.cwd]: event.sessions }));
         break;
       case "session_snapshot":
         applySnapshot(event.snapshot);
@@ -644,6 +730,14 @@ export default function App(): React.JSX.Element {
       case "project_updated":
         setProjectState(event.project);
         break;
+      case "metrics_updated":
+        setSnapshot((current) => current ? {
+          ...current,
+          responseMetrics: event.responseMetrics,
+          contextUsage: event.contextUsage,
+          tokenUsage: event.tokenUsage,
+        } : current);
+        break;
       case "run_state":
         setSnapshot((current) => current ? { ...current, running: event.running } : current);
         setAgentPhase(event.running ? "思考" : undefined);
@@ -659,7 +753,8 @@ export default function App(): React.JSX.Element {
   const activateProject = useCallback(async (selection: ProjectSelection): Promise<void> => {
     projectRef.current = selection;
     setProject(selection);
-    setProjectExpanded(true);
+    window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
+    setExpandedProjects((current) => new Set(current).add(selection.path));
     setLoading(true);
     setError(undefined);
     setMessages([]);
@@ -667,7 +762,7 @@ export default function App(): React.JSX.Element {
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
     try {
       const existing = await window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: selection.path });
-      setSessions(existing);
+      setSessionsByProject((current) => ({ ...current, [selection.path]: existing }));
       const next = existing[0]
         ? await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: selection.path, sessionPath: existing[0].path })
         : await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: selection.path });
@@ -687,8 +782,16 @@ export default function App(): React.JSX.Element {
       try {
         const bootstrap = await window.suocode.request<RuntimeBootstrap>({ type: "bootstrap" });
         setConfiguration(bootstrap.configuration);
-        const stored = loadStoredProject();
-        await activateProject(stored ?? await window.suocode.homeProject());
+        const home = await window.suocode.homeProject();
+        const mounted = uniqueProjects([home, ...loadStoredProjects()]);
+        setProjects(mounted);
+        setExpandedProjects(new Set(mounted.map((item) => item.path)));
+        await Promise.all(mounted.map(async (item) => {
+          const listed = await window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: item.path });
+          setSessionsByProject((current) => ({ ...current, [item.path]: listed }));
+        }));
+        const activePath = window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+        await activateProject(mounted.find((item) => item.path === activePath) ?? home);
         if (!bootstrap.configuration.configuredProviders.length) setSettingsOpen(true);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
@@ -709,6 +812,22 @@ export default function App(): React.JSX.Element {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
   }, [draft]);
+
+  useEffect(() => {
+    const fitPanels = (): void => {
+      const viewport = window.innerWidth;
+      setRightWidth((currentRight) => {
+        const nextRight = Math.max(20, Math.min(currentRight, viewport - (viewport <= 700 ? 20 : 40)));
+        if (viewport > 700) {
+          setLeftWidth((currentLeft) => Math.max(20, Math.min(currentLeft, viewport - nextRight - 20)));
+        }
+        return nextRight;
+      });
+    };
+    fitPanels();
+    window.addEventListener("resize", fitPanels);
+    return () => window.removeEventListener("resize", fitPanels);
+  }, []);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent): void => {
@@ -764,12 +883,11 @@ export default function App(): React.JSX.Element {
     document.body.classList.add("resizing-panels");
     const move = (pointer: PointerEvent): void => {
       const raw = side === "left" ? startWidth + pointer.clientX - startX : startWidth + startX - pointer.clientX;
-      const compact = window.innerWidth <= 700;
-      const minimum = side === "left" ? 210 : compact ? 180 : 280;
-      const available = side === "left"
-        ? window.innerWidth - (rightOpen ? rightWidth : 0) - 320
-        : window.innerWidth - (compact ? 120 : (leftOpen ? leftWidth : 0) + 320);
-      const maximum = Math.max(minimum, Math.min(side === "left" ? 420 : 560, available));
+      const minimum = 20;
+      const oppositeWidth = side === "left"
+        ? (rightOpen ? rightWidth : 0)
+        : (leftOpen ? leftWidth : 0);
+      const maximum = Math.max(minimum, window.innerWidth - oppositeWidth - 20);
       const width = Math.round(Math.max(minimum, Math.min(maximum, raw)));
       finalWidth = width;
       if (side === "left") setLeftWidth(width); else setRightWidth(width);
@@ -786,7 +904,9 @@ export default function App(): React.JSX.Element {
   const openProject = async (): Promise<void> => {
     const selection = await window.suocode.selectProject();
     if (!selection) return;
-    window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(selection));
+    const next = uniqueProjects([...projects, selection]);
+    setProjects(next);
+    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next.filter((item) => item.kind === "workspace")));
     await activateProject(selection);
   };
 
@@ -805,12 +925,15 @@ export default function App(): React.JSX.Element {
     }
   };
 
-  const openConversation = async (session: SessionSummary): Promise<void> => {
-    if (!project || session.id === activeConversation?.id) return;
+  const openConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
+    if (owner.path === project?.path && session.id === activeConversation?.id) return;
     setLoading(true);
     setError(undefined);
     try {
-      applySnapshot(await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: project.path, sessionPath: session.path }));
+      projectRef.current = owner;
+      setProject(owner);
+      window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, owner.path);
+      applySnapshot(await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -880,15 +1003,27 @@ export default function App(): React.JSX.Element {
           <nav className="primary-nav"><button className="nav-button" type="button" disabled={!project} onClick={() => void startNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
           <section className="project-section">
             <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={() => void openProject()}><FolderOpen size={15} strokeWidth={1.7} /></button></div>
-            {project ? (
-              <div className="project-tree">
-                <button className="project-row" type="button" aria-expanded={projectExpanded} onClick={() => setProjectExpanded((value) => !value)}><Folder size={15} strokeWidth={1.7} /><span>{project.name}</span>{projectExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
-                {projectExpanded ? <div className="conversation-list">
-                  {sessions.map((session) => <button className={`conversation-row ${session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(session)}><CircleDot size={11} strokeWidth={2} /><span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>)}
-                  {!sessions.length ? <p className="empty-conversations">暂无对话</p> : null}
-                </div> : null}
-              </div>
-            ) : (
+            {projects.length ? projects.map((item) => {
+              const expanded = expandedProjects.has(item.path);
+              const itemSessions = sessionsByProject[item.path] ?? [];
+              return (
+                <div className={`project-tree ${item.path === project?.path ? "active" : ""}`} key={item.path}>
+                  <button className="project-row" type="button" aria-expanded={expanded} onClick={() => {
+                    const activating = item.path !== project?.path;
+                    if (activating) void activateProject(item);
+                    setExpandedProjects((current) => {
+                      const next = new Set(current);
+                      if (activating || !expanded) next.add(item.path); else next.delete(item.path);
+                      return next;
+                    });
+                  }}><Folder size={15} strokeWidth={1.7} /><span>{item.name}</span>{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
+                  {expanded ? <div className="conversation-list">
+                    {itemSessions.map((session) => <button className={`conversation-row ${item.path === project?.path && session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(item, session)}><CircleDot size={11} strokeWidth={2} /><span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>)}
+                    {!itemSessions.length ? <p className="empty-conversations">暂无对话</p> : null}
+                  </div> : null}
+                </div>
+              );
+            }) : (
               <button className="open-project-card" type="button" onClick={() => void openProject()}><span className="open-project-icon"><Plus size={14} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
             )}
           </section>
@@ -923,12 +1058,12 @@ export default function App(): React.JSX.Element {
                 </div>
               </form>
             </div>
-            <div className="workspace-status"><span><FileCode2 size={14} />{project?.path ?? "未选择项目"}</span></div>
+            <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} />
           </div>
         </section>
 
         <aside className="inspector-pane">
-          <div className="inspector-header window-drag"><span>项目作业</span><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" })}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起作业栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
+          <div className="inspector-header window-drag"><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" })}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
           <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span>{item.meta ? <small>{item.meta}</small> : null}</button>; })}</nav>
           <section className="inspector-content">
             {inspectorView === "plan" ? <PlanPanel project={projectState} /> : null}

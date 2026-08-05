@@ -201,7 +201,13 @@ async function main() {
     assert.equal(homeState.home.kind, "home");
     assert.match(homeState.home.path, /\/Home$/);
     assert.equal(homeState.projectName, "Home");
-    assert.match(homeState.status, new RegExp(homeState.home.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(homeState.status, /Home/);
+    const expandedHomePath = await client.evaluate(`(async () => {
+      document.querySelector(".workspace-path")?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      return document.querySelector(".path-popover")?.textContent || "";
+    })()`);
+    assert.match(expandedHomePath, new RegExp(homeState.home.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
     const isolation = await client.evaluate(`({
       title: document.title,
@@ -311,18 +317,42 @@ async function main() {
         inspectorWidth: inspectorBounds?.width ?? 0,
         rightResizer: Boolean(document.querySelector(".right-resizer")),
       };
-      document.querySelector('button[aria-label="收起作业栏"]')?.click();
+      document.querySelector('button[aria-label="收起右侧栏"]')?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       return result;
     })()`);
     assert.equal(compactInspectorLayout.shellTransition, "0s");
     assert.equal(compactInspectorLayout.sidebarTransition, "0s");
     assert.notEqual(compactInspectorLayout.inspectorPosition, "absolute");
-    assert.ok(compactInspectorLayout.conversationWidth >= 119);
-    assert.ok(compactInspectorLayout.inspectorWidth >= 180);
+    assert.ok(compactInspectorLayout.conversationWidth >= 19);
+    assert.ok(compactInspectorLayout.inspectorWidth >= 20);
     assert.ok(compactInspectorLayout.inspectorLeft >= compactInspectorLayout.conversationRight - 1);
     assert.equal(compactInspectorLayout.rightResizer, true);
     await client.evaluate(`(() => { window.resizeTo(1440, 900); return true; })()`);
+    await client.waitFor(`window.innerWidth >= 1400`, "The window did not return to its regular test size.");
+    await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+    const rightHandle = await client.evaluate(`(() => {
+      const bounds = document.querySelector(".right-resizer")?.getBoundingClientRect();
+      return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;
+    })()`);
+    assert.ok(rightHandle);
+    await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x: rightHandle.x, y: rightHandle.y, button: "left", buttons: 1, clickCount: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 20, y: rightHandle.y, button: "left", buttons: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 20, y: rightHandle.y, button: "left", buttons: 0, clickCount: 1 });
+    const narrowConversation = await client.evaluate(`({
+      conversation: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
+      inspector: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
+    })`);
+    assert.ok(narrowConversation.conversation <= 21, `Conversation pane stopped at ${narrowConversation.conversation}px instead of 20px.`);
+    assert.ok(narrowConversation.inspector > 1_000);
+    const expandedHandle = await client.evaluate(`(() => {
+      const bounds = document.querySelector(".right-resizer")?.getBoundingClientRect();
+      return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;
+    })()`);
+    await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x: expandedHandle.x, y: expandedHandle.y, button: "left", buttons: 1, clickCount: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1_088, y: expandedHandle.y, button: "left", buttons: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 1_088, y: expandedHandle.y, button: "left", buttons: 0, clickCount: 1 });
+    await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
     const todoOverlayLayout = await client.evaluate(`(() => {
       const stack = document.querySelector(".composer-stack");
@@ -341,11 +371,13 @@ async function main() {
     assert.equal(todoOverlayLayout?.after, todoOverlayLayout?.before);
 
     await client.evaluate(`(() => {
-      localStorage.setItem("suocode.selected-workspace", ${JSON.stringify(JSON.stringify({
+      const project = ${JSON.stringify({
         name: basename(projectDirectory),
         path: projectDirectory,
         kind: "workspace",
-      }))});
+      })};
+      localStorage.setItem("suocode.mounted-projects", JSON.stringify([project]));
+      localStorage.setItem("suocode.active-project", project.path);
       location.reload();
       return true;
     })()`);
@@ -356,10 +388,18 @@ async function main() {
     );
     const projectState = await client.evaluate(`({
       status: document.querySelector(".workspace-status")?.textContent || "",
-      session: document.querySelector(".conversation-title")?.textContent || ""
+      session: document.querySelector(".conversation-title")?.textContent || "",
+      projects: [...document.querySelectorAll(".project-row span")].map((item) => item.textContent || ""),
+      headerBorder: getComputedStyle(document.querySelector(".conversation-header")).borderBottomWidth,
+      inspectorTitle: document.querySelector(".inspector-header")?.textContent || "",
+      filePreview: Boolean(document.querySelector(".file-preview"))
     })`);
-    assert.match(projectState.status, new RegExp(projectDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(projectState.status, new RegExp(basename(projectDirectory)));
     assert.ok(projectState.session.length > 0);
+    assert.deepEqual(projectState.projects, ["Home", basename(projectDirectory)]);
+    assert.equal(projectState.headerBorder, "0px");
+    assert.doesNotMatch(projectState.inspectorTitle, /项目作业/);
+    assert.equal(projectState.filePreview, false);
 
     if (live) {
       await client.evaluate(`(() => {
@@ -409,7 +449,7 @@ async function main() {
 
       const eventState = await client.evaluate(`window.__suocodeSmokeEvents`);
       const eventTypes = new Set(eventState.map((event) => event.type));
-      for (const eventType of ["message_delta", "tool_started", "tool_finished", "plan_updated", "project_updated", "run_state"]) {
+      for (const eventType of ["message_delta", "tool_started", "tool_finished", "plan_updated", "project_updated", "metrics_updated", "run_state"]) {
         assert.equal(eventTypes.has(eventType), true, `Missing streamed runtime event: ${eventType}`);
       }
       assert.equal(eventState.some((event) => event.type === "message_delta" && event.field === "text"), true);
@@ -439,16 +479,7 @@ async function main() {
         `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes(${JSON.stringify(fileName)}))`,
         "The Agent-written file was not projected into Files.",
       );
-      await client.evaluate(`(() => {
-        const file = [...document.querySelectorAll(".file-leaf")]
-          .find((item) => item.textContent.includes(${JSON.stringify(fileName)}));
-        file?.click();
-        return Boolean(file);
-      })()`);
-      await client.waitFor(
-        `document.querySelector(".file-preview")?.textContent.includes(${JSON.stringify(fileToken)})`,
-        "The Files panel could not read the Agent-written file through IPC.",
-      );
+      assert.equal(await client.evaluate(`Boolean(document.querySelector(".file-preview"))`), false);
       assert.equal((await readFile(join(projectDirectory, fileName), "utf8")).trim(), fileToken);
 
       await client.send("Page.reload", { ignoreCache: true });

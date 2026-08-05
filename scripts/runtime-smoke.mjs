@@ -10,6 +10,12 @@ const projectDir = join(temporaryRoot, "project");
 const live = process.argv.includes("--live");
 mkdirSync(projectDir, { recursive: true });
 writeFileSync(join(projectDir, "README.md"), "# Runtime smoke project\n", "utf8");
+const largeDirectory = join(projectDir, "aaa-large");
+mkdirSync(largeDirectory);
+for (let index = 0; index < 1_205; index += 1) {
+  writeFileSync(join(largeDirectory, `entry-${String(index).padStart(4, "0")}.txt`), "x", "utf8");
+}
+writeFileSync(join(projectDir, "zz-root.txt"), "root sibling\n", "utf8");
 
 const child = fork(join(root, "apps/desktop/out/main/runtime.js"), [], {
   env: {
@@ -74,7 +80,10 @@ try {
   const bootstrap = await request({ type: "bootstrap" });
   if (!bootstrap?.configuration?.models) throw new Error("Bootstrap did not return model configuration.");
   const snapshot = await request({ type: "create_session", cwd: projectDir });
-  if (snapshot?.project?.files?.[0]?.name !== "README.md") throw new Error("Project files were not projected.");
+  if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
+  if (!snapshot.project.files.some((entry) => entry.name === "zz-root.txt")) {
+    throw new Error("A large nested directory starved later root files from the project tree.");
+  }
   const file = await request({ type: "read_file", path: "README.md" });
   if (!file.content.includes("Runtime smoke project")) throw new Error("Project file reading failed.");
 
@@ -107,12 +116,22 @@ try {
     if (!writeToolEvent.tool.label || writeToolEvent.tool.label === "写入 runtime-proof.txt") {
       throw new Error(`The workflow purpose was not projected into the tool label: ${writeToolEvent.tool.label || "<empty>"}`);
     }
+    const metricsEvent = events.find((event) => event.type === "metrics_updated");
+    if (!metricsEvent?.responseMetrics || metricsEvent.responseMetrics.outputTokens <= 0) {
+      throw new Error("The workflow response metrics were not projected.");
+    }
     const restored = await request({ type: "open_session", cwd: projectDir, sessionPath: snapshot.session.path });
     const restoredWriteTool = restored.tools.find((tool) => tool.name === "write");
     if (!restoredWriteTool || restoredWriteTool.label !== writeToolEvent.tool.label) {
       throw new Error(
         `The workflow purpose was not restored from session audit entries: ${restoredWriteTool?.label || "<missing>"}`,
       );
+    }
+    if (!restored.responseMetrics || restored.responseMetrics.timestamp !== metricsEvent.responseMetrics.timestamp) {
+      throw new Error("The workflow response metrics were not restored from the session.");
+    }
+    if (!restored.contextUsage?.contextWindow || restored.tokenUsage.output <= 0) {
+      throw new Error("Context and token usage were not included in the restored session snapshot.");
     }
   }
 

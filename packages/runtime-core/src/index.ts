@@ -13,16 +13,19 @@ import type {
   ChangedFile,
   ChangeStatus,
   ChatMessage,
+  ContextUsage,
   FileNode,
   ModelOption,
   ProjectSnapshot,
   RuntimeBootstrap,
   RuntimeConfiguration,
   RuntimeEvent,
+  ResponseMetrics,
   SessionSnapshot,
   SessionSummary,
   TerminalRun,
   ThinkingLevel,
+  TokenUsage,
   TodoItem,
   ToolRun,
 } from "@suocode/runtime-protocol";
@@ -51,6 +54,7 @@ const MAX_CHANGE_FILES = 100;
 const MAX_PATCH_CHARS = 16_000;
 const MAX_TERMINAL_OUTPUT = 120_000;
 const WORKFLOW_AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
+const RESPONSE_METRICS_ENTRY_TYPE = "suocode-response-metrics";
 const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
 const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
@@ -89,6 +93,7 @@ interface ActiveSession {
   activeAssistantId?: string;
   activeAssistantOrder?: number;
   nextTimelineOrder: number;
+  responseMetrics?: ResponseMetrics;
 }
 
 interface WorkflowManifest {
@@ -155,6 +160,43 @@ function restoredToolPurposes(session: AgentSession): Map<string, string> {
     if (toolCallId && purpose) purposes.set(toolCallId, purpose);
   }
   return purposes;
+}
+
+function responseMetricsFromData(data: unknown): ResponseMetrics | undefined {
+  if (!isRecord(data)) return undefined;
+  const outputTokens = Number(data.outputTokens);
+  const totalMs = Number(data.totalMs);
+  const turnDurationMs = Number(data.turnDurationMs);
+  const timestamp = Number(data.timestamp);
+  if (![outputTokens, totalMs, turnDurationMs, timestamp].every(Number.isFinite)) return undefined;
+  const firstTokenMs = Number(data.firstTokenMs);
+  const averageTokensPerSecond = Number(data.averageTokensPerSecond);
+  return {
+    firstTokenMs: Number.isFinite(firstTokenMs) ? firstTokenMs : undefined,
+    averageTokensPerSecond: Number.isFinite(averageTokensPerSecond) ? averageTokensPerSecond : undefined,
+    outputTokens,
+    totalMs,
+    turnDurationMs,
+    timestamp,
+  };
+}
+
+function restoredResponseMetrics(session: AgentSession): ResponseMetrics | undefined {
+  let latest: ResponseMetrics | undefined;
+  for (const entry of session.sessionManager.getEntries()) {
+    if (entry.type !== "custom" || entry.customType !== RESPONSE_METRICS_ENTRY_TYPE) continue;
+    const metrics = responseMetricsFromData(entry.data);
+    if (metrics && (!latest || metrics.timestamp >= latest.timestamp)) latest = metrics;
+  }
+  return latest;
+}
+
+function sessionUsage(session: AgentSession): { contextUsage?: ContextUsage; tokenUsage: TokenUsage } {
+  const stats = session.getSessionStats();
+  return {
+    contextUsage: stats.contextUsage,
+    tokenUsage: { ...stats.tokens },
+  };
 }
 
 function contentParts(content: unknown): { text: string; thinking: string } {
@@ -324,13 +366,19 @@ function ensureInside(root: string, path: string): string {
 async function fileTree(cwd: string): Promise<FileNode[]> {
   let count = 0;
 
-  const visit = async (directory: string, depth: number): Promise<FileNode[]> => {
-    if (depth > MAX_TREE_DEPTH || count >= MAX_FILE_ENTRIES) return [];
+  interface PendingDirectory {
+    absolute: string;
+    depth: number;
+    target: FileNode[];
+  }
+
+  const readLevel = async (directory: string, depth: number): Promise<{ nodes: FileNode[]; pending: PendingDirectory[] }> => {
+    if (depth > MAX_TREE_DEPTH || count >= MAX_FILE_ENTRIES) return { nodes: [], pending: [] };
     let entries;
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch {
-      return [];
+      return { nodes: [], pending: [] };
     }
 
     entries.sort((a, b) => {
@@ -339,6 +387,7 @@ async function fileTree(cwd: string): Promise<FileNode[]> {
     });
 
     const nodes: FileNode[] = [];
+    const pending: PendingDirectory[] = [];
     for (const entry of entries) {
       if (count >= MAX_FILE_ENTRIES) break;
       if (entry.isDirectory() && IGNORED_DIRECTORIES.has(entry.name)) continue;
@@ -347,15 +396,25 @@ async function fileTree(cwd: string): Promise<FileNode[]> {
       const path = relative(cwd, absolute) || entry.name;
       count += 1;
       if (entry.isDirectory()) {
-        nodes.push({ name: entry.name, path, kind: "directory", children: await visit(absolute, depth + 1) });
+        const children: FileNode[] = [];
+        nodes.push({ name: entry.name, path, kind: "directory", children });
+        if (depth < MAX_TREE_DEPTH) pending.push({ absolute, depth: depth + 1, target: children });
       } else if (entry.isFile() || entry.isSymbolicLink()) {
         nodes.push({ name: entry.name, path, kind: "file" });
       }
     }
-    return nodes;
+    return { nodes, pending };
   };
 
-  return visit(cwd, 0);
+  const root = await readLevel(cwd, 0);
+  const queue = [...root.pending];
+  for (let index = 0; index < queue.length && count < MAX_FILE_ENTRIES; index += 1) {
+    const current = queue[index];
+    const level = await readLevel(current.absolute, current.depth);
+    current.target.push(...level.nodes);
+    queue.push(...level.pending);
+  }
+  return root.nodes;
 }
 
 async function gitChanges(cwd: string): Promise<ChangedFile[]> {
@@ -700,6 +759,7 @@ export class SuoCodeRuntime {
       project,
       messageIds: new WeakMap(),
       nextTimelineOrder: reconstructed.nextTimelineOrder,
+      responseMetrics: reconstructed.responseMetrics,
     };
     this.active = active;
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
@@ -716,6 +776,7 @@ export class SuoCodeRuntime {
     terminals: Map<string, TerminalRun>;
     plan: TodoItem[];
     nextTimelineOrder: number;
+    responseMetrics?: ResponseMetrics;
   } {
     const messages: ChatMessage[] = [];
     const tools = new Map<string, ToolRun>();
@@ -773,7 +834,14 @@ export class SuoCodeRuntime {
         });
       }
     }
-    return { messages, tools, terminals, plan, nextTimelineOrder: order };
+    return {
+      messages,
+      tools,
+      terminals,
+      plan,
+      nextTimelineOrder: order,
+      responseMetrics: restoredResponseMetrics(session),
+    };
   }
 
   private toolLabel(
@@ -821,6 +889,19 @@ export class SuoCodeRuntime {
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
           this.scheduleProjectRefresh();
           void this.listSessions(active.cwd);
+          break;
+        case "entry_appended":
+          if (event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE) {
+            const metrics = responseMetricsFromData(event.entry.data);
+            if (metrics) active.responseMetrics = metrics;
+            const usage = sessionUsage(active.session);
+            this.emitEvent({
+              type: "metrics_updated",
+              responseMetrics: active.responseMetrics,
+              contextUsage: usage.contextUsage,
+              tokenUsage: usage.tokenUsage,
+            });
+          }
           break;
         case "session_info_changed":
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
@@ -1063,6 +1144,8 @@ export class SuoCodeRuntime {
     const reconstructed = this.reconstructState(active.session);
     const messages = reconstructed.messages;
     const model = active.session.model;
+    const usage = sessionUsage(active.session);
+    active.responseMetrics = reconstructed.responseMetrics ?? active.responseMetrics;
     return {
       session: summary,
       messages,
@@ -1072,6 +1155,9 @@ export class SuoCodeRuntime {
         ? { provider: model.provider, id: model.id, name: model.name || model.id, reasoning: Boolean(model.reasoning) }
         : undefined,
       thinkingLevel: active.session.thinkingLevel as ThinkingLevel,
+      responseMetrics: active.responseMetrics,
+      contextUsage: usage.contextUsage,
+      tokenUsage: usage.tokenUsage,
       running: active.session.isStreaming,
     };
   }

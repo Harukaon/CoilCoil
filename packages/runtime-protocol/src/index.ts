@@ -68,6 +68,29 @@ export interface ToolRun {
   endedAt?: number;
 }
 
+export interface ResponseMetrics {
+  firstTokenMs?: number;
+  averageTokensPerSecond?: number;
+  outputTokens: number;
+  totalMs: number;
+  turnDurationMs: number;
+  timestamp: number;
+}
+
+export interface ContextUsage {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+}
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
 export interface TerminalRun {
   id: string;
   command: string;
@@ -112,6 +135,9 @@ export interface SessionSnapshot {
   project: ProjectSnapshot;
   model?: Pick<ModelOption, "provider" | "id" | "name" | "reasoning">;
   thinkingLevel: ThinkingLevel;
+  responseMetrics?: ResponseMetrics;
+  contextUsage?: ContextUsage;
+  tokenUsage: TokenUsage;
   running: boolean;
 }
 
@@ -153,6 +179,12 @@ export type RuntimeEvent =
   | { type: "tool_finished"; tool: ToolRun }
   | { type: "plan_updated"; plan: TodoItem[] }
   | { type: "project_updated"; project: ProjectSnapshot }
+  | {
+      type: "metrics_updated";
+      responseMetrics?: ResponseMetrics;
+      contextUsage?: ContextUsage;
+      tokenUsage: TokenUsage;
+    }
   | { type: "run_state"; running: boolean }
   | { type: "runtime_error"; message: string; detail?: string };
 

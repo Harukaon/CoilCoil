@@ -10,6 +10,17 @@ interface ConversationTiming {
   startedAt: number;
 }
 
+interface ResponseMetricsEntry {
+  firstTokenMs?: number;
+  averageTokensPerSecond?: number;
+  outputTokens: number;
+  totalMs: number;
+  turnDurationMs: number;
+  timestamp: number;
+}
+
+const RESPONSE_METRICS_ENTRY_TYPE = "suocode-response-metrics";
+
 function formatSeconds(milliseconds: number): string {
   return (Math.max(0, milliseconds) / 1_000).toFixed(2);
 }
@@ -49,10 +60,12 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
   let current: ResponseTiming | undefined;
   let conversation: ConversationTiming | undefined;
   let lastResponseMetrics: string | undefined;
+  let lastResponseMetricsData: Omit<ResponseMetricsEntry, "turnDurationMs"> | undefined;
 
   pi.on("before_agent_start", () => {
     conversation = { startedAt: performance.now() };
     lastResponseMetrics = undefined;
+    lastResponseMetricsData = undefined;
   });
 
   pi.on("before_provider_request", () => {
@@ -82,6 +95,14 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
       ? undefined
       : outputTokens / (generationMs / 1_000);
 
+    lastResponseMetricsData = {
+      firstTokenMs: firstTokenAt === undefined ? undefined : firstTokenAt - current.requestStartedAt,
+      averageTokensPerSecond,
+      outputTokens,
+      totalMs,
+      timestamp: Date.now(),
+    };
+
     if (ctx.hasUI) {
       const firstToken = firstTokenAt === undefined
         ? "—"
@@ -103,8 +124,10 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
   pi.on("agent_settled", (_event, ctx) => {
     if (!conversation) return;
 
+    const turnDurationMs = performance.now() - conversation.startedAt;
+
     const turnDuration = `轮${formatTurnDuration(
-      performance.now() - conversation.startedAt,
+      turnDurationMs,
     )}`;
     if (ctx.hasUI) {
       ctx.ui.setStatus(
@@ -115,12 +138,21 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
       );
     }
 
+    if (lastResponseMetricsData) {
+      pi.appendEntry<ResponseMetricsEntry>(RESPONSE_METRICS_ENTRY_TYPE, {
+        ...lastResponseMetricsData,
+        turnDurationMs,
+      });
+    }
+
     conversation = undefined;
+    lastResponseMetricsData = undefined;
   });
 
   pi.on("session_shutdown", () => {
     current = undefined;
     conversation = undefined;
     lastResponseMetrics = undefined;
+    lastResponseMetricsData = undefined;
   });
 }
