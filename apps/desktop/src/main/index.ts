@@ -112,8 +112,8 @@ function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 1040,
-    minHeight: 680,
+    minWidth: 350,
+    minHeight: 500,
     show: false,
     backgroundColor: "#f7f7f5",
     title: "SuoCode",
