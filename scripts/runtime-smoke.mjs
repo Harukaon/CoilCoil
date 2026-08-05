@@ -57,7 +57,7 @@ function request(command) {
 
 function waitForEvent(predicate, timeoutMs = 180_000) {
   return new Promise((resolveEvent, rejectEvent) => {
-    let cursor = 0;
+    let cursor = events.length;
     const timer = setInterval(() => {
       while (cursor < events.length) {
         const event = events[cursor++];
@@ -138,8 +138,24 @@ try {
     if (!restored.responseMetrics || restored.responseMetrics.timestamp !== metricsEvent.responseMetrics.timestamp) {
       throw new Error("The workflow response metrics were not restored from the session.");
     }
+    if (!Array.isArray(restored.responseMetricsHistory) || restored.responseMetricsHistory.length < 1) {
+      throw new Error("The response performance history was not restored from the session.");
+    }
     if (!restored.contextUsage?.contextWindow || restored.tokenUsage.output <= 0) {
       throw new Error("Context and token usage were not included in the restored session snapshot.");
+    }
+    const rewindTarget = restored.messages.find((message) => message.role === "user");
+    if (!rewindTarget?.entryId) throw new Error("Historical user messages did not expose a Pi session entry ID.");
+    const rewindToken = `SUOCODE_REWIND_OK_${Date.now()}`;
+    const rewindSettled = waitForEvent((event) => event.type === "run_state" && event.running === false);
+    await request({ type: "rewind_prompt", entryId: rewindTarget.entryId, text: `Reply exactly ${rewindToken}.` });
+    await rewindSettled;
+    const rewound = await request({ type: "open_session", cwd: projectDir, sessionPath: snapshot.session.path });
+    if (!rewound.messages.some((message) => message.role === "user" && message.text.includes(rewindToken))) {
+      throw new Error("Rewinding and resubmitting did not move the active Pi branch to the edited message.");
+    }
+    if ((rewound.responseMetricsHistory?.length ?? 0) < 2) {
+      throw new Error("Performance history did not retain both model requests.");
     }
   }
 

@@ -53,7 +53,8 @@ import type {
   ToolRun,
 } from "@suocode/runtime-protocol";
 
-type InspectorView = "plan" | "changes" | "terminal" | "files";
+type InspectorView = "files";
+type SessionActivity = { runtimeId?: string; running: boolean; unread: boolean };
 type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
   | { kind: "tools"; order: number; tools: ToolRun[] };
@@ -70,6 +71,7 @@ const ACTIVE_PROJECT_STORAGE_KEY = "suocode.active-project";
 const LEFT_WIDTH_KEY = "suocode.left-panel-width";
 const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const AGENT_ACTIVITY_PHRASES = ["工作中…", "整理线索…", "翻找文件…", "冲浪中…", "组织思路…", "沿着思路前进…", "快收尾了…"];
 const EMPTY_PROJECT: ProjectSnapshot = {
   cwd: "",
   files: [],
@@ -121,6 +123,19 @@ function formatTokens(tokens: number | null | undefined): string {
   if (tokens === null || tokens === undefined) return "—";
   if (tokens < 1_000) return String(Math.round(tokens));
   return `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
+}
+
+function performanceGrade(metrics: ResponseMetrics): "excellent" | "good" | "fair" | "slow" {
+  const firstToken = metrics.firstTokenMs ?? Number.POSITIVE_INFINITY;
+  const speed = metrics.averageTokensPerSecond ?? 0;
+  if (firstToken <= 1_200 && speed >= 45) return "excellent";
+  if (firstToken <= 2_500 && speed >= 25) return "good";
+  if (firstToken <= 5_000 && speed >= 12) return "fair";
+  return "slow";
+}
+
+function SuoLoader({ size = 14 }: { size?: number }): React.JSX.Element {
+  return <span className="suo-loader" style={{ "--loader-size": `${size}px` } as CSSProperties}><i /><i /><i /></span>;
 }
 
 function relativeTime(value: string): string {
@@ -195,12 +210,49 @@ function Markdown({ children }: { children: string }): React.JSX.Element {
   );
 }
 
-function MessageView({ message }: { message: ChatMessage }): React.JSX.Element {
+function MessageView({ message, disabled, onRewind }: {
+  message: ChatMessage;
+  disabled: boolean;
+  onRewind: (message: ChatMessage, text: string) => Promise<void>;
+}): React.JSX.Element {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(message.text);
+  const composing = useRef(false);
+  useEffect(() => setValue(message.text), [message.text]);
   if (message.role === "user") {
     return (
       <article className="timeline-message user-message">
         <div className="message-label">你</div>
-        <div className="user-bubble">{message.text}</div>
+        {editing ? (
+          <textarea
+            className="user-bubble user-message-editor"
+            autoFocus
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onCompositionStart={() => { composing.current = true; }}
+            onCompositionEnd={() => { composing.current = false; }}
+            onKeyDown={(event) => {
+              if (composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (event.key === "Escape") {
+                setValue(message.text);
+                setEditing(false);
+              } else if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (!value.trim() || !message.entryId) return;
+                setEditing(false);
+                void onRewind(message, value.trim());
+              }
+            }}
+          />
+        ) : (
+          <button
+            className="user-bubble user-bubble-button"
+            type="button"
+            title={message.entryId ? "点击编辑并从这里重新开始" : undefined}
+            disabled={disabled || !message.entryId}
+            onClick={() => setEditing(true)}
+          >{message.text}</button>
+        )}
       </article>
     );
   }
@@ -458,10 +510,11 @@ function replaceDirectoryChildren(nodes: FileNode[], path: string, children: Fil
   });
 }
 
-function FileTreeNode({ node, depth, onLoad }: {
+function FileTreeNode({ node, depth, onLoad, onOpen }: {
   node: FileNode;
   depth: number;
   onLoad: (path: string) => Promise<void>;
+  onOpen: (node: FileNode) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -484,18 +537,18 @@ function FileTreeNode({ node, depth, onLoad }: {
           <Folder size={14} />
           <span>{node.name}</span>
         </button>
-        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} onLoad={onLoad} />) : null}
+        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} onLoad={onLoad} onOpen={onOpen} />) : null}
       </div>
     );
   }
   return (
-    <div className="file-leaf" style={{ paddingLeft: 21 + depth * 13 }}>
+    <button className="file-leaf" type="button" style={{ paddingLeft: 21 + depth * 13 }} onClick={() => onOpen(node)}>
       <File size={13} /><span>{node.name}</span>
-    </div>
+    </button>
   );
 }
 
-function FilesPanel({ project }: { project: ProjectSnapshot }): React.JSX.Element {
+function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSnapshot; runtimeId?: string; onOpen: (node: FileNode) => void }): React.JSX.Element {
   const [tree, setTree] = useState<FileNode[]>(project.files);
   const [error, setError] = useState<string>();
   useEffect(() => {
@@ -505,7 +558,7 @@ function FilesPanel({ project }: { project: ProjectSnapshot }): React.JSX.Elemen
 
   const loadDirectory = async (path: string): Promise<void> => {
     try {
-      const children = await window.suocode.request<FileNode[]>({ type: "list_directory", path });
+      const children = await window.suocode.request<FileNode[]>({ type: "list_directory", path }, runtimeId);
       setTree((current) => replaceDirectoryChildren(current, path, children));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -518,7 +571,7 @@ function FilesPanel({ project }: { project: ProjectSnapshot }): React.JSX.Elemen
   return (
     <div className="files-panel">
       <div className="file-tree">
-        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} depth={0} onLoad={loadDirectory} />) : <p className="panel-note">此文件夹为空。</p>}
+        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} depth={0} onLoad={loadDirectory} onOpen={onOpen} />) : <p className="panel-note">此文件夹为空。</p>}
         {error ? <p className="file-tree-error">{error}</p> : null}
       </div>
     </div>
@@ -528,11 +581,13 @@ function FilesPanel({ project }: { project: ProjectSnapshot }): React.JSX.Elemen
 function WorkspaceStatus({
   project,
   responseMetrics,
+  responseMetricsHistory,
   contextUsage,
   tokenUsage,
 }: {
   project: ProjectSelection | null;
   responseMetrics?: ResponseMetrics;
+  responseMetricsHistory: ResponseMetrics[];
   contextUsage?: ContextUsage;
   tokenUsage: TokenUsage;
 }): React.JSX.Element {
@@ -586,16 +641,36 @@ function WorkspaceStatus({
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <button className="performance-trigger" type="button" aria-label="查看模型性能历史" title="模型响应性能">
+              <span className={`performance-signal ${responseMetrics ? performanceGrade(responseMetrics) : "unknown"}`}><i /><i /><i /></span>
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content className="performance-popover" side="top" align="end" sideOffset={7}>
+              <strong>近期请求性能</strong>
+              {responseMetricsHistory.length ? (
+                <>
+                  <div className="performance-grid">{responseMetricsHistory.slice(-30).map((item) => <span className={performanceGrade(item)} title={`${formatMetricDuration(item.firstTokenMs)} · ${item.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s`} key={item.timestamp} />)}</div>
+                  <div className="performance-history">{responseMetricsHistory.slice(-8).reverse().map((item) => <div key={item.timestamp}><span className={`performance-dot ${performanceGrade(item)}`} /><time>{new Date(item.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time><b>首字 {formatMetricDuration(item.firstTokenMs)}</b><b>{item.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s</b><small>{formatTokens(item.outputTokens)} tok</small></div>)}</div>
+                </>
+              ) : <p>完成一次模型请求后，这里会显示性能记录。</p>}
+              <Popover.Arrow className="model-popover-arrow" />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
       </div>
     </div>
   );
 }
 
-function SettingsDialog({ configuration, open, onClose, onSaved }: {
+function SettingsDialog({ configuration, open, onClose, onSaved, runtimeId }: {
   configuration?: RuntimeConfiguration;
   open: boolean;
   onClose: () => void;
   onSaved: (configuration: RuntimeConfiguration) => void;
+  runtimeId?: string;
 }): React.JSX.Element | null {
   const providers = useMemo(() => {
     const map = new Map<string, string>();
@@ -657,7 +732,7 @@ function SettingsDialog({ configuration, open, onClose, onSaved }: {
         modelId,
         thinkingLevel,
         apiKey: apiKey || undefined,
-      });
+      }, runtimeId);
       onSaved(next);
       onClose();
     } catch (caught) {
@@ -703,7 +778,8 @@ export default function App(): React.JSX.Element {
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
   const [configuration, setConfiguration] = useState<RuntimeConfiguration>();
-  const [inspectorView, setInspectorView] = useState<InspectorView>("plan");
+  const [inspectorView, setInspectorView] = useState<InspectorView>("files");
+  const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivity>>({});
   const [draft, setDraft] = useState("");
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
@@ -711,6 +787,7 @@ export default function App(): React.JSX.Element {
   const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT_WIDTH_KEY, 268));
   const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352));
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
+  const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelChanging, setModelChanging] = useState(false);
@@ -719,15 +796,47 @@ export default function App(): React.JSX.Element {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
+  const runtimeSessionRef = useRef(new Map<string, string>());
 
   const applySnapshot = useCallback((next: SessionSnapshot): void => {
+    snapshotRef.current = next;
+    if (next.runtimeId && next.session.path) runtimeSessionRef.current.set(next.runtimeId, next.session.path);
     setSnapshot(next);
     setMessages(next.messages);
     setTools(next.tools);
     setProjectState(next.project);
+    if (next.session.path) {
+      setSessionActivity((current) => ({
+        ...current,
+        [next.session.path]: { runtimeId: next.runtimeId, running: next.running, unread: false },
+      }));
+    }
   }, []);
 
-  const handleRuntimeEvent = useCallback((event: RuntimeEvent): void => {
+  const handleRuntimeEvent = useCallback((event: RuntimeEvent, runtimeId?: string): void => {
+    if (event.type === "session_snapshot") {
+      const path = event.snapshot.session.path;
+      if (runtimeId && path) runtimeSessionRef.current.set(runtimeId, path);
+      if (path) {
+        setSessionActivity((current) => {
+          const active = snapshotRef.current?.runtimeId === runtimeId;
+          return { ...current, [path]: { runtimeId, running: event.snapshot.running, unread: active ? false : current[path]?.unread ?? false } };
+        });
+      }
+      if (runtimeId !== snapshotRef.current?.runtimeId) return;
+    } else if (event.type === "run_state" && runtimeId) {
+      const path = runtimeSessionRef.current.get(runtimeId);
+      if (path) {
+        setSessionActivity((current) => {
+          const active = snapshotRef.current?.runtimeId === runtimeId;
+          return { ...current, [path]: { runtimeId, running: event.running, unread: !event.running && !active ? true : active ? false : current[path]?.unread ?? false } };
+        });
+      }
+      if (runtimeId !== snapshotRef.current?.runtimeId) return;
+    } else if (runtimeId && runtimeId !== snapshotRef.current?.runtimeId && event.type !== "sessions_updated" && event.type !== "configuration_updated") {
+      return;
+    }
     switch (event.type) {
       case "runtime_ready":
       case "configuration_updated":
@@ -775,6 +884,7 @@ export default function App(): React.JSX.Element {
         setSnapshot((current) => current ? {
           ...current,
           responseMetrics: event.responseMetrics,
+          responseMetricsHistory: event.responseMetricsHistory,
           contextUsage: event.contextUsage,
           tokenUsage: event.tokenUsage,
         } : current);
@@ -855,12 +965,18 @@ export default function App(): React.JSX.Element {
   }, [draft]);
 
   useEffect(() => {
+    if (!snapshot?.running) return;
+    const timer = window.setInterval(() => setActivityPhraseIndex((current) => current + 1), 2_300);
+    return () => window.clearInterval(timer);
+  }, [snapshot?.running]);
+
+  useEffect(() => {
     const fitPanels = (): void => {
       const viewport = window.innerWidth;
       setRightWidth((currentRight) => {
-        const nextRight = Math.max(20, Math.min(currentRight, viewport - (viewport <= 700 ? 20 : 40)));
+        const nextRight = Math.max(40, Math.min(currentRight, viewport - 315));
         if (viewport > 700) {
-          setLeftWidth((currentLeft) => Math.max(20, Math.min(currentLeft, viewport - nextRight - 20)));
+          setLeftWidth((currentLeft) => Math.max(40, Math.min(currentLeft, viewport - nextRight - 315)));
         }
         return nextRight;
       });
@@ -924,11 +1040,11 @@ export default function App(): React.JSX.Element {
     document.body.classList.add("resizing-panels");
     const move = (pointer: PointerEvent): void => {
       const raw = side === "left" ? startWidth + pointer.clientX - startX : startWidth + startX - pointer.clientX;
-      const minimum = 20;
+      const minimum = 40;
       const oppositeWidth = side === "left"
         ? (rightOpen ? rightWidth : 0)
         : (leftOpen ? leftWidth : 0);
-      const maximum = Math.max(minimum, window.innerWidth - oppositeWidth - 20);
+      const maximum = Math.max(minimum, window.innerWidth - oppositeWidth - 315);
       const width = Math.round(Math.max(minimum, Math.min(maximum, raw)));
       finalWidth = width;
       if (side === "left") setLeftWidth(width); else setRightWidth(width);
@@ -982,6 +1098,23 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  const rewindPrompt = async (message: ChatMessage, text: string): Promise<void> => {
+    if (!message.entryId || !snapshot?.runtimeId) return;
+    setError(undefined);
+    try {
+      await window.suocode.request({ type: "rewind_prompt", entryId: message.entryId, text }, snapshot.runtimeId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const openFilePreview = (node: FileNode): void => {
+    if (!projectState.cwd || node.kind !== "file") return;
+    void window.suocode.openFilePreview({ root: projectState.cwd, path: node.path }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    });
+  };
+
   const submitPrompt = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     const prompt = draft.trim();
@@ -994,7 +1127,7 @@ export default function App(): React.JSX.Element {
     setDraft("");
     setError(undefined);
     try {
-      await window.suocode.request({ type: running ? "steer" : "prompt", text: prompt });
+      await window.suocode.request({ type: running ? "steer" : "prompt", text: prompt }, snapshot.runtimeId);
     } catch (caught) {
       setDraft(prompt);
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -1019,7 +1152,7 @@ export default function App(): React.JSX.Element {
         provider: model.provider,
         modelId: model.id,
         thinkingLevel: configuration.thinkingLevel,
-      });
+      }, snapshot?.runtimeId);
       setConfiguration(next);
       setModelMenuOpen(false);
     } catch (caught) {
@@ -1029,10 +1162,7 @@ export default function App(): React.JSX.Element {
     }
   };
 
-  const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof CheckSquare2; meta?: string }> = [
-    { id: "plan", label: "Todo", icon: CheckSquare2, meta: projectState.plan.length ? String(projectState.plan.length) : undefined },
-    { id: "changes", label: "变更", icon: GitCompareArrows, meta: String(projectState.changes.length) },
-    { id: "terminal", label: "终端", icon: TerminalSquare, meta: projectState.terminals.length ? String(projectState.terminals.length) : undefined },
+  const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof CheckSquare2 }> = [
     { id: "files", label: "文件", icon: Files },
   ];
 
@@ -1059,7 +1189,10 @@ export default function App(): React.JSX.Element {
                     });
                   }}><Folder size={15} strokeWidth={1.7} /><span>{item.name}</span>{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
                   {expanded ? <div className="conversation-list">
-                    {itemSessions.map((session) => <button className={`conversation-row ${item.path === project?.path && session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(item, session)}><CircleDot size={11} strokeWidth={2} /><span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>)}
+                    {itemSessions.map((session) => {
+                      const activity = sessionActivity[session.path];
+                      return <button className={`conversation-row ${item.path === project?.path && session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(item, session)}>{activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <span className="conversation-unread" /> : <CircleDot size={11} strokeWidth={2} />}<span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>;
+                    })}
                     {!itemSessions.length ? <p className="empty-conversations">暂无对话</p> : null}
                   </div> : null}
                 </div>
@@ -1083,7 +1216,7 @@ export default function App(): React.JSX.Element {
           </header>
 
           <div className="conversation-body" ref={timelineRef}>
-            {loading ? <div className="loading-state"><LoaderCircle className="spin" size={20} /><span>正在加载工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={snapshot?.model?.name ?? "Agent"} />)}{running ? <div className="agent-activity"><LoaderCircle className="spin" size={14} /><span>{agentPhase === "工具" ? "正在执行工具…" : agentPhase === "回复" ? "正在回复…" : "正在思考…"}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
+            {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} disabled={running} onRewind={rewindPrompt} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={snapshot?.model?.name ?? "Agent"} />)}{running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
           </div>
 
           <div className="composer-wrap">
@@ -1094,28 +1227,25 @@ export default function App(): React.JSX.Element {
                 <textarea ref={inputRef} value={draft} rows={3} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
                 <div className="composer-toolbar">
                   <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
-                  {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" })}><Square size={12} fill="currentColor" /></button> : null}
+                  {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" }, snapshot?.runtimeId)}><Square size={12} fill="currentColor" /></button> : null}
                   <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || !snapshot || !draft.trim()}><ArrowUp size={17} strokeWidth={2.2} /></button>
                 </div>
               </form>
             </div>
-            <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} />
+            <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} />
           </div>
         </section>
 
         <aside className="inspector-pane">
-          <div className="inspector-header window-drag"><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" })}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
-          <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span>{item.meta ? <small>{item.meta}</small> : null}</button>; })}</nav>
+          <div className="inspector-header window-drag"><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
+          <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span></button>; })}</nav>
           <section className="inspector-content">
-            {inspectorView === "plan" ? <PlanPanel project={projectState} /> : null}
-            {inspectorView === "changes" ? <ChangesPanel changes={projectState.changes} /> : null}
-            {inspectorView === "terminal" ? <TerminalPanel project={projectState} /> : null}
-            {inspectorView === "files" ? <FilesPanel project={projectState} /> : null}
+            {inspectorView === "files" ? <FilesPanel project={projectState} runtimeId={snapshot?.runtimeId} onOpen={openFilePreview} /> : null}
           </section>
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
       </main>
-      <SettingsDialog configuration={configuration} open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} />
+      <SettingsDialog configuration={configuration} open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} />
     </>
   );
 }

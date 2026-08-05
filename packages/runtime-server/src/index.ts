@@ -53,6 +53,8 @@ export class RuntimeServer {
         return this.runtime.openSession(command.cwd, command.sessionPath);
       case "prompt":
         return this.runtime.prompt(command.text);
+      case "rewind_prompt":
+        return this.runtime.rewindPrompt(command.entryId, command.text);
       case "steer":
         return this.runtime.steer(command.text);
       case "abort":

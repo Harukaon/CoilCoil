@@ -40,6 +40,7 @@ export type ChatRole = "user" | "assistant" | "tool" | "system";
 
 export interface ChatMessage {
   id: string;
+  entryId?: string;
   order: number;
   role: ChatRole;
   text: string;
@@ -129,6 +130,7 @@ export interface ProjectSnapshot {
 }
 
 export interface SessionSnapshot {
+  runtimeId?: string;
   session: SessionSummary;
   messages: ChatMessage[];
   tools: ToolRun[];
@@ -136,6 +138,7 @@ export interface SessionSnapshot {
   model?: Pick<ModelOption, "provider" | "id" | "name" | "reasoning">;
   thinkingLevel: ThinkingLevel;
   responseMetrics?: ResponseMetrics;
+  responseMetricsHistory: ResponseMetrics[];
   contextUsage?: ContextUsage;
   tokenUsage: TokenUsage;
   running: boolean;
@@ -161,6 +164,7 @@ export type RuntimeCommand =
   | { type: "create_session"; cwd: string }
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "prompt"; text: string }
+  | { type: "rewind_prompt"; entryId: string; text: string }
   | { type: "steer"; text: string }
   | { type: "abort" }
   | { type: "refresh_project" }
@@ -183,6 +187,7 @@ export type RuntimeEvent =
   | {
       type: "metrics_updated";
       responseMetrics?: ResponseMetrics;
+      responseMetricsHistory: ResponseMetrics[];
       contextUsage?: ContextUsage;
       tokenUsage: TokenUsage;
     }
@@ -202,6 +207,11 @@ export interface RuntimeResponseEnvelope {
 }
 
 export interface RuntimeEventEnvelope {
+  event: RuntimeEvent;
+}
+
+export interface ScopedRuntimeEvent {
+  runtimeId?: string;
   event: RuntimeEvent;
 }
 

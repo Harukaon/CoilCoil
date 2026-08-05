@@ -92,6 +92,7 @@ interface ActiveSession {
   activeAssistantOrder?: number;
   nextTimelineOrder: number;
   responseMetrics?: ResponseMetrics;
+  responseMetricsHistory: ResponseMetrics[];
 }
 
 interface WorkflowManifest {
@@ -179,14 +180,14 @@ function responseMetricsFromData(data: unknown): ResponseMetrics | undefined {
   };
 }
 
-function restoredResponseMetrics(session: AgentSession): ResponseMetrics | undefined {
-  let latest: ResponseMetrics | undefined;
+function restoredResponseMetrics(session: AgentSession): ResponseMetrics[] {
+  const metricsHistory: ResponseMetrics[] = [];
   for (const entry of session.sessionManager.getEntries()) {
     if (entry.type !== "custom" || entry.customType !== RESPONSE_METRICS_ENTRY_TYPE) continue;
     const metrics = responseMetricsFromData(entry.data);
-    if (metrics && (!latest || metrics.timestamp >= latest.timestamp)) latest = metrics;
+    if (metrics) metricsHistory.push(metrics);
   }
-  return latest;
+  return metricsHistory.sort((a, b) => a.timestamp - b.timestamp);
 }
 
 function sessionUsage(session: AgentSession): { contextUsage?: ContextUsage; tokenUsage: TokenUsage } {
@@ -235,13 +236,13 @@ function messageTimestamp(message: Record<string, unknown>): number {
   return Date.now();
 }
 
-function mapMessage(message: unknown, id: string, order: number): ChatMessage | undefined {
+function mapMessage(message: unknown, id: string, order: number, entryId?: string): ChatMessage | undefined {
   if (!isRecord(message) || typeof message.role !== "string") return undefined;
   const role = message.role;
   const parts = contentParts(message.content);
 
   if (role === "user") {
-    return { id, order, role: "user", text: parts.text, timestamp: messageTimestamp(message) };
+    return { id, entryId, order, role: "user", text: parts.text, timestamp: messageTimestamp(message) };
   }
   if (role === "assistant") {
     const stopReason = stringValue(message.stopReason);
@@ -723,6 +724,7 @@ export class SuoCodeRuntime {
       messageIds: new WeakMap(),
       nextTimelineOrder: reconstructed.nextTimelineOrder,
       responseMetrics: reconstructed.responseMetrics,
+      responseMetricsHistory: reconstructed.responseMetricsHistory,
     };
     this.active = active;
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
@@ -740,6 +742,7 @@ export class SuoCodeRuntime {
     plan: TodoItem[];
     nextTimelineOrder: number;
     responseMetrics?: ResponseMetrics;
+    responseMetricsHistory: ResponseMetrics[];
   } {
     const messages: ChatMessage[] = [];
     const tools = new Map<string, ToolRun>();
@@ -749,9 +752,11 @@ export class SuoCodeRuntime {
     const purposes = restoredToolPurposes(session);
     let order = 0;
 
-    for (const [index, rawMessage] of session.messages.entries()) {
+    const branchMessages = session.sessionManager.getBranch().filter((entry) => entry.type === "message");
+    for (const [index, entry] of branchMessages.entries()) {
+      const rawMessage = entry.message;
       if (!isRecord(rawMessage)) continue;
-      const mapped = mapMessage(rawMessage, `history-${index}-${messageTimestamp(rawMessage)}`, order);
+      const mapped = mapMessage(rawMessage, `history-${entry.id}`, order, entry.id);
       if (mapped && mapped.role !== "tool" && (mapped.role === "user" || mapped.text || mapped.thinking)) {
         messages.push(mapped);
         order += 1;
@@ -797,13 +802,15 @@ export class SuoCodeRuntime {
         });
       }
     }
+    const responseMetricsHistory = restoredResponseMetrics(session);
     return {
       messages,
       tools,
       terminals,
       plan,
       nextTimelineOrder: order,
-      responseMetrics: restoredResponseMetrics(session),
+      responseMetrics: responseMetricsHistory.at(-1),
+      responseMetricsHistory,
     };
   }
 
@@ -856,11 +863,15 @@ export class SuoCodeRuntime {
         case "entry_appended":
           if (event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE) {
             const metrics = responseMetricsFromData(event.entry.data);
-            if (metrics) active.responseMetrics = metrics;
+            if (metrics) {
+              active.responseMetrics = metrics;
+              active.responseMetricsHistory = [...active.responseMetricsHistory, metrics].slice(-60);
+            }
             const usage = sessionUsage(active.session);
             this.emitEvent({
               type: "metrics_updated",
               responseMetrics: active.responseMetrics,
+              responseMetricsHistory: active.responseMetricsHistory,
               contextUsage: usage.contextUsage,
               tokenUsage: usage.tokenUsage,
             });
@@ -1018,6 +1029,20 @@ export class SuoCodeRuntime {
     return { accepted: true };
   }
 
+  async rewindPrompt(entryId: string, text: string): Promise<{ accepted: true }> {
+    const active = this.requireActive();
+    const prompt = text.trim();
+    if (!prompt) throw new Error("消息不能为空。");
+    if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");
+    const result = await active.session.navigateTree(entryId, { summarize: false });
+    if (result.cancelled) throw new Error("未能回溯到所选消息。");
+    void active.session.prompt(prompt).catch((error) => {
+      this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+      this.emitEvent({ type: "run_state", running: false });
+    });
+    return { accepted: true };
+  }
+
   async steer(text: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
     const prompt = text.trim();
@@ -1114,6 +1139,7 @@ export class SuoCodeRuntime {
     const model = active.session.model;
     const usage = sessionUsage(active.session);
     active.responseMetrics = reconstructed.responseMetrics ?? active.responseMetrics;
+    active.responseMetricsHistory = reconstructed.responseMetricsHistory;
     return {
       session: summary,
       messages,
@@ -1124,6 +1150,7 @@ export class SuoCodeRuntime {
         : undefined,
       thinkingLevel: active.session.thinkingLevel as ThinkingLevel,
       responseMetrics: active.responseMetrics,
+      responseMetricsHistory: active.responseMetricsHistory,
       contextUsage: usage.contextUsage,
       tokenUsage: usage.tokenUsage,
       running: active.session.isStreaming,

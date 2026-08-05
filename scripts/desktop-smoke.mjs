@@ -45,6 +45,17 @@ async function waitForPage(port, timeout = 30_000) {
   throw new Error("Packaged SuoCode did not expose its renderer in time.");
 }
 
+async function waitForPreviewPage(port, timeout = 30_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeout) {
+    const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json()).catch(() => []);
+    const page = pages.find((item) => item.type === "page" && String(item.url).includes("preview="));
+    if (page?.webSocketDebuggerUrl) return page;
+    await delay(100);
+  }
+  throw new Error("The independent file preview window did not open.");
+}
+
 class DevToolsClient {
   constructor(url) {
     this.socket = new WebSocket(url);
@@ -161,6 +172,8 @@ async function main() {
 
   const dataDirectory = await mkdtemp(join(tmpdir(), "suocode-desktop-data-"));
   const projectDirectory = await mkdtemp(join(tmpdir(), "suocode-desktop-project-"));
+  const concurrentDirectoryA = await mkdtemp(join(tmpdir(), "suocode-concurrent-a-"));
+  const concurrentDirectoryB = await mkdtemp(join(tmpdir(), "suocode-concurrent-b-"));
   execFileSync("git", ["init", "--quiet", projectDirectory]);
   await mkdir(join(projectDirectory, "lazy-folder"));
   await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "lazy\n", "utf8");
@@ -229,9 +242,16 @@ async function main() {
     assert.equal(isolation.panes, true);
     assert.equal(isolation.rightClosed, true);
     assert.equal(isolation.rightResizer, false);
-    for (const label of ["Todo", "变更", "终端", "文件"]) {
-      assert.match(isolation.inspector, new RegExp(label));
-    }
+    assert.match(isolation.inspector, /文件/);
+    assert.doesNotMatch(isolation.inspector, /Todo|变更|终端/);
+    const runtimeIsolation = await client.evaluate(`(async () => {
+      const first = await window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryA)} });
+      const second = await window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryB)} });
+      return { first: first.runtimeId, second: second.runtimeId };
+    })()`);
+    assert.ok(runtimeIsolation.first);
+    assert.ok(runtimeIsolation.second);
+    assert.notEqual(runtimeIsolation.first, runtimeIsolation.second);
     const regularToggleSize = await client.evaluate(`(() => {
       const bounds = document.querySelector('button[aria-label="收起侧栏"]')?.getBoundingClientRect();
       return bounds ? { width: bounds.width, height: bounds.height } : null;
@@ -256,10 +276,10 @@ async function main() {
       assert.ok(macTrafficLightSpacing.buttonLeft >= 82);
     }
 
-    await client.evaluate(`(() => { window.resizeTo(350, 700); return true; })()`);
+    await client.evaluate(`(() => { window.resizeTo(395, 700); return true; })()`);
     await client.waitFor(
-      `window.innerWidth <= 350`,
-      "The packaged desktop window could not shrink to 350px.",
+      `window.innerWidth <= 395`,
+      "The packaged desktop window could not shrink to 395px.",
     );
     await client.evaluate(`(async () => {
       if (!document.querySelector(".app-shell")?.classList.contains("left-collapsed")) return true;
@@ -326,8 +346,8 @@ async function main() {
     assert.equal(compactInspectorLayout.shellTransition, "0s");
     assert.equal(compactInspectorLayout.sidebarTransition, "0s");
     assert.notEqual(compactInspectorLayout.inspectorPosition, "absolute");
-    assert.ok(compactInspectorLayout.conversationWidth >= 19);
-    assert.ok(compactInspectorLayout.inspectorWidth >= 20);
+    assert.ok(compactInspectorLayout.conversationWidth >= 315);
+    assert.ok(compactInspectorLayout.inspectorWidth >= 40);
     assert.ok(compactInspectorLayout.inspectorLeft >= compactInspectorLayout.conversationRight - 1);
     assert.equal(compactInspectorLayout.rightResizer, true);
     await client.evaluate(`(() => { window.resizeTo(1440, 900); return true; })()`);
@@ -345,8 +365,8 @@ async function main() {
       conversation: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
       inspector: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
     })`);
-    assert.ok(narrowConversation.conversation <= 21, `Conversation pane stopped at ${narrowConversation.conversation}px instead of 20px.`);
-    assert.ok(narrowConversation.inspector > 1_000);
+    assert.ok(narrowConversation.conversation <= 316, `Conversation pane stopped at ${narrowConversation.conversation}px instead of 315px.`);
+    assert.ok(narrowConversation.inspector >= 800);
     const expandedHandle = await client.evaluate(`(() => {
       const bounds = document.querySelector(".right-resizer")?.getBoundingClientRect();
       return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;
@@ -384,7 +404,7 @@ async function main() {
       return true;
     })()`);
     await client.waitFor(
-      `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]:not([disabled])'))`,
+      `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]:not([disabled])')) && [...document.querySelectorAll(".project-row span")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
       "The packaged app could not create a project session through IPC.",
       45_000,
     );
@@ -415,6 +435,20 @@ async function main() {
       `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))`,
       "The file tree did not load an expanded folder on demand.",
     );
+    await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"))?.click()`);
+    const previewPage = await waitForPreviewPage(port);
+    const previewClient = new DevToolsClient(previewPage.webSocketDebuggerUrl);
+    await previewClient.open();
+    await previewClient.waitFor(
+      `document.querySelector(".text-preview")?.textContent.includes("lazy")`,
+      "The text preview window did not render the selected file.",
+    );
+    await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "live preview update\n", "utf8");
+    await previewClient.waitFor(
+      `document.querySelector(".text-preview")?.textContent.includes("live preview update")`,
+      "The preview window did not update after the file changed on disk.",
+    );
+    previewClient.close();
     await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
     if (live) {
@@ -450,7 +484,7 @@ async function main() {
         terminalToken,
       );
 
-      await client.evaluate(`window.suocode.request({ type: "refresh_project" })`);
+      await client.evaluate(`document.querySelector('button[aria-label="刷新项目"]')?.click()`);
 
       const toolState = await client.evaluate(`({
         count: document.querySelectorAll(".tool-activity-row").length,
@@ -471,24 +505,6 @@ async function main() {
       assert.equal(eventState.some((event) => event.type === "message_delta" && event.field === "text"), true);
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === true), true);
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === false), true);
-
-      await clickInspector(client, "Todo");
-      await client.waitFor(
-        `document.querySelectorAll(".plan-list li.completed").length >= 2`,
-        "Completed todo state was not projected into Plan.",
-      );
-
-      await clickInspector(client, "变更");
-      await client.waitFor(
-        `[...document.querySelectorAll(".change-path")].some((item) => item.textContent.includes(${JSON.stringify(fileName)}))`,
-        "The Agent-written file was not projected into Changes.",
-      );
-
-      await clickInspector(client, "终端");
-      await client.waitFor(
-        `[...document.querySelectorAll(".terminal-card")].some((item) => item.textContent.includes(${JSON.stringify(terminalToken)}))`,
-        "Bash output was not projected into Terminal.",
-      );
 
       await clickInspector(client, "文件");
       await client.waitFor(
@@ -519,6 +535,8 @@ async function main() {
     await stopProcess(child);
     await rm(dataDirectory, { recursive: true, force: true });
     await rm(projectDirectory, { recursive: true, force: true });
+    await rm(concurrentDirectoryA, { recursive: true, force: true });
+    await rm(concurrentDirectoryB, { recursive: true, force: true });
   }
 }
 
