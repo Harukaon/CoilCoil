@@ -53,6 +53,9 @@ type InspectorView = "plan" | "changes" | "terminal" | "files";
 type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
   | { kind: "tools"; order: number; tools: ToolRun[] };
+type ConversationTimelineItem =
+  | { kind: "user"; order: number; message: ChatMessage }
+  | { kind: "agent"; order: number; items: TimelineItem[] };
 
 const PROJECT_STORAGE_KEY = "suocode.selected-project";
 const LEFT_WIDTH_KEY = "suocode.left-panel-width";
@@ -147,7 +150,7 @@ function Markdown({ children }: { children: string }): React.JSX.Element {
   );
 }
 
-function MessageView({ message, modelName }: { message: ChatMessage; modelName: string }): React.JSX.Element {
+function MessageView({ message }: { message: ChatMessage }): React.JSX.Element {
   if (message.role === "user") {
     return (
       <article className="timeline-message user-message">
@@ -157,19 +160,15 @@ function MessageView({ message, modelName }: { message: ChatMessage; modelName: 
     );
   }
 
+  return <AssistantSegment message={message} />;
+}
+
+function AssistantSegment({ message }: { message: ChatMessage }): React.JSX.Element {
   return (
-    <article className={`timeline-message assistant-message ${message.isError ? "error" : ""}`}>
-      <div className="assistant-content">
-        <div className="message-label">{modelName}</div>
-        {message.thinking?.trim() ? (
-          <details className="thinking-block">
-            <summary>Reasoning</summary>
-            <div>{message.thinking}</div>
-          </details>
-        ) : null}
-        {message.text ? <Markdown>{message.text}</Markdown> : null}
-      </div>
-    </article>
+    <div className={`assistant-segment assistant-message ${message.isError ? "error" : ""}`}>
+      {message.thinking?.trim() ? <details className="thinking-block"><summary>Reasoning</summary><div>{message.thinking}</div></details> : null}
+      {message.text ? <Markdown>{message.text}</Markdown> : null}
+    </div>
   );
 }
 
@@ -278,12 +277,41 @@ function ToolGroupView({ tools }: { tools: ToolRun[] }): React.JSX.Element {
         {tools.map((tool) => {
           const itemStats = lineStats(tool);
           return <details className={`tool-activity-row ${tool.status}`} key={tool.id}>
-            <summary><span>{tool.label}</span>{itemStats.additions ? <b className="additions">+{itemStats.additions}</b> : null}{itemStats.deletions ? <b className="deletions">-{itemStats.deletions}</b> : null}{tool.status === "running" ? <LoaderCircle className="spin" size={13} /> : tool.status === "failed" ? <AlertCircle size={13} /> : null}</summary>
+            <summary><code>{tool.name}</code><span>{tool.label}</span>{itemStats.additions ? <b className="additions">+{itemStats.additions}</b> : null}{itemStats.deletions ? <b className="deletions">-{itemStats.deletions}</b> : null}{tool.status === "running" ? <LoaderCircle className="spin" size={13} /> : tool.status === "failed" ? <AlertCircle size={13} /> : null}</summary>
             {tool.output || Object.keys(tool.args).length ? <pre>{tool.output || JSON.stringify(tool.args, null, 2)}</pre> : null}
           </details>;
         })}
       </div>
     </details>
+  );
+}
+
+function AgentTurnView({ items, modelName }: { items: TimelineItem[]; modelName: string }): React.JSX.Element {
+  return (
+    <article className="agent-turn">
+      <div className="message-label">{modelName}</div>
+      <div className="agent-turn-content">
+        {items.map((item) => item.kind === "message"
+          ? <AssistantSegment key={`message-${item.message.id}`} message={item.message} />
+          : <ToolGroupView key={`tools-${item.order}`} tools={item.tools} />)}
+      </div>
+    </article>
+  );
+}
+
+function ComposerPlan({ plan }: { plan: ProjectSnapshot["plan"] }): React.JSX.Element | null {
+  if (!plan.length) return null;
+  const completed = plan.filter((item) => item.status === "completed").length;
+  return (
+    <section className="composer-plan" aria-label="Agent 计划">
+      <header><span>计划</span><small>{completed}/{plan.length}</small></header>
+      <ol>
+        {plan.map((item, index) => <li className={item.status} key={`${index}-${item.text}`}>
+          {item.status === "completed" ? <CheckCircle2 size={14} /> : item.status === "in_progress" ? <CircleDot size={14} /> : <Circle size={14} />}
+          <span>{item.text}</span>
+        </li>)}
+      </ol>
+    </section>
   );
 }
 
@@ -673,7 +701,7 @@ export default function App(): React.JSX.Element {
   const modelConfigured = Boolean(
     snapshot?.model && configuration?.configuredProviders.includes(snapshot.model.provider),
   );
-  const timeline = useMemo<TimelineItem[]>(() => {
+  const timeline = useMemo<ConversationTimelineItem[]>(() => {
     const ordered = [
       ...messages.filter((message) => message.role !== "tool" && (message.text || message.thinking)).map((message) => ({ kind: "message" as const, order: message.order, message })),
       ...tools.map((tool) => ({ kind: "tool" as const, order: tool.order, tool })),
@@ -686,7 +714,17 @@ export default function App(): React.JSX.Element {
         else grouped.push({ kind: "tools", order: item.order, tools: [item.tool] });
       } else grouped.push(item);
     }
-    return grouped;
+    const turns: ConversationTimelineItem[] = [];
+    for (const item of grouped) {
+      if (item.kind === "message" && item.message.role === "user") {
+        turns.push({ kind: "user", order: item.order, message: item.message });
+        continue;
+      }
+      const previous = turns.at(-1);
+      if (previous?.kind === "agent") previous.items.push(item);
+      else turns.push({ kind: "agent", order: item.order, items: [item] });
+    }
+    return turns;
   }, [messages, tools]);
 
   const beginResize = (side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>): void => {
@@ -833,10 +871,11 @@ export default function App(): React.JSX.Element {
           </header>
 
           <div className="conversation-body" ref={timelineRef}>
-            {loading ? <div className="loading-state"><LoaderCircle className="spin" size={20} /><span>正在加载工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "message" ? <MessageView key={`message-${item.message.id}`} message={item.message} modelName={snapshot?.model?.name ?? "Agent"} /> : <ToolGroupView key={`tools-${item.order}`} tools={item.tools} />)}{running ? <div className="agent-activity"><LoaderCircle className="spin" size={14} /><span>{agentPhase === "工具" ? "正在执行工具…" : agentPhase === "回复" ? "正在回复…" : "正在思考…"}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
+            {loading ? <div className="loading-state"><LoaderCircle className="spin" size={20} /><span>正在加载工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={snapshot?.model?.name ?? "Agent"} />)}{running ? <div className="agent-activity"><LoaderCircle className="spin" size={14} /><span>{agentPhase === "工具" ? "正在执行工具…" : agentPhase === "回复" ? "正在回复…" : "正在思考…"}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
           </div>
 
           <div className="composer-wrap">
+            <ComposerPlan plan={projectState.plan} />
             {error ? <div className="error-banner"><AlertCircle size={14} /><span>{error}</span><button type="button" onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
             <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
               <textarea ref={inputRef} value={draft} rows={3} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
