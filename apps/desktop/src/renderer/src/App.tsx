@@ -328,8 +328,8 @@ function ComposerPlan({ plan }: { plan: ProjectSnapshot["plan"] }): React.JSX.El
   if (!plan.length) return null;
   const completed = plan.filter((item) => item.status === "completed").length;
   return (
-    <section className={`composer-plan ${expanded ? "expanded" : "collapsed"}`} aria-label="Agent 计划">
-      <button className="composer-plan-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><span>计划</span><small>{completed}/{plan.length}</small>{expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
+    <section className={`composer-plan ${expanded ? "expanded" : "collapsed"}`} aria-label="Agent Todo">
+      <button className="composer-plan-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><span>Todo</span><small>{completed}/{plan.length}</small>{expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
       <div className="composer-plan-body"><ol>
           {plan.map((item, index) => <li className={item.status} key={`${index}-${item.text}`}>
             {item.status === "completed" ? <CheckCircle2 size={14} /> : item.status === "in_progress" ? <CircleDot size={14} /> : <Circle size={14} />}
@@ -342,7 +342,7 @@ function ComposerPlan({ plan }: { plan: ProjectSnapshot["plan"] }): React.JSX.El
 
 function PlanPanel({ project }: { project: ProjectSnapshot }): React.JSX.Element {
   if (!project.plan.length) {
-    return <EmptyState icon={CheckSquare2} title="暂无计划" detail="Agent 的结构化计划会显示在这里。" />;
+    return <EmptyState icon={CheckSquare2} title="暂无 Todo" detail="Agent 的结构化 Todo 会显示在这里。" />;
   }
   return (
     <ol className="plan-list">
@@ -856,7 +856,7 @@ export default function App(): React.JSX.Element {
   };
 
   const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof CheckSquare2; meta?: string }> = [
-    { id: "plan", label: "计划", icon: CheckSquare2, meta: projectState.plan.length ? String(projectState.plan.length) : undefined },
+    { id: "plan", label: "Todo", icon: CheckSquare2, meta: projectState.plan.length ? String(projectState.plan.length) : undefined },
     { id: "changes", label: "变更", icon: GitCompareArrows, meta: String(projectState.changes.length) },
     { id: "terminal", label: "终端", icon: TerminalSquare, meta: projectState.terminals.length ? String(projectState.terminals.length) : undefined },
     { id: "files", label: "文件", icon: Files },

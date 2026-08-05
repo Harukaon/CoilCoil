@@ -204,7 +204,7 @@ async function main() {
     assert.equal(isolation.rightClosed, true);
     assert.equal(isolation.leftResizer, true);
     assert.equal(isolation.rightResizer, false);
-    for (const label of ["计划", "变更", "终端", "文件"]) {
+    for (const label of ["Todo", "变更", "终端", "文件"]) {
       assert.match(isolation.inspector, new RegExp(label));
     }
 
@@ -283,7 +283,7 @@ async function main() {
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === true), true);
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === false), true);
 
-      await clickInspector(client, "计划");
+      await clickInspector(client, "Todo");
       await client.waitFor(
         `document.querySelectorAll(".plan-list li.completed").length >= 2`,
         "Completed todo state was not projected into Plan.",

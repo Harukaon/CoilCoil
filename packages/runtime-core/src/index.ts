@@ -740,7 +740,7 @@ export class SuoCodeRuntime {
     if (name === "grep") return `搜索 ${stringValue(args.pattern) || "项目"}`;
     if (name === "find") return `查找 ${stringValue(args.pattern) || "文件"}`;
     if (name === "ls") return `查看 ${stringValue(args.path) || "目录"}`;
-    if (name === "todo") return "更新计划";
+    if (name === "todo") return "更新 Todo";
     if (name === "terminal") return `运行 ${stringValue(args.command) || stringValue(args.action) || "终端命令"}`;
     return `调用 ${name.replace(/[_-]+/g, " ")}`;
   }
