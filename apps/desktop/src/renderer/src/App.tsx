@@ -450,17 +450,41 @@ function TerminalPanel({ project }: { project: ProjectSnapshot }): React.JSX.Ele
   );
 }
 
-function FileTreeNode({ node, depth }: { node: FileNode; depth: number }): React.JSX.Element {
-  const [open, setOpen] = useState(depth < 1);
+function replaceDirectoryChildren(nodes: FileNode[], path: string, children: FileNode[]): FileNode[] {
+  return nodes.map((node) => {
+    if (node.path === path && node.kind === "directory") return { ...node, children };
+    if (!node.children) return node;
+    return { ...node, children: replaceDirectoryChildren(node.children, path, children) };
+  });
+}
+
+function FileTreeNode({ node, depth, onLoad }: {
+  node: FileNode;
+  depth: number;
+  onLoad: (path: string) => Promise<void>;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   if (node.kind === "directory") {
+    const toggle = async (): Promise<void> => {
+      const nextOpen = !open;
+      setOpen(nextOpen);
+      if (!nextOpen || node.children !== undefined || loading) return;
+      setLoading(true);
+      try {
+        await onLoad(node.path);
+      } finally {
+        setLoading(false);
+      }
+    };
     return (
       <div className="file-tree-node">
-        <button type="button" style={{ paddingLeft: 8 + depth * 13 }} onClick={() => setOpen((value) => !value)}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <button type="button" style={{ paddingLeft: 8 + depth * 13 }} onClick={() => void toggle()}>
+          {loading ? <LoaderCircle className="spin" size={12} /> : open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <Folder size={14} />
           <span>{node.name}</span>
         </button>
-        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} />) : null}
+        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} onLoad={onLoad} />) : null}
       </div>
     );
   }
@@ -472,13 +496,30 @@ function FileTreeNode({ node, depth }: { node: FileNode; depth: number }): React
 }
 
 function FilesPanel({ project }: { project: ProjectSnapshot }): React.JSX.Element {
+  const [tree, setTree] = useState<FileNode[]>(project.files);
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    setTree(project.files);
+    setError(undefined);
+  }, [project.cwd, project.files]);
+
+  const loadDirectory = async (path: string): Promise<void> => {
+    try {
+      const children = await window.suocode.request<FileNode[]>({ type: "list_directory", path });
+      setTree((current) => replaceDirectoryChildren(current, path, children));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
   if (!project.cwd) {
     return <EmptyState icon={Files} title="未打开项目" detail="打开项目后即可查看文件。" />;
   }
   return (
     <div className="files-panel">
       <div className="file-tree">
-        {project.files.length ? project.files.map((node) => <FileTreeNode key={node.path} node={node} depth={0} />) : <p className="panel-note">此文件夹为空。</p>}
+        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} depth={0} onLoad={loadDirectory} />) : <p className="panel-note">此文件夹为空。</p>}
+        {error ? <p className="file-tree-error">{error}</p> : null}
       </div>
     </div>
   );

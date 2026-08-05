@@ -164,6 +164,7 @@ export type RuntimeCommand =
   | { type: "steer"; text: string }
   | { type: "abort" }
   | { type: "refresh_project" }
+  | { type: "list_directory"; path: string }
   | { type: "read_file"; path: string; maxBytes?: number };
 
 export type RuntimeEvent =

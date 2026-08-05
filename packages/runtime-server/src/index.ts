@@ -59,6 +59,8 @@ export class RuntimeServer {
         return this.runtime.abort();
       case "refresh_project":
         return this.runtime.refreshProject();
+      case "list_directory":
+        return this.runtime.listProjectDirectory(command.path);
       case "read_file":
         return this.runtime.readProjectFile(command.path, command.maxBytes);
     }

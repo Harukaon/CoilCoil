@@ -84,6 +84,14 @@ try {
   if (!snapshot.project.files.some((entry) => entry.name === "zz-root.txt")) {
     throw new Error("A large nested directory starved later root files from the project tree.");
   }
+  const largeNode = snapshot.project.files.find((entry) => entry.name === "aaa-large");
+  if (!largeNode || largeNode.children !== undefined) {
+    throw new Error("Project folders were traversed before the user expanded them.");
+  }
+  const lazyChildren = await request({ type: "list_directory", path: largeNode.path });
+  if (lazyChildren.length !== 1_205 || lazyChildren.some((entry) => entry.children !== undefined)) {
+    throw new Error("Lazy directory loading did not return exactly one directory level.");
+  }
   const file = await request({ type: "read_file", path: "README.md" });
   if (!file.content.includes("Runtime smoke project")) throw new Error("Project file reading failed.");
 

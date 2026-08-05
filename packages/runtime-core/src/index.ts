@@ -48,8 +48,6 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
-const MAX_FILE_ENTRIES = 1_200;
-const MAX_TREE_DEPTH = 6;
 const MAX_CHANGE_FILES = 100;
 const MAX_PATCH_CHARS = 16_000;
 const MAX_TERMINAL_OUTPUT = 120_000;
@@ -363,58 +361,23 @@ function ensureInside(root: string, path: string): string {
   return target;
 }
 
-async function fileTree(cwd: string): Promise<FileNode[]> {
-  let count = 0;
-
-  interface PendingDirectory {
-    absolute: string;
-    depth: number;
-    target: FileNode[];
-  }
-
-  const readLevel = async (directory: string, depth: number): Promise<{ nodes: FileNode[]; pending: PendingDirectory[] }> => {
-    if (depth > MAX_TREE_DEPTH || count >= MAX_FILE_ENTRIES) return { nodes: [], pending: [] };
-    let entries;
-    try {
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch {
-      return { nodes: [], pending: [] };
-    }
-
-    entries.sort((a, b) => {
-      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
-    });
-
-    const nodes: FileNode[] = [];
-    const pending: PendingDirectory[] = [];
-    for (const entry of entries) {
-      if (count >= MAX_FILE_ENTRIES) break;
-      if (entry.isDirectory() && IGNORED_DIRECTORIES.has(entry.name)) continue;
-      if (entry.name === ".DS_Store") continue;
-      const absolute = join(directory, entry.name);
-      const path = relative(cwd, absolute) || entry.name;
-      count += 1;
-      if (entry.isDirectory()) {
-        const children: FileNode[] = [];
-        nodes.push({ name: entry.name, path, kind: "directory", children });
-        if (depth < MAX_TREE_DEPTH) pending.push({ absolute, depth: depth + 1, target: children });
-      } else if (entry.isFile() || entry.isSymbolicLink()) {
-        nodes.push({ name: entry.name, path, kind: "file" });
-      }
-    }
-    return { nodes, pending };
-  };
-
-  const root = await readLevel(cwd, 0);
-  const queue = [...root.pending];
-  for (let index = 0; index < queue.length && count < MAX_FILE_ENTRIES; index += 1) {
-    const current = queue[index];
-    const level = await readLevel(current.absolute, current.depth);
-    current.target.push(...level.nodes);
-    queue.push(...level.pending);
-  }
-  return root.nodes;
+async function directoryNodes(cwd: string, requestedPath = ""): Promise<FileNode[]> {
+  const directory = requestedPath ? ensureInside(cwd, requestedPath) : safeRealPath(cwd);
+  const directoryStat = await stat(directory);
+  if (!directoryStat.isDirectory()) throw new Error("所选路径不是文件夹。");
+  const entries = await readdir(directory, { withFileTypes: true });
+  entries.sort((a, b) => {
+    if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  });
+  return entries.flatMap((entry): FileNode[] => {
+    if ((entry.isDirectory() && IGNORED_DIRECTORIES.has(entry.name)) || entry.name === ".DS_Store") return [];
+    const absolute = join(directory, entry.name);
+    const path = relative(cwd, absolute) || entry.name;
+    if (entry.isDirectory()) return [{ name: entry.name, path, kind: "directory" }];
+    if (entry.isFile() || entry.isSymbolicLink()) return [{ name: entry.name, path, kind: "file" }];
+    return [];
+  });
 }
 
 async function gitChanges(cwd: string): Promise<ChangedFile[]> {
@@ -1078,7 +1041,7 @@ export class SuoCodeRuntime {
 
   async refreshProject(): Promise<ProjectSnapshot> {
     const active = this.requireActive();
-    const [files, changes] = await Promise.all([fileTree(active.cwd), gitChanges(active.cwd)]);
+    const [files, changes] = await Promise.all([directoryNodes(active.cwd), gitChanges(active.cwd)]);
     active.project = {
       cwd: active.cwd,
       files,
@@ -1089,6 +1052,11 @@ export class SuoCodeRuntime {
     };
     this.emitEvent({ type: "project_updated", project: active.project });
     return active.project;
+  }
+
+  async listProjectDirectory(path: string): Promise<FileNode[]> {
+    const active = this.requireActive();
+    return directoryNodes(active.cwd, path);
   }
 
   private publishProjectFromMemory(): void {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -162,6 +162,8 @@ async function main() {
   const dataDirectory = await mkdtemp(join(tmpdir(), "suocode-desktop-data-"));
   const projectDirectory = await mkdtemp(join(tmpdir(), "suocode-desktop-project-"));
   execFileSync("git", ["init", "--quiet", projectDirectory]);
+  await mkdir(join(projectDirectory, "lazy-folder"));
+  await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "lazy\n", "utf8");
   const port = await freePort();
   const logs = [];
   const child = spawn(appBinary, [
@@ -400,6 +402,20 @@ async function main() {
     assert.equal(projectState.headerBorder, "0px");
     assert.doesNotMatch(projectState.inspectorTitle, /项目作业/);
     assert.equal(projectState.filePreview, false);
+    await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+    await clickInspector(client, "文件");
+    const lazyBeforeExpand = await client.evaluate(`({
+      folder: [...document.querySelectorAll(".file-tree-node > button")].some((item) => item.textContent.includes("lazy-folder")),
+      child: [...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))
+    })`);
+    assert.equal(lazyBeforeExpand.folder, true);
+    assert.equal(lazyBeforeExpand.child, false);
+    await client.evaluate(`[...document.querySelectorAll(".file-tree-node > button")].find((item) => item.textContent.includes("lazy-folder"))?.click()`);
+    await client.waitFor(
+      `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))`,
+      "The file tree did not load an expanded folder on demand.",
+    );
+    await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
     if (live) {
       await client.evaluate(`(() => {
