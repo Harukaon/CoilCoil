@@ -1,0 +1,1009 @@
+import {
+  DefaultResourceLoader,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+  createAgentSession,
+  type AgentSession,
+  type AgentSessionEvent,
+  type SessionInfo,
+} from "@earendil-works/pi-coding-agent";
+import type {
+  ChangedFile,
+  ChangeStatus,
+  ChatMessage,
+  FileNode,
+  ModelOption,
+  ProjectSnapshot,
+  RuntimeBootstrap,
+  RuntimeConfiguration,
+  RuntimeEvent,
+  SessionSnapshot,
+  SessionSummary,
+  TerminalRun,
+  ThinkingLevel,
+  TodoItem,
+  ToolRun,
+} from "@suocode/runtime-protocol";
+import { execFile } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+const MAX_FILE_ENTRIES = 1_200;
+const MAX_TREE_DEPTH = 6;
+const MAX_CHANGE_FILES = 100;
+const MAX_PATCH_CHARS = 16_000;
+const MAX_TERMINAL_OUTPUT = 120_000;
+const IGNORED_DIRECTORIES = new Set([
+  ".git",
+  ".idea",
+  ".next",
+  ".turbo",
+  ".vite",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "release",
+  "target",
+]);
+
+type EventSink = (event: RuntimeEvent) => void;
+
+export interface SuoCodeRuntimeOptions {
+  agentDir: string;
+  sessionDir: string;
+  workflowDir?: string;
+  legacyAgentDir?: string;
+  onEvent?: EventSink;
+}
+
+interface ActiveSession {
+  cwd: string;
+  session: AgentSession;
+  unsubscribe: () => void;
+  tools: Map<string, ToolRun>;
+  terminals: Map<string, TerminalRun>;
+  plan: TodoItem[];
+  project: ProjectSnapshot;
+  messageIds: WeakMap<object, string>;
+  activeAssistantId?: string;
+}
+
+interface WorkflowManifest {
+  pi?: { extensions?: string[] };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errorDetail(error: unknown): string | undefined {
+  return error instanceof Error ? error.stack : undefined;
+}
+
+function clampText(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max)}\n… output truncated …`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
+function contentParts(content: unknown): { text: string; thinking: string } {
+  if (typeof content === "string") return { text: content, thinking: "" };
+  if (!Array.isArray(content)) return { text: "", thinking: "" };
+
+  const text: string[] = [];
+  const thinking: string[] = [];
+  for (const block of content) {
+    if (!isRecord(block)) continue;
+    if (block.type === "text" && typeof block.text === "string") text.push(block.text);
+    if (block.type === "thinking" && typeof block.thinking === "string") thinking.push(block.thinking);
+    if (block.type === "thinking" && typeof block.text === "string") thinking.push(block.text);
+  }
+  return { text: text.join("\n"), thinking: thinking.join("\n") };
+}
+
+function toolResultText(result: unknown): string {
+  if (!isRecord(result)) return stringValue(result);
+  const direct = contentParts(result.content).text;
+  if (direct) return direct;
+  if (typeof result.output === "string") return result.output;
+  if (typeof result.text === "string") return result.text;
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
+}
+
+function messageTimestamp(message: Record<string, unknown>): number {
+  const timestamp = message.timestamp;
+  if (typeof timestamp === "number") return timestamp;
+  if (typeof timestamp === "string") {
+    const parsed = Date.parse(timestamp);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
+function mapMessage(message: unknown, id: string): ChatMessage | undefined {
+  if (!isRecord(message) || typeof message.role !== "string") return undefined;
+  const role = message.role;
+  const parts = contentParts(message.content);
+
+  if (role === "user") {
+    return { id, role: "user", text: parts.text, timestamp: messageTimestamp(message) };
+  }
+  if (role === "assistant") {
+    const stopReason = stringValue(message.stopReason);
+    const failed = stopReason === "error" || stopReason === "aborted";
+    return {
+      id,
+      role: "assistant",
+      text: parts.text || (failed ? stringValue(message.errorMessage) : ""),
+      thinking: parts.thinking || undefined,
+      timestamp: messageTimestamp(message),
+      isError: stopReason === "error",
+      status: stopReason === "aborted" ? "aborted" : stopReason === "error" ? "failed" : "succeeded",
+    };
+  }
+  if (role === "toolResult") {
+    return {
+      id,
+      role: "tool",
+      text: parts.text,
+      timestamp: messageTimestamp(message),
+      toolName: stringValue(message.toolName) || "tool",
+      toolCallId: stringValue(message.toolCallId) || undefined,
+      isError: message.isError === true,
+      status: message.isError === true ? "failed" : "succeeded",
+    };
+  }
+  if (role === "bashExecution") {
+    return {
+      id,
+      role: "tool",
+      text: stringValue(message.output),
+      timestamp: messageTimestamp(message),
+      toolName: "bash",
+      status: "succeeded",
+    };
+  }
+  if (role === "custom" && message.display !== false) {
+    return { id, role: "system", text: parts.text, timestamp: messageTimestamp(message) };
+  }
+  return undefined;
+}
+
+function titleFromText(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  if (!oneLine) return "New chat";
+  return oneLine.length > 64 ? `${oneLine.slice(0, 61)}…` : oneLine;
+}
+
+function sessionSummary(info: SessionInfo): SessionSummary {
+  return {
+    id: info.id,
+    path: info.path,
+    cwd: info.cwd,
+    title: info.name || titleFromText(info.firstMessage),
+    createdAt: info.created.toISOString(),
+    updatedAt: info.modified.toISOString(),
+    messageCount: info.messageCount,
+  };
+}
+
+function normalizeTodoPlan(value: unknown): TodoItem[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result: TodoItem[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return undefined;
+    const rawText = typeof item.text === "string" ? item.text : typeof item.step === "string" ? item.step : undefined;
+    const status = item.status;
+    if (!rawText || (status !== "pending" && status !== "in_progress" && status !== "completed")) {
+      return undefined;
+    }
+    result.push({ text: rawText, status });
+  }
+  return result;
+}
+
+function planFromResult(result: unknown): TodoItem[] | undefined {
+  if (!isRecord(result)) return undefined;
+  const details = isRecord(result.details) ? result.details : undefined;
+  return normalizeTodoPlan(details?.plan);
+}
+
+function extractExitCode(result: unknown): number | undefined {
+  if (!isRecord(result)) return undefined;
+  const details = isRecord(result.details) ? result.details : undefined;
+  const candidates = [details?.exitCode, details?.code, result.exitCode];
+  return candidates.find((value): value is number => typeof value === "number");
+}
+
+function statusFromPorcelain(code: string): ChangeStatus {
+  if (code === "??") return "untracked";
+  if (code.includes("U") || code === "AA" || code === "DD") return "conflicted";
+  if (code.includes("R")) return "renamed";
+  if (code.includes("D")) return "deleted";
+  if (code.includes("A")) return "added";
+  return "modified";
+}
+
+function safeRealPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function ensureInside(root: string, path: string): string {
+  const resolvedRoot = safeRealPath(root);
+  const candidate = isAbsolute(path) ? resolve(path) : resolve(resolvedRoot, path);
+  const target = existsSync(candidate) ? safeRealPath(candidate) : candidate;
+  const rel = relative(resolvedRoot, target);
+  if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
+    throw new Error("The requested file is outside the active project.");
+  }
+  return target;
+}
+
+async function fileTree(cwd: string): Promise<FileNode[]> {
+  let count = 0;
+
+  const visit = async (directory: string, depth: number): Promise<FileNode[]> => {
+    if (depth > MAX_TREE_DEPTH || count >= MAX_FILE_ENTRIES) return [];
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+
+    entries.sort((a, b) => {
+      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+    });
+
+    const nodes: FileNode[] = [];
+    for (const entry of entries) {
+      if (count >= MAX_FILE_ENTRIES) break;
+      if (entry.isDirectory() && IGNORED_DIRECTORIES.has(entry.name)) continue;
+      if (entry.name === ".DS_Store") continue;
+      const absolute = join(directory, entry.name);
+      const path = relative(cwd, absolute) || entry.name;
+      count += 1;
+      if (entry.isDirectory()) {
+        nodes.push({ name: entry.name, path, kind: "directory", children: await visit(absolute, depth + 1) });
+      } else if (entry.isFile() || entry.isSymbolicLink()) {
+        nodes.push({ name: entry.name, path, kind: "file" });
+      }
+    }
+    return nodes;
+  };
+
+  return visit(cwd, 0);
+}
+
+async function gitChanges(cwd: string): Promise<ChangedFile[]> {
+  let statusOutput = "";
+  try {
+    const result = await execFileAsync("git", ["-C", cwd, "status", "--porcelain=v1", "--untracked-files=all"], {
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    statusOutput = result.stdout;
+  } catch {
+    return [];
+  }
+
+  const records = statusOutput
+    .split("\n")
+    .filter(Boolean)
+    .slice(0, MAX_CHANGE_FILES)
+    .map((line) => {
+      const code = line.slice(0, 2);
+      const rawPath = line.slice(3).trim();
+      const path = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1) || rawPath : rawPath;
+      return { code, path: path.replace(/^"|"$/g, "") };
+    });
+
+  const numstat = new Map<string, { additions: number; deletions: number }>();
+  try {
+    const result = await execFileAsync("git", ["-C", cwd, "diff", "--numstat", "HEAD", "--", "."], {
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    for (const line of result.stdout.split("\n")) {
+      const [added, deleted, ...pathParts] = line.split("\t");
+      const path = pathParts.join("\t");
+      if (!path) continue;
+      numstat.set(path, {
+        additions: added === "-" ? 0 : Number.parseInt(added || "0", 10) || 0,
+        deletions: deleted === "-" ? 0 : Number.parseInt(deleted || "0", 10) || 0,
+      });
+    }
+  } catch {
+    // A repository without HEAD can still expose status and untracked files.
+  }
+
+  return Promise.all(
+    records.map(async ({ code, path }) => {
+      const stats = numstat.get(path) ?? { additions: 0, deletions: 0 };
+      const status = statusFromPorcelain(code);
+      let patch: string | undefined;
+      if (status === "untracked") {
+        try {
+          const target = ensureInside(cwd, path);
+          const fileStat = await stat(target);
+          if (fileStat.isFile() && fileStat.size <= 256 * 1024) {
+            const source = await readFile(target, "utf8");
+            const lines = source.split("\n");
+            stats.additions = lines.length;
+            patch = clampText(
+              [`diff --git a/${path} b/${path}`, "new file", "--- /dev/null", `+++ b/${path}`, ...lines.map((line) => `+${line}`)].join("\n"),
+              MAX_PATCH_CHARS,
+            );
+          }
+        } catch {
+          // Binary, unreadable, or concurrently removed files remain listed without a patch.
+        }
+      } else {
+        try {
+          const result = await execFileAsync("git", ["-C", cwd, "diff", "--no-ext-diff", "--unified=3", "HEAD", "--", path], {
+            maxBuffer: 2 * 1024 * 1024,
+          });
+          patch = clampText(result.stdout, MAX_PATCH_CHARS) || undefined;
+        } catch {
+          patch = undefined;
+        }
+      }
+      return { path, status, ...stats, patch } satisfies ChangedFile;
+    }),
+  );
+}
+
+function resolveWorkflowDirectory(explicit?: string): string {
+  if (explicit) return resolve(explicit);
+  const manifestPath = require.resolve("@suocode/workflow/package.json");
+  return dirname(manifestPath);
+}
+
+function workflowExtensions(directory: string): string[] {
+  const manifestPath = join(directory, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as WorkflowManifest;
+  return (manifest.pi?.extensions ?? []).map((path) => resolve(directory, path));
+}
+
+function seedLegacyConfiguration(agentDir: string, legacyAgentDir: string): boolean {
+  mkdirSync(agentDir, { recursive: true });
+  let migrated = false;
+  const authPath = join(agentDir, "auth.json");
+  const legacyAuthPath = join(legacyAgentDir, "auth.json");
+  if (!existsSync(authPath) && existsSync(legacyAuthPath)) {
+    copyFileSync(legacyAuthPath, authPath);
+    try {
+      const mode = statSync(legacyAuthPath).mode & 0o777;
+      chmodSync(authPath, mode || 0o600);
+    } catch {
+      // The copied credential remains usable even when permissions cannot be mirrored.
+    }
+    migrated = true;
+  }
+
+  const modelsPath = join(agentDir, "models.json");
+  const legacyModelsPath = join(legacyAgentDir, "models.json");
+  if (!existsSync(modelsPath) && existsSync(legacyModelsPath)) {
+    copyFileSync(legacyModelsPath, modelsPath);
+  }
+
+  const settingsPath = join(agentDir, "settings.json");
+  const legacySettingsPath = join(legacyAgentDir, "settings.json");
+  if (!existsSync(settingsPath) && existsSync(legacySettingsPath)) {
+    try {
+      const legacy = JSON.parse(readFileSync(legacySettingsPath, "utf8")) as Record<string, unknown>;
+      const selected = Object.fromEntries(
+        ["defaultProvider", "defaultModel", "defaultThinkingLevel", "transport"].flatMap((key) =>
+          legacy[key] === undefined ? [] : [[key, legacy[key]]],
+        ),
+      );
+      writeFileSync(settingsPath, `${JSON.stringify(selected, null, 2)}\n`, { mode: 0o600 });
+    } catch {
+      // Invalid legacy settings are intentionally ignored instead of copied wholesale.
+    }
+  }
+  return migrated;
+}
+
+export class SuoCodeRuntime {
+  readonly agentDir: string;
+  readonly sessionDir: string;
+  readonly workflowDir: string;
+
+  private readonly emitEvent: EventSink;
+  private readonly extensionPaths: string[];
+  private modelRuntime?: ModelRuntime;
+  private active?: ActiveSession;
+  private initialized = false;
+  private migratedLegacyCredentials = false;
+  private projectRefreshTimer?: ReturnType<typeof setTimeout>;
+
+  constructor(options: SuoCodeRuntimeOptions) {
+    this.agentDir = resolve(options.agentDir);
+    this.sessionDir = resolve(options.sessionDir);
+    this.workflowDir = resolveWorkflowDirectory(options.workflowDir);
+    this.extensionPaths = workflowExtensions(this.workflowDir);
+    this.emitEvent = options.onEvent ?? (() => undefined);
+    const legacyAgentDir = resolve(options.legacyAgentDir ?? join(homedir(), ".pi", "agent"));
+    this.migratedLegacyCredentials = seedLegacyConfiguration(this.agentDir, legacyAgentDir);
+    mkdirSync(this.sessionDir, { recursive: true });
+  }
+
+  async initialize(): Promise<RuntimeBootstrap> {
+    if (!this.initialized) {
+      this.modelRuntime = await ModelRuntime.create({
+        authPath: join(this.agentDir, "auth.json"),
+        modelsPath: join(this.agentDir, "models.json"),
+        allowModelNetwork: false,
+      });
+      this.initialized = true;
+    }
+    const configuration = await this.getConfiguration();
+    this.emitEvent({ type: "runtime_ready", configuration });
+    return { configuration, activeSession: this.active ? await this.snapshot() : undefined };
+  }
+
+  private async ready(): Promise<ModelRuntime> {
+    if (!this.initialized) await this.initialize();
+    if (!this.modelRuntime) throw new Error("SuoCode runtime failed to initialize.");
+    return this.modelRuntime;
+  }
+
+  async getConfiguration(): Promise<RuntimeConfiguration> {
+    const modelRuntime = await this.ready();
+    const cwd = this.active?.cwd ?? process.cwd();
+    const settings = SettingsManager.create(cwd, this.agentDir);
+    const providers = new Map(modelRuntime.getProviders().map((provider) => [provider.id, provider.name || provider.id]));
+    const configuredProviders = modelRuntime
+      .getProviders()
+      .filter((provider) => modelRuntime.hasConfiguredAuth(provider.id))
+      .map((provider) => provider.id)
+      .sort();
+    const configuredSet = new Set(configuredProviders);
+    const models: ModelOption[] = modelRuntime
+      .getModels()
+      .map((model) => ({
+        provider: model.provider,
+        providerName: providers.get(model.provider) ?? model.provider,
+        id: model.id,
+        name: model.name || model.id,
+        reasoning: Boolean(model.reasoning),
+        contextWindow: typeof model.contextWindow === "number" ? model.contextWindow : undefined,
+        configured: configuredSet.has(model.provider),
+      }))
+      .sort((a, b) => {
+        if (a.configured !== b.configured) return a.configured ? -1 : 1;
+        const providerOrder = a.providerName.localeCompare(b.providerName);
+        return providerOrder || a.name.localeCompare(b.name, undefined, { numeric: true });
+      });
+
+    return {
+      provider: settings.getDefaultProvider(),
+      modelId: settings.getDefaultModel(),
+      thinkingLevel: (settings.getDefaultThinkingLevel() ?? "medium") as ThinkingLevel,
+      configuredProviders,
+      models,
+      migratedLegacyCredentials: this.migratedLegacyCredentials,
+    };
+  }
+
+  async configureModel(input: {
+    provider: string;
+    modelId: string;
+    thinkingLevel: ThinkingLevel;
+    apiKey?: string;
+  }): Promise<RuntimeConfiguration> {
+    const modelRuntime = await this.ready();
+    const model = modelRuntime.getModel(input.provider, input.modelId);
+    if (!model) throw new Error(`Unknown model: ${input.provider}/${input.modelId}`);
+
+    if (input.apiKey?.trim()) {
+      const key = input.apiKey.trim();
+      await modelRuntime.login(input.provider, "api_key", {
+        prompt: async () => key,
+        notify: () => undefined,
+      });
+    }
+    if (!(await modelRuntime.checkAuth(input.provider))) {
+      throw new Error(`No credential is configured for ${input.provider}.`);
+    }
+
+    const settings = this.active?.session.settingsManager ?? SettingsManager.create(this.active?.cwd ?? process.cwd(), this.agentDir);
+    settings.setDefaultModelAndProvider(input.provider, input.modelId);
+    settings.setDefaultThinkingLevel(input.thinkingLevel);
+    await settings.flush();
+
+    if (this.active) {
+      await this.active.session.setModel(model);
+      this.active.session.setThinkingLevel(input.thinkingLevel);
+      this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+    }
+
+    const configuration = await this.getConfiguration();
+    this.emitEvent({ type: "configuration_updated", configuration });
+    return configuration;
+  }
+
+  async removeProviderAuth(provider: string): Promise<RuntimeConfiguration> {
+    const modelRuntime = await this.ready();
+    await modelRuntime.logout(provider);
+    const configuration = await this.getConfiguration();
+    this.emitEvent({ type: "configuration_updated", configuration });
+    return configuration;
+  }
+
+  async listSessions(cwd: string): Promise<SessionSummary[]> {
+    await this.ready();
+    const resolvedCwd = safeRealPath(cwd);
+    const sessions = await SessionManager.list(resolvedCwd, this.sessionDir);
+    const mapped = sessions.map(sessionSummary);
+    this.emitEvent({ type: "sessions_updated", cwd: resolvedCwd, sessions: mapped });
+    return mapped;
+  }
+
+  async createSession(cwd: string): Promise<SessionSnapshot> {
+    const resolvedCwd = safeRealPath(cwd);
+    if (!existsSync(resolvedCwd) || !statSync(resolvedCwd).isDirectory()) {
+      throw new Error(`Project directory does not exist: ${resolvedCwd}`);
+    }
+    return this.installSession(resolvedCwd, SessionManager.create(resolvedCwd, this.sessionDir));
+  }
+
+  async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
+    const resolvedCwd = safeRealPath(cwd);
+    const resolvedSession = ensureInside(this.sessionDir, sessionPath);
+    if (!existsSync(resolvedSession)) throw new Error("The selected session no longer exists.");
+    return this.installSession(resolvedCwd, SessionManager.open(resolvedSession, this.sessionDir, resolvedCwd));
+  }
+
+  private async installSession(cwd: string, sessionManager: SessionManager): Promise<SessionSnapshot> {
+    const modelRuntime = await this.ready();
+    if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
+    if (this.active) {
+      this.active.unsubscribe();
+      this.active.session.dispose();
+      this.active = undefined;
+    }
+
+    const settingsManager = SettingsManager.create(cwd, this.agentDir, { projectTrusted: true });
+    const loader = new DefaultResourceLoader({
+      cwd,
+      agentDir: this.agentDir,
+      settingsManager,
+      additionalExtensionPaths: this.extensionPaths,
+      noExtensions: true,
+      noThemes: true,
+    });
+    await loader.reload();
+    const extensionErrors = loader.getExtensions().errors;
+    if (extensionErrors.length > 0) {
+      const message = extensionErrors.map((entry) => `${entry.path}: ${entry.error}`).join("\n");
+      throw new Error(`SuoCode workflow failed to load:\n${message}`);
+    }
+
+    const created = await createAgentSession({
+      cwd,
+      agentDir: this.agentDir,
+      modelRuntime,
+      settingsManager,
+      sessionManager,
+      resourceLoader: loader,
+    });
+    await created.session.bindExtensions({});
+    const activeToolNames = new Set(created.session.getActiveToolNames());
+    const requiredTools = ["read", "bash", "edit", "write", "grep", "find", "ls", "todo", "terminal"];
+    const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
+    if (missingTools.length > 0) {
+      created.session.dispose();
+      throw new Error(`SuoCode workflow did not activate required tools: ${missingTools.join(", ")}`);
+    }
+
+    const reconstructed = this.reconstructState(created.session);
+    const project: ProjectSnapshot = {
+      cwd,
+      files: [],
+      changes: [],
+      terminals: [...reconstructed.terminals.values()],
+      plan: reconstructed.plan,
+      refreshedAt: Date.now(),
+    };
+    const active: ActiveSession = {
+      cwd,
+      session: created.session,
+      unsubscribe: () => undefined,
+      tools: reconstructed.tools,
+      terminals: reconstructed.terminals,
+      plan: reconstructed.plan,
+      project,
+      messageIds: new WeakMap(),
+    };
+    this.active = active;
+    active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
+    await this.refreshProject();
+    const snapshot = await this.snapshot();
+    this.emitEvent({ type: "session_snapshot", snapshot });
+    await this.listSessions(cwd);
+    return snapshot;
+  }
+
+  private reconstructState(session: AgentSession): {
+    tools: Map<string, ToolRun>;
+    terminals: Map<string, TerminalRun>;
+    plan: TodoItem[];
+  } {
+    const tools = new Map<string, ToolRun>();
+    const terminals = new Map<string, TerminalRun>();
+    let plan: TodoItem[] = [];
+    const calls = new Map<string, { name: string; args: Record<string, unknown>; timestamp: number }>();
+
+    for (const rawMessage of session.messages) {
+      if (!isRecord(rawMessage)) continue;
+      if (rawMessage.role === "assistant" && Array.isArray(rawMessage.content)) {
+        for (const block of rawMessage.content) {
+          if (!isRecord(block) || block.type !== "toolCall") continue;
+          const id = stringValue(block.id) || stringValue(block.toolCallId);
+          const name = stringValue(block.name) || stringValue(block.toolName);
+          const args = isRecord(block.arguments) ? block.arguments : isRecord(block.args) ? block.args : {};
+          if (id && name) calls.set(id, { name, args, timestamp: messageTimestamp(rawMessage) });
+        }
+      }
+      if (rawMessage.role !== "toolResult") continue;
+      const id = stringValue(rawMessage.toolCallId) || `tool-${tools.size + 1}`;
+      const name = stringValue(rawMessage.toolName) || calls.get(id)?.name || "tool";
+      const args = calls.get(id)?.args ?? {};
+      const output = clampText(contentParts(rawMessage.content).text, MAX_TERMINAL_OUTPUT);
+      const failed = rawMessage.isError === true;
+      tools.set(id, {
+        id,
+        name,
+        label: this.toolLabel(name, args),
+        args,
+        output,
+        status: failed ? "failed" : "succeeded",
+        startedAt: calls.get(id)?.timestamp ?? messageTimestamp(rawMessage),
+        endedAt: messageTimestamp(rawMessage),
+      });
+      const restoredPlan = normalizeTodoPlan(isRecord(rawMessage.details) ? rawMessage.details.plan : undefined);
+      if (name === "todo" && restoredPlan) plan = restoredPlan;
+      if (name === "bash" || (name === "terminal" && args.action === "start")) {
+        terminals.set(id, {
+          id,
+          command: stringValue(args.command) || name,
+          cwd: stringValue(args.cwd) || this.active?.cwd || session.sessionManager.getCwd(),
+          output,
+          status: failed ? "failed" : "succeeded",
+          startedAt: calls.get(id)?.timestamp ?? messageTimestamp(rawMessage),
+          endedAt: messageTimestamp(rawMessage),
+          exitCode: extractExitCode(rawMessage.details),
+        });
+      }
+    }
+    return { tools, terminals, plan };
+  }
+
+  private toolLabel(name: string, args: Record<string, unknown>): string {
+    if (name === "bash") return stringValue(args.command) || "Run command";
+    if (name === "read") return `Read ${stringValue(args.path) || "file"}`;
+    if (name === "write") return `Write ${stringValue(args.path) || "file"}`;
+    if (name === "edit") return `Edit ${stringValue(args.path) || "file"}`;
+    if (name === "grep") return `Search ${stringValue(args.pattern) || "project"}`;
+    if (name === "find") return `Find ${stringValue(args.pattern) || "files"}`;
+    if (name === "todo") return "Update plan";
+    if (name === "terminal") return stringValue(args.command) || `Terminal ${stringValue(args.action)}`;
+    return name.replace(/[_-]+/g, " ");
+  }
+
+  private messageId(message: unknown, prefix: string): string {
+    const active = this.active;
+    if (!active || !isRecord(message)) return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const existing = active.messageIds.get(message);
+    if (existing) return existing;
+    const id = `${prefix}-${messageTimestamp(message)}-${Math.random().toString(36).slice(2, 8)}`;
+    active.messageIds.set(message, id);
+    return id;
+  }
+
+  private handleSessionEvent(event: AgentSessionEvent): void {
+    const active = this.active;
+    if (!active) return;
+    try {
+      switch (event.type) {
+        case "agent_start":
+          this.emitEvent({ type: "run_state", running: true });
+          break;
+        case "agent_settled":
+          active.activeAssistantId = undefined;
+          this.emitEvent({ type: "run_state", running: false });
+          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
+          this.scheduleProjectRefresh();
+          void this.listSessions(active.cwd);
+          break;
+        case "session_info_changed":
+          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
+          void this.listSessions(active.cwd);
+          break;
+        case "message_start": {
+          const raw = event.message as unknown;
+          const role = isRecord(raw) ? stringValue(raw.role) : "message";
+          const id = this.messageId(raw, role || "message");
+          if (role === "assistant") active.activeAssistantId = id;
+          const mapped = mapMessage(raw, id);
+          if (mapped && mapped.role !== "tool") this.emitEvent({ type: "message_started", message: mapped });
+          break;
+        }
+        case "message_update": {
+          const update = event.assistantMessageEvent;
+          const id = active.activeAssistantId ?? this.messageId(event.message as unknown, "assistant");
+          active.activeAssistantId = id;
+          if (update.type === "text_delta") {
+            this.emitEvent({ type: "message_delta", id, field: "text", delta: update.delta });
+          } else if (update.type === "thinking_delta") {
+            this.emitEvent({ type: "message_delta", id, field: "thinking", delta: update.delta });
+          }
+          break;
+        }
+        case "message_end": {
+          const raw = event.message as unknown;
+          const role = isRecord(raw) ? stringValue(raw.role) : "message";
+          const id = role === "assistant" && active.activeAssistantId
+            ? active.activeAssistantId
+            : this.messageId(raw, role || "message");
+          const mapped = mapMessage(raw, id);
+          if (mapped && mapped.role !== "tool") this.emitEvent({ type: "message_finished", message: mapped });
+          break;
+        }
+        case "tool_execution_start": {
+          const args = isRecord(event.args) ? { ...event.args } : {};
+          const tool: ToolRun = {
+            id: event.toolCallId,
+            name: event.toolName,
+            label: this.toolLabel(event.toolName, args),
+            args,
+            output: "",
+            status: "running",
+            startedAt: Date.now(),
+          };
+          active.tools.set(tool.id, tool);
+          if (event.toolName === "bash" || (event.toolName === "terminal" && args.action === "start")) {
+            active.terminals.set(tool.id, {
+              id: tool.id,
+              command: stringValue(args.command) || this.toolLabel(event.toolName, args),
+              cwd: stringValue(args.cwd) || active.cwd,
+              output: "",
+              status: "running",
+              startedAt: tool.startedAt,
+            });
+          }
+          this.emitEvent({ type: "tool_started", tool: { ...tool } });
+          this.publishProjectFromMemory();
+          break;
+        }
+        case "tool_execution_update": {
+          const tool = active.tools.get(event.toolCallId);
+          if (!tool) break;
+          const output = toolResultText(event.partialResult);
+          if (output) tool.output = clampText(output, MAX_TERMINAL_OUTPUT);
+          const terminal = active.terminals.get(tool.id);
+          if (terminal && output) terminal.output = clampText(output, MAX_TERMINAL_OUTPUT);
+          this.emitEvent({ type: "tool_updated", tool: { ...tool } });
+          this.publishProjectFromMemory();
+          break;
+        }
+        case "tool_execution_end": {
+          const tool = active.tools.get(event.toolCallId) ?? {
+            id: event.toolCallId,
+            name: event.toolName,
+            label: this.toolLabel(event.toolName, {}),
+            args: {},
+            output: "",
+            status: "running" as const,
+            startedAt: Date.now(),
+          };
+          tool.output = clampText(toolResultText(event.result), MAX_TERMINAL_OUTPUT);
+          tool.status = event.isError ? "failed" : "succeeded";
+          tool.endedAt = Date.now();
+          active.tools.set(tool.id, tool);
+          const terminal = active.terminals.get(tool.id);
+          if (terminal) {
+            terminal.output = tool.output;
+            terminal.status = event.isError ? "failed" : "succeeded";
+            terminal.endedAt = tool.endedAt;
+            terminal.exitCode = extractExitCode(event.result);
+          }
+          if (event.toolName === "todo") {
+            const plan = planFromResult(event.result);
+            if (plan) {
+              active.plan = plan;
+              this.emitEvent({ type: "plan_updated", plan: [...plan] });
+            }
+          }
+          this.emitEvent({ type: "tool_finished", tool: { ...tool } });
+          this.publishProjectFromMemory();
+          if (["write", "edit", "bash", "terminal"].includes(event.toolName)) this.scheduleProjectRefresh();
+          break;
+        }
+        case "bash_execution_update": {
+          const id = event.id ?? "session-bash";
+          const current = active.terminals.get(id) ?? {
+            id,
+            command: "Shell command",
+            cwd: active.cwd,
+            output: "",
+            status: "running" as const,
+            startedAt: Date.now(),
+          };
+          current.output = clampText(`${current.output}${event.delta}`, MAX_TERMINAL_OUTPUT);
+          active.terminals.set(id, current);
+          this.publishProjectFromMemory();
+          break;
+        }
+        default:
+          break;
+      }
+    } catch (error) {
+      this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+    }
+  }
+
+  async prompt(text: string): Promise<{ accepted: true }> {
+    const active = this.requireActive();
+    const prompt = text.trim();
+    if (!prompt) throw new Error("Prompt cannot be empty.");
+    if (active.session.isStreaming) return this.steer(prompt);
+
+    const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
+    if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
+
+    void active.session.prompt(prompt).catch((error) => {
+      this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+      this.emitEvent({ type: "run_state", running: false });
+    });
+    return { accepted: true };
+  }
+
+  async steer(text: string): Promise<{ accepted: true }> {
+    const active = this.requireActive();
+    const prompt = text.trim();
+    if (!prompt) throw new Error("Prompt cannot be empty.");
+    await active.session.prompt(prompt, { streamingBehavior: "steer" });
+    return { accepted: true };
+  }
+
+  async abort(): Promise<{ aborted: boolean }> {
+    const active = this.requireActive();
+    if (!active.session.isStreaming) return { aborted: false };
+    await active.session.abort();
+    this.emitEvent({ type: "run_state", running: false });
+    return { aborted: true };
+  }
+
+  private requireActive(): ActiveSession {
+    if (!this.active) throw new Error("Open a project and create a session first.");
+    return this.active;
+  }
+
+  async refreshProject(): Promise<ProjectSnapshot> {
+    const active = this.requireActive();
+    const [files, changes] = await Promise.all([fileTree(active.cwd), gitChanges(active.cwd)]);
+    active.project = {
+      cwd: active.cwd,
+      files,
+      changes,
+      terminals: [...active.terminals.values()].sort((a, b) => b.startedAt - a.startedAt),
+      plan: [...active.plan],
+      refreshedAt: Date.now(),
+    };
+    this.emitEvent({ type: "project_updated", project: active.project });
+    return active.project;
+  }
+
+  private publishProjectFromMemory(): void {
+    const active = this.active;
+    if (!active) return;
+    active.project = {
+      ...active.project,
+      terminals: [...active.terminals.values()].sort((a, b) => b.startedAt - a.startedAt),
+      plan: [...active.plan],
+      refreshedAt: Date.now(),
+    };
+    this.emitEvent({ type: "project_updated", project: active.project });
+  }
+
+  private scheduleProjectRefresh(): void {
+    if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
+    this.projectRefreshTimer = setTimeout(() => {
+      void this.refreshProject().catch((error) => {
+        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+      });
+    }, 180);
+  }
+
+  async readProjectFile(path: string, maxBytes = 512 * 1024): Promise<{ path: string; content: string; truncated: boolean }> {
+    const active = this.requireActive();
+    const target = ensureInside(active.cwd, path);
+    const fileStat = await stat(target);
+    if (!fileStat.isFile()) throw new Error("The selected path is not a file.");
+    const buffer = await readFile(target);
+    const limit = Math.max(1, Math.min(maxBytes, 2 * 1024 * 1024));
+    const truncated = buffer.byteLength > limit;
+    const content = buffer.subarray(0, limit).toString("utf8");
+    return { path: relative(active.cwd, target), content, truncated };
+  }
+
+  async snapshot(): Promise<SessionSnapshot> {
+    const active = this.requireActive();
+    const sessions = await SessionManager.list(active.cwd, this.sessionDir);
+    const currentInfo = sessions.find((item) => item.id === active.session.sessionId);
+    const header = active.session.sessionManager.getHeader();
+    const now = new Date();
+    const summary: SessionSummary = currentInfo
+      ? sessionSummary(currentInfo)
+      : {
+          id: active.session.sessionId,
+          path: active.session.sessionFile ?? "",
+          cwd: active.cwd,
+          title: active.session.sessionName || "New chat",
+          createdAt: header?.timestamp ?? now.toISOString(),
+          updatedAt: now.toISOString(),
+          messageCount: active.session.messages.length,
+        };
+    const messages = active.session.messages.flatMap((message, index) => {
+      const mapped = mapMessage(message, `history-${index}-${messageTimestamp(message as unknown as Record<string, unknown>)}`);
+      return mapped ? [mapped] : [];
+    });
+    const model = active.session.model;
+    return {
+      session: summary,
+      messages,
+      tools: [...active.tools.values()].sort((a, b) => a.startedAt - b.startedAt),
+      project: active.project,
+      model: model
+        ? { provider: model.provider, id: model.id, name: model.name || model.id, reasoning: Boolean(model.reasoning) }
+        : undefined,
+      thinkingLevel: active.session.thinkingLevel as ThinkingLevel,
+      running: active.session.isStreaming,
+    };
+  }
+
+  async dispose(): Promise<void> {
+    if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
+    if (this.active) {
+      this.active.unsubscribe();
+      await this.active.session.abort().catch(() => undefined);
+      this.active.session.dispose();
+      this.active = undefined;
+    }
+  }
+}

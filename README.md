@@ -1,34 +1,95 @@
 # SuoCode
 
-SuoCode is a complete coding-agent product built around an embedded Pi runtime.
-It will ship in two forms:
+SuoCode is a self-contained coding Agent product built on an embedded Pi runtime. It ships as a desktop application and a terminal application; both use the same runtime, sessions, tools, and SuoCode workflow.
 
-- **SuoCode CLI** — the terminal product with SuoCode's workflow, tools, and defaults.
-- **SuoCode Desktop** — the self-contained GUI product with its own bundled runtime.
+SuoCode Desktop does not require a user-installed Pi. The application starts its bundled runtime in an isolated child process and communicates with it through a typed IPC protocol.
 
-Users of SuoCode Desktop will not need to install Pi separately.
+## Products
 
-The first desktop milestone is a minimal three-pane Agent workspace: projects
-and conversations on the left, the Agent conversation in the center, and the
-current project's plan, changes, terminal, and files on the right.
+- **SuoCode Desktop** — a three-pane Agent workspace with projects and sessions on the left, the live Agent conversation in the center, and Plan, Changes, Terminal, and Files on the right.
+- **SuoCode CLI** — a terminal Agent using the same model configuration, session system, tools, and workflow.
+
+## Included capabilities
+
+- Streaming Agent responses, reasoning, tool calls, steering, and cancellation
+- Persistent project-scoped conversations that survive application restarts
+- Model/provider selection and API-key configuration
+- Project tools for reading, searching, editing, writing, and running commands
+- Structured todo plans, Git changes and patches, terminal output, and project file previews
+- SuoCode's bundled Simplified Chinese workflow, policies, project memory, and terminal support
+- Optional one-time migration of an existing Pi model configuration into SuoCode's private data directory
 
 ## Repository layout
 
 ```text
 SuoCode/
-├── apps/                 # CLI and desktop applications
+├── apps/
+│   ├── cli/                  # SuoCode terminal application
+│   └── desktop/              # Electron + React desktop application
 ├── packages/
-│   └── workflow/         # SuoCode's current Pi workflow
-├── vendor/
-│   └── pi/               # Thin fork of the upstream Pi source
-└── docs/                 # Architecture and maintenance notes
+│   ├── runtime-core/         # Pi session and project runtime
+│   ├── runtime-protocol/     # Shared command/event contracts
+│   ├── runtime-server/       # Process IPC and JSONL transports
+│   └── workflow/             # SuoCode tools, policies, and defaults
+├── vendor/pi/                # Traceable thin fork of Pi
+├── scripts/                  # End-to-end runtime smoke tests
+└── docs/                     # Architecture and upstream maintenance
 ```
 
-The upstream Pi source is imported with Git subtree so it is present in this
-repository while remaining traceable and updateable. See
-[`docs/pi-upstream.md`](docs/pi-upstream.md).
+See [the runtime architecture](docs/architecture.md) and [Pi upstream maintenance](docs/pi-upstream.md) for implementation details.
 
-## Current status
+## Setup
 
-The existing workflow has been copied into `packages/workflow`. The standalone
-development copy is maintained separately as `pi-workflow`.
+SuoCode requires Node.js 22.19 or newer. From a clean checkout:
+
+```bash
+npm run setup
+```
+
+This installs Pi and product dependencies, builds the vendored Pi packages, and prepares Electron and native terminal modules.
+
+## Run
+
+Start the desktop application:
+
+```bash
+npm run dev
+```
+
+Start the CLI for a project:
+
+```bash
+npm run cli -- /absolute/path/to/project
+```
+
+The CLI can also receive an initial model configuration:
+
+```bash
+SUOCODE_API_KEY=your-key npm run cli -- /path/to/project \
+  --provider anthropic --model claude-sonnet-4-5
+```
+
+## Verify
+
+```bash
+npm run check
+npm test
+npm run smoke
+npm run package:desktop
+npm run smoke:desktop
+```
+
+`npm run smoke:live` performs a real provider request and a real Agent tool call in a disposable temporary project.
+`npm run smoke:desktop:live` launches the packaged application and verifies a real GUI-driven Agent run across Plan, Changes, Terminal, Files, and session restoration.
+
+## Package Desktop
+
+```bash
+npm run package:desktop
+```
+
+Installers and archives are written to `apps/desktop/release/`. The macOS build produces both DMG and ZIP artifacts; Linux and Windows targets are configured as AppImage and NSIS respectively.
+
+## Product data
+
+Desktop credentials, settings, and sessions live under Electron's platform-specific application-data directory. CLI data defaults to `~/.suocode` and can be redirected with `SUOCODE_DATA_DIR`. SuoCode never requires the user's global Pi installation at runtime.

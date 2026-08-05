@@ -5,6 +5,8 @@
 node_modules/
 dist/
 build/
+!apps/desktop/build/
+apps/desktop/build/icon.iconset/
 coverage/
 apps/desktop/out/
 apps/desktop/release/

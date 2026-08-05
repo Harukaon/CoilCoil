@@ -1,7 +1,6 @@
 # Applications
 
-- `desktop` — SuoCode's three-pane desktop Agent experience.
-- `cli` — reserved for the standalone SuoCode CLI product.
+- `desktop` — the complete Electron and React SuoCode Agent workspace.
+- `cli` — the terminal SuoCode Agent.
 
-Both products will share the same runtime, protocol, and workflow packages.
-
+Both applications use `@suocode/runtime-core`, `@suocode/runtime-protocol`, `@suocode/runtime-server`, the bundled workflow, and the vendored Pi source. Product behavior is implemented in shared packages instead of duplicated between surfaces.

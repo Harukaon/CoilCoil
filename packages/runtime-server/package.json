@@ -1,0 +1,20 @@
+{
+  "name": "@suocode/runtime-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@suocode/runtime-core": "0.1.0",
+    "@suocode/runtime-protocol": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "typescript": "5.9.3"
+  }
+}

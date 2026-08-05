@@ -1,0 +1,32 @@
+{
+  "name": "@suocode/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SuoCode terminal coding agent",
+  "type": "module",
+  "bin": {
+    "suocode": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup src/index.ts --format esm --platform node --target node22 --clean",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@suocode/runtime-core": "0.1.0",
+    "@suocode/runtime-protocol": "0.1.0",
+    "@suocode/workflow": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "tsup": "8.5.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

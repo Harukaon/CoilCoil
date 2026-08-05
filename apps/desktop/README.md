@@ -1,24 +1,27 @@
 # SuoCode Desktop
 
-The first SuoCode desktop shell: a minimal three-pane Agent workspace inspired
-by the interaction density of modern desktop coding agents.
+SuoCode Desktop is the self-contained GUI distribution of SuoCode. It provides a real Agent workspace rather than an editor shell: persistent conversations, live model output, tools, plans, Git changes, terminal activity, and project files are all backed by the embedded runtime.
 
-The current UI exposes only product capabilities already present in SuoCode's
-Pi-based workflow: projects and conversations, Agent chat, plan, changes,
-terminal activity, and project files. It intentionally omits editor-centric
-and unavailable features.
+## Runtime boundary
+
+The React renderer has no Node.js access. Electron's main process starts the bundled runtime as a child process, exposes a narrow typed IPC bridge through the sandboxed preload, and forwards runtime events to the UI.
 
 ## Development
 
+Run setup once from the repository root, then start Desktop:
+
 ```bash
-npm install
+npm run setup
 npm run dev
 ```
 
-## Verification
+## Verification and packaging
 
 ```bash
 npm run check
-npm run build
+npm test
+npm run smoke
+npm run package:desktop
 ```
 
+Packaged artifacts are generated in `apps/desktop/release/`.

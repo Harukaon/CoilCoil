@@ -35,10 +35,15 @@
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.81.0",
-    "@earendil-works/pi-coding-agent": "0.81.0",
-    "@earendil-works/pi-tui": "0.81.0",
+    "@earendil-works/pi-ai": "file:../../vendor/pi/packages/ai",
+    "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
+    "@earendil-works/pi-tui": "file:../../vendor/pi/packages/tui",
     "typebox": "1.1.38",
     "typescript": "5.9.3"
   }

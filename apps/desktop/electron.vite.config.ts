@@ -4,10 +4,34 @@ import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: [
+          "@suocode/runtime-core",
+          "@suocode/runtime-protocol",
+          "@suocode/runtime-server",
+        ],
+      }),
+    ],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve("src/main/index.ts"),
+          runtime: resolve("src/runtime/index.ts"),
+        },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        output: {
+          format: "cjs",
+          entryFileNames: "[name].cjs",
+        },
+      },
+    },
   },
   renderer: {
     resolve: {
@@ -18,4 +42,3 @@ export default defineConfig({
     plugins: [react()],
   },
 });
-

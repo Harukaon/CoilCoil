@@ -1,0 +1,26 @@
+{
+  "name": "@suocode/runtime-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "file:../../vendor/pi/packages/agent",
+    "@earendil-works/pi-ai": "file:../../vendor/pi/packages/ai",
+    "@earendil-works/pi-client": "file:../../vendor/pi/packages/client",
+    "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
+    "@earendil-works/pi-protocol": "file:../../vendor/pi/packages/protocol",
+    "@earendil-works/pi-tui": "file:../../vendor/pi/packages/tui",
+    "@suocode/runtime-protocol": "0.1.0",
+    "@suocode/workflow": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "typescript": "5.9.3"
+  }
+}

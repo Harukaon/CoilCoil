@@ -1,0 +1,44 @@
+{
+  "name": "suocode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SuoCode coding agent product",
+  "author": "Harukaon",
+  "repository": "github:Harukaon/SuoCode",
+  "type": "module",
+  "packageManager": "npm@11.17.0",
+  "workspaces": [
+    "apps/desktop",
+    "apps/cli",
+    "packages/runtime-core",
+    "packages/runtime-protocol",
+    "packages/runtime-server",
+    "packages/workflow"
+  ],
+  "scripts": {
+    "setup": "npm ci --prefix vendor/pi --ignore-scripts && npm run build:offline --prefix vendor/pi && npm ci --ignore-scripts && npm rebuild node-pty esbuild && node node_modules/electron/install.js",
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build:pi": "npm run build:offline --prefix vendor/pi",
+    "build": "npm run build:pi && npm run build --workspace @suocode/cli && npm run build --workspace @suocode/desktop",
+    "dev": "npm run dev --workspace @suocode/desktop",
+    "cli": "npm run dev --workspace @suocode/cli --",
+    "package:desktop": "npm run build:pi && npm run package --workspace @suocode/desktop",
+    "smoke": "npm run build && node scripts/runtime-smoke.mjs",
+    "smoke:live": "npm run build && node scripts/runtime-smoke.mjs --live",
+    "smoke:desktop": "node scripts/desktop-smoke.mjs",
+    "smoke:desktop:live": "node scripts/desktop-smoke.mjs --live"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "allowScripts": {
+    "@google/genai@1.52.0": true,
+    "electron@43.3.0": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true,
+    "node-pty@1.1.0": true,
+    "protobufjs@7.6.5": true
+  }
+}

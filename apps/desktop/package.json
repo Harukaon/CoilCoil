@@ -3,18 +3,30 @@
   "version": "0.1.0",
   "private": true,
   "description": "SuoCode desktop Agent",
+  "author": "Harukaon",
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "package": "npm run build && electron-builder",
+    "package:dir": "npm run build && electron-builder --dir"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
+    "@suocode/runtime-core": "0.1.0",
+    "@suocode/runtime-protocol": "0.1.0",
+    "@suocode/runtime-server": "0.1.0",
+    "@suocode/workflow": "0.1.0",
     "lucide-react": "1.28.0",
+    "node-pty": "1.1.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "typebox": "1.3.7"
   },
   "devDependencies": {
     "@types/node": "26.1.2",
@@ -22,11 +34,45 @@
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "5.2.0",
     "electron": "43.3.0",
+    "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "typescript": "5.9.3",
     "vite": "7.3.6"
   },
-  "allowScripts": {
-    "electron@43.3.0": true
+  "build": {
+    "appId": "app.suocode.desktop",
+    "productName": "SuoCode",
+    "asar": true,
+    "asarUnpack": [
+      "**/node-pty/**",
+      "**/@silvia-odwyer/photon-node/**"
+    ],
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }
