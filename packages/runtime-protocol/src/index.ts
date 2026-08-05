@@ -11,6 +11,7 @@ export interface ModelOption {
   id: string;
   name: string;
   reasoning: boolean;
+  supportedThinkingLevels: ThinkingLevel[];
   contextWindow?: number;
   configured: boolean;
 }

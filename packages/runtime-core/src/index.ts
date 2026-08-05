@@ -8,6 +8,7 @@ import {
   type AgentSessionEvent,
   type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type {
   ChangedFile,
   ChangeStatus,
@@ -505,6 +506,7 @@ export class SuoCodeRuntime {
         id: model.id,
         name: model.name || model.id,
         reasoning: Boolean(model.reasoning),
+        supportedThinkingLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],
         contextWindow: typeof model.contextWindow === "number" ? model.contextWindow : undefined,
         configured: configuredSet.has(model.provider),
       }))
@@ -545,14 +547,15 @@ export class SuoCodeRuntime {
       throw new Error(`No credential is configured for ${input.provider}.`);
     }
 
+    const effectiveThinkingLevel = clampThinkingLevel(model, input.thinkingLevel) as ThinkingLevel;
     const settings = this.active?.session.settingsManager ?? SettingsManager.create(this.active?.cwd ?? process.cwd(), this.agentDir);
     settings.setDefaultModelAndProvider(input.provider, input.modelId);
-    settings.setDefaultThinkingLevel(input.thinkingLevel);
+    settings.setDefaultThinkingLevel(effectiveThinkingLevel);
     await settings.flush();
 
     if (this.active) {
       await this.active.session.setModel(model);
-      this.active.session.setThinkingLevel(input.thinkingLevel);
+      this.active.session.setThinkingLevel(effectiveThinkingLevel);
       this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
     }
 
