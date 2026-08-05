@@ -1,7 +1,6 @@
 import {
   AlertCircle,
   ArrowUp,
-  Bot,
   Check,
   CheckCircle2,
   CheckSquare2,
@@ -42,6 +41,7 @@ import type {
   RuntimeBootstrap,
   RuntimeConfiguration,
   RuntimeEvent,
+  ModelOption,
   SessionSnapshot,
   SessionSummary,
   ThinkingLevel,
@@ -132,7 +132,7 @@ function Markdown({ children }: { children: string }): React.JSX.Element {
   );
 }
 
-function MessageView({ message }: { message: ChatMessage }): React.JSX.Element {
+function MessageView({ message, modelName }: { message: ChatMessage; modelName: string }): React.JSX.Element {
   if (message.role === "user") {
     return (
       <article className="timeline-message user-message">
@@ -144,9 +144,8 @@ function MessageView({ message }: { message: ChatMessage }): React.JSX.Element {
 
   return (
     <article className={`timeline-message assistant-message ${message.isError ? "error" : ""}`}>
-      <div className="assistant-avatar"><Bot size={15} /></div>
       <div className="assistant-content">
-        <div className="message-label">SuoCode</div>
+        <div className="message-label">{modelName}</div>
         {message.thinking?.trim() ? (
           <details className="thinking-block">
             <summary>Reasoning</summary>
@@ -156,6 +155,64 @@ function MessageView({ message }: { message: ChatMessage }): React.JSX.Element {
         {message.text ? <Markdown>{message.text}</Markdown> : null}
       </div>
     </article>
+  );
+}
+
+function ModelPicker({ configuration, currentModel, open, busy, onToggle, onSelect, onOpenSettings }: {
+  configuration?: RuntimeConfiguration;
+  currentModel?: SessionSnapshot["model"];
+  open: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onSelect: (model: ModelOption) => void;
+  onOpenSettings: () => void;
+}): React.JSX.Element {
+  const [search, setSearch] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setSearch("");
+      return;
+    }
+    const close = (event: PointerEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) onToggle();
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [onToggle, open]);
+
+  const groups = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const grouped = new Map<string, { name: string; models: ModelOption[] }>();
+    for (const model of configuration?.models ?? []) {
+      if (!model.configured) continue;
+      if (query && !`${model.providerName} ${model.provider} ${model.name} ${model.id}`.toLowerCase().includes(query)) continue;
+      const group = grouped.get(model.provider) ?? { name: model.providerName, models: [] };
+      group.models.push(model);
+      grouped.set(model.provider, group);
+    }
+    return [...grouped.entries()];
+  }, [configuration, search]);
+
+  return (
+    <div className="model-picker" ref={rootRef}>
+      <button className="agent-mode" type="button" aria-expanded={open} onClick={onToggle}><CircleDot size={13} /><span>{currentModel?.name ?? "选择模型"}</span><ChevronDown size={12} /></button>
+      {open ? <div className="model-popover">
+        <div className="model-popover-search"><Search size={14} /><input autoFocus value={search} placeholder="搜索模型" onChange={(event) => setSearch(event.target.value)} /></div>
+        <div className="model-popover-list">
+          {groups.map(([provider, group]) => <section className="model-provider-group" key={provider}>
+            <h3>{group.name}</h3>
+            {group.models.map((model) => {
+              const active = currentModel?.provider === model.provider && currentModel.id === model.id;
+              return <button className={active ? "active" : ""} type="button" disabled={busy} key={`${model.provider}/${model.id}`} onClick={() => onSelect(model)}><span><strong>{model.name}</strong><small>{model.id}</small></span>{active ? <Check size={14} /> : null}</button>;
+            })}
+          </section>)}
+          {!groups.length ? <div className="model-popover-empty">{configuration?.configuredProviders.length ? "没有匹配的模型" : "尚未配置模型服务商"}</div> : null}
+        </div>
+        <button className="model-settings-link" type="button" onClick={onOpenSettings}><Settings size={14} /><span>模型与服务商设置</span></button>
+      </div> : null}
+    </div>
   );
 }
 
@@ -449,6 +506,8 @@ export default function App(): React.JSX.Element {
   const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352));
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modelChanging, setModelChanging] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -565,6 +624,13 @@ export default function App(): React.JSX.Element {
     const viewport = timelineRef.current;
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [messages, tools]);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
+  }, [draft]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent): void => {
@@ -685,6 +751,26 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  const selectComposerModel = async (model: ModelOption): Promise<void> => {
+    if (!configuration || modelChanging) return;
+    setModelChanging(true);
+    setError(undefined);
+    try {
+      const next = await window.suocode.request<RuntimeConfiguration>({
+        type: "configure_model",
+        provider: model.provider,
+        modelId: model.id,
+        thinkingLevel: configuration.thinkingLevel,
+      });
+      setConfiguration(next);
+      setModelMenuOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setModelChanging(false);
+    }
+  };
+
   const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof CheckSquare2; meta?: string }> = [
     { id: "plan", label: "计划", icon: CheckSquare2, meta: projectState.plan.length ? String(projectState.plan.length) : undefined },
     { id: "changes", label: "变更", icon: GitCompareArrows, meta: String(projectState.changes.length) },
@@ -699,17 +785,17 @@ export default function App(): React.JSX.Element {
           <div className="window-drag sidebar-drag"><button className="icon-button no-drag sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><PanelLeft size={17} /></button></div>
           <nav className="primary-nav"><button className="nav-button" type="button" disabled={!project} onClick={() => void startNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
           <section className="project-section">
-            <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={() => void openProject()}><FolderOpen size={17} strokeWidth={1.7} /></button></div>
+            <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={() => void openProject()}><FolderOpen size={15} strokeWidth={1.7} /></button></div>
             {project ? (
               <div className="project-tree">
-                <button className="project-row" type="button" aria-expanded={projectExpanded} onClick={() => setProjectExpanded((value) => !value)}><Folder size={17} strokeWidth={1.7} /><span>{project.name}</span>{projectExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
+                <button className="project-row" type="button" aria-expanded={projectExpanded} onClick={() => setProjectExpanded((value) => !value)}><Folder size={15} strokeWidth={1.7} /><span>{project.name}</span>{projectExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
                 {projectExpanded ? <div className="conversation-list">
-                  {sessions.map((session) => <button className={`conversation-row ${session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(session)}><CircleDot size={12} strokeWidth={2} /><span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>)}
+                  {sessions.map((session) => <button className={`conversation-row ${session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(session)}><CircleDot size={11} strokeWidth={2} /><span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>)}
                   {!sessions.length ? <p className="empty-conversations">暂无对话</p> : null}
                 </div> : null}
               </div>
             ) : (
-              <button className="open-project-card" type="button" onClick={() => void openProject()}><span className="open-project-icon"><Plus size={16} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
+              <button className="open-project-card" type="button" onClick={() => void openProject()}><span className="open-project-icon"><Plus size={14} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
             )}
           </section>
           <div className="sidebar-footer"><div className="brand-mark">S</div><div className="brand-copy"><strong>SuoCode</strong><span>{snapshot?.model ? `${snapshot.model.provider}/${snapshot.model.name}` : "本地 Agent"}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={() => setSettingsOpen(true)}><Settings size={17} strokeWidth={1.7} /></button></div>
@@ -726,15 +812,15 @@ export default function App(): React.JSX.Element {
           </header>
 
           <div className="conversation-body" ref={timelineRef}>
-            {loading ? <div className="loading-state"><LoaderCircle className="spin" size={20} /><span>正在加载工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "message" ? <MessageView key={`message-${item.message.id}`} message={item.message} /> : <ToolGroupView key={`tools-${item.order}`} tools={item.tools} />)}{running ? <div className="agent-activity"><LoaderCircle className="spin" size={14} /><span>{agentPhase === "工具" ? "正在执行工具…" : agentPhase === "回复" ? "正在回复…" : "正在思考…"}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
+            {loading ? <div className="loading-state"><LoaderCircle className="spin" size={20} /><span>正在加载工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "message" ? <MessageView key={`message-${item.message.id}`} message={item.message} modelName={snapshot?.model?.name ?? "Agent"} /> : <ToolGroupView key={`tools-${item.order}`} tools={item.tools} />)}{running ? <div className="agent-activity"><LoaderCircle className="spin" size={14} /><span>{agentPhase === "工具" ? "正在执行工具…" : agentPhase === "回复" ? "正在回复…" : "正在思考…"}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
           </div>
 
           <div className="composer-wrap">
             {error ? <div className="error-banner"><AlertCircle size={14} /><span>{error}</span><button type="button" onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
             <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
-              <textarea ref={inputRef} value={draft} rows={2} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
+              <textarea ref={inputRef} value={draft} rows={3} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
               <div className="composer-toolbar">
-                <button className="agent-mode" type="button" onClick={() => setSettingsOpen(true)}><CircleDot size={13} /><span>{snapshot?.model ? snapshot.model.name : "选择模型"}</span><ChevronDown size={12} /></button>
+                <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onToggle={() => setModelMenuOpen((value) => !value)} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
                 {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" })}><Square size={12} fill="currentColor" /></button> : null}
                 <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || !snapshot || !draft.trim()}><ArrowUp size={17} strokeWidth={2.2} /></button>
               </div>
