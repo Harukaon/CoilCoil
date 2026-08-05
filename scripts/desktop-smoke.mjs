@@ -212,12 +212,7 @@ async function main() {
     })()`);
     assert.deepEqual(regularToggleSize, { width: 30, height: 30 });
 
-    await client.send("Emulation.setDeviceMetricsOverride", {
-      width: 350,
-      height: 700,
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
+    await client.evaluate(`(() => { window.resizeTo(350, 700); return true; })()`);
     await client.waitFor(
       `window.innerWidth <= 350`,
       "The packaged desktop window could not shrink to 350px.",
@@ -262,7 +257,7 @@ async function main() {
       return !document.querySelector(".app-shell")?.classList.contains("left-collapsed");
     })()`);
     assert.equal(compactSidebarOpened, true);
-    await client.send("Emulation.clearDeviceMetricsOverride");
+    await client.evaluate(`(() => { window.resizeTo(1440, 900); return true; })()`);
 
     await client.evaluate(`(() => {
       localStorage.setItem("suocode.selected-project", ${JSON.stringify(JSON.stringify({
