@@ -6,6 +6,7 @@ import {
   CheckSquare2,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Circle,
   CircleDot,
   File,
@@ -300,17 +301,18 @@ function AgentTurnView({ items, modelName }: { items: TimelineItem[]; modelName:
 }
 
 function ComposerPlan({ plan }: { plan: ProjectSnapshot["plan"] }): React.JSX.Element | null {
+  const [expanded, setExpanded] = useState(true);
   if (!plan.length) return null;
   const completed = plan.filter((item) => item.status === "completed").length;
   return (
-    <section className="composer-plan" aria-label="Agent 计划">
-      <header><span>计划</span><small>{completed}/{plan.length}</small></header>
-      <ol>
-        {plan.map((item, index) => <li className={item.status} key={`${index}-${item.text}`}>
-          {item.status === "completed" ? <CheckCircle2 size={14} /> : item.status === "in_progress" ? <CircleDot size={14} /> : <Circle size={14} />}
-          <span>{item.text}</span>
-        </li>)}
-      </ol>
+    <section className={`composer-plan ${expanded ? "expanded" : "collapsed"}`} aria-label="Agent 计划">
+      <button className="composer-plan-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><span>计划</span><small>{completed}/{plan.length}</small>{expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
+      <div className="composer-plan-body"><ol>
+          {plan.map((item, index) => <li className={item.status} key={`${index}-${item.text}`}>
+            {item.status === "completed" ? <CheckCircle2 size={14} /> : item.status === "in_progress" ? <CircleDot size={14} /> : <Circle size={14} />}
+            <span>{item.text}</span>
+          </li>)}
+      </ol></div>
     </section>
   );
 }
@@ -875,16 +877,18 @@ export default function App(): React.JSX.Element {
           </div>
 
           <div className="composer-wrap">
-            <ComposerPlan plan={projectState.plan} />
             {error ? <div className="error-banner"><AlertCircle size={14} /><span>{error}</span><button type="button" onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
-            <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
-              <textarea ref={inputRef} value={draft} rows={3} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
-              <div className="composer-toolbar">
-                <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
-                {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" })}><Square size={12} fill="currentColor" /></button> : null}
-                <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || !snapshot || !draft.trim()}><ArrowUp size={17} strokeWidth={2.2} /></button>
-              </div>
-            </form>
+            <div className="composer-stack">
+              <ComposerPlan plan={projectState.plan} />
+              <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
+                <textarea ref={inputRef} value={draft} rows={3} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
+                <div className="composer-toolbar">
+                  <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
+                  {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" })}><Square size={12} fill="currentColor" /></button> : null}
+                  <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || !snapshot || !draft.trim()}><ArrowUp size={17} strokeWidth={2.2} /></button>
+                </div>
+              </form>
+            </div>
             <div className="workspace-status"><span><FileCode2 size={14} />{project?.path ?? "未选择项目"}</span></div>
           </div>
         </section>
