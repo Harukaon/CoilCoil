@@ -1,5 +1,7 @@
 # Applications
 
-This directory is reserved for the SuoCode CLI and SuoCode Desktop products.
-Both applications will share the same runtime and workflow packages.
+- `desktop` — SuoCode's three-pane desktop Agent experience.
+- `cli` — reserved for the standalone SuoCode CLI product.
+
+Both products will share the same runtime, protocol, and workflow packages.
 

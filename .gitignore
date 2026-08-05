@@ -6,6 +6,8 @@ node_modules/
 dist/
 build/
 coverage/
+apps/desktop/out/
+apps/desktop/release/
 
 .env
 .env.*
@@ -13,4 +15,3 @@ coverage/
 
 *.log
 *.tsbuildinfo
-

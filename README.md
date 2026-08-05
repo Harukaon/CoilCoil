@@ -8,6 +8,10 @@ It will ship in two forms:
 
 Users of SuoCode Desktop will not need to install Pi separately.
 
+The first desktop milestone is a minimal three-pane Agent workspace: projects
+and conversations on the left, the Agent conversation in the center, and the
+current project's plan, changes, terminal, and files on the right.
+
 ## Repository layout
 
 ```text
