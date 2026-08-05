@@ -206,6 +206,11 @@ async function main() {
     for (const label of ["Todo", "变更", "终端", "文件"]) {
       assert.match(isolation.inspector, new RegExp(label));
     }
+    const regularToggleSize = await client.evaluate(`(() => {
+      const bounds = document.querySelector('button[aria-label="收起侧栏"]')?.getBoundingClientRect();
+      return bounds ? { width: bounds.width, height: bounds.height } : null;
+    })()`);
+    assert.deepEqual(regularToggleSize, { width: 30, height: 30 });
 
     await client.send("Emulation.setDeviceMetricsOverride", {
       width: 350,
@@ -229,6 +234,7 @@ async function main() {
       const dragRegion = document.querySelector(".sidebar-drag-region");
       const buttonBounds = button.getBoundingClientRect();
       const dragBounds = dragRegion?.getBoundingClientRect();
+      if (buttonBounds.width !== 50 || buttonBounds.height !== 50) return false;
       if (getComputedStyle(button).webkitAppRegion !== "no-drag") return false;
       if (dragBounds && buttonBounds.left < dragBounds.right) return false;
       const hitPoints = [
