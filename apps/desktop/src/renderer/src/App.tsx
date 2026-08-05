@@ -444,6 +444,7 @@ export default function App(): React.JSX.Element {
   const [draft, setDraft] = useState("");
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
+  const [projectExpanded, setProjectExpanded] = useState(true);
   const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT_WIDTH_KEY, 268));
   const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352));
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
@@ -520,6 +521,7 @@ export default function App(): React.JSX.Element {
   const activateProject = useCallback(async (selection: ProjectSelection): Promise<void> => {
     projectRef.current = selection;
     setProject(selection);
+    setProjectExpanded(true);
     setLoading(true);
     setError(undefined);
     setMessages([]);
@@ -700,11 +702,11 @@ export default function App(): React.JSX.Element {
             <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={() => void openProject()}><FolderOpen size={17} strokeWidth={1.7} /></button></div>
             {project ? (
               <div className="project-tree">
-                <button className="project-row" type="button" onClick={() => void openProject()}><Folder size={17} strokeWidth={1.7} /><span>{project.name}</span><ChevronDown size={14} /></button>
-                <div className="conversation-list">
+                <button className="project-row" type="button" aria-expanded={projectExpanded} onClick={() => setProjectExpanded((value) => !value)}><Folder size={17} strokeWidth={1.7} /><span>{project.name}</span>{projectExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
+                {projectExpanded ? <div className="conversation-list">
                   {sessions.map((session) => <button className={`conversation-row ${session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(session)}><CircleDot size={12} strokeWidth={2} /><span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>)}
                   {!sessions.length ? <p className="empty-conversations">暂无对话</p> : null}
-                </div>
+                </div> : null}
               </div>
             ) : (
               <button className="open-project-card" type="button" onClick={() => void openProject()}><span className="open-project-icon"><Plus size={16} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
