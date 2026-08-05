@@ -50,6 +50,9 @@ const MAX_TREE_DEPTH = 6;
 const MAX_CHANGE_FILES = 100;
 const MAX_PATCH_CHARS = 16_000;
 const MAX_TERMINAL_OUTPUT = 120_000;
+const WORKFLOW_AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
+const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
+const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
   ".git",
   ".idea",
@@ -112,6 +115,46 @@ function stringValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return "";
+}
+
+function purposeFromArgs(args: Record<string, unknown>): string | undefined {
+  for (const field of WORKFLOW_PURPOSE_FIELDS) {
+    const value = args[field];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  for (const [field, value] of Object.entries(args)) {
+    if (field.startsWith("__auditPurpose_") && typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function liveToolPurpose(toolCallId: string | undefined): string | undefined {
+  if (!toolCallId) return undefined;
+  const registry = (globalThis as Record<PropertyKey, unknown>)[WORKFLOW_PURPOSE_REGISTRY];
+  if (!(registry instanceof Map)) return undefined;
+  const record = registry.get(toolCallId);
+  if (!isRecord(record)) return undefined;
+  const purpose = stringValue(record.purpose).trim();
+  return purpose || undefined;
+}
+
+function restoredToolPurposes(session: AgentSession): Map<string, string> {
+  const purposes = new Map<string, string>();
+  for (const entry of session.sessionManager.getEntries()) {
+    if (
+      entry.type !== "custom" ||
+      entry.customType !== WORKFLOW_AUDIT_ENTRY_TYPE ||
+      !isRecord(entry.data)
+    ) {
+      continue;
+    }
+    const toolCallId = stringValue(entry.data.toolCallId);
+    const purpose = stringValue(entry.data.purpose).trim();
+    if (toolCallId && purpose) purposes.set(toolCallId, purpose);
+  }
+  return purposes;
 }
 
 function contentParts(content: unknown): { text: string; thinking: string } {
@@ -679,6 +722,7 @@ export class SuoCodeRuntime {
     const terminals = new Map<string, TerminalRun>();
     let plan: TodoItem[] = [];
     const calls = new Map<string, { name: string; args: Record<string, unknown>; timestamp: number }>();
+    const purposes = restoredToolPurposes(session);
     let order = 0;
 
     for (const [index, rawMessage] of session.messages.entries()) {
@@ -707,7 +751,7 @@ export class SuoCodeRuntime {
         id,
         order: order++,
         name,
-        label: this.toolLabel(name, args),
+        label: this.toolLabel(name, args, id, purposes.get(id)),
         args,
         output,
         status: failed ? "failed" : "succeeded",
@@ -732,7 +776,14 @@ export class SuoCodeRuntime {
     return { messages, tools, terminals, plan, nextTimelineOrder: order };
   }
 
-  private toolLabel(name: string, args: Record<string, unknown>): string {
+  private toolLabel(
+    name: string,
+    args: Record<string, unknown>,
+    toolCallId?: string,
+    restoredPurpose?: string,
+  ): string {
+    const purpose = restoredPurpose ?? liveToolPurpose(toolCallId) ?? purposeFromArgs(args);
+    if (purpose) return purpose;
     if (name === "bash") return `运行 ${stringValue(args.command) || "命令"}`;
     if (name === "read") return `查看 ${stringValue(args.path) || "文件"}`;
     if (name === "write") return `写入 ${stringValue(args.path) || "文件"}`;
@@ -818,7 +869,7 @@ export class SuoCodeRuntime {
             id: event.toolCallId,
             order: active.nextTimelineOrder++,
             name: event.toolName,
-            label: this.toolLabel(event.toolName, args),
+            label: this.toolLabel(event.toolName, args, event.toolCallId),
             args,
             output: "",
             status: "running",
@@ -855,7 +906,7 @@ export class SuoCodeRuntime {
             id: event.toolCallId,
             order: active.nextTimelineOrder++,
             name: event.toolName,
-            label: this.toolLabel(event.toolName, {}),
+            label: this.toolLabel(event.toolName, {}, event.toolCallId),
             args: {},
             output: "",
             status: "running" as const,

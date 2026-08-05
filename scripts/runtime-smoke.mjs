@@ -100,8 +100,19 @@ try {
     if (!existsSync(proofPath) || readFileSync(proofPath, "utf8").trim() !== "SUOCODE_RUNTIME_OK") {
       throw new Error("The live agent did not create the expected proof file.");
     }
-    if (!events.some((event) => event.type === "tool_finished" && event.tool.name === "write")) {
+    const writeToolEvent = events.find((event) => event.type === "tool_finished" && event.tool.name === "write");
+    if (!writeToolEvent) {
       throw new Error("The write tool lifecycle was not projected.");
+    }
+    if (!writeToolEvent.tool.label || writeToolEvent.tool.label === "写入 runtime-proof.txt") {
+      throw new Error(`The workflow purpose was not projected into the tool label: ${writeToolEvent.tool.label || "<empty>"}`);
+    }
+    const restored = await request({ type: "open_session", cwd: projectDir, sessionPath: snapshot.session.path });
+    const restoredWriteTool = restored.tools.find((tool) => tool.name === "write");
+    if (!restoredWriteTool || restoredWriteTool.label !== writeToolEvent.tool.label) {
+      throw new Error(
+        `The workflow purpose was not restored from session audit entries: ${restoredWriteTool?.label || "<missing>"}`,
+      );
     }
   }
 
