@@ -231,9 +231,17 @@ async function main() {
       const dragBounds = dragRegion?.getBoundingClientRect();
       if (getComputedStyle(button).webkitAppRegion !== "no-drag") return false;
       if (dragBounds && buttonBounds.left < dragBounds.right) return false;
-      const centerX = buttonBounds.left + buttonBounds.width / 2;
-      const centerY = buttonBounds.top + buttonBounds.height / 2;
-      if (document.elementsFromPoint(centerX, centerY).some((element) => getComputedStyle(element).webkitAppRegion === "drag")) return false;
+      const hitPoints = [
+        [buttonBounds.left + 5, buttonBounds.top + 5],
+        [buttonBounds.right - 5, buttonBounds.top + 5],
+        [buttonBounds.left + 5, buttonBounds.bottom - 5],
+        [buttonBounds.right - 5, buttonBounds.bottom - 5],
+        [buttonBounds.left + buttonBounds.width / 2, buttonBounds.top + buttonBounds.height / 2],
+      ];
+      for (const [x, y] of hitPoints) {
+        if (document.elementFromPoint(x, y)?.closest("button") !== button) return false;
+        if (document.elementsFromPoint(x, y).some((element) => getComputedStyle(element).webkitAppRegion === "drag")) return false;
+      }
       if (button.closest(".window-drag")) return false;
       button.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
