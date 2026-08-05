@@ -451,6 +451,7 @@ export default function App(): React.JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
 
   const applySnapshot = useCallback((next: SessionSnapshot): void => {
@@ -675,6 +676,7 @@ export default function App(): React.JSX.Element {
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
@@ -728,7 +730,7 @@ export default function App(): React.JSX.Element {
           <div className="composer-wrap">
             {error ? <div className="error-banner"><AlertCircle size={14} /><span>{error}</span><button type="button" onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
             <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
-              <textarea ref={inputRef} value={draft} rows={2} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} />
+              <textarea ref={inputRef} value={draft} rows={2} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
               <div className="composer-toolbar">
                 <button className="agent-mode" type="button" onClick={() => setSettingsOpen(true)}><CircleDot size={13} /><span>{snapshot?.model ? snapshot.model.name : "选择模型"}</span><ChevronDown size={12} /></button>
                 {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" })}><Square size={12} fill="currentColor" /></button> : null}
