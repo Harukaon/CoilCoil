@@ -208,6 +208,39 @@ async function main() {
       assert.match(isolation.inspector, new RegExp(label));
     }
 
+    await client.send("Emulation.setDeviceMetricsOverride", {
+      width: 350,
+      height: 700,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await client.waitFor(
+      `window.innerWidth <= 350`,
+      "The packaged desktop window could not shrink to 350px.",
+    );
+    const compactSidebarClosed = await client.evaluate(`(async () => {
+      const button = document.querySelector('button[aria-label="收起侧栏"]');
+      if (!button) return false;
+      const dragRegion = document.querySelector(".sidebar-drag-region");
+      const buttonBounds = button.getBoundingClientRect();
+      const dragBounds = dragRegion?.getBoundingClientRect();
+      if (getComputedStyle(button).webkitAppRegion !== "no-drag") return false;
+      if (dragBounds && buttonBounds.left < dragBounds.right) return false;
+      button.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      return document.querySelector(".app-shell")?.classList.contains("left-collapsed") ?? false;
+    })()`);
+    assert.equal(compactSidebarClosed, true);
+    const compactSidebarOpened = await client.evaluate(`(async () => {
+      const button = document.querySelector('button[aria-label="展开侧栏"]');
+      if (!button) return false;
+      button.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      return !document.querySelector(".app-shell")?.classList.contains("left-collapsed");
+    })()`);
+    assert.equal(compactSidebarOpened, true);
+    await client.send("Emulation.clearDeviceMetricsOverride");
+
     await client.evaluate(`(() => {
       localStorage.setItem("suocode.selected-project", ${JSON.stringify(JSON.stringify({
         name: basename(projectDirectory),

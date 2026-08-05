@@ -866,7 +866,7 @@ export default function App(): React.JSX.Element {
     <>
       <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
         <aside className="sidebar">
-          <div className="window-drag sidebar-drag"><button className="icon-button no-drag sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><PanelLeft size={17} /></button></div>
+          <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /><button className="icon-button sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><PanelLeft size={17} /></button></div>
           <nav className="primary-nav"><button className="nav-button" type="button" disabled={!project} onClick={() => void startNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
           <section className="project-section">
             <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={() => void openProject()}><FolderOpen size={15} strokeWidth={1.7} /></button></div>
