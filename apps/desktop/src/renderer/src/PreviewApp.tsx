@@ -28,6 +28,7 @@ export default function PreviewApp({ id }: { id: string }): React.JSX.Element {
   if (error) return <main className="preview-error">{error}</main>;
   if (!document) return <main className="preview-loading">正在打开文件…</main>;
   const canRender = document.kind === "markdown" || document.kind === "html";
+  const kindLabel = document.kind === "text" ? "文本" : document.kind === "markdown" ? "Markdown" : document.kind.toUpperCase();
   return (
     <main className="preview-window">
       <header className="preview-window-header window-drag">
@@ -41,7 +42,7 @@ export default function PreviewApp({ id }: { id: string }): React.JSX.Element {
         {document.kind === "html" && rendered ? <iframe className="html-preview" title={document.name} sandbox="" srcDoc={document.content} /> : null}
         {(document.kind === "text" || !rendered) ? <pre className="text-preview"><code>{document.content}</code></pre> : null}
       </section>
-      <footer className="preview-window-status"><span>{document.kind.toUpperCase()}</span><span>{new Date(document.updatedAt).toLocaleTimeString("zh-CN")}</span><span>实时更新</span></footer>
+      <footer className="preview-window-status"><span>{kindLabel}</span><span>{new Date(document.updatedAt).toLocaleTimeString("zh-CN")}</span><span>实时更新</span></footer>
     </main>
   );
 }
