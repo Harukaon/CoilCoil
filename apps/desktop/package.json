@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
+    "@radix-ui/react-popover": "^1.1.23",
     "@suocode/runtime-core": "0.1.0",
     "@suocode/runtime-protocol": "0.1.0",
     "@suocode/runtime-server": "0.1.0",

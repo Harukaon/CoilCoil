@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Popover from "@radix-ui/react-popover";
 import type { CSSProperties, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -158,29 +159,20 @@ function MessageView({ message, modelName }: { message: ChatMessage; modelName: 
   );
 }
 
-function ModelPicker({ configuration, currentModel, open, busy, onToggle, onSelect, onOpenSettings }: {
+function ModelPicker({ configuration, currentModel, open, busy, onOpenChange, onSelect, onOpenSettings }: {
   configuration?: RuntimeConfiguration;
   currentModel?: SessionSnapshot["model"];
   open: boolean;
   busy: boolean;
-  onToggle: () => void;
+  onOpenChange: (open: boolean) => void;
   onSelect: (model: ModelOption) => void;
   onOpenSettings: () => void;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) {
-      setSearch("");
-      return;
-    }
-    const close = (event: PointerEvent): void => {
-      if (!rootRef.current?.contains(event.target as Node)) onToggle();
-    };
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
-  }, [onToggle, open]);
+    if (!open) setSearch("");
+  }, [open]);
 
   const groups = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -196,23 +188,28 @@ function ModelPicker({ configuration, currentModel, open, busy, onToggle, onSele
   }, [configuration, search]);
 
   return (
-    <div className="model-picker" ref={rootRef}>
-      <button className="agent-mode" type="button" aria-expanded={open} onClick={onToggle}><CircleDot size={13} /><span>{currentModel?.name ?? "选择模型"}</span><ChevronDown size={12} /></button>
-      {open ? <div className="model-popover">
-        <div className="model-popover-search"><Search size={14} /><input autoFocus value={search} placeholder="搜索模型" onChange={(event) => setSearch(event.target.value)} /></div>
-        <div className="model-popover-list">
-          {groups.map(([provider, group]) => <section className="model-provider-group" key={provider}>
-            <h3>{group.name}</h3>
-            {group.models.map((model) => {
-              const active = currentModel?.provider === model.provider && currentModel.id === model.id;
-              return <button className={active ? "active" : ""} type="button" disabled={busy} key={`${model.provider}/${model.id}`} onClick={() => onSelect(model)}><span><strong>{model.name}</strong><small>{model.id}</small></span>{active ? <Check size={14} /> : null}</button>;
-            })}
-          </section>)}
-          {!groups.length ? <div className="model-popover-empty">{configuration?.configuredProviders.length ? "没有匹配的模型" : "尚未配置模型服务商"}</div> : null}
-        </div>
-        <button className="model-settings-link" type="button" onClick={onOpenSettings}><Settings size={14} /><span>模型与服务商设置</span></button>
-      </div> : null}
-    </div>
+    <Popover.Root open={open} onOpenChange={onOpenChange}>
+      <Popover.Trigger asChild>
+        <button className="agent-mode" type="button"><CircleDot size={13} /><span>{currentModel?.name ?? "选择模型"}</span><ChevronDown size={12} /></button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="model-popover" side="top" align="start" sideOffset={8} collisionPadding={12} avoidCollisions>
+          <div className="model-popover-search"><Search size={14} /><input autoFocus value={search} placeholder="搜索模型" onChange={(event) => setSearch(event.target.value)} /></div>
+          <div className="model-popover-list">
+            {groups.map(([provider, group]) => <section className="model-provider-group" key={provider}>
+              <h3>{group.name}</h3>
+              {group.models.map((model) => {
+                const active = currentModel?.provider === model.provider && currentModel.id === model.id;
+                return <button className={active ? "active" : ""} type="button" disabled={busy} key={`${model.provider}/${model.id}`} onClick={() => onSelect(model)}><span><strong>{model.name}</strong><small>{model.id}</small></span>{active ? <Check size={14} /> : null}</button>;
+              })}
+            </section>)}
+            {!groups.length ? <div className="model-popover-empty">{configuration?.configuredProviders.length ? "没有匹配的模型" : "尚未配置模型服务商"}</div> : null}
+          </div>
+          <button className="model-settings-link" type="button" onClick={onOpenSettings}><Settings size={14} /><span>模型与服务商设置</span></button>
+          <Popover.Arrow className="model-popover-arrow" width={12} height={6} />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -820,7 +817,7 @@ export default function App(): React.JSX.Element {
             <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
               <textarea ref={inputRef} value={draft} rows={3} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
               <div className="composer-toolbar">
-                <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onToggle={() => setModelMenuOpen((value) => !value)} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
+                <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
                 {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" })}><Square size={12} fill="currentColor" /></button> : null}
                 <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || !snapshot || !draft.trim()}><ArrowUp size={17} strokeWidth={2.2} /></button>
               </div>
