@@ -2,6 +2,25 @@
 
 本文档把桌面端后续大型需求整理成可实施的阶段。SuoCode 始终是自包含产品：运行时、Pi、MCP、子 Agent 和工作流均由 SuoCode 安装包维护，不调用用户本机安装的 Pi，也不依赖 `/Users/hao/Desktop/project/hao-pi-workflow` 或 `/Users/hao/Desktop/project/shelf` 才能运行。这两个项目仅作为迁移来源和设计参考。
 
+## 总体实现原则：扩展优先
+
+新增 Agent 能力时，优先寻找并复用成熟的 Pi 扩展，而不是在 SuoCode 中重新实现相同能力。
+
+- Pi 扩展负责真正的工具、协议、生命周期和 Agent 行为。
+- SuoCode Runtime 提供很薄的状态/配置桥接。
+- SuoCode Desktop 提供用户需要的配置界面、运行状态、预览、停止和错误诊断。
+- 如果扩展只提供 TUI，优先为扩展增加可复用的 headless 状态 API，再由 GUI 消费。
+- 如果现有扩展基本可用但缺少少量能力，优先做薄 fork、补丁或上游贡献；避免复制后形成两套长期分叉的实现。
+- 选用第三方扩展前检查许可证、维护状态、打包兼容性、安全边界和事件可观测性，并固定版本。
+- 所有扩展随 SuoCode 安装包交付，绝不在运行时依赖用户本机 Pi 已安装的扩展。
+
+典型应用：
+
+- MCP：复用 `pi-mcp-adapter`，GUI 只编辑配置并展示扩展状态。
+- 子 Agent：复用 `pi-subagents`，GUI 展示子任务执行过程、统计和停止入口。
+- Todo：复用现有结构化 Todo 扩展，GUI 将状态投影为活动面板。
+- 后续能力在立项时先完成“可复用扩展调查”，再决定是否自行实现。
+
 ## 阶段 0：组件拆分门槛
 
 在 Terminal 工作区和高级子 Agent UI 开发前，先拆分当前大型桌面组件。
@@ -121,34 +140,35 @@ apps/desktop/src/renderer/src/
 
 ## 阶段 6：MCP 配置管理 UI
 
-MCP 不能只作为安装包内置扩展存在。SuoCode Desktop 需要向用户提供完整的 MCP 管理界面，让用户直接配置自己的 MCP Server。
+MCP 的协议实现、连接管理和工具暴露全部复用 SuoCode 已内置的 `pi-mcp-adapter`。SuoCode Desktop 只为这个扩展提供图形化配置界面，不重新实现 MCP Client、Transport、OAuth、工具发现或资源调用。
 
 ### 产品边界
 
-- 配置由 SuoCode 前端管理，通过 typed IPC 交给 Runtime 校验和保存。
-- 配置保存到 SuoCode 自己的应用数据目录，不读取、覆盖或修改用户本机 Pi 的 `~/.pi/agent/mcp.json`。
-- Desktop 与 CLI 共享同一份 SuoCode MCP 配置模型；项目级配置可以覆盖或补充全局配置。
-- Renderer 不直接读写配置文件，不直接持有长期明文凭据。
+- `pi-mcp-adapter` 是唯一的 MCP 实现层，继续负责 stdio、Streamable HTTP、SSE fallback、OAuth、生命周期、连接测试、工具缓存和代理工具。
+- SuoCode 不定义另一套 MCP Server schema，UI 字段直接对应 `pi-mcp-adapter` 2.11.0 支持的配置格式。
+- 全局配置写入 SuoCode 自己的 Agent 目录下的 `mcp.json`，不读取、覆盖或修改用户本机 Pi 的 `~/.pi/agent/mcp.json`。
+- 项目级配置沿用扩展已支持的 `.mcp.json` / `.pi/mcp.json` 规则，不创造新的 SuoCode 专有 MCP 文件格式。
+- Renderer 不直接读写文件；Electron/Runtime 只充当安全的配置读写桥梁。
 
 ### 管理能力
 
 - 查看已配置的 MCP Server 列表。
 - 新增、编辑、复制、启用、停用和移除 Server。
-- 支持常见连接形式：
+- UI 映射扩展现有配置字段，包括：
   - stdio：command、args、cwd、env
-  - HTTP / Streamable HTTP：URL、headers
-  - SSE：URL、headers
+  - HTTP：url、headers、auth
+  - lifecycle、idleTimeout、requestTimeoutMs
+  - directTools、excludeTools、exposeResources、debug
 - 支持全局 MCP 和项目级 MCP，并清楚显示配置来源与生效范围。
-- 提供“测试连接”，展示连接中、可用、需要认证、配置错误、启动失败和超时状态。
-- 成功连接后展示 Server 暴露的 tools、resources 和 prompts。
-- 支持刷新和重新连接，不需要重启整个 SuoCode。
-- 删除或修改正在使用的 Server 时给出影响提示，并安全终止旧连接。
+- “测试连接”“重新连接”“认证”和状态展示调用 `pi-mcp-adapter` 已有能力，不在 SuoCode 中另写连接器。
+- 成功连接后的 tools、resources 和状态信息直接使用扩展已有的 manager/cache 结果。
+- 保存配置后通知当前 Agent Session reload，或者调用扩展现有 reconnect 流程，不需要重启整个 SuoCode。
 
 ### 凭据与环境变量
 
-- 敏感值使用系统安全存储或 SuoCode 的凭据层保存，配置文件只保留引用，不落明文。
+- 优先使用扩展已经支持的 `${VAR}`、`$env:VAR` 和 `bearerTokenEnv` 引用，不改变其插值语义。
+- 后续可由 SuoCode 凭据层为这些环境变量提供安全值，但不能修改 `pi-mcp-adapter` 期望的配置结构。
 - UI 中默认遮盖 token、Authorization header 和其他 secret。
-- 支持为 stdio Server 配置环境变量，并区分普通值与敏感值。
 - 导出配置时默认排除敏感值。
 - Runtime 日志、工具结果和错误信息不得泄露凭据。
 
@@ -157,31 +177,28 @@ MCP 不能只作为安装包内置扩展存在。SuoCode Desktop 需要向用户
 - 设置页新增独立的 `MCP` 分类，不与模型/Provider 下拉菜单混在一起。
 - 列表页展示名称、连接类型、作用域、启停状态和健康状态。
 - 编辑使用侧栏或独立设置页面，不使用会遮挡 Agent 工作区的全屏阻塞弹窗。
-- 测试连接时实时显示步骤与错误原因，避免只返回“连接失败”。
+- 测试连接时把扩展返回的状态和错误清晰展示出来，避免只显示“连接失败”。
 
-### Runtime 协议
+### SuoCode 桥接层
 
-需要增加以下 typed commands/events：
+SuoCode 仍需要少量 typed IPC，但它们只是前端和主进程之间的配置桥，不是 MCP 协议实现：
 
-- `list_mcp_servers`
-- `create_mcp_server`
-- `update_mcp_server`
-- `remove_mcp_server`
-- `set_mcp_server_enabled`
-- `test_mcp_server`
-- `refresh_mcp_server`
-- MCP 状态、认证请求和能力列表事件
+- 读取扩展当前生效的配置和来源。
+- 保存全局或项目级配置。
+- 请求当前 Session reload/reconnect。
+- 把扩展已有的状态、认证请求和错误转发给前端。
 
-所有写操作由 Runtime 完成，并进行 schema 校验、路径校验、命令参数校验和敏感字段处理。
+桥接层不直接使用 `@modelcontextprotocol/sdk` 建立连接，也不复制 `pi-mcp-adapter` 的 server manager。若扩展缺少稳定的程序化入口，优先给上游扩展补一个很薄的公共配置/状态 API，而不是在 SuoCode 内重写一套。
 
 ### 验收标准
 
 1. 全新安装、不依赖本机 Pi 配置即可从 UI 添加一个 MCP Server。
 2. 重启应用后配置和启停状态能够恢复。
-3. Agent 只看到当前启用且连接成功的 MCP 能力。
+3. 保存后由同一个 `pi-mcp-adapter` 扩展重新加载，Agent 能正常使用对应 MCP 能力。
 4. 项目级 Server 不会错误暴露给其他 Workspace。
 5. 配置错误能够定位到具体字段，凭据不会出现在日志或界面错误详情中。
 6. MCP Server 异常退出后 UI 能更新状态并允许重新连接。
+7. SuoCode 代码中不存在第二套 MCP transport、OAuth 或工具发现实现。
 
 ## 暂不承诺的能力
 

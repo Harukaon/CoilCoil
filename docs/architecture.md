@@ -35,6 +35,27 @@ Subagents and background memory workers launch the Pi CLI shipped inside SuoCode
 
 Each project session uses Pi's `SessionManager`. The runtime translates Pi message and tool events into stable SuoCode events, reconstructs tool/plan/terminal state when a session is reopened, and refreshes Git and file state after mutations.
 
+## Extension-first product architecture
+
+SuoCode follows an extension-first rule: when a mature Pi extension already implements a capability, the product bundles and reuses that extension, then adds a GUI control and visualization layer around it. SuoCode must not build a second competing implementation merely because the original extension exposes a TUI-first experience.
+
+The preferred order is:
+
+1. Bundle a pinned, reviewed Pi extension inside SuoCode.
+2. Use the extension's existing configuration format, runtime behavior, lifecycle, and tool implementation.
+3. Project its state and events through a thin typed bridge for the Desktop UI.
+4. Provide GUI configuration, status, preview, cancellation, and diagnostics without moving core behavior into the renderer.
+5. If a stable headless API is missing, add the smallest possible public API to the extension or maintain a thin patch while proposing the change upstream.
+6. Reimplement the capability in SuoCode only when no suitable extension exists or the extension cannot satisfy product safety and lifecycle requirements.
+
+Examples:
+
+- MCP reuses `pi-mcp-adapter`; SuoCode only adds configuration and status UI.
+- Subagents reuse `pi-subagents`; SuoCode adds activity cards, execution details, and stop controls by projecting the extension's lifecycle.
+- Todo and workflow tools remain Pi extensions; the activity panel visualizes their structured state.
+
+Bundled extensions are still part of the SuoCode runtime distribution. Extension-first does not mean loading packages from the user's local Pi installation.
+
 ## Pi thin fork
 
 Pi is committed under `vendor/pi` through Git subtree. SuoCode builds against that local source so desktop releases are reproducible and debuggable. Product-specific behavior remains outside the fork unless Pi's public SDK cannot provide a required runtime capability.
