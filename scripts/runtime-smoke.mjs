@@ -124,9 +124,16 @@ try {
     if (!writeToolEvent.tool.label || writeToolEvent.tool.label === "写入 runtime-proof.txt") {
       throw new Error(`The workflow purpose was not projected into the tool label: ${writeToolEvent.tool.label || "<empty>"}`);
     }
-    const metricsEvent = events.find((event) => event.type === "metrics_updated");
+    const metricsEvent = events.findLast((event) => event.type === "metrics_updated");
     if (!metricsEvent?.responseMetrics || metricsEvent.responseMetrics.outputTokens <= 0) {
       throw new Error("The workflow response metrics were not projected.");
+    }
+    if (
+      typeof metricsEvent.responseMetrics.inputTokens !== "number"
+      || typeof metricsEvent.responseMetrics.cacheReadTokens !== "number"
+      || typeof metricsEvent.responseMetrics.cacheWriteTokens !== "number"
+    ) {
+      throw new Error("Per-request input and cache token fields were not projected.");
     }
     const restored = await request({ type: "open_session", cwd: projectDir, sessionPath: snapshot.session.path });
     const restoredWriteTool = restored.tools.find((tool) => tool.name === "write");

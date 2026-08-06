@@ -170,10 +170,16 @@ function responseMetricsFromData(data: unknown): ResponseMetrics | undefined {
   if (![outputTokens, totalMs, turnDurationMs, timestamp].every(Number.isFinite)) return undefined;
   const firstTokenMs = Number(data.firstTokenMs);
   const averageTokensPerSecond = Number(data.averageTokensPerSecond);
+  const inputTokens = Number(data.inputTokens);
+  const cacheReadTokens = Number(data.cacheReadTokens);
+  const cacheWriteTokens = Number(data.cacheWriteTokens);
   return {
     firstTokenMs: Number.isFinite(firstTokenMs) ? firstTokenMs : undefined,
     averageTokensPerSecond: Number.isFinite(averageTokensPerSecond) ? averageTokensPerSecond : undefined,
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : undefined,
     outputTokens,
+    cacheReadTokens: Number.isFinite(cacheReadTokens) ? cacheReadTokens : undefined,
+    cacheWriteTokens: Number.isFinite(cacheWriteTokens) ? cacheWriteTokens : undefined,
     totalMs,
     turnDurationMs,
     timestamp,
@@ -948,6 +954,7 @@ export class SuoCodeRuntime {
         case "tool_execution_update": {
           const tool = active.tools.get(event.toolCallId);
           if (!tool) break;
+          if (isRecord(event.args)) tool.args = { ...event.args };
           const output = toolResultText(event.partialResult);
           if (output) tool.output = clampText(output, MAX_TERMINAL_OUTPUT);
           const terminal = active.terminals.get(tool.id);

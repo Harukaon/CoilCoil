@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import type { CSSProperties, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, DragEvent as ReactDragEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -401,6 +401,42 @@ function toolSummary(tools: ToolRun[], thinkingCount: number): string {
   return parts.join("，") || `调用了 ${tools.length} 个工具`;
 }
 
+function toolArgumentsText(tool: ToolRun): string {
+  const args = tool.args;
+  const path = String(args.path ?? args.filePath ?? "");
+  if (tool.name === "bash") return String(args.command ?? "");
+  if (tool.name === "read") {
+    const range = [args.offset !== undefined ? `offset=${String(args.offset)}` : "", args.limit !== undefined ? `limit=${String(args.limit)}` : ""].filter(Boolean).join(" · ");
+    return [path, range].filter(Boolean).join("\n");
+  }
+  if (tool.name === "grep") return [`pattern: ${String(args.pattern ?? "")}`, path ? `path: ${path}` : "", args.glob ? `glob: ${String(args.glob)}` : ""].filter(Boolean).join("\n");
+  if (tool.name === "find") return [`pattern: ${String(args.pattern ?? "")}`, path ? `path: ${path}` : ""].filter(Boolean).join("\n");
+  if (tool.name === "ls") return path || ".";
+  if (tool.name === "write") return [path, String(args.content ?? "")].filter(Boolean).join("\n\n");
+  if (tool.name === "edit") {
+    const oldText = String(args.oldText ?? args.old_string ?? "");
+    const newText = String(args.newText ?? args.new_string ?? "");
+    return [path, oldText ? `--- 原内容\n${oldText}` : "", newText ? `+++ 新内容\n${newText}` : ""].filter(Boolean).join("\n\n");
+  }
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+
+function ToolExecutionDetails({ tool }: { tool: ToolRun }): React.JSX.Element | null {
+  const input = toolArgumentsText(tool).trim();
+  const output = tool.output.trim();
+  if (!input && !output) return null;
+  return (
+    <div className="tool-execution-details">
+      {input ? <section><span>调用参数</span><pre>{input}</pre></section> : null}
+      {output ? <section><span>{tool.status === "failed" ? "错误" : "执行结果"}</span><pre>{output}</pre></section> : null}
+    </div>
+  );
+}
+
 function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX.Element {
   const tools = entries.flatMap((entry) => entry.kind === "tool" ? [entry.tool] : []);
   const thinkingCount = entries.filter((entry) => entry.kind === "thinking").length;
@@ -422,7 +458,7 @@ function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX
           if (entry.kind === "thinking") return <details className="tool-activity-row thinking" key={entry.id}><summary><code>think</code><span>Reasoning</span></summary><pre>{entry.text}</pre></details>;
           const tool = entry.tool;
           const itemStats = lineStats(tool);
-          return <details className={`tool-activity-row ${tool.status}`} key={tool.id}><summary><code>{tool.name}</code><span>{tool.label}</span>{itemStats.additions ? <b className="additions">+{itemStats.additions}</b> : null}{itemStats.deletions ? <b className="deletions">-{itemStats.deletions}</b> : null}{tool.status === "running" ? <LoaderCircle className="spin" size={13} /> : tool.status === "failed" ? <AlertCircle size={13} /> : null}</summary>{tool.output || Object.keys(tool.args).length ? <pre>{tool.output || JSON.stringify(tool.args, null, 2)}</pre> : null}</details>;
+          return <details className={`tool-activity-row ${tool.status}`} key={tool.id}><summary><code>{tool.name}</code><span>{tool.label}</span>{itemStats.additions ? <b className="additions">+{itemStats.additions}</b> : null}{itemStats.deletions ? <b className="deletions">-{itemStats.deletions}</b> : null}{tool.status === "running" ? <LoaderCircle className="spin" size={13} /> : tool.status === "failed" ? <AlertCircle size={13} /> : null}</summary><ToolExecutionDetails tool={tool} /></details>;
         })}
       </div>
     </details>
@@ -586,7 +622,11 @@ function FileTreeNode({ node, depth, onLoad, onOpen }: {
     );
   }
   return (
-    <button className="file-leaf" type="button" style={{ paddingLeft: 21 + depth * 13 }} onClick={() => onOpen(node)}>
+    <button className="file-leaf" type="button" draggable style={{ paddingLeft: 21 + depth * 13 }} onClick={() => onOpen(node)} onDragStart={(event) => {
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData("application/x-suocode-file", JSON.stringify({ name: node.name, path: node.path, kind: node.kind }));
+      event.dataTransfer.setData("text/plain", node.path);
+    }}>
       <File size={13} /><span>{node.name}</span>
     </button>
   );
@@ -661,6 +701,29 @@ function WorkspaceStatus({
         ) : null}
         <Popover.Root>
           <Popover.Trigger asChild>
+            <button className="performance-trigger" type="button" aria-label="查看模型性能历史" title="模型响应性能">
+              <span className={`performance-signal ${responseMetrics ? performanceGrade(responseMetrics) : "unknown"}`}><i /><i /><i /></span>
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content className="performance-popover" side="top" align="end" sideOffset={7}>
+              <strong>近期请求性能</strong>
+              {responseMetricsHistory.length ? (
+                <>
+                  <div className="performance-grid">{responseMetricsHistory.slice(-60).map((item, index) => {
+                    const promptTokens = (item.inputTokens ?? 0) + (item.cacheReadTokens ?? 0) + (item.cacheWriteTokens ?? 0);
+                    const cacheRate = promptTokens > 0 ? ((item.cacheReadTokens ?? 0) / promptTokens) * 100 : undefined;
+                    return <span className={`performance-cell ${performanceGrade(item)}`} key={`${item.timestamp}-${index}`}><span className="performance-tooltip"><strong>{new Date(item.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</strong><span>首字 {formatMetricDuration(item.firstTokenMs)}</span><span>{item.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s</span><span>输出 {formatTokens(item.outputTokens)} tok</span><span>缓存读取 {formatTokens(item.cacheReadTokens)}</span><span>缓存写入 {formatTokens(item.cacheWriteTokens)}</span><span>缓存命中 {cacheRate === undefined ? "—" : `${cacheRate.toFixed(1)}%`}</span></span></span>;
+                  })}</div>
+                  <div className="performance-legend"><span>较慢</span><i className="slow" /><i className="fair" /><i className="good" /><i className="excellent" /><span>较快</span></div>
+                </>
+              ) : <p>完成一次模型请求后，这里会显示性能记录。</p>}
+              <Popover.Arrow className="model-popover-arrow" />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+        <Popover.Root>
+          <Popover.Trigger asChild>
             <button
               className="context-trigger"
               type="button"
@@ -681,25 +744,6 @@ function WorkspaceStatus({
                 <div><dt>缓存读取</dt><dd>{formatTokens(tokenUsage.cacheRead)}</dd></div>
                 <div><dt>本次输出</dt><dd>{formatTokens(responseMetrics?.outputTokens)}</dd></div>
               </dl>
-              <Popover.Arrow className="model-popover-arrow" />
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
-        <Popover.Root>
-          <Popover.Trigger asChild>
-            <button className="performance-trigger" type="button" aria-label="查看模型性能历史" title="模型响应性能">
-              <span className={`performance-signal ${responseMetrics ? performanceGrade(responseMetrics) : "unknown"}`}><i /><i /><i /></span>
-            </button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content className="performance-popover" side="top" align="end" sideOffset={7}>
-              <strong>近期请求性能</strong>
-              {responseMetricsHistory.length ? (
-                <>
-                  <div className="performance-grid">{responseMetricsHistory.slice(-60).map((item, index) => <span className={`performance-cell ${performanceGrade(item)}`} key={`${item.timestamp}-${index}`}><span className="performance-tooltip"><strong>{new Date(item.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</strong><span>首字 {formatMetricDuration(item.firstTokenMs)}</span><span>{item.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s</span><span>{formatTokens(item.outputTokens)} tok</span></span></span>)}</div>
-                  <div className="performance-legend"><span>较慢</span><i className="slow" /><i className="fair" /><i className="good" /><i className="excellent" /><span>较快</span></div>
-                </>
-              ) : <p>完成一次模型请求后，这里会显示性能记录。</p>}
               <Popover.Arrow className="model-popover-arrow" />
             </Popover.Content>
           </Popover.Portal>
@@ -825,6 +869,8 @@ export default function App(): React.JSX.Element {
   const [inspectorView, setInspectorView] = useState<InspectorView>("files");
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivity>>({});
   const [draft, setDraft] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<FileNode[]>([]);
+  const [fileDragActive, setFileDragActive] = useState(false);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
@@ -844,6 +890,7 @@ export default function App(): React.JSX.Element {
   const timelineRef = useRef<HTMLDivElement>(null);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const runtimeSessionRef = useRef(new Map<string, string>());
+  const fileDragDepthRef = useRef(0);
 
   const applySnapshot = useCallback((next: SessionSnapshot): void => {
     snapshotRef.current = next;
@@ -954,6 +1001,7 @@ export default function App(): React.JSX.Element {
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setLoading(true);
     setError(undefined);
+    setAttachedFiles([]);
     setMessages([]);
     setTools([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
@@ -1144,6 +1192,7 @@ export default function App(): React.JSX.Element {
     try {
       applySnapshot(await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: project.path }));
       setDraft("");
+      setAttachedFiles([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -1159,6 +1208,7 @@ export default function App(): React.JSX.Element {
     try {
       projectRef.current = owner;
       setProject(owner);
+      setAttachedFiles([]);
       window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, owner.path);
       applySnapshot(await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path }));
     } catch (caught) {
@@ -1197,7 +1247,10 @@ export default function App(): React.JSX.Element {
     setDraft("");
     setError(undefined);
     try {
-      await window.suocode.request({ type: running ? "steer" : "prompt", text: prompt }, snapshot.runtimeId);
+      const references = attachedFiles.map((file) => `@${file.path}`);
+      const text = references.length ? `${prompt}\n\n参考文件：\n${references.join("\n")}` : prompt;
+      await window.suocode.request({ type: running ? "steer" : "prompt", text }, snapshot.runtimeId);
+      setAttachedFiles([]);
     } catch (caught) {
       setDraft(prompt);
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -1235,6 +1288,35 @@ export default function App(): React.JSX.Element {
   const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof CheckSquare2 }> = [
     { id: "files", label: "文件", icon: Files },
   ];
+
+  const handleFileDragEnter = (event: ReactDragEvent<HTMLElement>): void => {
+    if (!event.dataTransfer.types.includes("application/x-suocode-file")) return;
+    event.preventDefault();
+    fileDragDepthRef.current += 1;
+    setFileDragActive(true);
+  };
+
+  const handleFileDragLeave = (event: ReactDragEvent<HTMLElement>): void => {
+    if (!event.dataTransfer.types.includes("application/x-suocode-file")) return;
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) setFileDragActive(false);
+  };
+
+  const handleFileDrop = (event: ReactDragEvent<HTMLElement>): void => {
+    const serialized = event.dataTransfer.getData("application/x-suocode-file");
+    if (!serialized) return;
+    event.preventDefault();
+    fileDragDepthRef.current = 0;
+    setFileDragActive(false);
+    try {
+      const file = JSON.parse(serialized) as FileNode;
+      if (file.kind !== "file" || !file.path) return;
+      setAttachedFiles((current) => current.some((item) => item.path === file.path) ? current : [...current, file]);
+      inputRef.current?.focus();
+    } catch {
+      setError("无法添加拖入的文件。请重新拖动一次。");
+    }
+  };
 
   return (
     <>
@@ -1276,7 +1358,7 @@ export default function App(): React.JSX.Element {
         {leftOpen ? <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><span><PanelLeft size={17} /></span></button> : null}
         {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
 
-        <section className="conversation-pane">
+        <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} onDragEnter={handleFileDragEnter} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-suocode-file")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={handleFileDragLeave} onDrop={handleFileDrop}>
           <header className="conversation-header window-drag">
             {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={() => setLeftOpen(true)}><PanelLeft size={17} /></button> : null}
             <div className="conversation-title"><strong title={activeConversation?.title ?? "新建对话"}>{truncateTitle(activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
@@ -1294,6 +1376,7 @@ export default function App(): React.JSX.Element {
             <div className="composer-stack">
               <ComposerPlan plan={projectState.plan} />
               <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
+                {attachedFiles.length ? <div className="composer-attachments">{attachedFiles.map((file) => <span className="composer-file-chip" key={file.path} title={file.path}><FileCode2 size={12} /><span>{file.name}</span><button type="button" aria-label={`移除 ${file.name}`} onClick={() => setAttachedFiles((current) => current.filter((item) => item.path !== file.path))}><X size={11} /></button></span>)}</div> : null}
                 <textarea ref={inputRef} value={draft} rows={3} aria-label="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={handleComposerKeyDown} />
                 <div className="composer-toolbar">
                   <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />

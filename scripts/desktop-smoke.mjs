@@ -245,6 +245,12 @@ async function main() {
     assert.equal(isolation.rightResizer, false);
     assert.match(isolation.inspector, /文件/);
     assert.doesNotMatch(isolation.inspector, /Todo|变更|终端/);
+    const metricControlOrder = await client.evaluate(`(() => {
+      const performance = document.querySelector(".performance-trigger");
+      const context = document.querySelector(".context-trigger");
+      return Boolean(performance && context && (performance.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING));
+    })()`);
+    assert.equal(metricControlOrder, true);
     const inspectorDragSurface = await client.evaluate(`(() => {
       const surface = document.querySelector(".inspector-drag-surface");
       const bounds = surface?.getBoundingClientRect();
@@ -412,6 +418,26 @@ async function main() {
     assert.ok(minimumPanelWidths.center <= 316 && minimumPanelWidths.center >= 314);
     assert.ok(minimumPanelWidths.left <= 41 && minimumPanelWidths.left >= 39);
     assert.ok(minimumPanelWidths.right <= 41 && minimumPanelWidths.right >= 39);
+    const narrowConversationLayout = await client.evaluate(`(() => {
+      const body = document.querySelector(".conversation-body");
+      if (!body) return null;
+      const probe = document.createElement("div");
+      probe.className = "markdown";
+      probe.innerHTML = "<p>测试过程中的长中文内容必须在很窄的聊天窗口中正确换行而不能被右侧文件栏遮挡。<code>very-long-inline-token-without-natural-breaks-0123456789</code></p>";
+      body.append(probe);
+      const result = {
+        paddingBottom: Number.parseFloat(getComputedStyle(body).paddingBottom),
+        clientWidth: body.clientWidth,
+        scrollWidth: body.scrollWidth,
+        probeRight: probe.getBoundingClientRect().right,
+        bodyRight: body.getBoundingClientRect().right,
+      };
+      probe.remove();
+      return result;
+    })()`);
+    assert.ok((narrowConversationLayout?.paddingBottom ?? 0) >= 175);
+    assert.ok((narrowConversationLayout?.scrollWidth ?? 1) <= (narrowConversationLayout?.clientWidth ?? 0) + 1);
+    assert.ok((narrowConversationLayout?.probeRight ?? 1) <= (narrowConversationLayout?.bodyRight ?? 0) + 1);
     await client.evaluate(`window.resizeTo(1440, 900)`);
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not expand after panel compression.");
     await client.waitFor(
@@ -521,6 +547,24 @@ async function main() {
       `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))`,
       "The file tree did not load an expanded folder on demand.",
     );
+    const draggedFileReference = await client.evaluate(`(async () => {
+      const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
+      const conversation = document.querySelector(".conversation-pane");
+      if (!file || !conversation) return null;
+      const transfer = new DataTransfer();
+      file.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+      conversation.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
+      conversation.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      conversation.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      return {
+        chip: document.querySelector(".composer-file-chip")?.textContent || "",
+        overlay: document.querySelector(".conversation-pane")?.classList.contains("file-drag-active") ?? true,
+      };
+    })()`);
+    assert.match(draggedFileReference?.chip ?? "", /lazy-child\.txt/);
+    assert.equal(draggedFileReference?.overlay, false);
+    await client.evaluate(`document.querySelector(".composer-file-chip button")?.click()`);
     await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"))?.click()`);
     const previewPage = await waitForPreviewPage(port);
     const previewClient = new DevToolsClient(previewPage.webSocketDebuggerUrl);

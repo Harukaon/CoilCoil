@@ -72,7 +72,10 @@ export interface ToolRun {
 export interface ResponseMetrics {
   firstTokenMs?: number;
   averageTokensPerSecond?: number;
+  inputTokens?: number;
   outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   totalMs: number;
   turnDurationMs: number;
   timestamp: number;

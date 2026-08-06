@@ -13,7 +13,10 @@ interface ConversationTiming {
 interface ResponseMetricsEntry {
   firstTokenMs?: number;
   averageTokensPerSecond?: number;
+  inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   totalMs: number;
   turnDurationMs: number;
   timestamp: number;
@@ -60,12 +63,12 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
   let current: ResponseTiming | undefined;
   let conversation: ConversationTiming | undefined;
   let lastResponseMetrics: string | undefined;
-  let lastResponseMetricsData: Omit<ResponseMetricsEntry, "turnDurationMs"> | undefined;
+  let responseMetricsData: Array<Omit<ResponseMetricsEntry, "turnDurationMs">> = [];
 
   pi.on("before_agent_start", () => {
     conversation = { startedAt: performance.now() };
     lastResponseMetrics = undefined;
-    lastResponseMetricsData = undefined;
+    responseMetricsData = [];
   });
 
   pi.on("before_provider_request", () => {
@@ -95,13 +98,16 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
       ? undefined
       : outputTokens / (generationMs / 1_000);
 
-    lastResponseMetricsData = {
+    responseMetricsData.push({
       firstTokenMs: firstTokenAt === undefined ? undefined : firstTokenAt - current.requestStartedAt,
       averageTokensPerSecond,
+      inputTokens: event.message.usage.input,
       outputTokens,
+      cacheReadTokens: event.message.usage.cacheRead,
+      cacheWriteTokens: event.message.usage.cacheWrite,
       totalMs,
       timestamp: Date.now(),
-    };
+    });
 
     if (ctx.hasUI) {
       const firstToken = firstTokenAt === undefined
@@ -138,21 +144,21 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
       );
     }
 
-    if (lastResponseMetricsData) {
+    responseMetricsData.forEach((metrics, index) => {
       pi.appendEntry<ResponseMetricsEntry>(RESPONSE_METRICS_ENTRY_TYPE, {
-        ...lastResponseMetricsData,
-        turnDurationMs,
+        ...metrics,
+        turnDurationMs: index === responseMetricsData.length - 1 ? turnDurationMs : metrics.totalMs,
       });
-    }
+    });
 
     conversation = undefined;
-    lastResponseMetricsData = undefined;
+    responseMetricsData = [];
   });
 
   pi.on("session_shutdown", () => {
     current = undefined;
     conversation = undefined;
     lastResponseMetrics = undefined;
-    lastResponseMetricsData = undefined;
+    responseMetricsData = [];
   });
 }
