@@ -16,6 +16,9 @@ import type {
   ChatMessage,
   ContextUsage,
   FileNode,
+  McpConfigurationSnapshot,
+  McpImportConfiguration,
+  McpServerConfiguration,
   ModelOption,
   PromptImage,
   ProjectSnapshot,
@@ -39,6 +42,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -72,6 +76,38 @@ const IGNORED_DIRECTORIES = new Set([
 ]);
 
 type EventSink = (event: RuntimeEvent) => void;
+
+interface McpAdapterConfigModule {
+  ensureCompatibilityImports(imports: McpImportConfiguration["kind"][], overridePath?: string): { path: string; added: McpImportConfiguration["kind"][] };
+  getMcpDiscoverySummary(overridePath?: string, cwd?: string): {
+    imports: Array<{ kind: McpImportConfiguration["kind"]; path: string; serverCount: number }>;
+  };
+  getPiGlobalConfigPath(overridePath?: string): string;
+  getServerProvenance(overridePath?: string, cwd?: string): Map<string, { path: string; kind: "user" | "project" | "import" }>;
+  loadMcpConfig(overridePath?: string, cwd?: string): {
+    imports?: McpImportConfiguration["kind"][];
+    mcpServers: Record<string, Record<string, unknown>>;
+  };
+  writeSharedServerEntry(path: string, serverName: string, entry: Record<string, unknown>): string;
+}
+
+let mcpAdapterConfigModule: Promise<McpAdapterConfigModule> | undefined;
+
+function loadMcpAdapterConfigModule(): Promise<McpAdapterConfigModule> {
+  const { createJiti } = require("jiti") as typeof import("jiti");
+  const jiti = createJiti(import.meta.url, { interopDefault: true });
+  mcpAdapterConfigModule ??= jiti.import(join(resolvePackageDirectory("pi-mcp-adapter"), "config.ts")) as Promise<McpAdapterConfigModule>;
+  return mcpAdapterConfigModule;
+}
+
+function recordOfStrings(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
 
 export interface SuoCodeRuntimeOptions {
   agentDir: string;
@@ -724,6 +760,92 @@ export class SuoCodeRuntime {
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
     return configuration;
+  }
+
+  private mcpCwd(cwd?: string): string {
+    return cwd ? safeRealPath(cwd) : this.active?.cwd ?? process.cwd();
+  }
+
+  private async reloadMcpExtension(): Promise<void> {
+    if (!this.active || this.active.session.isStreaming) return;
+    await this.active.session.reload();
+    this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+  }
+
+  async getMcpConfiguration(cwd?: string): Promise<McpConfigurationSnapshot> {
+    const adapter = await loadMcpAdapterConfigModule();
+    const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    const resolvedCwd = this.mcpCwd(cwd);
+    const config = adapter.loadMcpConfig(configPath, resolvedCwd);
+    const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
+    const provenance = adapter.getServerProvenance(configPath, resolvedCwd);
+    const enabledImports = new Set(config.imports ?? []);
+    return {
+      configPath,
+      imports: discovery.imports.map((entry) => ({ ...entry, enabled: enabledImports.has(entry.kind) })),
+      servers: Object.entries(config.mcpServers).map(([name, raw]) => {
+        const source = provenance.get(name);
+        return {
+          name,
+          transport: typeof raw.url === "string" ? "http" : "stdio",
+          command: typeof raw.command === "string" ? raw.command : undefined,
+          args: stringArray(raw.args),
+          env: recordOfStrings(raw.env),
+          cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
+          url: typeof raw.url === "string" ? raw.url : undefined,
+          headers: recordOfStrings(raw.headers),
+          auth: raw.auth === "oauth" || raw.auth === "bearer" || raw.auth === false ? raw.auth : undefined,
+          lifecycle: raw.lifecycle === "keep-alive" || raw.lifecycle === "eager" ? raw.lifecycle : "lazy",
+          directTools: raw.directTools === true,
+          source: source?.path,
+          sourceKind: source?.kind,
+        } satisfies McpServerConfiguration;
+      }).sort((left, right) => left.name.localeCompare(right.name)),
+    };
+  }
+
+  async saveMcpServer(server: McpServerConfiguration, previousName?: string, cwd?: string): Promise<McpConfigurationSnapshot> {
+    const name = server.name.trim();
+    if (!name || !/^[A-Za-z0-9._-]+$/.test(name)) throw new Error("MCP 名称只能包含字母、数字、点、下划线和连字符。");
+    if (server.transport === "stdio" && !server.command?.trim()) throw new Error("stdio MCP 需要填写启动命令。");
+    if (server.transport === "http" && !server.url?.trim()) throw new Error("HTTP MCP 需要填写服务器地址。");
+    const adapter = await loadMcpAdapterConfigModule();
+    const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    if (previousName && previousName !== name) this.removeMcpServerFromFile(configPath, previousName);
+    const definition: Record<string, unknown> = server.transport === "http"
+      ? { url: server.url?.trim(), ...(Object.keys(server.headers).length ? { headers: server.headers } : {}), ...(server.auth !== undefined ? { auth: server.auth } : {}) }
+      : { command: server.command?.trim(), ...(server.args.length ? { args: server.args } : {}), ...(Object.keys(server.env).length ? { env: server.env } : {}), ...(server.cwd?.trim() ? { cwd: server.cwd.trim() } : {}) };
+    definition.lifecycle = server.lifecycle;
+    if (server.directTools) definition.directTools = true;
+    adapter.writeSharedServerEntry(configPath, name, definition);
+    await this.reloadMcpExtension();
+    return this.getMcpConfiguration(cwd);
+  }
+
+  private removeMcpServerFromFile(configPath: string, name: string): void {
+    if (!existsSync(configPath)) return;
+    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    const servers = parsed.mcpServers;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers) || !(name in servers)) return;
+    delete (servers as Record<string, unknown>)[name];
+    const temporaryPath = `${configPath}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    renameSync(temporaryPath, configPath);
+  }
+
+  async removeMcpServer(name: string, cwd?: string): Promise<McpConfigurationSnapshot> {
+    const adapter = await loadMcpAdapterConfigModule();
+    const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    this.removeMcpServerFromFile(configPath, name);
+    await this.reloadMcpExtension();
+    return this.getMcpConfiguration(cwd);
+  }
+
+  async enableMcpImports(imports: McpImportConfiguration["kind"][], cwd?: string): Promise<McpConfigurationSnapshot> {
+    const adapter = await loadMcpAdapterConfigModule();
+    adapter.ensureCompatibilityImports(imports, join(this.agentDir, "mcp.json"));
+    await this.reloadMcpExtension();
+    return this.getMcpConfiguration(cwd);
   }
 
   async listSessions(cwd: string): Promise<SessionSummary[]> {

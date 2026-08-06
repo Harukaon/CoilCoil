@@ -274,6 +274,62 @@ async function main() {
         "apps/desktop/release/mac-arm64/SuoCode.app/Contents/Frameworks/SuoCode Helper.app/Contents/MacOS/SuoCode Helper",
       ));
     }
+
+    const openedSettings = await client.evaluate(`(() => {
+      const settings = document.querySelector('button[aria-label="设置"]');
+      if (!settings) return false;
+      settings.click();
+      return true;
+    })()`);
+    assert.equal(openedSettings, true);
+    await client.waitFor(`Boolean(document.querySelector(".settings-tabs"))`, "The settings dialog did not open.");
+    const openedMcpSettings = await client.evaluate(`(() => {
+      const mcp = [...document.querySelectorAll(".settings-tabs button")].find((button) => button.textContent.includes("MCP"));
+      if (!mcp) return false;
+      mcp.click();
+      return true;
+    })()`);
+    assert.equal(openedMcpSettings, true);
+    await client.waitFor(`Boolean(document.querySelector(".mcp-settings"))`, "The MCP settings view did not open.");
+    const savedMcpServer = await client.evaluate(`(async () => {
+      const setInput = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      document.querySelector(".mcp-add-button")?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      const labels = [...document.querySelectorAll(".mcp-editor label")];
+      const name = labels.find((label) => label.firstChild?.textContent === "名称")?.querySelector("input");
+      const command = labels.find((label) => label.firstChild?.textContent === "启动命令")?.querySelector("input");
+      if (!name || !command) return false;
+      setInput(name, "desktop-smoke-mcp");
+      setInput(command, "/usr/bin/true");
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      document.querySelector(".mcp-editor form")?.requestSubmit();
+      return true;
+    })()`);
+    assert.equal(savedMcpServer, true);
+    await client.waitFor(
+      `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp")`,
+      "The MCP server saved through the desktop settings did not appear.",
+    );
+    const mcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration" })`);
+    assert.equal(mcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp")?.command, "/usr/bin/true");
+    const removedMcpServer = await client.evaluate(`(() => {
+      const row = [...document.querySelectorAll(".mcp-server-list button")].find((button) => button.textContent.includes("desktop-smoke-mcp"));
+      row?.click();
+      const remove = document.querySelector('button[aria-label="移除 MCP 服务器"]');
+      if (!row || !remove) return false;
+      remove.click();
+      return true;
+    })()`);
+    assert.equal(removedMcpServer, true);
+    await client.waitFor(
+      `![...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp")`,
+      "The MCP server was not removed through the desktop settings.",
+    );
+    await client.evaluate(`document.querySelector('button[aria-label="关闭设置"]')?.click()`);
+
     const expandedHomePath = await client.evaluate(`(async () => {
       document.querySelector(".workspace-path")?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));

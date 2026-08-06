@@ -15,7 +15,6 @@ import {
   Folder,
   FolderOpen,
   GitCompareArrows,
-  KeyRound,
   LoaderCircle,
   MessageSquarePlus,
   MoreHorizontal,
@@ -48,7 +47,6 @@ import type {
   PromptImage,
   SessionSnapshot,
   SessionSummary,
-  ThinkingLevel,
   TokenUsage,
   ToolRun,
 } from "@suocode/runtime-protocol";
@@ -60,6 +58,7 @@ import {
   type ConversationTimelineItem,
   type TimelineItem,
 } from "./features/conversation/ConversationTimeline";
+import { SettingsDialog } from "./features/settings/SettingsDialog";
 
 type InspectorView = "files";
 type SessionActivity = { runtimeId?: string; running: boolean; unread: boolean };
@@ -71,7 +70,6 @@ const LEFT_WIDTH_KEY = "suocode.left-panel-width";
 const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
 const MINIMUM_CONVERSATION_WIDTH = 315;
 const MINIMUM_PANEL_WIDTH = 40;
-const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const AGENT_ACTIVITY_PHRASES = ["工作中…", "整理线索…", "翻找文件…", "冲浪中…", "组织思路…", "沿着思路前进…", "快收尾了…"];
 const EMPTY_PROJECT: ProjectSnapshot = {
   cwd: "",
@@ -168,19 +166,6 @@ function truncateTitle(value: string, maximum = 10): string {
 function storedWidth(key: string, fallback: number): number {
   const value = Number(window.localStorage.getItem(key));
   return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function thinkingLevelForModel(model: ModelOption | undefined, requested: ThinkingLevel): ThinkingLevel {
-  const available: ThinkingLevel[] = model?.supportedThinkingLevels?.length ? model.supportedThinkingLevels : ["off"];
-  if (available.includes(requested)) return requested;
-  const requestedIndex = THINKING_LEVELS.indexOf(requested);
-  for (let index = requestedIndex; index < THINKING_LEVELS.length; index += 1) {
-    if (available.includes(THINKING_LEVELS[index])) return THINKING_LEVELS[index];
-  }
-  for (let index = requestedIndex - 1; index >= 0; index -= 1) {
-    if (available.includes(THINKING_LEVELS[index])) return THINKING_LEVELS[index];
-  }
-  return available[0] ?? "off";
 }
 
 function upsertMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
@@ -523,109 +508,6 @@ function WorkspaceStatus({
           </Popover.Portal>
         </Popover.Root>
       </div>
-    </div>
-  );
-}
-
-function SettingsDialog({ configuration, open, onClose, onSaved, runtimeId }: {
-  configuration?: RuntimeConfiguration;
-  open: boolean;
-  onClose: () => void;
-  onSaved: (configuration: RuntimeConfiguration) => void;
-  runtimeId?: string;
-}): React.JSX.Element | null {
-  const providers = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const model of configuration?.models ?? []) map.set(model.provider, model.providerName);
-    return [...map].sort((a, b) => {
-      const aConfigured = configuration?.configuredProviders.includes(a[0]) ? 1 : 0;
-      const bConfigured = configuration?.configuredProviders.includes(b[0]) ? 1 : 0;
-      return bConfigured - aConfigured || a[1].localeCompare(b[1]);
-    });
-  }, [configuration]);
-  const [provider, setProvider] = useState("");
-  const [modelId, setModelId] = useState("");
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("medium");
-  const [apiKey, setApiKey] = useState("");
-  const [modelSearch, setModelSearch] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    if (!open || !configuration) return;
-    const nextProvider = configuration.provider || configuration.configuredProviders[0] || providers[0]?.[0] || "";
-    setProvider(nextProvider);
-    const providerModels = configuration.models.filter((model) => model.provider === nextProvider);
-    const nextModel = providerModels.find((model) => model.id === configuration.modelId) ?? providerModels[0];
-    setModelId(nextModel?.id || "");
-    setThinkingLevel(thinkingLevelForModel(nextModel, configuration.thinkingLevel));
-    setApiKey("");
-    setModelSearch("");
-    setError(undefined);
-  }, [configuration, open, providers]);
-
-  const models = useMemo(() => (configuration?.models ?? []).filter((model) =>
-    model.provider === provider && (!modelSearch || `${model.name} ${model.id}`.toLowerCase().includes(modelSearch.toLowerCase())),
-  ), [configuration, modelSearch, provider]);
-
-  const chooseProvider = (value: string): void => {
-    setProvider(value);
-    const first = configuration?.models.find((model) => model.provider === value);
-    setModelId(first?.id || "");
-    setThinkingLevel((current) => thinkingLevelForModel(first, current));
-    setModelSearch("");
-  };
-
-  const chooseModel = (value: string): void => {
-    setModelId(value);
-    const model = configuration?.models.find((item) => item.provider === provider && item.id === value);
-    setThinkingLevel((current) => thinkingLevelForModel(model, current));
-  };
-
-  const save = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-    if (!provider || !modelId) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      const next = await window.suocode.request<RuntimeConfiguration>({
-        type: "configure_model",
-        provider,
-        modelId,
-        thinkingLevel,
-        apiKey: apiKey || undefined,
-      }, runtimeId);
-      onSaved(next);
-      onClose();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!open) return null;
-  const configured = configuration?.configuredProviders.includes(provider) ?? false;
-  const selectedModel = configuration?.models.find((model) => model.provider === provider && model.id === modelId);
-  const availableThinkingLevels: ThinkingLevel[] = selectedModel?.supportedThinkingLevels?.length ? selectedModel.supportedThinkingLevels : ["off"];
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <header>
-          <div><span className="settings-icon"><Settings size={16} /></span><div><h2 id="settings-title">模型设置</h2><p>凭据保存在 SuoCode 的私有运行时目录中。</p></div></div>
-          <button className="icon-button" type="button" aria-label="关闭设置" onClick={onClose}><X size={17} /></button>
-        </header>
-        <form onSubmit={(event) => void save(event)}>
-          <label>服务商<select value={provider} onChange={(event) => chooseProvider(event.target.value)}>{providers.map(([id, name]) => <option value={id} key={id}>{name}{configuration?.configuredProviders.includes(id) ? " · 已配置" : ""}</option>)}</select></label>
-          <label>模型<span className="model-search"><Search size={14} /><input value={modelSearch} placeholder="筛选模型" onChange={(event) => setModelSearch(event.target.value)} /></span><select size={7} value={modelId} onChange={(event) => chooseModel(event.target.value)}>{models.map((model) => <option value={model.id} key={model.id}>{model.name} · {model.id}{model.reasoning ? " · reasoning" : ""}</option>)}</select></label>
-          <div className="settings-grid">
-            <label>Thinking<select value={thinkingLevel} disabled={availableThinkingLevels.length === 1} onChange={(event) => setThinkingLevel(event.target.value as ThinkingLevel)}>{availableThinkingLevels.map((level) => <option value={level} key={level}>{level}</option>)}</select></label>
-            <label>API 密钥<span className="secret-input"><KeyRound size={14} /><input type="password" value={apiKey} autoComplete="off" placeholder={configured ? "已配置，留空可保留" : "粘贴服务商 API 密钥"} onChange={(event) => setApiKey(event.target.value)} /></span></label>
-          </div>
-          {error ? <div className="settings-error"><AlertCircle size={14} />{error}</div> : null}
-          <footer><span>{configured ? "服务商凭据可用" : "首次发送消息前需要配置凭据。"}</span><button className="primary-button" type="submit" disabled={saving || !provider || !modelId}>{saving ? <LoaderCircle className="spin" size={15} /> : null}保存</button></footer>
-        </form>
-      </section>
     </div>
   );
 }
@@ -1284,7 +1166,7 @@ export default function App(): React.JSX.Element {
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
       </main>
-      <SettingsDialog configuration={configuration} open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} />
+      <SettingsDialog configuration={configuration} open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} />
     </>
   );
 }

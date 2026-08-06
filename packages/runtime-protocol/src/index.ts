@@ -27,6 +27,37 @@ export interface RuntimeConfiguration {
   migratedLegacyCredentials: boolean;
 }
 
+export type McpTransport = "stdio" | "http";
+
+export interface McpServerConfiguration {
+  name: string;
+  transport: McpTransport;
+  command?: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers: Record<string, string>;
+  auth?: "oauth" | "bearer" | false;
+  lifecycle: "keep-alive" | "lazy" | "eager";
+  directTools: boolean;
+  source?: string;
+  sourceKind?: "user" | "project" | "import";
+}
+
+export interface McpImportConfiguration {
+  kind: "cursor" | "claude-code" | "claude-desktop" | "codex" | "windsurf" | "vscode";
+  path: string;
+  serverCount: number;
+  enabled: boolean;
+}
+
+export interface McpConfigurationSnapshot {
+  configPath: string;
+  servers: McpServerConfiguration[];
+  imports: McpImportConfiguration[];
+}
+
 export interface SessionSummary {
   id: string;
   path: string;
@@ -172,6 +203,10 @@ export type RuntimeCommand =
       apiKey?: string;
     }
   | { type: "remove_provider_auth"; provider: string }
+  | { type: "get_mcp_configuration"; cwd?: string }
+  | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
+  | { type: "remove_mcp_server"; name: string; cwd?: string }
+  | { type: "enable_mcp_imports"; imports: McpImportConfiguration["kind"][]; cwd?: string }
   | { type: "list_sessions"; cwd: string }
   | { type: "create_session"; cwd: string }
   | { type: "open_session"; cwd: string; sessionPath: string }

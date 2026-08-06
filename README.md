@@ -15,7 +15,7 @@ SuoCode Desktop does not require a user-installed Pi. The application starts its
 - Persistent project-scoped conversations that survive application restarts
 - Model/provider selection and API-key configuration
 - Project tools for reading, searching, editing, writing, and running commands
-- Bundled MCP gateway and bundled subagents with skills and prompt templates
+- Bundled `pi-mcp-adapter` and `pi-subagents` extensions, with SuoCode-owned GUI configuration and status projection
 - Structured todo plans, Git changes and patches, terminal output, and project file previews
 - SuoCode's bundled Simplified Chinese workflow, policies, project memory, and terminal support
 - Explicit development-only migration support for an existing Pi model configuration

@@ -79,6 +79,32 @@ function waitForEvent(predicate, timeoutMs = 180_000) {
 try {
   const bootstrap = await request({ type: "bootstrap" });
   if (!bootstrap?.configuration?.models) throw new Error("Bootstrap did not return model configuration.");
+  const initialMcp = await request({ type: "get_mcp_configuration", cwd: projectDir });
+  if (!initialMcp?.configPath?.startsWith(temporaryRoot) || initialMcp.servers.some((server) => server.name === "smoke-server")) {
+    throw new Error("MCP configuration was not isolated inside the SuoCode runtime.");
+  }
+  const savedMcp = await request({
+    type: "save_mcp_server",
+    cwd: projectDir,
+    server: {
+      name: "smoke-server",
+      transport: "stdio",
+      command: process.execPath,
+      args: ["-e", "process.exit(0)"],
+      env: { SUOCODE_MCP_SMOKE: "1" },
+      headers: {},
+      lifecycle: "lazy",
+      directTools: false,
+    },
+  });
+  const smokeMcp = savedMcp.servers.find((server) => server.name === "smoke-server");
+  if (!smokeMcp || smokeMcp.command !== process.execPath || smokeMcp.env.SUOCODE_MCP_SMOKE !== "1") {
+    throw new Error("The Pi MCP adapter configuration bridge did not persist a stdio server.");
+  }
+  const removedMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "smoke-server" });
+  if (removedMcp.servers.some((server) => server.name === "smoke-server")) {
+    throw new Error("The Pi MCP adapter configuration bridge did not remove a SuoCode-owned server.");
+  }
   const snapshot = await request({ type: "create_session", cwd: projectDir });
   if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
   if (!snapshot.project.files.some((entry) => entry.name === "zz-root.txt")) {

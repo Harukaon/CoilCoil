@@ -45,6 +45,14 @@ export class RuntimeServer {
         return this.runtime.configureModel(command);
       case "remove_provider_auth":
         return this.runtime.removeProviderAuth(command.provider);
+      case "get_mcp_configuration":
+        return this.runtime.getMcpConfiguration(command.cwd);
+      case "save_mcp_server":
+        return this.runtime.saveMcpServer(command.server, command.previousName, command.cwd);
+      case "remove_mcp_server":
+        return this.runtime.removeMcpServer(command.name, command.cwd);
+      case "enable_mcp_imports":
+        return this.runtime.enableMcpImports(command.imports, command.cwd);
       case "list_sessions":
         return this.runtime.listSessions(command.cwd);
       case "create_session":
