@@ -86,6 +86,25 @@
 - 错误消息作为该次 assistant turn 的结束状态展示，不应破坏摘要展开、折叠或后续继续对话。
 - 连接错误不生成虚假的性能指标。
 
+## P0：子 Agent 后台进程窗口泄漏
+
+### macOS Dock 出现多个 `exec` 应用图标
+
+- 当前问题：运行子 Agent 时，macOS Dock 会出现一个或多个名为 `exec` 的临时应用图标。子 Agent 数量增加时图标也会增加。
+- 原因方向：后台 worker 可能直接使用 Electron 应用可执行文件启动 Node/Pi CLI，macOS 因而把每个 worker 识别为新的 GUI 应用实例，而不是无界面的后台子进程。
+- 目标：子 Agent、memory worker 和其他 Runtime worker 必须使用真正的无界面进程启动方式，不注册 Dock 应用，不创建窗口，不激活应用。
+- 实现审查：
+  - 检查打包环境下 `process.execPath` 是否指向 Electron/SuoCode 可执行文件。
+  - Electron 可执行文件承载 Node worker 时，确保使用正确的 Node 模式环境和后台启动参数；如果仍会注册 GUI 实例，应改用安装包内独立的 Node sidecar/runtime launcher。
+  - worker 的 stdio、IPC、退出码和进程组仍需保留，不能通过脱离管理来隐藏图标。
+  - 子 Agent 停止、异常退出或主应用退出后，必须清理对应 worker，不能留下孤儿进程。
+- 验收：
+  1. 同时启动 1 个、3 个和更多子 Agent，Dock 中始终只有一个 SuoCode 图标。
+  2. 不出现 `exec`、Electron 或其他临时应用图标。
+  3. 子 Agent 启动过程中不弹窗、不抢焦点、不切换当前 Space。
+  4. 子 Agent 的流式事件、停止操作和退出状态保持正常。
+  5. 打包应用和开发模式分别回归。
+
 ## 回归矩阵
 
 每次完成本清单中的一组修复，至少验证：
@@ -100,3 +119,4 @@
 8. Todo 展开、折叠与聊天滚动。
 9. Markdown 长表格、长路径、代码块。
 10. 供应商连接失败和用户主动中止。
+11. 并发子 Agent 不产生额外 Dock 图标、窗口或孤儿进程。
