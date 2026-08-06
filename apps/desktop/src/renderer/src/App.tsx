@@ -1233,7 +1233,7 @@ export default function App(): React.JSX.Element {
         </section>
 
         <aside className="inspector-pane">
-          <div className="inspector-header window-drag"><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
+          <div className="inspector-header"><div className="inspector-drag-surface" aria-hidden="true" /><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
           <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span></button>; })}</nav>
           <section className="inspector-content">
             {inspectorView === "files" ? <FilesPanel project={projectState} runtimeId={snapshot?.runtimeId} onOpen={openFilePreview} /> : null}

@@ -244,6 +244,14 @@ async function main() {
     assert.equal(isolation.rightResizer, false);
     assert.match(isolation.inspector, /文件/);
     assert.doesNotMatch(isolation.inspector, /Todo|变更|终端/);
+    const inspectorDragSurface = await client.evaluate(`(() => {
+      const surface = document.querySelector(".inspector-drag-surface");
+      const bounds = surface?.getBoundingClientRect();
+      if (!surface || !bounds) return null;
+      const center = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+      return { region: getComputedStyle(surface).webkitAppRegion, width: bounds.width, hit: center === surface };
+    })()`);
+    assert.equal(inspectorDragSurface?.region, "drag");
     const runtimeIsolation = await client.evaluate(`(async () => {
       const first = await window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryA)} });
       const second = await window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryB)} });
@@ -368,6 +376,15 @@ async function main() {
     await client.evaluate(`(() => { window.resizeTo(1440, 900); return true; })()`);
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not return to its regular test size.");
     await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+    const openInspectorDragSurface = await client.evaluate(`(() => {
+      const surface = document.querySelector(".inspector-drag-surface");
+      const bounds = surface?.getBoundingClientRect();
+      if (!surface || !bounds) return null;
+      const center = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+      return { width: bounds.width, hit: center === surface };
+    })()`);
+    assert.ok((openInspectorDragSurface?.width ?? 0) > 100);
+    assert.equal(openInspectorDragSurface?.hit, true);
     const rightHandle = await client.evaluate(`(() => {
       const bounds = document.querySelector(".right-resizer")?.getBoundingClientRect();
       return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;
