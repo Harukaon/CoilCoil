@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -267,6 +267,13 @@ async function main() {
     assert.match(homeState.home.path, /\/Home$/);
     assert.equal(homeState.projectName, "Home");
     assert.match(homeState.status, /Home/);
+    if (process.platform === "darwin") {
+      const nodeRuntimeLink = join(dirname(homeState.home.path), "agent", "runtime-bin", "node");
+      assert.equal(await realpath(nodeRuntimeLink), join(
+        repositoryRoot,
+        "apps/desktop/release/mac-arm64/SuoCode.app/Contents/Frameworks/SuoCode Helper.app/Contents/MacOS/SuoCode Helper",
+      ));
+    }
     const expandedHomePath = await client.evaluate(`(async () => {
       document.querySelector(".workspace-path")?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
@@ -294,12 +301,14 @@ async function main() {
     assert.equal(isolation.rightResizer, false);
     assert.match(isolation.inspector, /文件/);
     assert.doesNotMatch(isolation.inspector, /Todo|变更|终端/);
-    const metricControlOrder = await client.evaluate(`(() => {
-      const performance = document.querySelector(".performance-trigger");
-      const context = document.querySelector(".context-trigger");
-      return Boolean(performance && context && (performance.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING));
-    })()`);
-    assert.equal(metricControlOrder, true);
+    const emptyMetricState = await client.evaluate(`({
+      summary: document.querySelector(".response-metrics")?.textContent || "",
+      performance: Boolean(document.querySelector(".performance-trigger")),
+      context: Boolean(document.querySelector(".context-trigger"))
+    })`);
+    assert.equal(emptyMetricState.summary, "");
+    assert.equal(emptyMetricState.performance, false);
+    assert.equal(emptyMetricState.context, true);
     const inspectorDragSurface = await client.evaluate(`(() => {
       const surface = document.querySelector(".inspector-drag-surface");
       const bounds = surface?.getBoundingClientRect();
@@ -473,8 +482,12 @@ async function main() {
       if (!body) return null;
       const probe = document.createElement("div");
       probe.className = "agent-turn-content";
-      probe.innerHTML = '<details class="tool-activity"><summary><span>思考了 7 次，编辑了 1 个文件，查看了 2 个文件，搜索 1 次，运行了 4 个命令，调用了 3 个工具</span><svg width="14"></svg></summary></details><div class="assistant-segment"><div class="markdown"><p>测试过程中的长中文内容必须在很窄的聊天窗口中正确换行而不能被右侧文件栏遮挡。<code>very-long-inline-token-without-natural-breaks-0123456789</code></p></div></div>';
+      probe.innerHTML = '<details class="tool-activity"><summary><span>思考了 7 次，编辑了 1 个文件，查看了 2 个文件，搜索 1 次，运行了 4 个命令，调用了 3 个工具</span><svg class="tool-chevron" width="14"></svg></summary></details><div class="assistant-segment"><div class="markdown"><p>测试过程中的长中文内容必须在很窄的聊天窗口中正确换行而不能被右侧文件栏遮挡。<code>very-long-inline-token-without-natural-breaks-0123456789</code></p><div class="markdown-table-scroll"><table><tbody><tr><td style="min-width:480px">很宽的表格内容</td><td style="min-width:480px">继续横向滚动</td></tr></tbody></table></div></div></div>';
       body.append(probe);
+      const summary = probe.querySelector(".tool-activity > summary");
+      const summaryText = summary?.querySelector("span")?.getBoundingClientRect();
+      const chevron = summary?.querySelector(".tool-chevron")?.getBoundingClientRect();
+      const tableScroller = probe.querySelector(".markdown-table-scroll");
       const result = {
         paddingBottom: Number.parseFloat(getComputedStyle(body).paddingBottom),
         clientWidth: body.clientWidth,
@@ -483,6 +496,8 @@ async function main() {
         probeScrollWidth: probe.scrollWidth,
         probeClientWidth: probe.clientWidth,
         bodyRight: body.getBoundingClientRect().right,
+        summaryGap: summaryText && chevron ? chevron.left - summaryText.right : 999,
+        tableScrollable: tableScroller ? tableScroller.scrollWidth > tableScroller.clientWidth : false,
       };
       probe.remove();
       return result;
@@ -491,6 +506,8 @@ async function main() {
     assert.ok((narrowConversationLayout?.scrollWidth ?? 1) <= (narrowConversationLayout?.clientWidth ?? 0) + 1);
     assert.ok((narrowConversationLayout?.probeScrollWidth ?? 1) <= (narrowConversationLayout?.probeClientWidth ?? 0) + 1);
     assert.ok((narrowConversationLayout?.probeRight ?? 1) <= (narrowConversationLayout?.bodyRight ?? 0) + 1);
+    assert.ok((narrowConversationLayout?.summaryGap ?? 999) <= 9);
+    assert.equal(narrowConversationLayout?.tableScrollable, true);
     await client.evaluate(`window.resizeTo(1440, 900)`);
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not expand after panel compression.");
     await client.waitFor(

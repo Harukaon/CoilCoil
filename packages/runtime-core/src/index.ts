@@ -1121,17 +1121,21 @@ export class SuoCodeRuntime {
     return { accepted: true };
   }
 
-  async rewindPrompt(entryId: string, text: string): Promise<{ accepted: true }> {
+  async rewindPrompt(entryId: string, text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    const prompt = text.trim();
+    const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");
     const result = await active.session.navigateTree(entryId, { summarize: false });
     if (result.cancelled) throw new Error("未能回溯到所选消息。");
+    const prepared = await preparePromptImages(images);
+    const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
     const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
     if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
     this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
-    void active.session.prompt(prompt).catch((error) => {
+    void active.session.prompt(expandedPrompt, {
+      images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
+    }).catch((error) => {
       this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       this.emitEvent({ type: "run_state", running: false });
     });

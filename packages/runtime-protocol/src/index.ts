@@ -176,7 +176,7 @@ export type RuntimeCommand =
   | { type: "create_session"; cwd: string }
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "prompt"; text: string; images?: PromptImage[] }
-  | { type: "rewind_prompt"; entryId: string; text: string }
+  | { type: "rewind_prompt"; entryId: string; text: string; images?: PromptImage[] }
   | { type: "steer"; text: string; images?: PromptImage[] }
   | { type: "abort" }
   | { type: "refresh_project" }

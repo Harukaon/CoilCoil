@@ -33,8 +33,6 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import type { ClipboardEvent as ReactClipboardEvent, CSSProperties, DragEvent as ReactDragEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type {
   ChangedFile,
   ChatMessage,
@@ -54,25 +52,23 @@ import type {
   TokenUsage,
   ToolRun,
 } from "@suocode/runtime-protocol";
+import {
+  AgentTurnView,
+  MessageView,
+  clipboardImage,
+  imageDataUrl,
+  type ConversationTimelineItem,
+  type TimelineItem,
+} from "./features/conversation/ConversationTimeline";
 
 type InspectorView = "files";
 type SessionActivity = { runtimeId?: string; running: boolean; unread: boolean };
-type TimelineItem =
-  | { kind: "message"; order: number; message: ChatMessage }
-  | { kind: "tools"; order: number; tools: ToolRun[] };
-type ConversationTimelineItem =
-  | { kind: "user"; order: number; message: ChatMessage }
-  | { kind: "agent"; order: number; items: TimelineItem[] };
-type ActivityEntry =
-  | { kind: "thinking"; id: string; text: string }
-  | { kind: "tool"; id: string; tool: ToolRun };
 
 const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
 const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
 const ACTIVE_PROJECT_STORAGE_KEY = "suocode.active-project";
 const LEFT_WIDTH_KEY = "suocode.left-panel-width";
 const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
-const REWIND_WARNING_DISMISSED_KEY = "suocode.rewind-warning-dismissed";
 const MINIMUM_CONVERSATION_WIDTH = 315;
 const MINIMUM_PANEL_WIDTH = 40;
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -119,25 +115,6 @@ function absoluteProjectPath(root: string, value: string): string {
 
 function quotePath(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function imageDataUrl(image: PromptImage): string {
-  return `data:${image.mimeType};base64,${image.data}`;
-}
-
-async function clipboardImage(file: globalThis.File): Promise<PromptImage> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("无法读取粘贴的图片。"));
-    reader.readAsDataURL(file);
-  });
-  return {
-    id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
-    name: file.name || "粘贴的图片",
-    mimeType: file.type || "image/png",
-    data: dataUrl.slice(dataUrl.indexOf(",") + 1),
-  };
 }
 
 function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
@@ -236,121 +213,6 @@ function EmptyState({ icon: Icon, title, detail }: {
   );
 }
 
-function Markdown({ children }: { children: string }): React.JSX.Element {
-  return (
-    <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
-    </div>
-  );
-}
-
-function MessageView({ message, disabled, onRewind }: {
-  message: ChatMessage;
-  disabled: boolean;
-  onRewind: (message: ChatMessage, text: string) => Promise<void>;
-}): React.JSX.Element {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(message.text);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const editorRef = useRef<HTMLDivElement>(null);
-  const composingRef = useRef(false);
-  useEffect(() => setValue(message.text), [message.text]);
-
-  useEffect(() => {
-    if (!editing) return;
-    const closeOnOutsidePointer = (event: PointerEvent): void => {
-      if (confirmOpen || editorRef.current?.contains(event.target as Node)) return;
-      setEditing(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
-    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-  }, [confirmOpen, editing]);
-
-  const proceed = (remember: boolean): void => {
-    const prompt = value.trim();
-    if (!prompt || !message.entryId) return;
-    if (remember) window.localStorage.setItem(REWIND_WARNING_DISMISSED_KEY, "true");
-    setConfirmOpen(false);
-    setEditing(false);
-    void onRewind(message, prompt);
-  };
-
-  const requestRewind = (): void => {
-    if (!value.trim() || !message.entryId) return;
-    if (window.localStorage.getItem(REWIND_WARNING_DISMISSED_KEY) === "true") proceed(false);
-    else setConfirmOpen(true);
-  };
-
-  if (message.role === "user") {
-    return (
-      <article className="timeline-message user-message">
-        <div className="message-label">你</div>
-        {editing ? (
-          <div className="user-message-editor-shell" ref={editorRef}>
-            <textarea
-              className="user-bubble user-message-editor"
-              autoFocus
-              value={value}
-              aria-label="编辑历史消息"
-              placeholder="编辑历史消息"
-              onChange={(event) => setValue(event.target.value)}
-              onCompositionStart={() => { composingRef.current = true; }}
-              onCompositionEnd={() => { composingRef.current = false; }}
-              onKeyDown={(event) => {
-                if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setEditing(false);
-                } else if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  requestRewind();
-                }
-              }}
-            />
-            {value !== message.text ? <small className="history-edit-warning">修改历史消息会改变后续上下文，可能降低本次请求的提示缓存命中率。</small> : null}
-          </div>
-        ) : (
-          <button
-            className="user-bubble user-bubble-button"
-            type="button"
-            title={message.entryId ? "点击编辑并从这里重新开始" : undefined}
-            data-prompt-value={value}
-            disabled={disabled || !message.entryId}
-            onClick={() => setEditing(true)}
-          >
-            {value ? <span>{value}</span> : null}
-            {message.images?.length ? <span className="message-images">{message.images.map((image) => <img src={imageDataUrl(image)} alt={image.name ?? "附加图片"} key={image.id ?? image.data.slice(0, 24)} />)}</span> : null}
-          </button>
-        )}
-        {confirmOpen ? (
-          <div className="modal-backdrop rewind-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmOpen(false); }}>
-            <section className="rewind-dialog" role="dialog" aria-modal="true" aria-labelledby={`rewind-title-${message.id}`}>
-              <h2 id={`rewind-title-${message.id}`}>从这里重新开始？</h2>
-              <p>对话将从这条消息重新开始。当前工作区中已经产生的文件修改不会被恢复。</p>
-              <footer>
-                <button type="button" onClick={() => setConfirmOpen(false)}>取消</button>
-                <button type="button" onClick={() => proceed(true)}>不再提醒</button>
-                <button className="primary-button" type="button" onClick={() => proceed(false)}>继续</button>
-              </footer>
-            </section>
-          </div>
-        ) : null}
-      </article>
-    );
-  }
-
-  return <AssistantSegment message={message} />;
-}
-
-function AssistantSegment({ message }: { message: ChatMessage }): React.JSX.Element {
-  return (
-    <div className={`assistant-segment assistant-message ${message.isError ? "error" : ""}`}>
-      {message.thinking?.trim() ? <details className="thinking-block"><summary>Reasoning</summary><div>{message.thinking}</div></details> : null}
-      {message.text ? <Markdown>{message.text}</Markdown> : null}
-    </div>
-  );
-}
-
 function ModelPicker({ configuration, currentModel, open, busy, onOpenChange, onSelect, onOpenSettings }: {
   configuration?: RuntimeConfiguration;
   currentModel?: SessionSnapshot["model"];
@@ -402,135 +264,6 @@ function ModelPicker({ configuration, currentModel, open, busy, onOpenChange, on
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
-  );
-}
-
-function lineStats(tool: ToolRun): { additions: number; deletions: number } {
-  const args = tool.args;
-  const added = String(args.newText ?? args.new_string ?? args.content ?? "");
-  const removed = String(args.oldText ?? args.old_string ?? "");
-  return {
-    additions: added ? added.split("\n").length : 0,
-    deletions: removed ? removed.split("\n").length : 0,
-  };
-}
-
-function toolSummary(tools: ToolRun[], thinkingCount: number): string {
-  const edited = new Set<string>();
-  let explored = 0;
-  let searches = 0;
-  let commands = 0;
-  let other = 0;
-  for (const tool of tools) {
-    const path = String(tool.args.path ?? "");
-    if (["edit", "write"].includes(tool.name)) edited.add(path || tool.id);
-    else if (["read", "ls", "find"].includes(tool.name)) explored += 1;
-    else if (tool.name === "grep") searches += 1;
-    else if (["bash", "terminal"].includes(tool.name)) commands += 1;
-    else other += 1;
-  }
-  const parts: string[] = [];
-  if (thinkingCount) parts.push(`思考了 ${thinkingCount} 次`);
-  if (edited.size) parts.push(`编辑了 ${edited.size} 个文件`);
-  if (explored) parts.push(`查看了 ${explored} 个文件`);
-  if (searches) parts.push(`搜索 ${searches} 次`);
-  if (commands) parts.push(`运行了 ${commands} 个命令`);
-  if (other) parts.push(`调用了 ${other} 个工具`);
-  return parts.join("，") || `调用了 ${tools.length} 个工具`;
-}
-
-function toolArgumentsText(tool: ToolRun): string {
-  const args = tool.args;
-  const path = String(args.path ?? args.filePath ?? "");
-  if (tool.name === "bash") return String(args.command ?? "");
-  if (tool.name === "read") {
-    const range = [args.offset !== undefined ? `offset=${String(args.offset)}` : "", args.limit !== undefined ? `limit=${String(args.limit)}` : ""].filter(Boolean).join(" · ");
-    return [path, range].filter(Boolean).join("\n");
-  }
-  if (tool.name === "grep") return [`pattern: ${String(args.pattern ?? "")}`, path ? `path: ${path}` : "", args.glob ? `glob: ${String(args.glob)}` : ""].filter(Boolean).join("\n");
-  if (tool.name === "find") return [`pattern: ${String(args.pattern ?? "")}`, path ? `path: ${path}` : ""].filter(Boolean).join("\n");
-  if (tool.name === "ls") return path || ".";
-  if (tool.name === "write") return [path, String(args.content ?? "")].filter(Boolean).join("\n\n");
-  if (tool.name === "edit") {
-    const oldText = String(args.oldText ?? args.old_string ?? "");
-    const newText = String(args.newText ?? args.new_string ?? "");
-    return [path, oldText ? `--- 原内容\n${oldText}` : "", newText ? `+++ 新内容\n${newText}` : ""].filter(Boolean).join("\n\n");
-  }
-  try {
-    return JSON.stringify(args, null, 2);
-  } catch {
-    return String(args);
-  }
-}
-
-function ToolExecutionDetails({ tool }: { tool: ToolRun }): React.JSX.Element | null {
-  const input = toolArgumentsText(tool).trim();
-  const output = tool.output.trim();
-  if (!input && !output) return null;
-  return (
-    <div className="tool-execution-details">
-      {input ? <section><span>调用参数</span><pre>{input}</pre></section> : null}
-      {output ? <section><span>{tool.status === "failed" ? "错误" : "执行结果"}</span><pre>{output}</pre></section> : null}
-    </div>
-  );
-}
-
-function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX.Element {
-  const tools = entries.flatMap((entry) => entry.kind === "tool" ? [entry.tool] : []);
-  const thinkingCount = entries.filter((entry) => entry.kind === "thinking").length;
-  const stats = tools.reduce((total, tool) => {
-    const next = lineStats(tool);
-    return { additions: total.additions + next.additions, deletions: total.deletions + next.deletions };
-  }, { additions: 0, deletions: 0 });
-  const running = tools.some((tool) => tool.status === "running");
-  return (
-    <details className="tool-activity" open={running}>
-      <summary>
-        <span>{running ? "正在执行工具" : toolSummary(tools, thinkingCount)}</span>
-        {stats.additions ? <b className="additions">+{stats.additions}</b> : null}
-        {stats.deletions ? <b className="deletions">-{stats.deletions}</b> : null}
-        <ChevronRight className="tool-chevron" size={14} />
-      </summary>
-      <div className="tool-activity-list">
-        {entries.map((entry) => {
-          if (entry.kind === "thinking") return <details className="tool-activity-row thinking" key={entry.id}><summary><code>think</code><span>Reasoning</span></summary><pre>{entry.text}</pre></details>;
-          const tool = entry.tool;
-          const itemStats = lineStats(tool);
-          return <details className={`tool-activity-row ${tool.status}`} key={tool.id}><summary><code>{tool.name}</code><span>{tool.label}</span>{itemStats.additions ? <b className="additions">+{itemStats.additions}</b> : null}{itemStats.deletions ? <b className="deletions">-{itemStats.deletions}</b> : null}{tool.status === "running" ? <LoaderCircle className="spin" size={13} /> : tool.status === "failed" ? <AlertCircle size={13} /> : null}</summary><ToolExecutionDetails tool={tool} /></details>;
-        })}
-      </div>
-    </details>
-  );
-}
-
-function AgentTurnView({ items, modelName }: { items: TimelineItem[]; modelName: string }): React.JSX.Element {
-  const rendered: React.JSX.Element[] = [];
-  let activity: ActivityEntry[] = [];
-  const flushActivity = (): void => {
-    if (!activity.length) return;
-    const entries = activity;
-    activity = [];
-    rendered.push(<ActivityGroupView key={`activity-${entries[0].id}`} entries={entries} />);
-  };
-  for (const item of items) {
-    if (item.kind === "tools") {
-      activity.push(...item.tools.map((tool) => ({ kind: "tool" as const, id: tool.id, tool })));
-      continue;
-    }
-    if (item.message.thinking?.trim()) activity.push({ kind: "thinking", id: `${item.message.id}-thinking`, text: item.message.thinking });
-    if (item.message.text) {
-      flushActivity();
-      rendered.push(<AssistantSegment key={`message-${item.message.id}`} message={{ ...item.message, thinking: undefined }} />);
-    }
-  }
-  flushActivity();
-  return (
-    <article className="agent-turn">
-      <div className="message-label">{modelName}</div>
-      <div className="agent-turn-content">
-        {rendered}
-      </div>
-    </article>
   );
 }
 
@@ -718,6 +451,10 @@ function WorkspaceStatus({
 }): React.JSX.Element {
   const [pathOpen, setPathOpen] = useState(false);
   const percent = Math.max(0, Math.min(100, contextUsage?.percent ?? 0));
+  const firstTokenText = responseMetrics?.firstTokenMs === undefined ? undefined : `首字 ${formatMetricDuration(responseMetrics.firstTokenMs)}`;
+  const speedText = responseMetrics?.averageTokensPerSecond === undefined ? undefined : `${responseMetrics.averageTokensPerSecond.toFixed(1)} tok/s`;
+  const metricSummary = [firstTokenText, speedText].filter(Boolean).join(" · ");
+  const hasPerformanceHistory = responseMetricsHistory.length > 0;
   return (
     <div className="workspace-status">
       <Popover.Root open={pathOpen} onOpenChange={setPathOpen}>
@@ -735,12 +472,8 @@ function WorkspaceStatus({
         </Popover.Portal>
       </Popover.Root>
       <div className="composer-metrics">
-        {responseMetrics ? (
-          <span className="response-metrics">
-            首字 {formatMetricDuration(responseMetrics.firstTokenMs)} · {responseMetrics.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s
-          </span>
-        ) : null}
-        <Popover.Root>
+        {metricSummary ? <span className="response-metrics">{metricSummary}</span> : null}
+        {responseMetrics || hasPerformanceHistory ? <Popover.Root>
           <Popover.Trigger asChild>
             <button className="performance-trigger" type="button" aria-label="查看模型性能历史" title="模型响应性能">
               <span className={`performance-signal ${responseMetrics ? performanceGrade(responseMetrics) : "unknown"}`}><i /><i /><i /></span>
@@ -754,7 +487,7 @@ function WorkspaceStatus({
                   <div className="performance-grid">{responseMetricsHistory.slice(-60).map((item, index) => {
                     const promptTokens = (item.inputTokens ?? 0) + (item.cacheReadTokens ?? 0) + (item.cacheWriteTokens ?? 0);
                     const cacheRate = promptTokens > 0 ? ((item.cacheReadTokens ?? 0) / promptTokens) * 100 : undefined;
-                    return <span className={`performance-cell ${performanceGrade(item)}`} key={`${item.timestamp}-${index}`}><span className="performance-tooltip"><strong>{new Date(item.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</strong><span>首字 {formatMetricDuration(item.firstTokenMs)}</span><span>{item.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s</span><span>输出 {formatTokens(item.outputTokens)} tok</span><span>缓存读取 {formatTokens(item.cacheReadTokens)}</span><span>缓存写入 {formatTokens(item.cacheWriteTokens)}</span><span>缓存命中 {cacheRate === undefined ? "—" : `${cacheRate.toFixed(1)}%`}</span></span></span>;
+                    return <span className={`performance-cell ${performanceGrade(item)}`} key={`${item.timestamp}-${index}`}><span className="performance-tooltip"><strong>{new Date(item.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</strong>{item.firstTokenMs === undefined ? null : <span>首字 {formatMetricDuration(item.firstTokenMs)}</span>}{item.averageTokensPerSecond === undefined ? null : <span>{item.averageTokensPerSecond.toFixed(1)} tok/s</span>}{item.outputTokens === undefined ? null : <span>输出 {formatTokens(item.outputTokens)} tok</span>}{item.cacheReadTokens === undefined ? null : <span>缓存读取 {formatTokens(item.cacheReadTokens)}</span>}{item.cacheWriteTokens === undefined ? null : <span>缓存写入 {formatTokens(item.cacheWriteTokens)}</span>}{cacheRate === undefined ? null : <span>缓存命中 {cacheRate.toFixed(1)}%</span>}</span></span>;
                   })}</div>
                   <div className="performance-legend"><span>较慢</span><i className="slow" /><i className="fair" /><i className="good" /><i className="excellent" /><span>较快</span></div>
                 </>
@@ -762,7 +495,7 @@ function WorkspaceStatus({
               <Popover.Arrow className="model-popover-arrow" />
             </Popover.Content>
           </Popover.Portal>
-        </Popover.Root>
+        </Popover.Root> : null}
         <Popover.Root>
           <Popover.Trigger asChild>
             <button
@@ -1290,12 +1023,19 @@ export default function App(): React.JSX.Element {
     }
   };
 
-  const rewindPrompt = async (message: ChatMessage, text: string): Promise<void> => {
+  const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[]): Promise<void> => {
     if (!message.entryId || !snapshot?.runtimeId) return;
     setError(undefined);
+    const previousMessages = messages;
+    const previousTools = tools;
+    setMessages((current) => current.filter((item) => item.order < message.order));
+    setTools((current) => current.filter((item) => item.order < message.order));
+    shouldAutoScrollRef.current = true;
     try {
-      await window.suocode.request({ type: "rewind_prompt", entryId: message.entryId, text }, snapshot.runtimeId);
+      await window.suocode.request({ type: "rewind_prompt", entryId: message.entryId, text, images }, snapshot.runtimeId);
     } catch (caught) {
+      setMessages(previousMessages);
+      setTools(previousTools);
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
@@ -1503,7 +1243,7 @@ export default function App(): React.JSX.Element {
           </header>
 
           <div className="conversation-body" ref={timelineRef} onScroll={handleTimelineScroll}>
-            {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} disabled={running} onRewind={rewindPrompt} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={snapshot?.model?.name ?? "Agent"} />)}{running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
+            {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} disabled={running} onRewind={rewindPrompt} onError={(message) => setError(message)} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={snapshot?.model?.name ?? "Agent"} />)}{running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
           </div>
 
           <div className="composer-wrap">

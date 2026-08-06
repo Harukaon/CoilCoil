@@ -161,6 +161,10 @@ class RuntimeHost {
   start(): void {
     if (this.child?.connected) return;
     const runtimeEntry = join(__dirname, "runtime.js");
+    const executableName = basename(process.execPath);
+    const nodeExecutable = process.platform === "darwin" && app.isPackaged
+      ? join(dirname(dirname(process.execPath)), "Frameworks", `${executableName} Helper.app`, "Contents", "MacOS", `${executableName} Helper`)
+      : process.execPath;
     const child = fork(runtimeEntry, [], {
       execPath: process.execPath,
       env: {
@@ -168,6 +172,7 @@ class RuntimeHost {
         ELECTRON_RUN_AS_NODE: "1",
         SUOCODE_AGENT_DIR: join(app.getPath("userData"), "agent"),
         SUOCODE_SESSION_DIR: join(app.getPath("userData"), "sessions"),
+        SUOCODE_NODE_EXEC_PATH: nodeExecutable,
       },
       stdio: ["ignore", "pipe", "pipe", "ipc"],
     });

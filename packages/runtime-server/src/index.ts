@@ -54,7 +54,7 @@ export class RuntimeServer {
       case "prompt":
         return this.runtime.prompt(command.text, command.images);
       case "rewind_prompt":
-        return this.runtime.rewindPrompt(command.entryId, command.text);
+        return this.runtime.rewindPrompt(command.entryId, command.text, command.images);
       case "steer":
         return this.runtime.steer(command.text, command.images);
       case "abort":
