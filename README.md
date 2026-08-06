@@ -15,9 +15,10 @@ SuoCode Desktop does not require a user-installed Pi. The application starts its
 - Persistent project-scoped conversations that survive application restarts
 - Model/provider selection and API-key configuration
 - Project tools for reading, searching, editing, writing, and running commands
+- Bundled MCP gateway and bundled subagents with skills and prompt templates
 - Structured todo plans, Git changes and patches, terminal output, and project file previews
 - SuoCode's bundled Simplified Chinese workflow, policies, project memory, and terminal support
-- Optional one-time migration of an existing Pi model configuration into SuoCode's private data directory
+- Explicit development-only migration support for an existing Pi model configuration
 
 ## Repository layout
 
@@ -36,7 +37,7 @@ SuoCode/
 └── docs/                     # Architecture and upstream maintenance
 ```
 
-See [the runtime architecture](docs/architecture.md) and [Pi upstream maintenance](docs/pi-upstream.md) for implementation details.
+See [the runtime architecture](docs/architecture.md), [the current Desktop bug list](docs/desktop-bugs-2026-08-07.md), [the product roadmap](docs/product-roadmap-2026-08-07.md), and [Pi upstream maintenance](docs/pi-upstream.md) for implementation details.
 
 ## Setup
 
@@ -92,4 +93,4 @@ Installers and archives are written to `apps/desktop/release/`. The macOS build 
 
 ## Product data
 
-Desktop credentials, settings, and sessions live under Electron's platform-specific application-data directory. CLI data defaults to `~/.suocode` and can be redirected with `SUOCODE_DATA_DIR`. SuoCode never requires the user's global Pi installation at runtime.
+Desktop credentials, settings, MCP configuration, project memory, and sessions live under Electron's platform-specific application-data directory. CLI data defaults to `~/.suocode` and can be redirected with `SUOCODE_DATA_DIR`. SuoCode never loads the user's global Pi packages or executable at runtime.

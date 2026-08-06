@@ -1472,7 +1472,7 @@ export default function App(): React.JSX.Element {
                   </div>
                   <div className={`conversation-list-shell ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
                     <div className="conversation-list">
-                    {hasPending ? <button className="conversation-row active pending" type="button" onClick={() => inputRef.current?.focus()}><Circle size={11} strokeWidth={1.7} /><span>新 Agent</span><time>刚刚</time></button> : null}
+                    {hasPending ? <button className="conversation-row active pending" type="button" onClick={() => inputRef.current?.focus()}><Circle size={11} strokeWidth={1.7} /><span>新对话</span><time>刚刚</time></button> : null}
                     {visibleSessions.map((session) => {
                       const activity = sessionActivity[session.path];
                       return <button className={`conversation-row ${item.path === project?.path && session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(item, session)}>{activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <span className="conversation-unread" /> : <CircleDot size={11} strokeWidth={2} />}<span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>;
@@ -1496,7 +1496,7 @@ export default function App(): React.JSX.Element {
         <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} onDragEnter={handleFileDragEnter} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-suocode-path")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={handleFileDragLeave} onDrop={handleFileDrop}>
           <header className="conversation-header window-drag">
             {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={() => setLeftOpen(true)}><PanelLeft size={17} /></button> : null}
-            <div className="conversation-title"><strong title={pendingProjectPath ? "新 Agent" : activeConversation?.title ?? "新建对话"}>{truncateTitle(pendingProjectPath ? "新 Agent" : activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
+            <div className="conversation-title"><strong title={pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话"}>{truncateTitle(pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
             <div className="header-actions no-drag">
               {!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={() => setRightOpen(true)}><PanelRight size={17} /></button> : null}
             </div>

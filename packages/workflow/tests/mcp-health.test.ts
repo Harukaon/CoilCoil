@@ -4,7 +4,15 @@ import {
   buildInitialHealth,
   collectEnvPlaceholders,
   markToolResult,
+  piConfigPath,
 } from "../extensions/mcp-health.ts";
+
+test("MCP health uses the SuoCode-owned Agent directory", () => {
+  assert.equal(
+    piConfigPath({ PI_CODING_AGENT_DIR: "/tmp/suocode-agent" }),
+    "/tmp/suocode-agent/mcp.json",
+  );
+});
 
 test("MCP health finds nested environment placeholders", () => {
   const placeholders = collectEnvPlaceholders({

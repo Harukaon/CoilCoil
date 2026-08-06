@@ -80,7 +80,7 @@ The following skills provide specialized instructions.
 test("extension keeps extra tools active and strips the catalog per turn", async () => {
   const harness = createHarness();
   await harness.handlers.get("session_start")?.[0]({}, {});
-  assert.deepEqual(harness.activeTools(), ["read", "bash", "grep", "find", "ls"]);
+  assert.deepEqual(harness.activeTools(), ["read", "bash", "grep", "ls"]);
 
   const result = await harness.handlers.get("before_agent_start")?.[0]({
     systemPrompt: `Base

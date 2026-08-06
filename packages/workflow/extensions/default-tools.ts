@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const DEFAULT_EXTRA_TOOLS = ["grep", "find", "ls"];
+const DEFAULT_EXTRA_TOOLS = ["grep", "ls"];
 const AVAILABLE_TOOLS_HEADING = "\n\nAvailable tools:\n";
 const GUIDELINES_HEADING = "\n\nGuidelines:\n";
 const PI_DOCUMENTATION_HEADING = "\n\nPi documentation (";

@@ -26,6 +26,7 @@ import {
   resolveProjectMemoryPaths,
   resolveProjectMemoryStorageRoot,
   resolveProjectRoot,
+  resolvePiWorkerInvocation,
   type MemoryWorkerChild,
   type MemoryWorkerLaunch,
 } from "../extensions/project-memory.ts";
@@ -272,6 +273,19 @@ test("worker launch runs inside the global project memory folder with isolated r
   assert.doesNotMatch(joined, /not-in-argv/);
   assert.equal(launch.env.PI_MEMORY_WORKER, "1");
   assert.equal(launch.env.PI_MEMORY_WORKER_LOCK_FILE, paths.workerLockFile);
+});
+
+test("bundled memory workers use the host runtime and internal Pi CLI entry", () => {
+  assert.deepEqual(
+    resolvePiWorkerInvocation(
+      { PI_MEMORY_WORKER_ENTRY: "/Applications/SuoCode.app/Contents/Resources/app.asar/node_modules/pi/dist/cli.js" },
+      ["SuoCode", "runtime.js"],
+    ),
+    {
+      command: process.execPath,
+      prefixArgs: ["/Applications/SuoCode.app/Contents/Resources/app.asar/node_modules/pi/dist/cli.js"],
+    },
+  );
 });
 
 test("extension injects global project-scoped memory without creating project .pi", async (t) => {

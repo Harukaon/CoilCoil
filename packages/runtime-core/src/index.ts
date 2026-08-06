@@ -43,10 +43,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -98,7 +98,17 @@ interface ActiveSession {
 }
 
 interface WorkflowManifest {
-  pi?: { extensions?: string[] };
+  pi?: {
+    extensions?: string[];
+    skills?: string[];
+    prompts?: string[];
+  };
+}
+
+interface RuntimeResources {
+  extensions: string[];
+  skills: string[];
+  prompts: string[];
 }
 
 function errorMessage(error: unknown): string {
@@ -489,10 +499,51 @@ function resolveWorkflowDirectory(explicit?: string): string {
   return dirname(manifestPath);
 }
 
-function workflowExtensions(directory: string): string[] {
+function resourcesFromManifest(directory: string): RuntimeResources {
   const manifestPath = join(directory, "package.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as WorkflowManifest;
-  return (manifest.pi?.extensions ?? []).map((path) => resolve(directory, path));
+  return {
+    extensions: (manifest.pi?.extensions ?? []).map((path) => resolve(directory, path)),
+    skills: (manifest.pi?.skills ?? []).map((path) => resolve(directory, path)),
+    prompts: (manifest.pi?.prompts ?? []).map((path) => resolve(directory, path)),
+  };
+}
+
+function resolvePackageDirectory(packageName: string): string {
+  try {
+    return dirname(require.resolve(`${packageName}/package.json`));
+  } catch {
+    let entryPath: string;
+    try {
+      entryPath = require.resolve(packageName);
+    } catch {
+      entryPath = fileURLToPath(import.meta.resolve(packageName));
+    }
+    let directory = dirname(entryPath);
+    while (directory !== dirname(directory)) {
+      const manifestPath = join(directory, "package.json");
+      if (existsSync(manifestPath)) {
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { name?: string };
+        if (manifest.name === packageName) return directory;
+      }
+      directory = dirname(directory);
+    }
+  }
+  throw new Error(`Unable to resolve bundled package: ${packageName}`);
+}
+
+function bundledRuntimeResources(workflowDirectory: string): RuntimeResources {
+  const packageDirectories = [
+    workflowDirectory,
+    resolvePackageDirectory("pi-mcp-adapter"),
+    resolvePackageDirectory("pi-subagents"),
+  ];
+  const resources = packageDirectories.map(resourcesFromManifest);
+  return {
+    extensions: resources.flatMap((entry) => entry.extensions),
+    skills: resources.flatMap((entry) => entry.skills),
+    prompts: resources.flatMap((entry) => entry.prompts),
+  };
 }
 
 function seedLegacyConfiguration(agentDir: string, legacyAgentDir: string): boolean {
@@ -542,6 +593,8 @@ export class SuoCodeRuntime {
 
   private readonly emitEvent: EventSink;
   private readonly extensionPaths: string[];
+  private readonly skillPaths: string[];
+  private readonly promptPaths: string[];
   private modelRuntime?: ModelRuntime;
   private active?: ActiveSession;
   private initialized = false;
@@ -552,10 +605,18 @@ export class SuoCodeRuntime {
     this.agentDir = resolve(options.agentDir);
     this.sessionDir = resolve(options.sessionDir);
     this.workflowDir = resolveWorkflowDirectory(options.workflowDir);
-    this.extensionPaths = workflowExtensions(this.workflowDir);
+    const resources = bundledRuntimeResources(this.workflowDir);
+    this.extensionPaths = resources.extensions;
+    this.skillPaths = resources.skills;
+    this.promptPaths = resources.prompts;
     this.emitEvent = options.onEvent ?? (() => undefined);
-    const legacyAgentDir = resolve(options.legacyAgentDir ?? join(homedir(), ".pi", "agent"));
-    this.migratedLegacyCredentials = seedLegacyConfiguration(this.agentDir, legacyAgentDir);
+    const codingAgentRoot = resolvePackageDirectory("@earendil-works/pi-coding-agent");
+    process.env.PI_CODING_AGENT_DIR = this.agentDir;
+    process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = codingAgentRoot;
+    process.env.PI_MEMORY_WORKER_ENTRY = join(codingAgentRoot, "dist", "cli.js");
+    this.migratedLegacyCredentials = options.legacyAgentDir
+      ? seedLegacyConfiguration(this.agentDir, resolve(options.legacyAgentDir))
+      : false;
     mkdirSync(this.sessionDir, { recursive: true });
   }
 
@@ -704,6 +765,8 @@ export class SuoCodeRuntime {
       agentDir: this.agentDir,
       settingsManager,
       additionalExtensionPaths: this.extensionPaths,
+      additionalSkillPaths: this.skillPaths,
+      additionalPromptTemplatePaths: this.promptPaths,
       noExtensions: true,
       noThemes: true,
     });
@@ -724,7 +787,7 @@ export class SuoCodeRuntime {
     });
     await created.session.bindExtensions({});
     const activeToolNames = new Set(created.session.getActiveToolNames());
-    const requiredTools = ["read", "bash", "edit", "write", "grep", "find", "ls", "todo", "terminal"];
+    const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp", "subagent"];
     const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
     if (missingTools.length > 0) {
       created.session.dispose();
@@ -854,7 +917,6 @@ export class SuoCodeRuntime {
     if (name === "write") return `写入 ${stringValue(args.path) || "文件"}`;
     if (name === "edit") return `编辑 ${stringValue(args.path) || "文件"}`;
     if (name === "grep") return `搜索 ${stringValue(args.pattern) || "项目"}`;
-    if (name === "find") return `查找 ${stringValue(args.pattern) || "文件"}`;
     if (name === "ls") return `查看 ${stringValue(args.path) || "目录"}`;
     if (name === "todo") return "更新 Todo";
     if (name === "terminal") return `运行 ${stringValue(args.command) || stringValue(args.action) || "终端命令"}`;

@@ -3,9 +3,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-const STATUS_KEY = "hao-mcp-health";
+const STATUS_KEY = "suocode-mcp-health";
 const STANDARD_CONFIG = join(homedir(), ".config", "mcp", "mcp.json");
-const PI_CONFIG = join(homedir(), ".pi", "agent", "mcp.json");
+
+function piConfigPath(environment: NodeJS.ProcessEnv = process.env): string {
+  const configured = environment.PI_CODING_AGENT_DIR?.trim();
+  const agentDir = configured
+    ? configured === "~"
+      ? homedir()
+      : configured.startsWith("~/")
+        ? join(homedir(), configured.slice(2))
+        : resolve(configured)
+    : join(homedir(), ".pi", "agent");
+  return join(agentDir, "mcp.json");
+}
 
 type AuthState = "unknown" | "env-ready" | "verified" | "failed";
 
@@ -38,7 +49,7 @@ function configuredServers(cwd: string): Record<string, Record<string, unknown>>
   const merged: Record<string, Record<string, unknown>> = {};
   for (const path of [
     STANDARD_CONFIG,
-    PI_CONFIG,
+    piConfigPath(),
     resolve(cwd, ".mcp.json"),
     resolve(cwd, ".pi", "mcp.json"),
   ]) {
@@ -199,4 +210,5 @@ export {
   collectEnvPlaceholders,
   initialHealth,
   markToolResult,
+  piConfigPath,
 };

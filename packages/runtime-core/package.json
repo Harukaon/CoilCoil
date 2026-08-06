@@ -17,7 +17,9 @@
     "@earendil-works/pi-protocol": "file:../../vendor/pi/packages/protocol",
     "@earendil-works/pi-tui": "file:../../vendor/pi/packages/tui",
     "@suocode/runtime-protocol": "0.1.0",
-    "@suocode/workflow": "0.1.0"
+    "@suocode/workflow": "0.1.0",
+    "pi-mcp-adapter": "2.11.0",
+    "pi-subagents": "0.35.1"
   },
   "devDependencies": {
     "@types/node": "26.1.2",

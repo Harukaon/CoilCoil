@@ -11,6 +11,7 @@ Bundled SuoCode runtime
     ├── runtime protocol and server
     ├── Pi AgentSession + ModelRuntime
     ├── SuoCode workflow extensions
+    ├── bundled MCP and subagent extensions
     ├── SessionManager persistence
     └── project files, Git changes, plans, and terminal projection
 ```
@@ -20,7 +21,7 @@ Bundled SuoCode runtime
 - `@suocode/runtime-protocol` defines commands, responses, events, messages, sessions, plans, changes, terminal runs, and file-tree data.
 - `@suocode/runtime-core` owns model configuration, Pi session creation, workflow loading, event translation, session persistence, and project inspection.
 - `@suocode/runtime-server` exposes the core over Node process IPC for Desktop and strict JSONL over stdin/stdout for integrations.
-- `@suocode/workflow` contains the SuoCode-specific Pi extensions. The runtime loads these paths explicitly and does not depend on user-installed extensions.
+- `@suocode/workflow` contains the SuoCode-specific Pi extensions. The runtime explicitly loads it together with pinned `pi-mcp-adapter` and `pi-subagents` releases; it never reads the package list from the user's Pi settings.
 
 ## Desktop isolation
 
@@ -28,7 +29,9 @@ The renderer runs with `contextIsolation`, Chromium sandboxing, and Node integra
 
 ## Runtime ownership
 
-Desktop starts the runtime with dedicated Agent and session directories inside the platform application-data location. CLI uses `~/.suocode` unless `SUOCODE_DATA_DIR` is set. On first use, SuoCode may copy compatible authentication, model, and selected default settings from `~/.pi/agent`; after migration, SuoCode owns its copy and Pi is not a runtime dependency.
+Desktop starts the runtime with dedicated Agent and session directories inside the platform application-data location. CLI uses `~/.suocode` unless `SUOCODE_DATA_DIR` is set. The product does not implicitly read `~/.pi/agent`; credentials and model settings belong to SuoCode's own data directory. An explicit `SUOCODE_LEGACY_AGENT_DIR` is retained only for controlled development migration and tests.
+
+Subagents and background memory workers launch the Pi CLI shipped inside SuoCode using the current runtime executable. They do not discover or invoke a `pi` executable from the user's shell `PATH`. MCP uses SuoCode's own Agent directory plus standard/project MCP configuration files; secrets are never copied into the repository or installation image.
 
 Each project session uses Pi's `SessionManager`. The runtime translates Pi message and tool events into stable SuoCode events, reconstructs tool/plan/terminal state when a session is reopened, and refreshes Git and file state after mutations.
 

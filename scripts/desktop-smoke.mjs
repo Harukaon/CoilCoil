@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -222,7 +222,11 @@ async function main() {
     `--user-data-dir=${dataDirectory}`,
   ], {
     cwd: repositoryRoot,
-    env: { ...process.env, ELECTRON_ENABLE_LOGGING: "1" },
+    env: {
+      ...process.env,
+      ELECTRON_ENABLE_LOGGING: "1",
+      ...(live ? { SUOCODE_LEGACY_AGENT_DIR: join(homedir(), ".pi", "agent") } : {}),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (chunk) => logs.push(chunk.toString()));
@@ -242,6 +246,14 @@ async function main() {
       "The desktop app did not initialize its private Home workspace.",
       45_000,
     );
+    const hasConfiguredProvider = await client.evaluate(`(async () => {
+      const configuration = await window.suocode.request({ type: "get_configuration" });
+      return configuration.configuredProviders.length > 0;
+    })()`);
+    if (!hasConfiguredProvider) {
+      await client.waitFor(`Boolean(document.querySelector('button[aria-label="关闭设置"]'))`, "The first-run model settings dialog did not open.");
+      await client.evaluate(`document.querySelector('button[aria-label="关闭设置"]')?.click()`);
+    }
     const homeState = await client.evaluate(`(async () => {
       const home = await window.suocode.homeProject();
       return {
@@ -356,13 +368,13 @@ async function main() {
     })()`);
     const compactSidebarClosed = await client.evaluate(`(async () => {
       const button = document.querySelector('button[aria-label="收起侧栏"]');
-      if (!button) return false;
+      if (!button) return { ok: false, reason: "missing-button" };
       const dragRegion = document.querySelector(".sidebar-drag-region");
       const buttonBounds = button.getBoundingClientRect();
       const dragBounds = dragRegion?.getBoundingClientRect();
-      if (buttonBounds.width !== 50 || buttonBounds.height !== 50) return false;
-      if (getComputedStyle(button).webkitAppRegion !== "no-drag") return false;
-      if (dragBounds && buttonBounds.left < dragBounds.right) return false;
+      if (buttonBounds.width !== 50 || buttonBounds.height !== 50) return { ok: false, reason: "size", width: buttonBounds.width, height: buttonBounds.height };
+      if (getComputedStyle(button).webkitAppRegion !== "no-drag") return { ok: false, reason: "drag-region" };
+      if (dragBounds && buttonBounds.left < dragBounds.right) return { ok: false, reason: "overlap", buttonLeft: buttonBounds.left, dragRight: dragBounds.right };
       const hitPoints = [
         [buttonBounds.left + 5, buttonBounds.top + 5],
         [buttonBounds.right - 5, buttonBounds.top + 5],
@@ -371,15 +383,16 @@ async function main() {
         [buttonBounds.left + buttonBounds.width / 2, buttonBounds.top + buttonBounds.height / 2],
       ];
       for (const [x, y] of hitPoints) {
-        if (document.elementFromPoint(x, y)?.closest("button") !== button) return false;
-        if (document.elementsFromPoint(x, y).some((element) => getComputedStyle(element).webkitAppRegion === "drag")) return false;
+        const hit = document.elementFromPoint(x, y);
+        if (hit?.closest("button") !== button) return { ok: false, reason: "hit-target", x, y, hit: hit ? { tag: hit.tagName, className: String(hit.className) } : null };
+        if (document.elementsFromPoint(x, y).some((element) => getComputedStyle(element).webkitAppRegion === "drag")) return { ok: false, reason: "hit-drag", x, y };
       }
-      if (button.closest(".window-drag")) return false;
+      if (button.closest(".window-drag")) return { ok: false, reason: "drag-ancestor" };
       button.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-      return document.querySelector(".app-shell")?.classList.contains("left-collapsed") ?? false;
+      return { ok: document.querySelector(".app-shell")?.classList.contains("left-collapsed") ?? false, reason: "click" };
     })()`);
-    assert.equal(compactSidebarClosed, true);
+    assert.equal(compactSidebarClosed?.ok, true, JSON.stringify(compactSidebarClosed));
     const compactSidebarOpened = await client.evaluate(`(async () => {
       const button = document.querySelector('button[aria-label="展开侧栏"]');
       if (!button) return false;
@@ -623,7 +636,7 @@ async function main() {
     })()`);
     assert.equal(projectInteraction.titleAfterCollapse, projectInteraction.titleBefore);
     assert.equal(projectInteraction.collapsed, true);
-    assert.equal(projectInteraction.pendingTitle, "新 Agent");
+    assert.equal(projectInteraction.pendingTitle, "新对话");
     assert.equal(projectInteraction.pendingRow, true);
     assert.equal(projectInteraction.loading, false);
     assert.equal(projectInteraction.textareaDisabled, false);
@@ -744,6 +757,7 @@ async function main() {
       const planToken = `DESKTOP_PLAN_OK_${Date.now()}`;
       const fileToken = `DESKTOP_FILE_OK_${Date.now()}`;
       const terminalToken = `DESKTOP_TERMINAL_OK_${Date.now()}`;
+      const subagentToken = `DESKTOP_SUBAGENT_OK_${Date.now()}`;
       const fileName = "suocode-desktop-smoke.txt";
       await submitPrompt(
         client,
@@ -790,6 +804,12 @@ async function main() {
         `You must execute a shell tool before replying. Run exactly: printf ${terminalToken}. Then reply exactly ${terminalToken}.`,
         "bash",
       );
+      await submitPrompt(
+        client,
+        `You must call the subagent tool exactly once using the scout agent. Ask it to reply exactly ${subagentToken}. Do not call another tool. After it completes, reply exactly ${subagentToken}.`,
+        "subagent",
+        180_000,
+      );
 
       await client.evaluate(`document.querySelector('button[aria-label="刷新项目"]')?.click()`);
 
@@ -811,6 +831,7 @@ async function main() {
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === false), true);
       assert.equal(toolNames.has("todo"), true, "The live Agent did not emit the todo tool lifecycle.");
       assert.equal(toolNames.has("write"), true, "The live Agent did not emit the write tool lifecycle.");
+      assert.equal(toolNames.has("subagent"), true, "The packaged Agent did not emit the bundled subagent lifecycle.");
       assert.equal([...toolNames].some((name) => name === "bash" || name.startsWith("terminal")), true, "The live Agent did not emit a terminal tool lifecycle.");
       assert.equal(eventState.some((event) => event.toolName === "bash" && event.toolOutput?.includes(terminalToken)), true, "The terminal tool did not return the expected output.");
 

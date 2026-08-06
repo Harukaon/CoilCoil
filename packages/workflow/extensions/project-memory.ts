@@ -443,6 +443,11 @@ export function resolvePiWorkerInvocation(
   const configured = env.PI_MEMORY_WORKER_BIN?.trim();
   if (configured) return { command: expandHome(configured), prefixArgs: [] };
 
+  const configuredEntry = env.PI_MEMORY_WORKER_ENTRY?.trim();
+  if (configuredEntry) {
+    return { command: process.execPath, prefixArgs: [expandHome(configuredEntry)] };
+  }
+
   const entry = argv[1];
   if (
     entry &&
