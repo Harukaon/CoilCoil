@@ -70,6 +70,9 @@ const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
 const ACTIVE_PROJECT_STORAGE_KEY = "suocode.active-project";
 const LEFT_WIDTH_KEY = "suocode.left-panel-width";
 const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
+const REWIND_WARNING_DISMISSED_KEY = "suocode.rewind-warning-dismissed";
+const MINIMUM_CONVERSATION_WIDTH = 315;
+const MINIMUM_PANEL_WIDTH = 40;
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const AGENT_ACTIVITY_PHRASES = ["工作中…", "整理线索…", "翻找文件…", "冲浪中…", "组织思路…", "沿着思路前进…", "快收尾了…"];
 const EMPTY_PROJECT: ProjectSnapshot = {
@@ -217,33 +220,61 @@ function MessageView({ message, disabled, onRewind }: {
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(message.text);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const composing = useRef(false);
+  const editorRef = useRef<HTMLDivElement>(null);
   useEffect(() => setValue(message.text), [message.text]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const closeOnOutsidePointer = (event: PointerEvent): void => {
+      if (confirmOpen || editorRef.current?.contains(event.target as Node)) return;
+      setEditing(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+  }, [confirmOpen, editing]);
+
+  const proceed = (remember: boolean): void => {
+    const prompt = value.trim();
+    if (!prompt || !message.entryId) return;
+    if (remember) window.localStorage.setItem(REWIND_WARNING_DISMISSED_KEY, "true");
+    setConfirmOpen(false);
+    setEditing(false);
+    void onRewind(message, prompt);
+  };
+
+  const requestRewind = (): void => {
+    if (!value.trim() || !message.entryId) return;
+    if (window.localStorage.getItem(REWIND_WARNING_DISMISSED_KEY) === "true") proceed(false);
+    else setConfirmOpen(true);
+  };
+
   if (message.role === "user") {
     return (
       <article className="timeline-message user-message">
         <div className="message-label">你</div>
         {editing ? (
-          <textarea
-            className="user-bubble user-message-editor"
-            autoFocus
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            onCompositionStart={() => { composing.current = true; }}
-            onCompositionEnd={() => { composing.current = false; }}
-            onKeyDown={(event) => {
-              if (composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-              if (event.key === "Escape") {
-                setValue(message.text);
-                setEditing(false);
-              } else if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                if (!value.trim() || !message.entryId) return;
-                setEditing(false);
-                void onRewind(message, value.trim());
-              }
-            }}
-          />
+          <div className="user-message-editor-shell" ref={editorRef}>
+            <textarea
+              className="user-bubble user-message-editor"
+              autoFocus
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onCompositionStart={() => { composing.current = true; }}
+              onCompositionEnd={() => { composing.current = false; }}
+              onKeyDown={(event) => {
+                if (composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (event.key === "Escape") {
+                  setEditing(false);
+                } else if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  requestRewind();
+                }
+              }}
+            />
+            {value !== message.text ? <small className="history-edit-warning">修改历史消息会改变后续上下文，可能降低本次请求的提示缓存命中率。</small> : null}
+          </div>
         ) : (
           <button
             className="user-bubble user-bubble-button"
@@ -251,8 +282,21 @@ function MessageView({ message, disabled, onRewind }: {
             title={message.entryId ? "点击编辑并从这里重新开始" : undefined}
             disabled={disabled || !message.entryId}
             onClick={() => setEditing(true)}
-          >{message.text}</button>
+          >{value}</button>
         )}
+        {confirmOpen ? (
+          <div className="modal-backdrop rewind-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmOpen(false); }}>
+            <section className="rewind-dialog" role="dialog" aria-modal="true" aria-labelledby={`rewind-title-${message.id}`}>
+              <h2 id={`rewind-title-${message.id}`}>从这里重新开始？</h2>
+              <p>对话将从这条消息重新开始。当前工作区中已经产生的文件修改不会被恢复。</p>
+              <footer>
+                <button type="button" onClick={() => setConfirmOpen(false)}>取消</button>
+                <button type="button" onClick={() => proceed(true)}>不再提醒</button>
+                <button className="primary-button" type="button" onClick={() => proceed(false)}>继续</button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
       </article>
     );
   }
@@ -786,6 +830,8 @@ export default function App(): React.JSX.Element {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT_WIDTH_KEY, 268));
   const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352));
+  const preferredLeftWidthRef = useRef(leftWidth);
+  const preferredRightWidthRef = useRef(rightWidth);
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
   const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -971,16 +1017,42 @@ export default function App(): React.JSX.Element {
   }, [snapshot?.running]);
 
   useEffect(() => {
-    const updateMinimumWidth = (): void => {
-      const compact = window.innerWidth <= 700;
-      const tiledLeftWidth = leftOpen && !compact ? leftWidth : 0;
-      const tiledRightWidth = rightOpen ? rightWidth : 0;
-      void window.suocode.setWindowMinimumWidth(315 + tiledLeftWidth + tiledRightWidth);
+    const fitPanelsToWindow = (): void => {
+      const compact = window.innerWidth <= 700 && !rightOpen;
+      const leftIsTiled = leftOpen && !compact;
+      const rightIsTiled = rightOpen;
+      let nextLeftWidth = preferredLeftWidthRef.current;
+      let nextRightWidth = preferredRightWidthRef.current;
+      let deficit = Math.max(
+        0,
+        (leftIsTiled ? nextLeftWidth : 0)
+          + (rightIsTiled ? nextRightWidth : 0)
+          + MINIMUM_CONVERSATION_WIDTH
+          - window.innerWidth,
+      );
+
+      if (deficit > 0 && rightIsTiled) {
+        const reduction = Math.min(deficit, Math.max(0, nextRightWidth - MINIMUM_PANEL_WIDTH));
+        nextRightWidth -= reduction;
+        deficit -= reduction;
+      }
+      if (deficit > 0 && leftIsTiled) {
+        const reduction = Math.min(deficit, Math.max(0, nextLeftWidth - MINIMUM_PANEL_WIDTH));
+        nextLeftWidth -= reduction;
+      }
+
+      setLeftWidth(Math.round(leftIsTiled ? nextLeftWidth : preferredLeftWidthRef.current));
+      setRightWidth(Math.round(rightIsTiled ? nextRightWidth : preferredRightWidthRef.current));
+      void window.suocode.setWindowMinimumWidth(
+        MINIMUM_CONVERSATION_WIDTH
+          + (leftIsTiled ? MINIMUM_PANEL_WIDTH : 0)
+          + (rightIsTiled ? MINIMUM_PANEL_WIDTH : 0),
+      );
     };
-    updateMinimumWidth();
-    window.addEventListener("resize", updateMinimumWidth);
-    return () => window.removeEventListener("resize", updateMinimumWidth);
-  }, [leftOpen, leftWidth, rightOpen, rightWidth]);
+    fitPanelsToWindow();
+    window.addEventListener("resize", fitPanelsToWindow);
+    return () => window.removeEventListener("resize", fitPanelsToWindow);
+  }, [leftOpen, rightOpen]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent): void => {
@@ -1048,6 +1120,8 @@ export default function App(): React.JSX.Element {
     const stop = (): void => {
       document.body.classList.remove("resizing-panels");
       window.removeEventListener("pointermove", move);
+      if (side === "left") preferredLeftWidthRef.current = finalWidth;
+      else preferredRightWidthRef.current = finalWidth;
       window.localStorage.setItem(side === "left" ? LEFT_WIDTH_KEY : RIGHT_WIDTH_KEY, String(finalWidth));
     };
     window.addEventListener("pointermove", move);
@@ -1164,7 +1238,7 @@ export default function App(): React.JSX.Element {
 
   return (
     <>
-      <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
+      <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "keep-tiled" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
         <aside className="sidebar">
           <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
           <nav className="primary-nav"><button className="nav-button" type="button" disabled={!project} onClick={() => void startNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>

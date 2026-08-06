@@ -122,6 +122,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .user-bubble-button { display: block; color: inherit; text-align: left; cursor: text; }
 .user-bubble-button:disabled { cursor: default; }
 .user-message-editor { width: min(680px, 88%); min-height: 52px; resize: vertical; outline: 0; font-family: inherit; }
+.user-message-editor-shell { display: flex; width: min(680px, 88%); align-items: flex-end; flex-direction: column; }
+.user-message-editor-shell .user-message-editor { width: 100%; }
+.history-edit-warning { max-width: 100%; margin: 6px 4px 0; color: #a09f98; font-size: 9px; line-height: 1.45; text-align: right; }
+.rewind-backdrop { z-index: 120; }
+.rewind-dialog { width: min(390px, calc(100vw - 32px)); padding: 19px; border: 1px solid #d8d8d3; border-radius: 14px; background: #fafaf8; box-shadow: 0 22px 70px rgb(26 26 23 / 24%); }
+.rewind-dialog h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.rewind-dialog p { margin: 9px 0 18px; color: #71716c; font-size: 11px; line-height: 1.6; }
+.rewind-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
+.rewind-dialog footer button { min-width: 66px; height: 32px; padding: 0 12px; border-radius: 8px; background: #eeeeea; font-size: 11px; cursor: pointer; }
+.rewind-dialog footer .primary-button { color: #fff; background: #292927; }
 .assistant-message { display: block; }
 .assistant-segment { min-width: 0; margin: 0 0 17px; }
 .assistant-segment:empty { display: none; }
@@ -363,45 +373,42 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 }
 
 @media (max-width: 700px) {
-  .app-shell,
-  .app-shell.left-collapsed {
+  .app-shell:not(.keep-tiled),
+  .app-shell:not(.keep-tiled).left-collapsed {
     grid-template-columns: minmax(315px, 1fr) var(--inspector-width);
   }
 
-  .app-shell.right-collapsed,
-  .app-shell.left-collapsed.right-collapsed { grid-template-columns: minmax(315px, 1fr) 0; }
+  .app-shell:not(.keep-tiled).right-collapsed,
+  .app-shell:not(.keep-tiled).left-collapsed.right-collapsed { grid-template-columns: minmax(315px, 1fr) 0; }
 
-  .left-resizer { display: none; }
+  .app-shell:not(.keep-tiled) .left-resizer { display: none; }
   .right-resizer { right: calc(var(--inspector-width) - 3px); }
 
-  .sidebar {
+  .app-shell:not(.keep-tiled) .sidebar {
     position: absolute;
     z-index: 40;
     top: 0;
     bottom: 0;
-  }
-
-  .sidebar {
     left: 0;
     width: min(var(--sidebar-width), calc(100vw - 48px));
     -webkit-app-region: no-drag;
     box-shadow: 12px 0 32px rgb(28 28 25 / 12%);
   }
 
-  .sidebar-drag-region { inset-inline: 80px 64px; }
-  .sidebar-toggle { top: 2px; left: calc(min(var(--sidebar-width), calc(100vw - 48px)) - 52px); width: 50px; height: 50px; border-radius: 10px; }
-  .sidebar-toggle span { width: 30px; height: 30px; border-radius: 7px; }
-  .sidebar-toggle:focus-visible { outline-offset: -7px; }
-  [data-platform="darwin"] .sidebar-toggle { top: 8px; }
+  .app-shell:not(.keep-tiled) .sidebar-drag-region { inset-inline: 80px 64px; }
+  .app-shell:not(.keep-tiled) .sidebar-toggle { top: 2px; left: calc(min(var(--sidebar-width), calc(100vw - 48px)) - 52px); width: 50px; height: 50px; border-radius: 10px; }
+  .app-shell:not(.keep-tiled) .sidebar-toggle span { width: 30px; height: 30px; border-radius: 7px; }
+  .app-shell:not(.keep-tiled) .sidebar-toggle:focus-visible { outline-offset: -7px; }
+  [data-platform="darwin"] .app-shell:not(.keep-tiled) .sidebar-toggle { top: 8px; }
 
-  .app-shell.left-collapsed .sidebar {
+  .app-shell:not(.keep-tiled).left-collapsed .sidebar {
     pointer-events: none;
     box-shadow: none;
     transform: translateX(-105%);
   }
 
-  .inspector-pane { position: relative; z-index: auto; grid-column: 2; width: auto; box-shadow: none; transform: none; }
-  .app-shell.right-collapsed .inspector-pane { pointer-events: none; transform: none; }
+  .app-shell:not(.keep-tiled) .inspector-pane { position: relative; z-index: auto; grid-column: 2; width: auto; box-shadow: none; transform: none; }
+  .app-shell:not(.keep-tiled).right-collapsed .inspector-pane { pointer-events: none; transform: none; }
 
   .conversation-header { padding: 0 12px; }
   .conversation-header.window-drag { -webkit-app-region: no-drag; }

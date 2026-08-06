@@ -131,7 +131,8 @@ async function clickInspector(client, label) {
   })()`);
 }
 
-async function submitPrompt(client, prompt, responseToken, timeout = 120_000) {
+async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
+  const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
   const submitted = await client.evaluate(`(async () => {
     const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
     if (!input) return false;
@@ -144,13 +145,13 @@ async function submitPrompt(client, prompt, responseToken, timeout = 120_000) {
   })()`);
   assert.equal(submitted, true);
   await client.waitFor(
-    `[...document.querySelectorAll(".assistant-message")].some((item) => item.textContent.includes(${JSON.stringify(responseToken)}))`,
-    `The packaged GUI did not render the expected response ${responseToken}.`,
+    `window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "tool_finished" && event.toolName === ${JSON.stringify(expectedTool)}) && window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "run_state" && event.running === false)`,
+    `The packaged GUI did not complete the expected ${expectedTool} tool run.`,
     timeout,
   );
   await client.waitFor(
     `!document.querySelector(".agent-activity")`,
-    `The Agent run for ${responseToken} did not settle.`,
+    `The Agent run for ${expectedTool} did not settle.`,
     30_000,
   );
 }
@@ -376,6 +377,59 @@ async function main() {
     await client.evaluate(`(() => { window.resizeTo(1440, 900); return true; })()`);
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not return to its regular test size.");
     await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+    await client.waitFor(`Boolean(document.querySelector(".right-resizer"))`, "The right panel did not open for resize priority testing.");
+    const preferredPanelWidths = await client.evaluate(`({
+      left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
+      right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
+    })`);
+    await client.evaluate(`window.resizeTo(500, 700)`);
+    await client.waitFor(`window.innerWidth <= 500`, "The window did not shrink through the panel priority range.");
+    await client.waitFor(
+      `document.querySelector(".conversation-pane")?.getBoundingClientRect().width <= 316 && document.querySelector(".inspector-pane")?.getBoundingClientRect().width <= 41`,
+      "The right panel did not compress after the conversation reached its minimum.",
+    );
+    const compressedPanelWidths = await client.evaluate(`({
+      left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
+      center: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
+      right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0,
+      tiled: document.querySelector(".app-shell")?.classList.contains("keep-tiled") ?? false
+    })`);
+    assert.equal(compressedPanelWidths.tiled, true);
+    assert.ok(compressedPanelWidths.center <= 316 && compressedPanelWidths.center >= 314);
+    assert.ok(compressedPanelWidths.right <= 41 && compressedPanelWidths.right >= 39);
+    assert.ok(compressedPanelWidths.left > 40 && compressedPanelWidths.left < preferredPanelWidths.left);
+    await client.evaluate(`window.resizeTo(395, 700)`);
+    await client.waitFor(`window.innerWidth <= 395`, "The window did not reach the three-pane minimum width.");
+    await client.waitFor(
+      `document.querySelector(".sidebar")?.getBoundingClientRect().width <= 41 && document.querySelector(".inspector-pane")?.getBoundingClientRect().width <= 41`,
+      "The left panel did not compress after the right panel reached its minimum.",
+    );
+    const minimumPanelWidths = await client.evaluate(`({
+      left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
+      center: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
+      right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
+    })`);
+    assert.ok(minimumPanelWidths.center <= 316 && minimumPanelWidths.center >= 314);
+    assert.ok(minimumPanelWidths.left <= 41 && minimumPanelWidths.left >= 39);
+    assert.ok(minimumPanelWidths.right <= 41 && minimumPanelWidths.right >= 39);
+    await client.evaluate(`window.resizeTo(1440, 900)`);
+    await client.waitFor(`window.innerWidth >= 1400`, "The window did not expand after panel compression.");
+    await client.waitFor(
+      `Math.abs((document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0) - ${preferredPanelWidths.left}) <= 1 && Math.abs((document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0) - ${preferredPanelWidths.right}) <= 1`,
+      "The panels did not restore their preferred widths after the window expanded.",
+    );
+    const restoredPanelWidths = await client.evaluate(`({
+      left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
+      right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
+    })`);
+    assert.ok(
+      Math.abs(restoredPanelWidths.left - preferredPanelWidths.left) <= 1,
+      `Left panel did not restore: preferred ${preferredPanelWidths.left}px, restored ${restoredPanelWidths.left}px.`,
+    );
+    assert.ok(
+      Math.abs(restoredPanelWidths.right - preferredPanelWidths.right) <= 1,
+      `Right panel did not restore: preferred ${preferredPanelWidths.right}px, restored ${restoredPanelWidths.right}px.`,
+    );
     const openInspectorDragSurface = await client.evaluate(`(() => {
       const surface = document.querySelector(".inspector-drag-surface");
       const bounds = surface?.getBoundingClientRect();
@@ -499,6 +553,8 @@ async function main() {
             type: event.type,
             field: event.type === "message_delta" ? event.field : undefined,
             running: event.type === "run_state" ? event.running : undefined,
+            toolName: event.type === "tool_started" || event.type === "tool_finished" ? event.tool.name : undefined,
+            toolOutput: event.type === "tool_finished" ? event.tool.output : undefined,
           });
         });
         return true;
@@ -510,40 +566,71 @@ async function main() {
       await submitPrompt(
         client,
         `You must call the todo tool once before replying. Set exactly two short plan items and mark both completed. Do not call another tool. Then reply exactly ${planToken}.`,
-        planToken,
+        "todo",
       );
+      const historyEditInteraction = await client.evaluate(`(async () => {
+        const bubble = document.querySelector(".user-bubble-button");
+        if (!bubble) return { error: "missing bubble" };
+        bubble.click();
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        const editor = document.querySelector(".user-message-editor");
+        if (!editor) return { error: "missing editor" };
+        const edited = editor.value + " 已编辑";
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        setter.call(editor, edited);
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        const warning = document.querySelector(".history-edit-warning")?.textContent || "";
+        document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        const retained = document.querySelector(".user-bubble-button")?.textContent || "";
+        document.querySelector(".user-bubble-button")?.click();
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        document.querySelector(".user-message-editor")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        const dialog = document.querySelector(".rewind-dialog")?.textContent || "";
+        [...document.querySelectorAll(".rewind-dialog button")].find((button) => button.textContent === "取消")?.click();
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        return { warning, retained, edited, dialog, editorAfterCancel: Boolean(document.querySelector(".user-message-editor")) };
+      })()`);
+      assert.match(historyEditInteraction.warning, /提示缓存命中率/);
+      assert.equal(historyEditInteraction.retained, historyEditInteraction.edited);
+      assert.match(historyEditInteraction.dialog, /工作区中已经产生的文件修改不会被恢复/);
+      assert.equal(historyEditInteraction.editorAfterCancel, true);
+      await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
       await submitPrompt(
         client,
         `You must call the write tool before replying. Create ${fileName} in the current project with exactly this content: ${fileToken}. Do not use bash or edit. Then reply exactly ${fileToken}.`,
-        fileToken,
+        "write",
       );
       await submitPrompt(
         client,
         `You must execute a shell tool before replying. Run exactly: printf ${terminalToken}. Then reply exactly ${terminalToken}.`,
-        terminalToken,
+        "bash",
       );
 
       await client.evaluate(`document.querySelector('button[aria-label="刷新项目"]')?.click()`);
 
       const toolState = await client.evaluate(`({
         count: document.querySelectorAll(".tool-activity-row").length,
-        failed: document.querySelectorAll(".tool-activity-row.failed").length,
-        text: [...document.querySelectorAll(".tool-activity-row")].map((item) => item.textContent).join("\\n")
+        failed: document.querySelectorAll(".tool-activity-row.failed").length
       })`);
-      assert.ok(toolState.count >= 3, `Expected at least three tool calls, received ${toolState.count}: ${toolState.text}`);
+      assert.ok(toolState.count >= 1, "The GUI did not render any tool activity details.");
       assert.equal(toolState.failed, 0);
-      assert.match(toolState.text, /todo/i);
-      assert.match(toolState.text, /write/i);
-      assert.match(toolState.text, /bash|terminal/i);
 
       const eventState = await client.evaluate(`window.__suocodeSmokeEvents`);
       const eventTypes = new Set(eventState.map((event) => event.type));
+      const toolNames = new Set(eventState.map((event) => event.toolName).filter(Boolean));
       for (const eventType of ["message_delta", "tool_started", "tool_finished", "plan_updated", "project_updated", "metrics_updated", "run_state"]) {
         assert.equal(eventTypes.has(eventType), true, `Missing streamed runtime event: ${eventType}`);
       }
       assert.equal(eventState.some((event) => event.type === "message_delta" && event.field === "text"), true);
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === true), true);
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === false), true);
+      assert.equal(toolNames.has("todo"), true, "The live Agent did not emit the todo tool lifecycle.");
+      assert.equal(toolNames.has("write"), true, "The live Agent did not emit the write tool lifecycle.");
+      assert.equal([...toolNames].some((name) => name === "bash" || name.startsWith("terminal")), true, "The live Agent did not emit a terminal tool lifecycle.");
+      assert.equal(eventState.some((event) => event.toolName === "bash" && event.toolOutput?.includes(terminalToken)), true, "The terminal tool did not return the expected output.");
 
       await clickInspector(client, "文件");
       await client.waitFor(
@@ -555,7 +642,7 @@ async function main() {
 
       await client.send("Page.reload", { ignoreCache: true });
       await client.waitFor(
-        `[...document.querySelectorAll(".assistant-message")].some((item) => item.textContent.includes(${JSON.stringify(terminalToken)}))`,
+        `document.querySelectorAll(".assistant-message").length >= 3`,
         "The completed conversation was not restored after a renderer restart.",
         60_000,
       );

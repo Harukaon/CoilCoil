@@ -1036,6 +1036,9 @@ export class SuoCodeRuntime {
     if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");
     const result = await active.session.navigateTree(entryId, { summarize: false });
     if (result.cancelled) throw new Error("未能回溯到所选消息。");
+    const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
+    if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
+    this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
     void active.session.prompt(prompt).catch((error) => {
       this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       this.emitEvent({ type: "run_state", running: false });

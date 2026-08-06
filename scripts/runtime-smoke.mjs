@@ -147,8 +147,16 @@ try {
     const rewindTarget = restored.messages.find((message) => message.role === "user");
     if (!rewindTarget?.entryId) throw new Error("Historical user messages did not expose a Pi session entry ID.");
     const rewindToken = `SUOCODE_REWIND_OK_${Date.now()}`;
+    const rewindEventStart = events.length;
     const rewindSettled = waitForEvent((event) => event.type === "run_state" && event.running === false);
     await request({ type: "rewind_prompt", entryId: rewindTarget.entryId, text: `Reply exactly ${rewindToken}.` });
+    const immediateRewindSnapshot = events.slice(rewindEventStart).find((event) => event.type === "session_snapshot");
+    if (!immediateRewindSnapshot) {
+      throw new Error("Rewinding did not publish the cleaned Pi branch before starting the replacement request.");
+    }
+    if (immediateRewindSnapshot.snapshot.messages.some((message) => message.role === "assistant")) {
+      throw new Error("The immediate rewind snapshot still contained assistant messages from the abandoned branch.");
+    }
     await rewindSettled;
     const rewound = await request({ type: "open_session", cwd: projectDir, sessionPath: snapshot.session.path });
     if (!rewound.messages.some((message) => message.role === "user" && message.text.includes(rewindToken))) {
