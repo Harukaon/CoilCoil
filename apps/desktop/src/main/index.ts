@@ -15,6 +15,7 @@ import type { FilePreviewDocument, OpenFilePreviewInput, ProjectSelection, Runti
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
+const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
@@ -351,6 +352,12 @@ app.whenReady().then(() => {
     const path = result.filePaths[0];
     if (result.canceled || !path) return null;
     return { name: basename(path), path, kind: "workspace" };
+  });
+  ipcMain.handle(WINDOW_MINIMUM_WIDTH_CHANNEL, (event, requestedWidth: number): void => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || !Number.isFinite(requestedWidth)) return;
+    const [, minimumHeight] = window.getMinimumSize();
+    window.setMinimumSize(Math.max(315, Math.ceil(requestedWidth)), minimumHeight);
   });
   ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openPreviewOrMenu(event, input));
   ipcMain.handle(PREVIEW_GET_CHANNEL, async (_event, id: string): Promise<FilePreviewDocument> => {

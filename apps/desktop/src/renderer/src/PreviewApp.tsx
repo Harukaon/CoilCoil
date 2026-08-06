@@ -30,7 +30,7 @@ export default function PreviewApp({ id }: { id: string }): React.JSX.Element {
   const canRender = document.kind === "markdown" || document.kind === "html";
   const kindLabel = document.kind === "text" ? "文本" : document.kind === "markdown" ? "Markdown" : document.kind.toUpperCase();
   return (
-    <main className="preview-window">
+    <main className={`preview-window ${document.truncated ? "has-warning" : ""}`}>
       <header className="preview-window-header window-drag">
         <div className="preview-window-title"><FileText size={15} /><strong>{document.name}</strong><span title={document.path}>{document.path}</span></div>
         {canRender ? <div className="preview-mode no-drag"><button className={!rendered ? "active" : ""} type="button" onClick={() => setRendered(false)}><Code2 size={14} />源码</button><button className={rendered ? "active" : ""} type="button" onClick={() => setRendered(true)}><Eye size={14} />预览</button></div> : null}

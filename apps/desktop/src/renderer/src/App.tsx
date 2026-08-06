@@ -128,9 +128,9 @@ function formatTokens(tokens: number | null | undefined): string {
 function performanceGrade(metrics: ResponseMetrics): "excellent" | "good" | "fair" | "slow" {
   const firstToken = metrics.firstTokenMs ?? Number.POSITIVE_INFINITY;
   const speed = metrics.averageTokensPerSecond ?? 0;
-  if (firstToken <= 1_200 && speed >= 45) return "excellent";
-  if (firstToken <= 2_500 && speed >= 25) return "good";
-  if (firstToken <= 5_000 && speed >= 12) return "fair";
+  if (firstToken <= 2_000 && speed >= 50) return "excellent";
+  if (firstToken <= 5_000 && speed >= 25) return "good";
+  if (firstToken <= 20_000 && speed >= 10) return "fair";
   return "slow";
 }
 
@@ -652,8 +652,8 @@ function WorkspaceStatus({
               <strong>近期请求性能</strong>
               {responseMetricsHistory.length ? (
                 <>
-                  <div className="performance-grid">{responseMetricsHistory.slice(-30).map((item) => <span className={performanceGrade(item)} title={`${formatMetricDuration(item.firstTokenMs)} · ${item.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s`} key={item.timestamp} />)}</div>
-                  <div className="performance-history">{responseMetricsHistory.slice(-8).reverse().map((item) => <div key={item.timestamp}><span className={`performance-dot ${performanceGrade(item)}`} /><time>{new Date(item.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time><b>首字 {formatMetricDuration(item.firstTokenMs)}</b><b>{item.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s</b><small>{formatTokens(item.outputTokens)} tok</small></div>)}</div>
+                  <div className="performance-grid">{responseMetricsHistory.slice(-60).map((item, index) => <span className={`performance-cell ${performanceGrade(item)}`} key={`${item.timestamp}-${index}`}><span className="performance-tooltip"><strong>{new Date(item.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</strong><span>首字 {formatMetricDuration(item.firstTokenMs)}</span><span>{item.averageTokensPerSecond?.toFixed(1) ?? "—"} tok/s</span><span>{formatTokens(item.outputTokens)} tok</span></span></span>)}</div>
+                  <div className="performance-legend"><span>较慢</span><i className="slow" /><i className="fair" /><i className="good" /><i className="excellent" /><span>较快</span></div>
                 </>
               ) : <p>完成一次模型请求后，这里会显示性能记录。</p>}
               <Popover.Arrow className="model-popover-arrow" />
@@ -971,20 +971,16 @@ export default function App(): React.JSX.Element {
   }, [snapshot?.running]);
 
   useEffect(() => {
-    const fitPanels = (): void => {
-      const viewport = window.innerWidth;
-      setRightWidth((currentRight) => {
-        const nextRight = Math.max(40, Math.min(currentRight, viewport - 315));
-        if (viewport > 700) {
-          setLeftWidth((currentLeft) => Math.max(40, Math.min(currentLeft, viewport - nextRight - 315)));
-        }
-        return nextRight;
-      });
+    const updateMinimumWidth = (): void => {
+      const compact = window.innerWidth <= 700;
+      const tiledLeftWidth = leftOpen && !compact ? leftWidth : 0;
+      const tiledRightWidth = rightOpen ? rightWidth : 0;
+      void window.suocode.setWindowMinimumWidth(315 + tiledLeftWidth + tiledRightWidth);
     };
-    fitPanels();
-    window.addEventListener("resize", fitPanels);
-    return () => window.removeEventListener("resize", fitPanels);
-  }, []);
+    updateMinimumWidth();
+    window.addEventListener("resize", updateMinimumWidth);
+    return () => window.removeEventListener("resize", updateMinimumWidth);
+  }, [leftOpen, leftWidth, rightOpen, rightWidth]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent): void => {

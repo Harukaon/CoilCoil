@@ -253,13 +253,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .performance-popover { z-index: 1000; width: 310px; padding: 12px; border: 1px solid #d8d8d3; border-radius: 10px; color: #666661; background: #fafaf8; box-shadow: 0 12px 32px rgb(28 28 25 / 14%); font-size: 10px; }
 .performance-popover > strong { display: block; margin-bottom: 10px; color: #3f3f3c; font-size: 11px; }
 .performance-popover > p { margin: 4px 0; color: #92928d; }
-.performance-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin-bottom: 12px; }
-.performance-grid span { aspect-ratio: 1; border-radius: 3px; background: #e4e4df; }.performance-grid span.excellent { background: #287d45; }.performance-grid span.good { background: #62a969; }.performance-grid span.fair { background: #d09b42; }.performance-grid span.slow { background: #c95c54; }
-.performance-history { display: grid; gap: 6px; }
-.performance-history > div { display: grid; grid-template-columns: 7px 38px 1fr 55px 42px; gap: 6px; align-items: center; }
-.performance-history b, .performance-history small { font-size: 9px; font-weight: 500; }
-.performance-history small { color: #999994; text-align: right; }
-.performance-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.performance-grid { display: grid; grid-template-columns: repeat(15, 12px); gap: 3px; min-height: 12px; margin: 4px 0 10px; overflow: visible; }
+.performance-cell { position: relative; width: 12px; height: 12px; border: 1px solid rgb(27 31 36 / 6%); border-radius: 2px; background: #e7e7e3; cursor: default; }
+.performance-cell.excellent, .performance-legend i.excellent { background: #287d45; }.performance-cell.good, .performance-legend i.good { background: #62a969; }.performance-cell.fair, .performance-legend i.fair { background: #d5a03d; }.performance-cell.slow, .performance-legend i.slow { background: #c95c54; }
+.performance-tooltip { position: absolute; z-index: 2; bottom: calc(100% + 8px); left: 50%; display: none; width: max-content; max-width: 220px; grid-template-columns: repeat(3, auto); gap: 3px 10px; padding: 7px 9px; border: 1px solid #d9d9d4; border-radius: 7px; color: #73736e; background: #fff; box-shadow: 0 8px 22px rgb(25 25 22 / 14%); font-size: 9px; line-height: 1.35; transform: translateX(-50%); pointer-events: none; }
+.performance-tooltip::after { position: absolute; top: 100%; left: 50%; width: 7px; height: 7px; content: ""; border-right: 1px solid #d9d9d4; border-bottom: 1px solid #d9d9d4; background: #fff; transform: translate(-50%, -4px) rotate(45deg); }
+.performance-tooltip strong { grid-column: 1 / -1; color: #3f3f3c; font-size: 9px; }
+.performance-cell:hover { outline: 2px solid rgb(40 40 36 / 13%); outline-offset: 1px; }
+.performance-cell:hover .performance-tooltip { display: grid; }
+.performance-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: #999994; font-size: 9px; }
+.performance-legend i { width: 10px; height: 10px; border: 1px solid rgb(27 31 36 / 6%); border-radius: 2px; }
 
 .inspector-pane { display: grid; grid-template-rows: 44px auto minmax(0, 1fr); border-left: 1px solid #e1e1de; background: #f8f8f6; }
 .inspector-header { display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; color: #777772; font-size: 12px; font-weight: 550; }
@@ -310,7 +313,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .file-tree-node span, .file-leaf span { min-width: 0; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .file-tree-error { margin: 8px; color: #a45149; font-size: 10px; line-height: 1.4; }
 
-.preview-window { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: 58px auto minmax(0, 1fr) 26px; background: #f8f8f6; }
+.preview-window { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: 58px minmax(0, 1fr) 26px; background: #f8f8f6; }
+.preview-window.has-warning { grid-template-rows: 58px auto minmax(0, 1fr) 26px; }
 .preview-window-header { display: flex; min-width: 0; align-items: center; gap: 16px; padding: 0 16px 0 84px; border-bottom: 1px solid #e1e1de; }
 .preview-window-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; }
 .preview-window-title strong { flex: 0 1 auto; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }

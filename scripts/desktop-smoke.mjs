@@ -276,6 +276,21 @@ async function main() {
       assert.ok(macTrafficLightSpacing.buttonLeft >= 82);
     }
 
+    const panelWidthBeforeWindowResize = await client.evaluate(`({
+      sidebar: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
+      conversation: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0
+    })`);
+    await client.evaluate(`(() => { window.resizeTo(1_000, 700); return true; })()`);
+    await client.waitFor(`window.innerWidth <= 1_000`, "The window did not resize for the panel preservation test.");
+    const panelWidthAfterWindowResize = await client.evaluate(`({
+      sidebar: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
+      conversation: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0
+    })`);
+    assert.equal(panelWidthAfterWindowResize.sidebar, panelWidthBeforeWindowResize.sidebar);
+    assert.ok(panelWidthAfterWindowResize.conversation < panelWidthBeforeWindowResize.conversation);
+
+    await client.evaluate(`(() => { window.resizeTo(395, 700); return true; })()`);
+    await client.waitFor(`window.innerWidth <= 700`, "The window did not enter its compact layout.");
     await client.evaluate(`(() => { window.resizeTo(395, 700); return true; })()`);
     await client.waitFor(
       `window.innerWidth <= 395`,
@@ -443,6 +458,13 @@ async function main() {
       `document.querySelector(".text-preview")?.textContent.includes("lazy")`,
       "The text preview window did not render the selected file.",
     );
+    const previewLayout = await previewClient.evaluate(`(() => {
+      const content = document.querySelector(".preview-window-content")?.getBoundingClientRect();
+      const footer = document.querySelector(".preview-window-status")?.getBoundingClientRect();
+      return { contentBottom: content?.bottom ?? 0, footerTop: footer?.top ?? 0, footerBottom: footer?.bottom ?? 0, viewport: window.innerHeight };
+    })()`);
+    assert.ok(Math.abs(previewLayout.contentBottom - previewLayout.footerTop) <= 1);
+    assert.ok(Math.abs(previewLayout.footerBottom - previewLayout.viewport) <= 1);
     await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "live preview update\n", "utf8");
     await previewClient.waitFor(
       `document.querySelector(".text-preview")?.textContent.includes("live preview update")`,
