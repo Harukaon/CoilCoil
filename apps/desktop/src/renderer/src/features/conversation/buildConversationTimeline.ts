@@ -1,12 +1,19 @@
-import type { ChatMessage, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
 import type { ConversationTimelineItem, TimelineItem } from "./ConversationTimeline";
 
-export function buildConversationTimeline(messages: ChatMessage[], tools: ToolRun[]): ConversationTimelineItem[] {
+export function buildConversationTimeline(messages: ChatMessage[], tools: ToolRun[], subagents: SubagentActivity[]): ConversationTimelineItem[] {
   const ordered = [
     ...messages
       .filter((message) => message.role !== "tool" && (message.text || message.thinking || message.images?.length))
       .map((message) => ({ kind: "message" as const, order: message.order, message })),
-    ...tools.map((tool) => ({ kind: "tool" as const, order: tool.order, tool })),
+    ...tools.map((tool) => tool.name === "subagent"
+      ? {
+          kind: "subagents" as const,
+          order: tool.order,
+          tool,
+          subagents: subagents.filter((activity) => activity.parentToolId === tool.id || (!activity.parentToolId && activity.runId === tool.id)),
+        }
+      : { kind: "tool" as const, order: tool.order, tool }),
   ].sort((left, right) => left.order - right.order);
 
   const grouped: TimelineItem[] = [];
@@ -15,6 +22,8 @@ export function buildConversationTimeline(messages: ChatMessage[], tools: ToolRu
       const previous = grouped.at(-1);
       if (previous?.kind === "tools") previous.tools.push(item.tool);
       else grouped.push({ kind: "tools", order: item.order, tools: [item.tool] });
+    } else if (item.kind === "subagents") {
+      grouped.push(item);
     } else {
       grouped.push(item);
     }

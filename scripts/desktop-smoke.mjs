@@ -203,6 +203,71 @@ async function stopProcess(child) {
   if (!exited) child.kill("SIGKILL");
 }
 
+function subagentFixtureEntries(snapshot, token) {
+  const timestamp = new Date().toISOString();
+  const toolId = `desktop-subagent-tool-${token}`;
+  const userId = `desktop-subagent-user-${token}`;
+  const callId = `desktop-subagent-call-${token}`;
+  return [
+    { type: "session", version: 3, id: snapshot.session.id, timestamp, cwd: snapshot.session.cwd },
+    {
+      type: "message",
+      id: userId,
+      parentId: null,
+      timestamp,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: `子 Agent 投影测试 ${token}` }],
+        timestamp: Date.now(),
+      },
+    },
+    {
+      type: "message",
+      id: callId,
+      parentId: userId,
+      timestamp,
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: toolId, name: "subagent", arguments: { agent: "scout", task: "验证桌面端扩展投影" } }],
+        api: "openai-responses",
+        provider: "smoke",
+        model: "smoke",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: "toolUse",
+        timestamp: Date.now(),
+      },
+    },
+    {
+      type: "message",
+      id: `desktop-subagent-result-${token}`,
+      parentId: callId,
+      timestamp,
+      message: {
+        role: "toolResult",
+        toolCallId: toolId,
+        toolName: "subagent",
+        content: [{ type: "text", text: token }],
+        details: {
+          mode: "single",
+          runId: `desktop-subagent-run-${token}`,
+          results: [{
+            agent: "scout",
+            task: "验证桌面端扩展投影",
+            exitCode: 0,
+            model: "smoke-child-model",
+            usage: { input: 8, output: 4, cacheRead: 3, cacheWrite: 0, cost: 0, turns: 2 },
+            messages: [{ role: "assistant", content: [{ type: "thinking", text: "检查 Pi 扩展事件" }, { type: "text", text: token }] }],
+            toolCalls: [{ text: "读取桌面测试文件", expandedText: "read /tmp/desktop-subagent-smoke" }],
+            finalOutput: token,
+          }],
+        },
+        isError: false,
+        timestamp: Date.now(),
+      },
+    },
+  ];
+}
+
 async function main() {
   if (process.platform !== "darwin") {
     throw new Error("The current packaged desktop smoke test targets the macOS app bundle.");
@@ -304,6 +369,7 @@ async function main() {
       if (!name || !command) return false;
       setInput(name, "desktop-smoke-mcp");
       setInput(command, "/usr/bin/true");
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
       return true;
     })()`);
     assert.equal(savedMcpServer, true);
@@ -311,11 +377,13 @@ async function main() {
       `(() => { const button = [...document.querySelectorAll(".mcp-editor .primary-button")].find((item) => item.textContent.includes("保存 MCP")); return Boolean(button && !button.disabled); })()`,
       "The MCP editor did not accept the server fields.",
     );
-    await client.evaluate(`([...document.querySelectorAll(".mcp-editor .primary-button")].find((item) => item.textContent.includes("保存 MCP")))?.click()`);
+    await client.evaluate(`document.querySelector(".mcp-editor form")?.requestSubmit()`);
     await client.waitFor(
-      `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp")`,
-      "The MCP server saved through the desktop settings did not appear.",
+      `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp") || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
+      "The MCP settings save did not settle.",
     );
+    const mcpUiSaveState = await client.evaluate(`({ saved: [...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp"), error: document.querySelector(".mcp-editor .settings-error")?.textContent || "" })`);
+    assert.equal(mcpUiSaveState.saved, true, `The MCP server saved through the desktop settings did not appear: ${mcpUiSaveState.error}`);
     const mcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration" })`);
     assert.equal(mcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp")?.command, "/usr/bin/true");
     const removedMcpServer = await client.evaluate(`(() => {
@@ -332,6 +400,17 @@ async function main() {
       "The MCP server was not removed through the desktop settings.",
     );
     await client.evaluate(`document.querySelector('button[aria-label="关闭设置"]')?.click()`);
+
+    const openedArchive = await client.evaluate(`(() => {
+      const button = document.querySelector('button[aria-label="归档会话"]');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    assert.equal(openedArchive, true);
+    await client.waitFor(`Boolean(document.querySelector(".archive-popover"))`, "The archive restore popover did not open.");
+    await client.waitFor(`document.querySelector(".archive-popover")?.textContent.includes("暂无归档会话")`, "The empty archive state did not render.");
+    await client.evaluate(`document.querySelector('button[aria-label="归档会话"]')?.click()`);
 
     const expandedHomePath = await client.evaluate(`(async () => {
       document.querySelector(".workspace-path")?.click();
@@ -807,6 +886,48 @@ async function main() {
     previewClient.close();
     await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
+    if (!live) {
+      const fixtureToken = `DESKTOP_SUBAGENT_FIXTURE_${Date.now()}`;
+      const fixtureSnapshot = await client.evaluate(`window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(projectDirectory)} })`);
+      const fixturePath = join(dirname(fixtureSnapshot.session.path), `desktop-subagent-${Date.now()}.jsonl`);
+      const fixtureSession = { ...fixtureSnapshot, session: { ...fixtureSnapshot.session, id: `desktop-subagent-${Date.now()}`, path: fixturePath } };
+      await writeFile(fixturePath, `${subagentFixtureEntries(fixtureSession, fixtureToken).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+      await client.evaluate(`(() => {
+        localStorage.setItem("suocode.activeProject", ${JSON.stringify(projectDirectory)});
+        location.reload();
+      })()`);
+      await client.waitFor(
+        `[...document.querySelectorAll(".conversation-row")].some((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))`,
+        "The packaged sidebar did not discover the subagent fixture session.",
+        60_000,
+      );
+      await client.evaluate(`[...document.querySelectorAll(".conversation-row")].find((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))?.click()`);
+      await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The packaged renderer did not restore the pi-subagents timeline card.", 60_000);
+      const backdropCountBeforeDetail = await client.evaluate(`document.querySelectorAll(".modal-backdrop").length`);
+      await client.evaluate(`document.querySelector(".subagent-timeline-card")?.click()`);
+      await client.waitFor(`document.querySelector(".subagent-detail-window")?.textContent.includes(${JSON.stringify(fixtureToken)})`, "The packaged renderer did not show the structured subagent details.");
+      const detailInteraction = await client.evaluate(`(async () => {
+        const detail = document.querySelector(".subagent-detail-window");
+        const header = detail?.querySelector(":scope > header");
+        const before = detail?.getBoundingClientRect();
+        if (!detail || !header || !before) return null;
+        header.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: before.left + 30, clientY: before.top + 20 }));
+        window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: before.left + 70, clientY: before.top + 55 }));
+        window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        const after = detail.getBoundingClientRect();
+        return {
+          moved: after.left > before.left + 20 && after.top > before.top + 20,
+          backdropCount: document.querySelectorAll(".modal-backdrop").length,
+          composerEnabled: !document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.disabled,
+        };
+      })()`);
+      assert.equal(detailInteraction?.moved, true, "The subagent detail window was not draggable.");
+      assert.equal(detailInteraction?.backdropCount, backdropCountBeforeDetail, "The subagent detail window added a blocking backdrop to the Agent workspace.");
+      assert.equal(detailInteraction?.composerEnabled, true, "The subagent detail window disabled the composer.");
+      await client.evaluate(`document.querySelector('button[aria-label="关闭子 Agent 详情"]')?.click()`);
+    }
+
     if (live) {
       await client.evaluate(`(async () => {
         const configuration = await window.suocode.request({ type: "get_configuration" });
@@ -886,6 +1007,12 @@ async function main() {
         "subagent",
         180_000,
       );
+      await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The subagent extension result was not projected into the conversation timeline.");
+      await client.evaluate(`document.querySelector(".subagent-timeline-card")?.click()`);
+      await client.waitFor(`Boolean(document.querySelector(".subagent-detail-window"))`, "The non-blocking subagent detail window did not open.");
+      const subagentDetail = await client.evaluate(`document.querySelector(".subagent-detail-window")?.textContent || ""`);
+      assert.match(subagentDetail, new RegExp(subagentToken));
+      await client.evaluate(`document.querySelector('button[aria-label="关闭子 Agent 详情"]')?.click()`);
 
       await client.evaluate(`document.querySelector('button[aria-label="刷新项目"]')?.click()`);
 

@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage, PromptImage, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, PromptImage, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
+import { SubagentTimelineCard } from "./SubagentTimelineCard";
 
 export type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
-  | { kind: "tools"; order: number; tools: ToolRun[] };
+  | { kind: "tools"; order: number; tools: ToolRun[] }
+  | { kind: "subagents"; order: number; tool: ToolRun; subagents: SubagentActivity[] };
 
 export type ConversationTimelineItem =
   | { kind: "user"; order: number; message: ChatMessage }
@@ -339,7 +341,7 @@ function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX
   );
 }
 
-export function AgentTurnView({ items, modelName }: { items: TimelineItem[]; modelName: string }): React.JSX.Element {
+export function AgentTurnView({ items, modelName, onStopSubagent }: { items: TimelineItem[]; modelName: string; onStopSubagent: (activity: SubagentActivity) => void }): React.JSX.Element {
   const rendered: React.JSX.Element[] = [];
   let activity: ActivityEntry[] = [];
   const flushActivity = (): void => {
@@ -349,6 +351,11 @@ export function AgentTurnView({ items, modelName }: { items: TimelineItem[]; mod
     rendered.push(<ActivityGroupView key={`activity-${entries[0].id}`} entries={entries} />);
   };
   for (const item of items) {
+    if (item.kind === "subagents") {
+      flushActivity();
+      rendered.push(<SubagentTimelineCard key={`subagents-${item.tool.id}`} tool={item.tool} activities={item.subagents} onStop={onStopSubagent} />);
+      continue;
+    }
     if (item.kind === "tools") {
       activity.push(...item.tools.map((tool) => ({ kind: "tool" as const, id: tool.id, tool })));
       continue;

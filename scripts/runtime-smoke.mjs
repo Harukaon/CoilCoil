@@ -134,7 +134,57 @@ try {
   if (!live) {
     const timestamp = new Date().toISOString();
     mkdirSync(dirname(snapshot.session.path), { recursive: true });
-    writeFileSync(snapshot.session.path, `${JSON.stringify({ type: "session", version: 3, id: snapshot.session.id, timestamp, cwd: snapshot.session.cwd })}\n`, "utf8");
+    const subagentToolId = "subagent-smoke-tool";
+    const sessionEntries = [
+      { type: "session", version: 3, id: snapshot.session.id, timestamp, cwd: snapshot.session.cwd },
+      {
+        type: "message",
+        id: "subagent-call-entry",
+        parentId: null,
+        timestamp,
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: subagentToolId, name: "subagent", arguments: { agent: "scout", task: "验证扩展投影" } }],
+          api: "openai-responses",
+          provider: "smoke",
+          model: "smoke",
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: "toolUse",
+          timestamp: Date.now(),
+        },
+      },
+      {
+        type: "message",
+        id: "subagent-result-entry",
+        parentId: "subagent-call-entry",
+        timestamp,
+        message: {
+          role: "toolResult",
+          toolCallId: subagentToolId,
+          toolName: "subagent",
+          content: [{ type: "text", text: "子 Agent 已完成" }],
+          details: {
+            mode: "single",
+            runId: "subagent-smoke-run",
+            results: [{
+              agent: "scout",
+              task: "验证扩展投影",
+              exitCode: 0,
+              model: "smoke-child-model",
+              usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 0, cost: 0, turns: 2 },
+              messages: [{ role: "assistant", content: [{ type: "thinking", text: "检查结构化事件" }, { type: "text", text: "扩展投影完成" }] }],
+              toolCalls: [{ text: "读取测试文件", expandedText: "read /tmp/subagent-smoke" }],
+              finalOutput: "扩展投影完成",
+              transcriptPath: "/tmp/subagent-smoke.jsonl",
+              sessionFile: "/tmp/subagent-smoke-session.jsonl",
+            }],
+          },
+          isError: false,
+          timestamp: Date.now(),
+        },
+      },
+    ];
+    writeFileSync(snapshot.session.path, `${sessionEntries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
     const persistedSessions = await request({ type: "list_sessions", cwd: projectDir });
     if (!persistedSessions.some((session) => session.path === snapshot.session.path)) throw new Error("The session archive fixture was not discoverable.");
     const afterArchive = await request({ type: "archive_session", cwd: projectDir, sessionPath: snapshot.session.path });
@@ -143,6 +193,18 @@ try {
     if (!archivedSessions.some((session) => session.path === snapshot.session.path && session.archivedAt)) throw new Error("Archived sessions were not listed with archive metadata.");
     const afterRestore = await request({ type: "restore_session", cwd: projectDir, sessionPath: snapshot.session.path });
     if (!afterRestore.some((session) => session.path === snapshot.session.path)) throw new Error("Restored sessions did not return to the default list.");
+    const restoredFixture = await request({ type: "open_session", cwd: projectDir, sessionPath: snapshot.session.path });
+    const restoredSubagent = restoredFixture.subagents.find((activity) => activity.runId === "subagent-smoke-run");
+    if (
+      !restoredSubagent
+      || restoredSubagent.parentToolId !== subagentToolId
+      || restoredSubagent.model !== "smoke-child-model"
+      || restoredSubagent.messages?.[0]?.thinking !== "检查结构化事件"
+      || restoredSubagent.toolCalls?.[0]?.expandedText !== "read /tmp/subagent-smoke"
+      || restoredSubagent.finalOutput !== "扩展投影完成"
+    ) {
+      throw new Error("The pi-subagents structured result was not restored through the SuoCode projection bridge.");
+    }
   }
 
   if (live) {

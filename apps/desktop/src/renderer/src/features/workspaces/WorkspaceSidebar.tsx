@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 import { SuoLoader } from "../../ui/SuoLoader";
+import { ArchivedSessionsPopover } from "./ArchivedSessionsPopover";
 
 export interface SessionActivityState {
   runtimeId?: string;
@@ -49,8 +50,10 @@ export function WorkspaceSidebar({
   onCollapseSessions,
   onOpenConversation,
   onArchiveConversation,
+  onRestoreSessions,
   onFocusPending,
   onOpenSettings,
+  onError,
 }: {
   projects: ProjectSelection[];
   activeProject: ProjectSelection | null;
@@ -68,15 +71,17 @@ export function WorkspaceSidebar({
   onCollapseSessions: (path: string) => void;
   onOpenConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onArchiveConversation: (project: ProjectSelection, session: SessionSummary) => void;
+  onRestoreSessions: (project: ProjectSelection, sessions: SessionSummary[]) => void;
   onFocusPending: () => void;
   onOpenSettings: () => void;
+  onError: (message: string) => void;
 }): React.JSX.Element {
   return (
     <aside className="sidebar">
       <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
       <nav className="primary-nav"><button className="nav-button" type="button" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
       <section className="project-section">
-        <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></div>
+        <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsPopover projects={projects} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></span></div>
         {projects.length ? projects.map((project) => {
           const expanded = expandedProjects.has(project.path);
           const sessions = sessionsByProject[project.path] ?? [];

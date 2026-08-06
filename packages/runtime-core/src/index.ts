@@ -116,13 +116,17 @@ interface PiSubagentsStatusModule {
     steps: Array<{
       index: number;
       agent: string;
+      label?: string;
       status: "pending" | "running" | "complete" | "completed" | "failed" | "paused" | "stopped" | "detached";
       currentTool?: string;
       currentPath?: string;
+      recentTools?: Array<{ tool: string; args: string; endMs?: number }>;
+      recentOutput?: string[];
       turnCount?: number;
       toolCount?: number;
       durationMs?: number;
       tokens?: { total?: number };
+      model?: string;
       error?: string;
     }>;
   }>;
@@ -350,6 +354,54 @@ function subagentTokens(value: unknown): number {
   return typeof value.total === "number" && Number.isFinite(value.total) ? value.total : 0;
 }
 
+function subagentUsageTokens(value: unknown): number {
+  if (!isRecord(value)) return 0;
+  return [value.input, value.output, value.cacheRead, value.cacheWrite]
+    .reduce<number>((total, item) => total + (typeof item === "number" && Number.isFinite(item) ? item : 0), 0);
+}
+
+function subagentRecentTools(value: unknown): Array<{ tool: string; args: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tools = value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const tool = stringValue(entry.tool);
+    if (!tool) return [];
+    return [{ tool, args: stringValue(entry.args) }];
+  });
+  return tools.length ? tools : undefined;
+}
+
+function subagentRecentOutput(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const output = value.flatMap((entry) => typeof entry === "string" && entry.trim() ? [clampText(entry, 12_000)] : []).slice(-24);
+  return output.length ? output : undefined;
+}
+
+function subagentMessages(value: unknown): Array<{ role: string; text: string; thinking?: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const messages = value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const parts = contentParts(entry.content);
+    const text = parts.text || stringValue(entry.text);
+    const thinking = parts.thinking || undefined;
+    if (!text && !thinking) return [];
+    return [{ role: stringValue(entry.role) || "unknown", text: clampText(text, 24_000), thinking: thinking ? clampText(thinking, 24_000) : undefined }];
+  }).slice(-40);
+  return messages.length ? messages : undefined;
+}
+
+function subagentToolCalls(value: unknown): Array<{ text: string; expandedText?: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const calls = value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const text = stringValue(entry.text);
+    const expandedText = stringValue(entry.expandedText) || undefined;
+    if (!text && !expandedText) return [];
+    return [{ text: clampText(text || expandedText || "工具调用", 2_000), expandedText: expandedText ? clampText(expandedText, 16_000) : undefined }];
+  }).slice(-80);
+  return calls.length ? calls : undefined;
+}
+
 function subagentActivitiesFromResult(result: unknown, fallbackRunId: string, background = false): SubagentActivity[] {
   if (!isRecord(result) || !isRecord(result.details)) return [];
   const details = result.details;
@@ -358,51 +410,50 @@ function subagentActivitiesFromResult(result: unknown, fallbackRunId: string, ba
   const isBackground = background || Boolean(details.asyncId);
   const updatedAt = Date.now();
   const progress = Array.isArray(details.progress) ? details.progress : [];
-  if (progress.length > 0) {
-    return progress.flatMap((raw, position) => {
-      if (!isRecord(raw)) return [];
-      const index = typeof raw.index === "number" ? raw.index : position;
-      return [{
-        id: `${runId}:${index}`,
-        runId,
-        index,
-        agent: stringValue(raw.agent) || `代理 ${index + 1}`,
-        task: stringValue(raw.task) || undefined,
-        mode,
-        status: subagentStatus(raw.status),
-        background: isBackground,
-        currentTool: stringValue(raw.currentTool) || undefined,
-        currentPath: stringValue(raw.currentPath) || undefined,
-        toolCount: typeof raw.toolCount === "number" ? raw.toolCount : 0,
-        turnCount: typeof raw.turnCount === "number" ? raw.turnCount : undefined,
-        tokens: subagentTokens(raw.tokens),
-        durationMs: typeof raw.durationMs === "number" ? raw.durationMs : 0,
-        error: stringValue(raw.error) || undefined,
-        updatedAt,
-      } satisfies SubagentActivity];
-    });
-  }
   const results = Array.isArray(details.results) ? details.results : [];
-  return results.flatMap((raw, index) => {
-    if (!isRecord(raw)) return [];
-    const failed = raw.stopped === true ? "stopped" : raw.detached === true ? "detached" : raw.exitCode === 0 ? "completed" : "failed";
-    const usage = isRecord(raw.usage) ? raw.usage : undefined;
-    return [{
+  const progressByIndex = new Map<number, Record<string, unknown>>();
+  progress.forEach((raw, position) => {
+    if (!isRecord(raw)) return;
+    progressByIndex.set(typeof raw.index === "number" ? raw.index : position, raw);
+  });
+  const resultByIndex = new Map<number, Record<string, unknown>>();
+  results.forEach((raw, index) => { if (isRecord(raw)) resultByIndex.set(index, raw); });
+  const indexes = [...new Set([...progressByIndex.keys(), ...resultByIndex.keys()])].sort((left, right) => left - right);
+  return indexes.map((index) => {
+    const progressItem = progressByIndex.get(index);
+    const resultItem = resultByIndex.get(index);
+    const failed = resultItem
+      ? resultItem.stopped === true ? "stopped" : resultItem.detached === true ? "detached" : resultItem.exitCode === 0 ? "completed" : "failed"
+      : subagentStatus(progressItem?.status);
+    const usage = resultItem && isRecord(resultItem.usage) ? resultItem.usage : undefined;
+    const progressSummary = resultItem && isRecord(resultItem.progressSummary) ? resultItem.progressSummary : undefined;
+    return {
       id: `${runId}:${index}`,
       runId,
+      parentToolId: fallbackRunId,
       index,
-      agent: stringValue(raw.agent) || `代理 ${index + 1}`,
-      task: stringValue(raw.task) || undefined,
+      agent: stringValue(resultItem?.agent) || stringValue(progressItem?.agent) || `代理 ${index + 1}`,
+      task: stringValue(resultItem?.task) || stringValue(progressItem?.task) || undefined,
+      model: stringValue(resultItem?.model) || stringValue(progressItem?.model) || undefined,
       mode,
       status: failed,
       background: isBackground,
-      toolCount: Array.isArray(raw.toolCalls) ? raw.toolCalls.length : 0,
-      turnCount: usage && typeof usage.turns === "number" ? usage.turns : undefined,
-      tokens: usage ? (typeof usage.input === "number" ? usage.input : 0) + (typeof usage.output === "number" ? usage.output : 0) : 0,
-      durationMs: 0,
-      error: stringValue(raw.error) || undefined,
+      currentTool: stringValue(progressItem?.currentTool) || undefined,
+      currentPath: stringValue(progressItem?.currentPath) || undefined,
+      recentTools: subagentRecentTools(progressItem?.recentTools),
+      recentOutput: subagentRecentOutput(progressItem?.recentOutput),
+      messages: subagentMessages(resultItem?.messages),
+      toolCalls: subagentToolCalls(resultItem?.toolCalls),
+      finalOutput: stringValue(resultItem?.finalOutput) ? clampText(stringValue(resultItem?.finalOutput), 48_000) : undefined,
+      transcriptPath: stringValue(resultItem?.transcriptPath) || undefined,
+      sessionFile: stringValue(resultItem?.sessionFile) || undefined,
+      toolCount: typeof progressSummary?.toolCount === "number" ? progressSummary.toolCount : Array.isArray(resultItem?.toolCalls) ? resultItem.toolCalls.length : typeof progressItem?.toolCount === "number" ? progressItem.toolCount : 0,
+      turnCount: usage && typeof usage.turns === "number" ? usage.turns : typeof progressItem?.turnCount === "number" ? progressItem.turnCount : undefined,
+      tokens: subagentUsageTokens(usage) || subagentTokens(progressSummary?.tokens) || subagentTokens(progressItem?.tokens),
+      durationMs: typeof progressSummary?.durationMs === "number" ? progressSummary.durationMs : typeof progressItem?.durationMs === "number" ? progressItem.durationMs : 0,
+      error: stringValue(resultItem?.error) || stringValue(progressItem?.error) || undefined,
       updatedAt,
-    } satisfies SubagentActivity];
+    } satisfies SubagentActivity;
   });
 }
 
@@ -759,6 +810,7 @@ export class SuoCodeRuntime {
   private migratedLegacyCredentials = false;
   private projectRefreshTimer?: ReturnType<typeof setTimeout>;
   private subagentRefreshTimer?: ReturnType<typeof setTimeout>;
+  private mcpReloadTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: SuoCodeRuntimeOptions) {
     this.agentDir = resolve(options.agentDir);
@@ -912,10 +964,21 @@ export class SuoCodeRuntime {
     renameSync(temporaryPath, path);
   }
 
-  private async reloadMcpExtension(): Promise<void> {
-    if (!this.active || this.active.session.isStreaming) return;
-    await this.active.session.reload();
-    this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+  private reloadMcpExtension(): void {
+    if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
+    this.mcpReloadTimer = setTimeout(() => {
+      this.mcpReloadTimer = undefined;
+      if (!this.active || this.active.session.isStreaming) return;
+      const active = this.active;
+      void active.session.reload()
+        .then(async () => {
+          if (this.active !== active) return;
+          this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+        })
+        .catch((error) => {
+          this.emitEvent({ type: "runtime_error", message: `MCP 扩展重新加载失败：${errorMessage(error)}`, detail: errorDetail(error) });
+        });
+    }, 750);
   }
 
   async getMcpConfiguration(cwd?: string): Promise<McpConfigurationSnapshot> {
@@ -964,7 +1027,7 @@ export class SuoCodeRuntime {
     definition.lifecycle = server.lifecycle;
     if (server.directTools) definition.directTools = true;
     adapter.writeSharedServerEntry(configPath, name, definition);
-    await this.reloadMcpExtension();
+    this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);
   }
 
@@ -983,14 +1046,14 @@ export class SuoCodeRuntime {
     const adapter = await loadMcpAdapterConfigModule();
     const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     this.removeMcpServerFromFile(configPath, name);
-    await this.reloadMcpExtension();
+    this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);
   }
 
   async enableMcpImports(imports: McpImportConfiguration["kind"][], cwd?: string): Promise<McpConfigurationSnapshot> {
     const adapter = await loadMcpAdapterConfigModule();
     adapter.ensureCompatibilityImports(imports, join(this.agentDir, "mcp.json"));
-    await this.reloadMcpExtension();
+    this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);
   }
 
@@ -1267,6 +1330,15 @@ export class SuoCodeRuntime {
         task: activity.task ?? existing.task,
         currentTool: activity.currentTool ?? existing.currentTool,
         currentPath: activity.currentPath ?? existing.currentPath,
+        model: activity.model ?? existing.model,
+        recentTools: activity.recentTools ?? existing.recentTools,
+        recentOutput: activity.recentOutput ?? existing.recentOutput,
+        messages: activity.messages ?? existing.messages,
+        toolCalls: activity.toolCalls ?? existing.toolCalls,
+        finalOutput: activity.finalOutput ?? existing.finalOutput,
+        transcriptPath: activity.transcriptPath ?? existing.transcriptPath,
+        sessionFile: activity.sessionFile ?? existing.sessionFile,
+        parentToolId: activity.parentToolId ?? existing.parentToolId,
         turnCount: activity.turnCount ?? existing.turnCount,
         error: activity.error ?? existing.error,
       } : activity);
@@ -1291,11 +1363,15 @@ export class SuoCodeRuntime {
         runId: run.id,
         index: step.index,
         agent: step.agent || `代理 ${step.index + 1}`,
+        task: step.label,
+        model: step.model,
         mode: run.mode,
         status: subagentStatus(step.status, subagentStatus(run.state)),
         background: true,
         currentTool: step.currentTool ?? run.currentTool,
         currentPath: step.currentPath ?? run.currentPath,
+        recentTools: subagentRecentTools(step.recentTools),
+        recentOutput: subagentRecentOutput(step.recentOutput),
         toolCount: step.toolCount ?? run.toolCount ?? 0,
         turnCount: step.turnCount ?? run.turnCount,
         tokens: subagentTokens(step.tokens) || subagentTokens(run.totalTokens),
@@ -1457,9 +1533,11 @@ export class SuoCodeRuntime {
             const placeholder: SubagentActivity = {
               id: `${tool.id}:0`,
               runId: tool.id,
+              parentToolId: tool.id,
               index: 0,
               agent,
               task: task || undefined,
+              model: stringValue(args.model) || undefined,
               mode: Array.isArray(args.tasks) ? "parallel" : Array.isArray(args.chain) ? "chain" : "single",
               status: "running",
               background,
@@ -1742,6 +1820,7 @@ export class SuoCodeRuntime {
   async dispose(): Promise<void> {
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
     if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
+    if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
     if (this.active) {
       this.active.unsubscribe();
       await this.active.session.abort().catch(() => undefined);

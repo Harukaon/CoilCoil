@@ -362,7 +362,7 @@ export default function App(): React.JSX.Element {
   const modelConfigured = Boolean(
     selectedModel && configuration?.configuredProviders.includes(selectedModel.provider),
   );
-  const timeline = useMemo(() => buildConversationTimeline(messages, tools), [messages, tools]);
+  const timeline = useMemo(() => buildConversationTimeline(messages, tools, subagents), [messages, subagents, tools]);
 
   const openProject = async (): Promise<void> => {
     const selection = await window.suocode.selectProject();
@@ -524,8 +524,10 @@ export default function App(): React.JSX.Element {
           onCollapseSessions={(path) => setExpandedSessionLists((current) => { const next = new Set(current); next.delete(path); return next; })}
           onOpenConversation={(owner, session) => { void openConversation(owner, session); }}
           onArchiveConversation={(owner, session) => { void archiveConversation(owner, session); }}
+          onRestoreSessions={(owner, sessions) => setSessionsByProject((current) => ({ ...current, [owner.path]: sessions }))}
           onFocusPending={() => inputRef.current?.focus()}
           onOpenSettings={() => setSettingsOpen(true)}
+          onError={setError}
         />
         {leftOpen ? <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><span><PanelLeft size={17} /></span></button> : null}
         {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
