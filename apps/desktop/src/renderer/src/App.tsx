@@ -1,75 +1,39 @@
 import {
-  AlertCircle,
-  ArrowUp,
-  Check,
-  CheckCircle2,
-  CheckSquare2,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  Circle,
-  CircleDot,
-  File,
-  FileCode2,
   Files,
-  Folder,
-  FolderOpen,
-  GitCompareArrows,
-  LoaderCircle,
-  MessageSquarePlus,
-  MoreHorizontal,
   PanelLeft,
   PanelRight,
-  Plus,
   RefreshCw,
-  Search,
-  Settings,
-  Square,
-  TerminalSquare,
-  Wrench,
-  X,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import * as Popover from "@radix-ui/react-popover";
-import type { ClipboardEvent as ReactClipboardEvent, CSSProperties, DragEvent as ReactDragEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import type {
-  ChangedFile,
   ChatMessage,
-  ContextUsage,
   FileNode,
   ProjectSelection,
   ProjectSnapshot,
   RuntimeBootstrap,
   RuntimeConfiguration,
   RuntimeEvent,
-  ResponseMetrics,
-  ModelOption,
   PromptImage,
   SessionSnapshot,
   SessionSummary,
-  TokenUsage,
+  SubagentActivity,
   ToolRun,
 } from "@suocode/runtime-protocol";
-import {
-  AgentTurnView,
-  MessageView,
-  clipboardImage,
-  imageDataUrl,
-  type ConversationTimelineItem,
-  type TimelineItem,
-} from "./features/conversation/ConversationTimeline";
+import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
+import { ConversationPane } from "./features/conversation/ConversationPane";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
+import { WorkspaceSidebar, type SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
+import { FilesPanel } from "./features/files/FilesPanel";
+import { useComposerController } from "./features/composer/useComposerController";
+import { usePanelLayout } from "./hooks/usePanelLayout";
+import { useFilePathDrop } from "./hooks/useFilePathDrop";
 
 type InspectorView = "files";
-type SessionActivity = { runtimeId?: string; running: boolean; unread: boolean };
 
 const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
 const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
 const ACTIVE_PROJECT_STORAGE_KEY = "suocode.active-project";
-const LEFT_WIDTH_KEY = "suocode.left-panel-width";
-const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
-const MINIMUM_CONVERSATION_WIDTH = 315;
-const MINIMUM_PANEL_WIDTH = 40;
 const AGENT_ACTIVITY_PHRASES = ["工作中…", "整理线索…", "翻找文件…", "冲浪中…", "组织思路…", "沿着思路前进…", "快收尾了…"];
 const EMPTY_PROJECT: ProjectSnapshot = {
   cwd: "",
@@ -100,21 +64,6 @@ function loadStoredProjects(): ProjectSelection[] {
   }
 }
 
-function pathLabel(path: string): string {
-  const normalized = path.replace(/[\\/]+$/, "");
-  return normalized.split(/[\\/]/).at(-1) || path;
-}
-
-function absoluteProjectPath(root: string, value: string): string {
-  if (/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value)) return value;
-  const separator = root.includes("\\") ? "\\" : "/";
-  return `${root.replace(/[\\/]+$/, "")}${separator}${value.replace(/^[\\/]+/, "")}`;
-}
-
-function quotePath(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
 function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
   const seen = new Set<string>();
   return projects.filter((project) => {
@@ -124,49 +73,6 @@ function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
   });
 }
 
-function formatMetricDuration(milliseconds: number | undefined): string {
-  return milliseconds === undefined ? "—" : `${(milliseconds / 1_000).toFixed(2)}s`;
-}
-
-function formatTokens(tokens: number | null | undefined): string {
-  if (tokens === null || tokens === undefined) return "—";
-  if (tokens < 1_000) return String(Math.round(tokens));
-  return `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
-}
-
-function performanceGrade(metrics: ResponseMetrics): "excellent" | "good" | "fair" | "slow" {
-  const firstToken = metrics.firstTokenMs ?? Number.POSITIVE_INFINITY;
-  const speed = metrics.averageTokensPerSecond ?? 0;
-  if (firstToken <= 2_000 && speed >= 50) return "excellent";
-  if (firstToken <= 5_000 && speed >= 25) return "good";
-  if (firstToken <= 20_000 && speed >= 10) return "fair";
-  return "slow";
-}
-
-function SuoLoader({ size = 14 }: { size?: number }): React.JSX.Element {
-  return <span className="suo-loader" style={{ "--loader-size": `${size}px` } as CSSProperties}><i /><i /><i /></span>;
-}
-
-function relativeTime(value: string): string {
-  const milliseconds = Date.now() - Date.parse(value);
-  if (!Number.isFinite(milliseconds) || milliseconds < 60_000) return "刚刚";
-  const minutes = Math.floor(milliseconds / 60_000);
-  if (minutes < 60) return `${minutes} 分钟`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时`;
-  const days = Math.floor(hours / 24);
-  return days < 7 ? `${days} 天` : new Date(value).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
-}
-
-function truncateTitle(value: string, maximum = 10): string {
-  const characters = Array.from(value);
-  return characters.length > maximum ? `${characters.slice(0, maximum).join("")}…` : value;
-}
-
-function storedWidth(key: string, fallback: number): number {
-  const value = Number(window.localStorage.getItem(key));
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
 
 function upsertMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
   const index = messages.findIndex((item) => item.id === message.id);
@@ -184,334 +90,6 @@ function upsertTool(tools: ToolRun[], tool: ToolRun): ToolRun[] {
   return next;
 }
 
-function EmptyState({ icon: Icon, title, detail }: {
-  icon: typeof CheckSquare2;
-  title: string;
-  detail: string;
-}): React.JSX.Element {
-  return (
-    <div className="inspector-empty">
-      <span className="inspector-empty-icon"><Icon size={16} strokeWidth={1.7} /></span>
-      <strong>{title}</strong>
-      <p>{detail}</p>
-    </div>
-  );
-}
-
-function ModelPicker({ configuration, currentModel, open, busy, onOpenChange, onSelect, onOpenSettings }: {
-  configuration?: RuntimeConfiguration;
-  currentModel?: SessionSnapshot["model"];
-  open: boolean;
-  busy: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSelect: (model: ModelOption) => void;
-  onOpenSettings: () => void;
-}): React.JSX.Element {
-  const [search, setSearch] = useState("");
-
-  useEffect(() => {
-    if (!open) setSearch("");
-  }, [open]);
-
-  const groups = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    const grouped = new Map<string, { name: string; models: ModelOption[] }>();
-    for (const model of configuration?.models ?? []) {
-      if (!model.configured) continue;
-      if (query && !`${model.providerName} ${model.provider} ${model.name} ${model.id}`.toLowerCase().includes(query)) continue;
-      const group = grouped.get(model.provider) ?? { name: model.providerName, models: [] };
-      group.models.push(model);
-      grouped.set(model.provider, group);
-    }
-    return [...grouped.entries()];
-  }, [configuration, search]);
-
-  return (
-    <Popover.Root open={open} onOpenChange={onOpenChange}>
-      <Popover.Trigger asChild>
-        <button className="agent-mode" type="button"><CircleDot size={13} /><span>{currentModel?.name ?? "选择模型"}</span><ChevronDown size={12} /></button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content className="model-popover" side="top" align="start" sideOffset={8} collisionPadding={12} avoidCollisions>
-          <div className="model-popover-search"><Search size={14} /><input autoFocus value={search} placeholder="搜索模型" onChange={(event) => setSearch(event.target.value)} /></div>
-          <div className="model-popover-list">
-            {groups.map(([provider, group]) => <section className="model-provider-group" key={provider}>
-              <h3>{group.name}</h3>
-              {group.models.map((model) => {
-                const active = currentModel?.provider === model.provider && currentModel.id === model.id;
-                return <button className={active ? "active" : ""} type="button" disabled={busy} key={`${model.provider}/${model.id}`} onClick={() => onSelect(model)}><span><strong>{model.name}</strong><small>{model.id}</small></span>{active ? <Check size={14} /> : null}</button>;
-              })}
-            </section>)}
-            {!groups.length ? <div className="model-popover-empty">{configuration?.configuredProviders.length ? "没有匹配的模型" : "尚未配置模型服务商"}</div> : null}
-          </div>
-          <button className="model-settings-link" type="button" onClick={onOpenSettings}><Settings size={14} /><span>模型与服务商设置</span></button>
-          <Popover.Arrow className="model-popover-arrow" width={12} height={6} />
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
-function ComposerPlan({ plan }: { plan: ProjectSnapshot["plan"] }): React.JSX.Element | null {
-  const [expanded, setExpanded] = useState(true);
-  if (!plan.length) return null;
-  const completed = plan.filter((item) => item.status === "completed").length;
-  return (
-    <section className={`composer-plan ${expanded ? "expanded" : "collapsed"}`} aria-label="Agent Todo">
-      <button className="composer-plan-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><span>Todo</span><small>{completed}/{plan.length}</small>{expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
-      <div className="composer-plan-body"><ol>
-          {plan.map((item, index) => <li className={item.status} key={`${index}-${item.text}`}>
-            {item.status === "completed" ? <CheckCircle2 size={14} /> : item.status === "in_progress" ? <CircleDot size={14} /> : <Circle size={14} />}
-            <span>{item.text}</span>
-          </li>)}
-      </ol></div>
-    </section>
-  );
-}
-
-function PlanPanel({ project }: { project: ProjectSnapshot }): React.JSX.Element {
-  if (!project.plan.length) {
-    return <EmptyState icon={CheckSquare2} title="暂无 Todo" detail="Agent 的结构化 Todo 会显示在这里。" />;
-  }
-  return (
-    <ol className="plan-list">
-      {project.plan.map((item, index) => (
-        <li className={item.status} key={`${index}-${item.text}`}>
-          {item.status === "completed" ? <CheckCircle2 size={15} /> : item.status === "in_progress" ? <CircleDot size={15} /> : <Circle size={15} />}
-          <span>{item.text}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function ChangesPanel({ changes }: { changes: ChangedFile[] }): React.JSX.Element {
-  const [selectedPath, setSelectedPath] = useState<string>();
-  const selected = changes.find((change) => change.path === selectedPath) ?? changes[0];
-  useEffect(() => {
-    if (!changes.some((change) => change.path === selectedPath)) setSelectedPath(changes[0]?.path);
-  }, [changes, selectedPath]);
-
-  if (!changes.length) {
-    return <EmptyState icon={GitCompareArrows} title="工作区干净" detail="你或 Agent 所做的修改会显示在这里。" />;
-  }
-  return (
-    <div className="changes-panel">
-      <div className="change-list">
-        {changes.map((change) => (
-          <button className={selected?.path === change.path ? "active" : ""} type="button" key={change.path} onClick={() => setSelectedPath(change.path)}>
-            <span className={`change-status ${change.status}`}>{change.status.slice(0, 1).toUpperCase()}</span>
-            <span className="change-path">{change.path}</span>
-            <small className="additions">+{change.additions}</small>
-            <small className="deletions">−{change.deletions}</small>
-          </button>
-        ))}
-      </div>
-      {selected ? (
-        <div className="diff-preview">
-          <div className="preview-heading"><FileCode2 size={13} /><span>{selected.path}</span></div>
-          <pre>{selected.patch || "二进制文件或暂无文本差异。"}</pre>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function TerminalPanel({ project }: { project: ProjectSnapshot }): React.JSX.Element {
-  if (!project.terminals.length) {
-    return <EmptyState icon={TerminalSquare} title="暂无命令" detail="Agent 执行的命令会实时显示在这里。" />;
-  }
-  return (
-    <div className="terminal-list">
-      {project.terminals.map((terminal) => (
-        <details className={`terminal-card ${terminal.status}`} key={terminal.id} open={terminal.status === "running"}>
-          <summary>
-            <span className="terminal-light" />
-            <code>{terminal.command}</code>
-            {terminal.status === "running" ? <LoaderCircle className="spin" size={13} /> : null}
-          </summary>
-          <div className="terminal-meta">{terminal.cwd}{terminal.exitCode === undefined ? "" : ` · 退出码 ${terminal.exitCode}`}</div>
-          <pre>{terminal.output || "等待输出…"}</pre>
-        </details>
-      ))}
-    </div>
-  );
-}
-
-function replaceDirectoryChildren(nodes: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return nodes.map((node) => {
-    if (node.path === path && node.kind === "directory") return { ...node, children };
-    if (!node.children) return node;
-    return { ...node, children: replaceDirectoryChildren(node.children, path, children) };
-  });
-}
-
-function FileTreeNode({ node, root, depth, onLoad, onOpen }: {
-  node: FileNode;
-  root: string;
-  depth: number;
-  onLoad: (path: string) => Promise<void>;
-  onOpen: (node: FileNode) => void;
-}): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const startPathDrag = (event: ReactDragEvent<HTMLButtonElement>): void => {
-    const absolutePath = absoluteProjectPath(root, node.path);
-    event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData("application/x-suocode-path", JSON.stringify({ path: absolutePath }));
-    event.dataTransfer.setData("text/plain", quotePath(absolutePath));
-  };
-  if (node.kind === "directory") {
-    const toggle = async (): Promise<void> => {
-      const nextOpen = !open;
-      setOpen(nextOpen);
-      if (!nextOpen || node.children !== undefined || loading) return;
-      setLoading(true);
-      try {
-        await onLoad(node.path);
-      } finally {
-        setLoading(false);
-      }
-    };
-    return (
-      <div className="file-tree-node">
-        <button type="button" draggable style={{ paddingLeft: 8 + depth * 13 }} onClick={() => void toggle()} onDragStart={startPathDrag}>
-          {loading ? <LoaderCircle className="spin" size={12} /> : open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <Folder size={14} />
-          <span>{node.name}</span>
-        </button>
-        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} root={root} depth={depth + 1} onLoad={onLoad} onOpen={onOpen} />) : null}
-      </div>
-    );
-  }
-  return (
-    <button className="file-leaf" type="button" draggable style={{ paddingLeft: 21 + depth * 13 }} onClick={() => onOpen(node)} onDragStart={startPathDrag}>
-      <File size={13} /><span>{node.name}</span>
-    </button>
-  );
-}
-
-function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSnapshot; runtimeId?: string; onOpen: (node: FileNode) => void }): React.JSX.Element {
-  const [tree, setTree] = useState<FileNode[]>(project.files);
-  const [error, setError] = useState<string>();
-  useEffect(() => {
-    setTree(project.files);
-    setError(undefined);
-  }, [project.cwd, project.files]);
-
-  const loadDirectory = async (path: string): Promise<void> => {
-    try {
-      const children = await window.suocode.request<FileNode[]>({ type: "list_directory", path }, runtimeId);
-      setTree((current) => replaceDirectoryChildren(current, path, children));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-
-  if (!project.cwd) {
-    return <EmptyState icon={Files} title="未打开项目" detail="打开项目后即可查看文件。" />;
-  }
-  return (
-    <div className="files-panel">
-      <div className="file-tree">
-        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} root={project.cwd} depth={0} onLoad={loadDirectory} onOpen={onOpen} />) : <p className="panel-note">此文件夹为空。</p>}
-        {error ? <p className="file-tree-error">{error}</p> : null}
-      </div>
-    </div>
-  );
-}
-
-function WorkspaceStatus({
-  project,
-  responseMetrics,
-  responseMetricsHistory,
-  contextUsage,
-  tokenUsage,
-}: {
-  project: ProjectSelection | null;
-  responseMetrics?: ResponseMetrics;
-  responseMetricsHistory: ResponseMetrics[];
-  contextUsage?: ContextUsage;
-  tokenUsage: TokenUsage;
-}): React.JSX.Element {
-  const [pathOpen, setPathOpen] = useState(false);
-  const percent = Math.max(0, Math.min(100, contextUsage?.percent ?? 0));
-  const firstTokenText = responseMetrics?.firstTokenMs === undefined ? undefined : `首字 ${formatMetricDuration(responseMetrics.firstTokenMs)}`;
-  const speedText = responseMetrics?.averageTokensPerSecond === undefined ? undefined : `${responseMetrics.averageTokensPerSecond.toFixed(1)} tok/s`;
-  const metricSummary = [firstTokenText, speedText].filter(Boolean).join(" · ");
-  const hasPerformanceHistory = responseMetricsHistory.length > 0;
-  return (
-    <div className="workspace-status">
-      <Popover.Root open={pathOpen} onOpenChange={setPathOpen}>
-        <Popover.Trigger asChild>
-          <button className="workspace-path" type="button" title={project?.path ?? "未选择项目"}>
-            <FileCode2 size={13} />
-            <span>{project ? pathLabel(project.path) : "未选择项目"}</span>
-          </button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content className="path-popover" side="top" align="start" sideOffset={7}>
-            {project?.path ?? "未选择项目"}
-            <Popover.Arrow className="model-popover-arrow" />
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
-      <div className="composer-metrics">
-        {metricSummary ? <span className="response-metrics">{metricSummary}</span> : null}
-        {responseMetrics || hasPerformanceHistory ? <Popover.Root>
-          <Popover.Trigger asChild>
-            <button className="performance-trigger" type="button" aria-label="查看模型性能历史" title="模型响应性能">
-              <span className={`performance-signal ${responseMetrics ? performanceGrade(responseMetrics) : "unknown"}`}><i /><i /><i /></span>
-            </button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content className="performance-popover" side="top" align="end" sideOffset={7}>
-              <strong>近期请求性能</strong>
-              {responseMetricsHistory.length ? (
-                <>
-                  <div className="performance-grid">{responseMetricsHistory.slice(-60).map((item, index) => {
-                    const promptTokens = (item.inputTokens ?? 0) + (item.cacheReadTokens ?? 0) + (item.cacheWriteTokens ?? 0);
-                    const cacheRate = promptTokens > 0 ? ((item.cacheReadTokens ?? 0) / promptTokens) * 100 : undefined;
-                    return <span className={`performance-cell ${performanceGrade(item)}`} key={`${item.timestamp}-${index}`}><span className="performance-tooltip"><strong>{new Date(item.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</strong>{item.firstTokenMs === undefined ? null : <span>首字 {formatMetricDuration(item.firstTokenMs)}</span>}{item.averageTokensPerSecond === undefined ? null : <span>{item.averageTokensPerSecond.toFixed(1)} tok/s</span>}{item.outputTokens === undefined ? null : <span>输出 {formatTokens(item.outputTokens)} tok</span>}{item.cacheReadTokens === undefined ? null : <span>缓存读取 {formatTokens(item.cacheReadTokens)}</span>}{item.cacheWriteTokens === undefined ? null : <span>缓存写入 {formatTokens(item.cacheWriteTokens)}</span>}{cacheRate === undefined ? null : <span>缓存命中 {cacheRate.toFixed(1)}%</span>}</span></span>;
-                  })}</div>
-                  <div className="performance-legend"><span>较慢</span><i className="slow" /><i className="fair" /><i className="good" /><i className="excellent" /><span>较快</span></div>
-                </>
-              ) : <p>完成一次模型请求后，这里会显示性能记录。</p>}
-              <Popover.Arrow className="model-popover-arrow" />
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root> : null}
-        <Popover.Root>
-          <Popover.Trigger asChild>
-            <button
-              className="context-trigger"
-              type="button"
-              aria-label="查看上下文 Token 详情"
-              title={`上下文 ${contextUsage?.percent === null || contextUsage?.percent === undefined ? "未知" : `${contextUsage.percent.toFixed(1)}%`}`}
-            >
-              <span className="context-ring" style={{ "--context-percent": `${percent}%` } as CSSProperties}><i /></span>
-            </button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content className="context-popover" side="top" align="end" sideOffset={7}>
-              <strong>Token 使用情况</strong>
-              <dl>
-                <div><dt>当前上下文</dt><dd>{formatTokens(contextUsage?.tokens)} / {formatTokens(contextUsage?.contextWindow)}</dd></div>
-                <div><dt>上下文占用</dt><dd>{contextUsage?.percent === null || contextUsage?.percent === undefined ? "—" : `${contextUsage.percent.toFixed(1)}%`}</dd></div>
-                <div><dt>累计输入</dt><dd>{formatTokens(tokenUsage.input)}</dd></div>
-                <div><dt>累计输出</dt><dd>{formatTokens(tokenUsage.output)}</dd></div>
-                <div><dt>缓存读取</dt><dd>{formatTokens(tokenUsage.cacheRead)}</dd></div>
-                <div><dt>本次输出</dt><dd>{formatTokens(responseMetrics?.outputTokens)}</dd></div>
-              </dl>
-              <Popover.Arrow className="model-popover-arrow" />
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
-      </div>
-    </div>
-  );
-}
-
 export default function App(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSelection[]>([]);
   const [project, setProject] = useState<ProjectSelection | null>(null);
@@ -520,38 +98,49 @@ export default function App(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<SessionSnapshot>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [tools, setTools] = useState<ToolRun[]>([]);
+  const [subagents, setSubagents] = useState<SubagentActivity[]>([]);
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
   const [configuration, setConfiguration] = useState<RuntimeConfiguration>();
   const [inspectorView, setInspectorView] = useState<InspectorView>("files");
-  const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivity>>({});
-  const [draft, setDraft] = useState("");
-  const [draftImages, setDraftImages] = useState<PromptImage[]>([]);
+  const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivityState>>({});
   const [pendingProjectPath, setPendingProjectPath] = useState<string>();
   const [expandedSessionLists, setExpandedSessionLists] = useState<Set<string>>(new Set());
   const [startingSession, setStartingSession] = useState(false);
-  const [fileDragActive, setFileDragActive] = useState(false);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
-  const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT_WIDTH_KEY, 268));
-  const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352));
-  const preferredLeftWidthRef = useRef(leftWidth);
-  const preferredRightWidthRef = useRef(rightWidth);
+  const { leftOpen, rightOpen, leftWidth, rightWidth, setLeftOpen, setRightOpen, beginResize } = usePanelLayout();
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
   const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [modelChanging, setModelChanging] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const composingRef = useRef(false);
+  const composer = useComposerController({
+    configuration,
+    runtimeId: snapshot?.runtimeId,
+    onConfigurationChange: setConfiguration,
+    onError: setError,
+  });
+  const {
+    draft,
+    images: draftImages,
+    inputRef,
+    modelMenuOpen,
+    modelChanging,
+    setDraft,
+    setImages: setDraftImages,
+    setModelMenuOpen,
+    reset: resetComposer,
+    focus: focusComposer,
+    insertPath: insertComposerPath,
+  } = composer;
   const timelineRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const runtimeSessionRef = useRef(new Map<string, string>());
-  const fileDragDepthRef = useRef(0);
   const optimisticMessageIdRef = useRef<string | undefined>(undefined);
+  const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
+    onInsertPath: insertComposerPath,
+    onError: (message) => setError(message),
+  });
 
   const applySnapshot = useCallback((next: SessionSnapshot): void => {
     snapshotRef.current = next;
@@ -559,6 +148,7 @@ export default function App(): React.JSX.Element {
     setSnapshot(next);
     setMessages(next.messages);
     setTools(next.tools);
+    setSubagents(next.subagents);
     setProjectState(next.project);
     if (next.session.path) {
       setSessionActivity((current) => ({
@@ -578,14 +168,14 @@ export default function App(): React.JSX.Element {
     setSnapshot(undefined);
     setMessages([]);
     setTools([]);
+    setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
-    setDraft("");
-    setDraftImages([]);
+    resetComposer();
     setLoading(false);
     setError(undefined);
     shouldAutoScrollRef.current = true;
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, []);
+    focusComposer();
+  }, [focusComposer, resetComposer]);
 
   const handleRuntimeEvent = useCallback((event: RuntimeEvent, runtimeId?: string): void => {
     if (event.type === "session_snapshot") {
@@ -657,6 +247,9 @@ export default function App(): React.JSX.Element {
       case "plan_updated":
         setProjectState((current) => ({ ...current, plan: event.plan }));
         break;
+      case "subagents_updated":
+        setSubagents(event.subagents);
+        break;
       case "project_updated":
         setProjectState(event.project);
         break;
@@ -692,6 +285,7 @@ export default function App(): React.JSX.Element {
     setError(undefined);
     setMessages([]);
     setTools([]);
+    setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
     try {
       const existing = await window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: selection.path });
@@ -704,9 +298,9 @@ export default function App(): React.JSX.Element {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setLoading(false);
-      inputRef.current?.focus();
+      focusComposer();
     }
-  }, [applySnapshot]);
+  }, [applySnapshot, focusComposer, setDraftImages]);
 
   useEffect(() => {
     document.documentElement.dataset.platform = window.suocode.platform;
@@ -740,55 +334,10 @@ export default function App(): React.JSX.Element {
   }, [messages, tools, snapshot?.running]);
 
   useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
-  }, [draft]);
-
-  useEffect(() => {
     if (!snapshot?.running) return;
     const timer = window.setInterval(() => setActivityPhraseIndex((current) => current + 1), 2_300);
     return () => window.clearInterval(timer);
   }, [snapshot?.running]);
-
-  useEffect(() => {
-    const fitPanelsToWindow = (): void => {
-      const compact = window.innerWidth <= 700 && !rightOpen;
-      const leftIsTiled = leftOpen && !compact;
-      const rightIsTiled = rightOpen;
-      let nextLeftWidth = preferredLeftWidthRef.current;
-      let nextRightWidth = preferredRightWidthRef.current;
-      let deficit = Math.max(
-        0,
-        (leftIsTiled ? nextLeftWidth : 0)
-          + (rightIsTiled ? nextRightWidth : 0)
-          + MINIMUM_CONVERSATION_WIDTH
-          - window.innerWidth,
-      );
-
-      if (deficit > 0 && rightIsTiled) {
-        const reduction = Math.min(deficit, Math.max(0, nextRightWidth - MINIMUM_PANEL_WIDTH));
-        nextRightWidth -= reduction;
-        deficit -= reduction;
-      }
-      if (deficit > 0 && leftIsTiled) {
-        const reduction = Math.min(deficit, Math.max(0, nextLeftWidth - MINIMUM_PANEL_WIDTH));
-        nextLeftWidth -= reduction;
-      }
-
-      setLeftWidth(Math.round(leftIsTiled ? nextLeftWidth : preferredLeftWidthRef.current));
-      setRightWidth(Math.round(rightIsTiled ? nextRightWidth : preferredRightWidthRef.current));
-      void window.suocode.setWindowMinimumWidth(
-        MINIMUM_CONVERSATION_WIDTH
-          + (leftIsTiled ? MINIMUM_PANEL_WIDTH : 0)
-          + (rightIsTiled ? MINIMUM_PANEL_WIDTH : 0),
-      );
-    };
-    fitPanelsToWindow();
-    window.addEventListener("resize", fitPanelsToWindow);
-    return () => window.removeEventListener("resize", fitPanelsToWindow);
-  }, [leftOpen, rightOpen]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent): void => {
@@ -813,59 +362,7 @@ export default function App(): React.JSX.Element {
   const modelConfigured = Boolean(
     selectedModel && configuration?.configuredProviders.includes(selectedModel.provider),
   );
-  const timeline = useMemo<ConversationTimelineItem[]>(() => {
-    const ordered = [
-      ...messages.filter((message) => message.role !== "tool" && (message.text || message.thinking || message.images?.length)).map((message) => ({ kind: "message" as const, order: message.order, message })),
-      ...tools.map((tool) => ({ kind: "tool" as const, order: tool.order, tool })),
-    ].sort((a, b) => a.order - b.order);
-    const grouped: TimelineItem[] = [];
-    for (const item of ordered) {
-      if (item.kind === "tool") {
-        const previous = grouped.at(-1);
-        if (previous?.kind === "tools") previous.tools.push(item.tool);
-        else grouped.push({ kind: "tools", order: item.order, tools: [item.tool] });
-      } else grouped.push(item);
-    }
-    const turns: ConversationTimelineItem[] = [];
-    for (const item of grouped) {
-      if (item.kind === "message" && item.message.role === "user") {
-        turns.push({ kind: "user", order: item.order, message: item.message });
-        continue;
-      }
-      const previous = turns.at(-1);
-      if (previous?.kind === "agent") previous.items.push(item);
-      else turns.push({ kind: "agent", order: item.order, items: [item] });
-    }
-    return turns;
-  }, [messages, tools]);
-
-  const beginResize = (side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>): void => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = side === "left" ? leftWidth : rightWidth;
-    let finalWidth = startWidth;
-    document.body.classList.add("resizing-panels");
-    const move = (pointer: PointerEvent): void => {
-      const raw = side === "left" ? startWidth + pointer.clientX - startX : startWidth + startX - pointer.clientX;
-      const minimum = 40;
-      const oppositeWidth = side === "left"
-        ? (rightOpen ? rightWidth : 0)
-        : (leftOpen ? leftWidth : 0);
-      const maximum = Math.max(minimum, window.innerWidth - oppositeWidth - 315);
-      const width = Math.round(Math.max(minimum, Math.min(maximum, raw)));
-      finalWidth = width;
-      if (side === "left") setLeftWidth(width); else setRightWidth(width);
-    };
-    const stop = (): void => {
-      document.body.classList.remove("resizing-panels");
-      window.removeEventListener("pointermove", move);
-      if (side === "left") preferredLeftWidthRef.current = finalWidth;
-      else preferredRightWidthRef.current = finalWidth;
-      window.localStorage.setItem(side === "left" ? LEFT_WIDTH_KEY : RIGHT_WIDTH_KEY, String(finalWidth));
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop, { once: true });
-  };
+  const timeline = useMemo(() => buildConversationTimeline(messages, tools), [messages, tools]);
 
   const openProject = async (): Promise<void> => {
     const selection = await window.suocode.selectProject();
@@ -890,8 +387,7 @@ export default function App(): React.JSX.Element {
     setLoading(true);
     setError(undefined);
     setPendingProjectPath(undefined);
-    setDraft("");
-    setDraftImages([]);
+    resetComposer();
     shouldAutoScrollRef.current = true;
     try {
       projectRef.current = owner;
@@ -902,6 +398,25 @@ export default function App(): React.JSX.Element {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const archiveConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
+    if (sessionActivity[session.path]?.running) {
+      setError("请先停止正在运行的会话，再进行归档。");
+      return;
+    }
+    try {
+      const next = await window.suocode.request<SessionSummary[]>({ type: "archive_session", cwd: owner.path, sessionPath: session.path });
+      setSessionsByProject((current) => ({ ...current, [owner.path]: next }));
+      setSessionActivity((current) => {
+        const updated = { ...current };
+        delete updated[session.path];
+        return updated;
+      });
+      if (owner.path === projectRef.current?.path && session.id === snapshotRef.current?.session.id) startPendingConversation(owner);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
@@ -975,187 +490,93 @@ export default function App(): React.JSX.Element {
     }
   };
 
-  const handleComposerPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>): void => {
-    const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
-    if (!files.length) return;
-    event.preventDefault();
-    void Promise.all(files.map(clipboardImage))
-      .then((images) => setDraftImages((current) => [...current, ...images]))
-      .catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
-  };
-
   const handleTimelineScroll = (): void => {
     const viewport = timelineRef.current;
     if (!viewport) return;
     shouldAutoScrollRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1;
   };
 
-  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      event.currentTarget.form?.requestSubmit();
-    }
-  };
-
-  const selectComposerModel = async (model: ModelOption): Promise<void> => {
-    if (!configuration || modelChanging) return;
-    setModelChanging(true);
-    setError(undefined);
-    try {
-      const next = await window.suocode.request<RuntimeConfiguration>({
-        type: "configure_model",
-        provider: model.provider,
-        modelId: model.id,
-        thinkingLevel: configuration.thinkingLevel,
-      }, snapshot?.runtimeId);
-      setConfiguration(next);
-      setModelMenuOpen(false);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setModelChanging(false);
-    }
-  };
-
-  const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof CheckSquare2 }> = [
+  const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof Files }> = [
     { id: "files", label: "文件", icon: Files },
   ];
-
-  const handleFileDragEnter = (event: ReactDragEvent<HTMLElement>): void => {
-    if (!event.dataTransfer.types.includes("application/x-suocode-path")) return;
-    event.preventDefault();
-    fileDragDepthRef.current += 1;
-    setFileDragActive(true);
-  };
-
-  const handleFileDragLeave = (event: ReactDragEvent<HTMLElement>): void => {
-    if (!event.dataTransfer.types.includes("application/x-suocode-path")) return;
-    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
-    if (fileDragDepthRef.current === 0) setFileDragActive(false);
-  };
-
-  const handleFileDrop = (event: ReactDragEvent<HTMLElement>): void => {
-    const serialized = event.dataTransfer.getData("application/x-suocode-path");
-    if (!serialized) return;
-    event.preventDefault();
-    fileDragDepthRef.current = 0;
-    setFileDragActive(false);
-    try {
-      const dropped = JSON.parse(serialized) as { path?: string };
-      if (!dropped.path) return;
-      const input = inputRef.current;
-      const start = input?.selectionStart ?? draft.length;
-      const end = input?.selectionEnd ?? start;
-      const before = draft.slice(0, start);
-      const after = draft.slice(end);
-      const leadingSpace = before.length && !/\s$/.test(before) ? " " : "";
-      const trailingSpace = after.length && !/^\s/.test(after) ? " " : "";
-      const insertion = `${leadingSpace}${quotePath(dropped.path)}${trailingSpace}`;
-      const nextDraft = `${before}${insertion}${after}`;
-      const caret = start + insertion.length;
-      setDraft(nextDraft);
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-        inputRef.current?.setSelectionRange(caret, caret);
-      });
-    } catch {
-      setError("无法插入拖入的路径。请重新拖动一次。");
-    }
-  };
 
   return (
     <>
       <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "keep-tiled" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
-        <aside className="sidebar">
-          <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
-          <nav className="primary-nav"><button className="nav-button" type="button" disabled={!project} onClick={() => startNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
-          <section className="project-section">
-            <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={() => void openProject()}><FolderOpen size={15} strokeWidth={1.7} /></button></div>
-            {projects.length ? projects.map((item) => {
-              const expanded = expandedProjects.has(item.path);
-              const itemSessions = sessionsByProject[item.path] ?? [];
-              const hasPending = pendingProjectPath === item.path;
-              const showAll = expandedSessionLists.has(item.path);
-              const visibleSessions = showAll ? itemSessions : itemSessions.slice(0, hasPending ? 3 : 4);
-              const hiddenCount = itemSessions.length - visibleSessions.length;
-              return (
-                <div className={`project-tree ${item.path === project?.path ? "active" : ""}`} key={item.path}>
-                  <div className="project-row">
-                    <button className="project-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedProjects((current) => {
-                      const next = new Set(current);
-                      if (expanded) next.delete(item.path); else next.add(item.path);
-                      return next;
-                    })}>
-                      <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
-                      <span className="project-name">{item.name}</span>
-                    </button>
-                    <button className="project-add" type="button" aria-label={`在 ${item.name} 中新建对话`} onClick={() => startNewConversation(item)}><Plus size={14} /></button>
-                  </div>
-                  <div className={`conversation-list-shell ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
-                    <div className="conversation-list">
-                    {hasPending ? <button className="conversation-row active pending" type="button" onClick={() => inputRef.current?.focus()}><Circle size={11} strokeWidth={1.7} /><span>新对话</span><time>刚刚</time></button> : null}
-                    {visibleSessions.map((session) => {
-                      const activity = sessionActivity[session.path];
-                      return <button className={`conversation-row ${item.path === project?.path && session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(item, session)}>{activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <span className="conversation-unread" /> : <CircleDot size={11} strokeWidth={2} />}<span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>;
-                    })}
-                    {hiddenCount > 0 ? <button className="more-conversations" type="button" aria-label={`显示另外 ${hiddenCount} 个对话`} onClick={() => setExpandedSessionLists((current) => new Set(current).add(item.path))}><MoreHorizontal size={15} /></button> : null}
-                    {showAll && itemSessions.length > 4 ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => setExpandedSessionLists((current) => { const next = new Set(current); next.delete(item.path); return next; })}><ChevronUp size={14} /></button> : null}
-                    {!itemSessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
-                    </div>
-                  </div>
-                </div>
-              );
-            }) : (
-              <button className="open-project-card" type="button" onClick={() => void openProject()}><span className="open-project-icon"><Plus size={14} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
-            )}
-          </section>
-          <div className="sidebar-footer"><div className="brand-mark">S</div><div className="brand-copy"><strong>SuoCode</strong><span>{snapshot?.model ? `${snapshot.model.provider}/${snapshot.model.name}` : "本地 Agent"}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={() => setSettingsOpen(true)}><Settings size={17} strokeWidth={1.7} /></button></div>
-        </aside>
+        <WorkspaceSidebar
+          projects={projects}
+          activeProject={project}
+          activeSessionId={activeConversation?.id}
+          pendingProjectPath={pendingProjectPath}
+          sessionsByProject={sessionsByProject}
+          sessionActivity={sessionActivity}
+          expandedProjects={expandedProjects}
+          expandedSessionLists={expandedSessionLists}
+          modelLabel={snapshot?.model ? `${snapshot.model.provider}/${snapshot.model.name}` : "本地 Agent"}
+          onNewConversation={(owner) => startNewConversation(owner)}
+          onOpenProject={() => { void openProject(); }}
+          onToggleProject={(path) => setExpandedProjects((current) => {
+            const next = new Set(current);
+            if (next.has(path)) next.delete(path); else next.add(path);
+            return next;
+          })}
+          onShowAllSessions={(path) => setExpandedSessionLists((current) => new Set(current).add(path))}
+          onCollapseSessions={(path) => setExpandedSessionLists((current) => { const next = new Set(current); next.delete(path); return next; })}
+          onOpenConversation={(owner, session) => { void openConversation(owner, session); }}
+          onArchiveConversation={(owner, session) => { void archiveConversation(owner, session); }}
+          onFocusPending={() => inputRef.current?.focus()}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
         {leftOpen ? <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><span><PanelLeft size={17} /></span></button> : null}
         {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
 
-        <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} onDragEnter={handleFileDragEnter} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-suocode-path")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={handleFileDragLeave} onDrop={handleFileDrop}>
-          <header className="conversation-header window-drag">
-            {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={() => setLeftOpen(true)}><PanelLeft size={17} /></button> : null}
-            <div className="conversation-title"><strong title={pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话"}>{truncateTitle(pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
-            <div className="header-actions no-drag">
-              {!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={() => setRightOpen(true)}><PanelRight size={17} /></button> : null}
-            </div>
-          </header>
-
-          <div className="conversation-body" ref={timelineRef} onScroll={handleTimelineScroll}>
-            {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} disabled={running} onRewind={rewindPrompt} onError={(message) => setError(message)} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={snapshot?.model?.name ?? "Agent"} />)}{running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
-          </div>
-
-          <div className="composer-wrap">
-            {error ? <div className="error-banner"><AlertCircle size={14} /><span>{error}</span><button type="button" onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
-            <div className="composer-stack">
-              <ComposerPlan plan={projectState.plan} />
-              <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
-                {draftImages.length ? <div className="composer-images">{draftImages.map((image) => <figure key={image.id ?? image.data.slice(0, 24)}><img src={imageDataUrl(image)} alt={image.name ?? "粘贴的图片"} /><button type="button" aria-label="移除图片" onClick={() => setDraftImages((current) => current.filter((item) => item !== image))}><X size={11} /></button></figure>)}</div> : null}
-                <textarea
-                  ref={inputRef}
-                  value={draft}
-                  aria-label="发送消息给 SuoCode"
-                  placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"}
-                  disabled={!project || loading || startingSession}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onPaste={handleComposerPaste}
-                  onCompositionStart={() => { composingRef.current = true; }}
-                  onCompositionEnd={() => { composingRef.current = false; }}
-                  onKeyDown={handleComposerKeyDown}
-                />
-                <div className="composer-toolbar">
-                  <ModelPicker configuration={configuration} currentModel={selectedModel} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
-                  {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" }, snapshot?.runtimeId)}><Square size={12} fill="currentColor" /></button> : null}
-                  <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || startingSession || (!draft.trim() && !draftImages.length)}><ArrowUp size={17} strokeWidth={2.2} /></button>
-                </div>
-              </form>
-            </div>
-            <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} />
-          </div>
-        </section>
+        <ConversationPane
+          fileDragActive={fileDragActive}
+          leftOpen={leftOpen}
+          rightOpen={rightOpen}
+          pendingProjectPath={pendingProjectPath}
+          activeConversation={activeConversation}
+          project={project}
+          loading={loading}
+          timeline={timeline}
+          running={running}
+          timelineRef={timelineRef}
+          agentPhase={agentPhase}
+          activityPhrase={AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}
+          error={error}
+          projectState={projectState}
+          subagents={subagents}
+          snapshot={snapshot}
+          startingSession={startingSession}
+          draft={draft}
+          draftImages={draftImages}
+          inputRef={inputRef}
+          configuration={configuration}
+          selectedModel={selectedModel}
+          modelMenuOpen={modelMenuOpen}
+          modelChanging={modelChanging}
+          onDragEnter={handleFileDragEnter}
+          onDragOver={handleFileDragOver}
+          onDragLeave={handleFileDragLeave}
+          onDrop={handleFileDrop}
+          onOpenLeft={() => setLeftOpen(true)}
+          onOpenRight={() => setRightOpen(true)}
+          onTimelineScroll={handleTimelineScroll}
+          onRewind={rewindPrompt}
+          onError={setError}
+          onStopSubagent={(activity) => { void window.suocode.request({ type: "stop_subagent", id: activity.runId, background: activity.background }, snapshot?.runtimeId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught))); }}
+          onSubmit={(event) => { void submitPrompt(event); }}
+          onDraftChange={setDraft}
+          onImagesChange={setDraftImages}
+          onPaste={composer.handlePaste}
+          onCompositionStart={composer.handleCompositionStart}
+          onCompositionEnd={composer.handleCompositionEnd}
+          onKeyDown={composer.handleKeyDown}
+          onModelMenuOpenChange={setModelMenuOpen}
+          onSelectModel={(model) => { void composer.selectModel(model); }}
+          onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }}
+          onAbort={() => { void window.suocode.request({ type: "abort" }, snapshot?.runtimeId); }}
+        />
 
         <aside className="inspector-pane">
           <div className="inspector-header"><div className="inspector-drag-surface" aria-hidden="true" /><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>

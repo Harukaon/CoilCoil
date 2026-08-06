@@ -3,10 +3,12 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  createEventBus,
   createAgentSession,
   processImage,
   type AgentSession,
   type AgentSessionEvent,
+  type EventBusController,
   type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -28,6 +30,7 @@ import type {
   ResponseMetrics,
   SessionSnapshot,
   SessionSummary,
+  SubagentActivity,
   TerminalRun,
   ThinkingLevel,
   TokenUsage,
@@ -91,13 +94,62 @@ interface McpAdapterConfigModule {
   writeSharedServerEntry(path: string, serverName: string, entry: Record<string, unknown>): string;
 }
 
+interface PiSubagentsStatusModule {
+  ASYNC_DIR: string;
+  RESULTS_DIR: string;
+  listAsyncRuns(asyncDirRoot: string, options?: {
+    states?: string[];
+    sessionId?: string;
+    resultsDir?: string;
+  }): Array<{
+    id: string;
+    state: "queued" | "running" | "complete" | "failed" | "paused" | "stopped";
+    mode: "single" | "parallel" | "chain";
+    startedAt: number;
+    lastUpdate?: number;
+    currentTool?: string;
+    currentPath?: string;
+    turnCount?: number;
+    toolCount?: number;
+    totalTokens?: { total?: number };
+    error?: string;
+    steps: Array<{
+      index: number;
+      agent: string;
+      status: "pending" | "running" | "complete" | "completed" | "failed" | "paused" | "stopped" | "detached";
+      currentTool?: string;
+      currentPath?: string;
+      turnCount?: number;
+      toolCount?: number;
+      durationMs?: number;
+      tokens?: { total?: number };
+      error?: string;
+    }>;
+  }>;
+}
+
 let mcpAdapterConfigModule: Promise<McpAdapterConfigModule> | undefined;
+let piSubagentsStatusModule: Promise<PiSubagentsStatusModule> | undefined;
 
 function loadMcpAdapterConfigModule(): Promise<McpAdapterConfigModule> {
   const { createJiti } = require("jiti") as typeof import("jiti");
   const jiti = createJiti(import.meta.url, { interopDefault: true });
   mcpAdapterConfigModule ??= jiti.import(join(resolvePackageDirectory("pi-mcp-adapter"), "config.ts")) as Promise<McpAdapterConfigModule>;
   return mcpAdapterConfigModule;
+}
+
+function loadPiSubagentsStatusModule(): Promise<PiSubagentsStatusModule> {
+  const { createJiti } = require("jiti") as typeof import("jiti");
+  const jiti = createJiti(import.meta.url, { interopDefault: true });
+  const packageDirectory = resolvePackageDirectory("pi-subagents");
+  piSubagentsStatusModule ??= Promise.all([
+    jiti.import(join(packageDirectory, "src", "runs", "background", "async-status.ts")),
+    jiti.import(join(packageDirectory, "src", "shared", "types.ts")),
+  ]).then(([status, shared]) => ({
+    ...(status as Pick<PiSubagentsStatusModule, "listAsyncRuns">),
+    ...(shared as Pick<PiSubagentsStatusModule, "ASYNC_DIR" | "RESULTS_DIR">),
+  }));
+  return piSubagentsStatusModule;
 }
 
 function recordOfStrings(value: unknown): Record<string, string> {
@@ -122,6 +174,7 @@ interface ActiveSession {
   session: AgentSession;
   unsubscribe: () => void;
   tools: Map<string, ToolRun>;
+  subagents: Map<string, SubagentActivity>;
   terminals: Map<string, TerminalRun>;
   plan: TodoItem[];
   project: ProjectSnapshot;
@@ -131,6 +184,7 @@ interface ActiveSession {
   nextTimelineOrder: number;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
+  eventBus: EventBusController;
 }
 
 interface WorkflowManifest {
@@ -282,6 +336,74 @@ function toolResultText(result: unknown): string {
   } catch {
     return String(result);
   }
+}
+
+function subagentStatus(value: unknown, fallback: SubagentActivity["status"] = "running"): SubagentActivity["status"] {
+  if (value === "pending" || value === "running" || value === "completed" || value === "failed" || value === "stopped" || value === "paused" || value === "detached") return value;
+  if (value === "complete") return "completed";
+  return fallback;
+}
+
+function subagentTokens(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (!isRecord(value)) return 0;
+  return typeof value.total === "number" && Number.isFinite(value.total) ? value.total : 0;
+}
+
+function subagentActivitiesFromResult(result: unknown, fallbackRunId: string, background = false): SubagentActivity[] {
+  if (!isRecord(result) || !isRecord(result.details)) return [];
+  const details = result.details;
+  const mode = details.mode === "parallel" || details.mode === "chain" ? details.mode : "single";
+  const runId = stringValue(details.runId) || stringValue(details.asyncId) || fallbackRunId;
+  const isBackground = background || Boolean(details.asyncId);
+  const updatedAt = Date.now();
+  const progress = Array.isArray(details.progress) ? details.progress : [];
+  if (progress.length > 0) {
+    return progress.flatMap((raw, position) => {
+      if (!isRecord(raw)) return [];
+      const index = typeof raw.index === "number" ? raw.index : position;
+      return [{
+        id: `${runId}:${index}`,
+        runId,
+        index,
+        agent: stringValue(raw.agent) || `代理 ${index + 1}`,
+        task: stringValue(raw.task) || undefined,
+        mode,
+        status: subagentStatus(raw.status),
+        background: isBackground,
+        currentTool: stringValue(raw.currentTool) || undefined,
+        currentPath: stringValue(raw.currentPath) || undefined,
+        toolCount: typeof raw.toolCount === "number" ? raw.toolCount : 0,
+        turnCount: typeof raw.turnCount === "number" ? raw.turnCount : undefined,
+        tokens: subagentTokens(raw.tokens),
+        durationMs: typeof raw.durationMs === "number" ? raw.durationMs : 0,
+        error: stringValue(raw.error) || undefined,
+        updatedAt,
+      } satisfies SubagentActivity];
+    });
+  }
+  const results = Array.isArray(details.results) ? details.results : [];
+  return results.flatMap((raw, index) => {
+    if (!isRecord(raw)) return [];
+    const failed = raw.stopped === true ? "stopped" : raw.detached === true ? "detached" : raw.exitCode === 0 ? "completed" : "failed";
+    const usage = isRecord(raw.usage) ? raw.usage : undefined;
+    return [{
+      id: `${runId}:${index}`,
+      runId,
+      index,
+      agent: stringValue(raw.agent) || `代理 ${index + 1}`,
+      task: stringValue(raw.task) || undefined,
+      mode,
+      status: failed,
+      background: isBackground,
+      toolCount: Array.isArray(raw.toolCalls) ? raw.toolCalls.length : 0,
+      turnCount: usage && typeof usage.turns === "number" ? usage.turns : undefined,
+      tokens: usage ? (typeof usage.input === "number" ? usage.input : 0) + (typeof usage.output === "number" ? usage.output : 0) : 0,
+      durationMs: 0,
+      error: stringValue(raw.error) || undefined,
+      updatedAt,
+    } satisfies SubagentActivity];
+  });
 }
 
 function messageTimestamp(message: Record<string, unknown>): number {
@@ -636,6 +758,7 @@ export class SuoCodeRuntime {
   private initialized = false;
   private migratedLegacyCredentials = false;
   private projectRefreshTimer?: ReturnType<typeof setTimeout>;
+  private subagentRefreshTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: SuoCodeRuntimeOptions) {
     this.agentDir = resolve(options.agentDir);
@@ -766,6 +889,29 @@ export class SuoCodeRuntime {
     return cwd ? safeRealPath(cwd) : this.active?.cwd ?? process.cwd();
   }
 
+  private archivedSessionsPath(): string {
+    return join(this.agentDir, "archived-sessions.json");
+  }
+
+  private readArchivedSessions(): Record<string, string> {
+    const path = this.archivedSessionsPath();
+    if (!existsSync(path)) return {};
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      return recordOfStrings(parsed);
+    } catch {
+      return {};
+    }
+  }
+
+  private writeArchivedSessions(value: Record<string, string>): void {
+    mkdirSync(this.agentDir, { recursive: true });
+    const path = this.archivedSessionsPath();
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
+  }
+
   private async reloadMcpExtension(): Promise<void> {
     if (!this.active || this.active.session.isStreaming) return;
     await this.active.session.reload();
@@ -852,9 +998,41 @@ export class SuoCodeRuntime {
     await this.ready();
     const resolvedCwd = safeRealPath(cwd);
     const sessions = await SessionManager.list(resolvedCwd, this.sessionDir);
-    const mapped = sessions.map(sessionSummary);
+    const archived = this.readArchivedSessions();
+    const mapped = sessions.filter((session) => !archived[safeRealPath(session.path)]).map(sessionSummary);
     this.emitEvent({ type: "sessions_updated", cwd: resolvedCwd, sessions: mapped });
     return mapped;
+  }
+
+  async listArchivedSessions(cwd: string): Promise<SessionSummary[]> {
+    await this.ready();
+    const resolvedCwd = safeRealPath(cwd);
+    const archived = this.readArchivedSessions();
+    return (await SessionManager.list(resolvedCwd, this.sessionDir)).flatMap((session) => {
+      const archivedAt = archived[safeRealPath(session.path)];
+      return archivedAt ? [{ ...sessionSummary(session), archivedAt }] : [];
+    });
+  }
+
+  async archiveSession(cwd: string, sessionPath: string): Promise<SessionSummary[]> {
+    const resolvedCwd = safeRealPath(cwd);
+    const resolvedSession = ensureInside(this.sessionDir, sessionPath);
+    const belongsToProject = (await SessionManager.list(resolvedCwd, this.sessionDir))
+      .some((session) => safeRealPath(session.path) === safeRealPath(resolvedSession));
+    if (!belongsToProject) throw new Error("所选会话不属于当前工作区。");
+    const archived = this.readArchivedSessions();
+    archived[safeRealPath(resolvedSession)] = new Date().toISOString();
+    this.writeArchivedSessions(archived);
+    return this.listSessions(resolvedCwd);
+  }
+
+  async restoreSession(cwd: string, sessionPath: string): Promise<SessionSummary[]> {
+    const resolvedCwd = safeRealPath(cwd);
+    const resolvedSession = ensureInside(this.sessionDir, sessionPath);
+    const archived = this.readArchivedSessions();
+    delete archived[safeRealPath(resolvedSession)];
+    this.writeArchivedSessions(archived);
+    return this.listSessions(resolvedCwd);
   }
 
   async createSession(cwd: string): Promise<SessionSnapshot> {
@@ -875,17 +1053,21 @@ export class SuoCodeRuntime {
   private async installSession(cwd: string, sessionManager: SessionManager): Promise<SessionSnapshot> {
     const modelRuntime = await this.ready();
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
+    if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
     if (this.active) {
       this.active.unsubscribe();
       this.active.session.dispose();
+      this.active.eventBus.clear();
       this.active = undefined;
     }
 
     const settingsManager = SettingsManager.create(cwd, this.agentDir, { projectTrusted: true });
+    const eventBus = createEventBus();
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: this.agentDir,
       settingsManager,
+      eventBus,
       additionalExtensionPaths: this.extensionPaths,
       additionalSkillPaths: this.skillPaths,
       additionalPromptTemplatePaths: this.promptPaths,
@@ -908,6 +1090,7 @@ export class SuoCodeRuntime {
       resourceLoader: loader,
     });
     await created.session.bindExtensions({});
+    created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => name !== "find"));
     const activeToolNames = new Set(created.session.getActiveToolNames());
     const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp", "subagent"];
     const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
@@ -930,6 +1113,7 @@ export class SuoCodeRuntime {
       session: created.session,
       unsubscribe: () => undefined,
       tools: reconstructed.tools,
+      subagents: reconstructed.subagents,
       terminals: reconstructed.terminals,
       plan: reconstructed.plan,
       project,
@@ -937,9 +1121,11 @@ export class SuoCodeRuntime {
       nextTimelineOrder: reconstructed.nextTimelineOrder,
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
+      eventBus,
     };
     this.active = active;
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
+    await this.refreshAsyncSubagents();
     await this.refreshProject();
     const snapshot = await this.snapshot();
     this.emitEvent({ type: "session_snapshot", snapshot });
@@ -950,6 +1136,7 @@ export class SuoCodeRuntime {
   private reconstructState(session: AgentSession): {
     messages: ChatMessage[];
     tools: Map<string, ToolRun>;
+    subagents: Map<string, SubagentActivity>;
     terminals: Map<string, TerminalRun>;
     plan: TodoItem[];
     nextTimelineOrder: number;
@@ -958,6 +1145,7 @@ export class SuoCodeRuntime {
   } {
     const messages: ChatMessage[] = [];
     const tools = new Map<string, ToolRun>();
+    const subagents = new Map<string, SubagentActivity>();
     const terminals = new Map<string, TerminalRun>();
     let plan: TodoItem[] = [];
     const calls = new Map<string, { name: string; args: Record<string, unknown>; timestamp: number }>();
@@ -1001,6 +1189,9 @@ export class SuoCodeRuntime {
       });
       const restoredPlan = normalizeTodoPlan(isRecord(rawMessage.details) ? rawMessage.details.plan : undefined);
       if (name === "todo" && restoredPlan) plan = restoredPlan;
+      if (name === "subagent") {
+        for (const activity of subagentActivitiesFromResult(rawMessage, id)) subagents.set(activity.id, activity);
+      }
       if (name === "bash" || (name === "terminal" && args.action === "start")) {
         terminals.set(id, {
           id,
@@ -1018,6 +1209,7 @@ export class SuoCodeRuntime {
     return {
       messages,
       tools,
+      subagents,
       terminals,
       plan,
       nextTimelineOrder: order,
@@ -1053,6 +1245,122 @@ export class SuoCodeRuntime {
     const id = `${prefix}-${messageTimestamp(message)}-${Math.random().toString(36).slice(2, 8)}`;
     active.messageIds.set(message, id);
     return id;
+  }
+
+  private publishSubagents(): void {
+    const active = this.active;
+    if (!active) return;
+    this.emitEvent({
+      type: "subagents_updated",
+      subagents: [...active.subagents.values()].sort((left, right) => left.updatedAt - right.updatedAt || left.index - right.index),
+    });
+  }
+
+  private mergeSubagentActivities(activities: SubagentActivity[]): void {
+    const active = this.active;
+    if (!active || activities.length === 0) return;
+    for (const activity of activities) {
+      const existing = active.subagents.get(activity.id);
+      active.subagents.set(activity.id, existing ? {
+        ...existing,
+        ...activity,
+        task: activity.task ?? existing.task,
+        currentTool: activity.currentTool ?? existing.currentTool,
+        currentPath: activity.currentPath ?? existing.currentPath,
+        turnCount: activity.turnCount ?? existing.turnCount,
+        error: activity.error ?? existing.error,
+      } : activity);
+    }
+    this.publishSubagents();
+  }
+
+  private async refreshAsyncSubagents(): Promise<void> {
+    const active = this.active;
+    if (!active) return;
+    if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
+    try {
+      const statusModule = await loadPiSubagentsStatusModule();
+      if (active !== this.active) return;
+      const runs = statusModule.listAsyncRuns(statusModule.ASYNC_DIR, {
+        sessionId: active.session.sessionId,
+        resultsDir: statusModule.RESULTS_DIR,
+      });
+      const updatedAt = Date.now();
+      const activities = runs.flatMap((run) => run.steps.map((step) => ({
+        id: `${run.id}:${step.index}`,
+        runId: run.id,
+        index: step.index,
+        agent: step.agent || `代理 ${step.index + 1}`,
+        mode: run.mode,
+        status: subagentStatus(step.status, subagentStatus(run.state)),
+        background: true,
+        currentTool: step.currentTool ?? run.currentTool,
+        currentPath: step.currentPath ?? run.currentPath,
+        toolCount: step.toolCount ?? run.toolCount ?? 0,
+        turnCount: step.turnCount ?? run.turnCount,
+        tokens: subagentTokens(step.tokens) || subagentTokens(run.totalTokens),
+        durationMs: step.durationMs ?? Math.max(0, (run.lastUpdate ?? updatedAt) - run.startedAt),
+        error: step.error ?? run.error,
+        updatedAt: run.lastUpdate ?? updatedAt,
+      } satisfies SubagentActivity)));
+      this.mergeSubagentActivities(activities);
+      if (runs.some((run) => run.state === "queued" || run.state === "running" || run.state === "paused")) {
+        this.subagentRefreshTimer = setTimeout(() => {
+          void this.refreshAsyncSubagents().catch((error) => {
+            this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+          });
+        }, 750);
+      }
+    } catch (error) {
+      this.emitEvent({ type: "runtime_error", message: `子 Agent 状态读取失败：${errorMessage(error)}`, detail: errorDetail(error) });
+    }
+  }
+
+  private subagentRpc(method: "stop" | "interrupt", id: string): Promise<unknown> {
+    const active = this.requireActive();
+    const requestId = `suocode-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `subagents:rpc:v1:reply:${requestId}`;
+    return new Promise((resolvePromise, rejectPromise) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        callback();
+      };
+      const unsubscribe = active.eventBus.on(replyChannel, (raw) => {
+        if (!isRecord(raw)) return;
+        if (raw.success === true) {
+          finish(() => resolvePromise(raw.data));
+          return;
+        }
+        const rpcError = isRecord(raw.error) ? stringValue(raw.error.message) : "子 Agent 控制请求失败。";
+        finish(() => rejectPromise(new Error(rpcError || "子 Agent 控制请求失败。")));
+      });
+      const timer = setTimeout(() => finish(() => rejectPromise(new Error("子 Agent 控制请求超时。"))), 8_000);
+      active.eventBus.emit("subagents:rpc:v1:request", {
+        version: 1,
+        requestId,
+        method,
+        params: { id },
+        source: { client: "suocode-desktop" },
+      });
+    });
+  }
+
+  async stopSubagent(id: string, background: boolean): Promise<{ stopped: true }> {
+    if (!id.trim()) throw new Error("缺少子 Agent 标识。");
+    await this.subagentRpc(background ? "stop" : "interrupt", id.trim());
+    const active = this.requireActive();
+    for (const [key, activity] of active.subagents) {
+      if (activity.runId === id || activity.id === id) {
+        active.subagents.set(key, { ...activity, status: "stopped", updatedAt: Date.now() });
+      }
+    }
+    this.publishSubagents();
+    await this.refreshAsyncSubagents();
+    return { stopped: true };
   }
 
   private handleSessionEvent(event: AgentSessionEvent): void {
@@ -1142,6 +1450,27 @@ export class SuoCodeRuntime {
             startedAt: Date.now(),
           };
           active.tools.set(tool.id, tool);
+          if (event.toolName === "subagent") {
+            const task = stringValue(args.task);
+            const agent = stringValue(args.agent) || "子 Agent";
+            const background = args.async === true;
+            const placeholder: SubagentActivity = {
+              id: `${tool.id}:0`,
+              runId: tool.id,
+              index: 0,
+              agent,
+              task: task || undefined,
+              mode: Array.isArray(args.tasks) ? "parallel" : Array.isArray(args.chain) ? "chain" : "single",
+              status: "running",
+              background,
+              toolCount: 0,
+              tokens: 0,
+              durationMs: 0,
+              updatedAt: tool.startedAt,
+            };
+            active.subagents.set(placeholder.id, placeholder);
+            this.publishSubagents();
+          }
           if (event.toolName === "bash" || (event.toolName === "terminal" && args.action === "start")) {
             active.terminals.set(tool.id, {
               id: tool.id,
@@ -1164,6 +1493,11 @@ export class SuoCodeRuntime {
           if (output) tool.output = clampText(output, MAX_TERMINAL_OUTPUT);
           const terminal = active.terminals.get(tool.id);
           if (terminal && output) terminal.output = clampText(output, MAX_TERMINAL_OUTPUT);
+          if (tool.name === "subagent") {
+            const activities = subagentActivitiesFromResult(event.partialResult, tool.id, tool.args.async === true);
+            if (activities.some((activity) => activity.runId !== tool.id || activity.index !== 0)) active.subagents.delete(`${tool.id}:0`);
+            this.mergeSubagentActivities(activities);
+          }
           this.emitEvent({ type: "tool_updated", tool: { ...tool } });
           this.publishProjectFromMemory();
           break;
@@ -1196,6 +1530,27 @@ export class SuoCodeRuntime {
               active.plan = plan;
               this.emitEvent({ type: "plan_updated", plan: [...plan] });
             }
+          }
+          if (event.toolName === "subagent") {
+            const activities = subagentActivitiesFromResult(event.result, tool.id, tool.args.async === true);
+            if (activities.length > 0) {
+              if (activities.some((activity) => activity.runId !== tool.id || activity.index !== 0)) active.subagents.delete(`${tool.id}:0`);
+              this.mergeSubagentActivities(activities);
+            }
+            else {
+              const placeholder = active.subagents.get(`${tool.id}:0`);
+              if (placeholder) {
+                active.subagents.set(placeholder.id, {
+                  ...placeholder,
+                  status: event.isError ? "failed" : placeholder.background ? "running" : "completed",
+                  error: event.isError ? tool.output : placeholder.error,
+                  durationMs: Date.now() - placeholder.updatedAt,
+                  updatedAt: Date.now(),
+                });
+                this.publishSubagents();
+              }
+            }
+            void this.refreshAsyncSubagents();
           }
           this.emitEvent({ type: "tool_finished", tool: { ...tool } });
           this.publishProjectFromMemory();
@@ -1370,6 +1725,7 @@ export class SuoCodeRuntime {
       session: summary,
       messages,
       tools: [...reconstructed.tools.values()].sort((a, b) => a.order - b.order),
+      subagents: [...active.subagents.values()].sort((left, right) => left.updatedAt - right.updatedAt || left.index - right.index),
       project: active.project,
       model: model
         ? { provider: model.provider, id: model.id, name: model.name || model.id, reasoning: Boolean(model.reasoning) }
@@ -1385,10 +1741,12 @@ export class SuoCodeRuntime {
 
   async dispose(): Promise<void> {
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
+    if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
     if (this.active) {
       this.active.unsubscribe();
       await this.active.session.abort().catch(() => undefined);
       this.active.session.dispose();
+      this.active.eventBus.clear();
       this.active = undefined;
     }
   }

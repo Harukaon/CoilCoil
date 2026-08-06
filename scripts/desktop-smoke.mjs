@@ -304,11 +304,14 @@ async function main() {
       if (!name || !command) return false;
       setInput(name, "desktop-smoke-mcp");
       setInput(command, "/usr/bin/true");
-      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-      document.querySelector(".mcp-editor form")?.requestSubmit();
       return true;
     })()`);
     assert.equal(savedMcpServer, true);
+    await client.waitFor(
+      `(() => { const button = [...document.querySelectorAll(".mcp-editor .primary-button")].find((item) => item.textContent.includes("保存 MCP")); return Boolean(button && !button.disabled); })()`,
+      "The MCP editor did not accept the server fields.",
+    );
+    await client.evaluate(`([...document.querySelectorAll(".mcp-editor .primary-button")].find((item) => item.textContent.includes("保存 MCP")))?.click()`);
     await client.waitFor(
       `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp")`,
       "The MCP server saved through the desktop settings did not appear.",
@@ -643,8 +646,8 @@ async function main() {
       if (!stack) return null;
       const before = stack.getBoundingClientRect().height;
       const plan = document.createElement("section");
-      plan.className = "composer-plan expanded";
-      plan.innerHTML = '<button class="composer-plan-toggle"><span>Todo</span></button><div class="composer-plan-body"><ol><li>测试</li></ol></div>';
+      plan.className = "composer-activity expanded";
+      plan.innerHTML = '<div class="composer-activity-header"><strong>Todo</strong></div><div class="composer-activity-body"><ol><li>测试</li></ol></div>';
       stack.prepend(plan);
       const after = stack.getBoundingClientRect().height;
       const position = getComputedStyle(plan).position;

@@ -53,8 +53,16 @@ export class RuntimeServer {
         return this.runtime.removeMcpServer(command.name, command.cwd);
       case "enable_mcp_imports":
         return this.runtime.enableMcpImports(command.imports, command.cwd);
+      case "stop_subagent":
+        return this.runtime.stopSubagent(command.id, command.background);
       case "list_sessions":
         return this.runtime.listSessions(command.cwd);
+      case "list_archived_sessions":
+        return this.runtime.listArchivedSessions(command.cwd);
+      case "archive_session":
+        return this.runtime.archiveSession(command.cwd, command.sessionPath);
+      case "restore_session":
+        return this.runtime.restoreSession(command.cwd, command.sessionPath);
       case "create_session":
         return this.runtime.createSession(command.cwd);
       case "open_session":

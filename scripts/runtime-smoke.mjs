@@ -107,6 +107,16 @@ try {
   }
   const snapshot = await request({ type: "create_session", cwd: projectDir });
   if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
+  if (!Array.isArray(snapshot.subagents)) throw new Error("Subagent activity was not included in the session snapshot.");
+  let invalidSubagentStopRejected = false;
+  try {
+    await request({ type: "stop_subagent", id: "missing-smoke-subagent", background: true });
+  } catch (error) {
+    invalidSubagentStopRejected = !String(error).includes("超时");
+  }
+  if (!invalidSubagentStopRejected) {
+    throw new Error("The bundled pi-subagents RPC bridge did not reject an unknown background run.");
+  }
   if (!snapshot.project.files.some((entry) => entry.name === "zz-root.txt")) {
     throw new Error("A large nested directory starved later root files from the project tree.");
   }
@@ -120,6 +130,20 @@ try {
   }
   const file = await request({ type: "read_file", path: "README.md" });
   if (!file.content.includes("Runtime smoke project")) throw new Error("Project file reading failed.");
+
+  if (!live) {
+    const timestamp = new Date().toISOString();
+    mkdirSync(dirname(snapshot.session.path), { recursive: true });
+    writeFileSync(snapshot.session.path, `${JSON.stringify({ type: "session", version: 3, id: snapshot.session.id, timestamp, cwd: snapshot.session.cwd })}\n`, "utf8");
+    const persistedSessions = await request({ type: "list_sessions", cwd: projectDir });
+    if (!persistedSessions.some((session) => session.path === snapshot.session.path)) throw new Error("The session archive fixture was not discoverable.");
+    const afterArchive = await request({ type: "archive_session", cwd: projectDir, sessionPath: snapshot.session.path });
+    if (afterArchive.some((session) => session.path === snapshot.session.path)) throw new Error("Archived sessions were not hidden from the default list.");
+    const archivedSessions = await request({ type: "list_archived_sessions", cwd: projectDir });
+    if (!archivedSessions.some((session) => session.path === snapshot.session.path && session.archivedAt)) throw new Error("Archived sessions were not listed with archive metadata.");
+    const afterRestore = await request({ type: "restore_session", cwd: projectDir, sessionPath: snapshot.session.path });
+    if (!afterRestore.some((session) => session.path === snapshot.session.path)) throw new Error("Restored sessions did not return to the default list.");
+  }
 
   if (live) {
     const configuration = bootstrap.configuration;

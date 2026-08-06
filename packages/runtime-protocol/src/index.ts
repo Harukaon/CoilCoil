@@ -66,6 +66,7 @@ export interface SessionSummary {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  archivedAt?: string;
 }
 
 export type ChatRole = "user" | "assistant" | "tool" | "system";
@@ -95,6 +96,27 @@ export interface ChatMessage {
 export interface TodoItem {
   text: string;
   status: "pending" | "in_progress" | "completed";
+}
+
+export type SubagentActivityStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "paused" | "detached";
+
+export interface SubagentActivity {
+  id: string;
+  runId: string;
+  index: number;
+  agent: string;
+  task?: string;
+  mode: "single" | "parallel" | "chain";
+  status: SubagentActivityStatus;
+  background: boolean;
+  currentTool?: string;
+  currentPath?: string;
+  toolCount: number;
+  turnCount?: number;
+  tokens: number;
+  durationMs: number;
+  error?: string;
+  updatedAt: number;
 }
 
 export interface ToolRun {
@@ -177,6 +199,7 @@ export interface SessionSnapshot {
   session: SessionSummary;
   messages: ChatMessage[];
   tools: ToolRun[];
+  subagents: SubagentActivity[];
   project: ProjectSnapshot;
   model?: Pick<ModelOption, "provider" | "id" | "name" | "reasoning">;
   thinkingLevel: ThinkingLevel;
@@ -207,7 +230,11 @@ export type RuntimeCommand =
   | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
   | { type: "remove_mcp_server"; name: string; cwd?: string }
   | { type: "enable_mcp_imports"; imports: McpImportConfiguration["kind"][]; cwd?: string }
+  | { type: "stop_subagent"; id: string; background: boolean }
   | { type: "list_sessions"; cwd: string }
+  | { type: "list_archived_sessions"; cwd: string }
+  | { type: "archive_session"; cwd: string; sessionPath: string }
+  | { type: "restore_session"; cwd: string; sessionPath: string }
   | { type: "create_session"; cwd: string }
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "prompt"; text: string; images?: PromptImage[] }
@@ -230,6 +257,7 @@ export type RuntimeEvent =
   | { type: "tool_updated"; tool: ToolRun }
   | { type: "tool_finished"; tool: ToolRun }
   | { type: "plan_updated"; plan: TodoItem[] }
+  | { type: "subagents_updated"; subagents: SubagentActivity[] }
   | { type: "project_updated"; project: ProjectSnapshot }
   | {
       type: "metrics_updated";
