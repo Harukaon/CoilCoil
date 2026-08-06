@@ -119,6 +119,70 @@ apps/desktop/src/renderer/src/
 - 首字 7–16 秒且输出 25–90 tok/s 通常应评为黄色或中等，而不是直接判红；评级应同时考虑首字与持续输出，不使用过严单阈值。
 - 上下文圆环与信号图标位置保持一致，点击分别查看上下文和请求性能详情。
 
+## 阶段 6：MCP 配置管理 UI
+
+MCP 不能只作为安装包内置扩展存在。SuoCode Desktop 需要向用户提供完整的 MCP 管理界面，让用户直接配置自己的 MCP Server。
+
+### 产品边界
+
+- 配置由 SuoCode 前端管理，通过 typed IPC 交给 Runtime 校验和保存。
+- 配置保存到 SuoCode 自己的应用数据目录，不读取、覆盖或修改用户本机 Pi 的 `~/.pi/agent/mcp.json`。
+- Desktop 与 CLI 共享同一份 SuoCode MCP 配置模型；项目级配置可以覆盖或补充全局配置。
+- Renderer 不直接读写配置文件，不直接持有长期明文凭据。
+
+### 管理能力
+
+- 查看已配置的 MCP Server 列表。
+- 新增、编辑、复制、启用、停用和移除 Server。
+- 支持常见连接形式：
+  - stdio：command、args、cwd、env
+  - HTTP / Streamable HTTP：URL、headers
+  - SSE：URL、headers
+- 支持全局 MCP 和项目级 MCP，并清楚显示配置来源与生效范围。
+- 提供“测试连接”，展示连接中、可用、需要认证、配置错误、启动失败和超时状态。
+- 成功连接后展示 Server 暴露的 tools、resources 和 prompts。
+- 支持刷新和重新连接，不需要重启整个 SuoCode。
+- 删除或修改正在使用的 Server 时给出影响提示，并安全终止旧连接。
+
+### 凭据与环境变量
+
+- 敏感值使用系统安全存储或 SuoCode 的凭据层保存，配置文件只保留引用，不落明文。
+- UI 中默认遮盖 token、Authorization header 和其他 secret。
+- 支持为 stdio Server 配置环境变量，并区分普通值与敏感值。
+- 导出配置时默认排除敏感值。
+- Runtime 日志、工具结果和错误信息不得泄露凭据。
+
+### 前端交互建议
+
+- 设置页新增独立的 `MCP` 分类，不与模型/Provider 下拉菜单混在一起。
+- 列表页展示名称、连接类型、作用域、启停状态和健康状态。
+- 编辑使用侧栏或独立设置页面，不使用会遮挡 Agent 工作区的全屏阻塞弹窗。
+- 测试连接时实时显示步骤与错误原因，避免只返回“连接失败”。
+
+### Runtime 协议
+
+需要增加以下 typed commands/events：
+
+- `list_mcp_servers`
+- `create_mcp_server`
+- `update_mcp_server`
+- `remove_mcp_server`
+- `set_mcp_server_enabled`
+- `test_mcp_server`
+- `refresh_mcp_server`
+- MCP 状态、认证请求和能力列表事件
+
+所有写操作由 Runtime 完成，并进行 schema 校验、路径校验、命令参数校验和敏感字段处理。
+
+### 验收标准
+
+1. 全新安装、不依赖本机 Pi 配置即可从 UI 添加一个 MCP Server。
+2. 重启应用后配置和启停状态能够恢复。
+3. Agent 只看到当前启用且连接成功的 MCP 能力。
+4. 项目级 Server 不会错误暴露给其他 Workspace。
+5. 配置错误能够定位到具体字段，凭据不会出现在日志或界面错误详情中。
+6. MCP Server 异常退出后 UI 能更新状态并允许重新连接。
+
 ## 暂不承诺的能力
 
 以下功能需要先完成技术调查，不纳入当前 UI 修复的完成条件：
