@@ -134,13 +134,12 @@ async function clickInspector(client, label) {
 async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
   const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
   const submitted = await client.evaluate(`(async () => {
-    const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+    const input = document.querySelector('[contenteditable="true"][aria-label="发送消息给 SuoCode"]');
     if (!input) return false;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-    setter.call(input, ${JSON.stringify(prompt)});
+    input.replaceChildren(document.createTextNode(${JSON.stringify(prompt)}));
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-    input.form.requestSubmit();
+    input.closest("form")?.requestSubmit();
     return true;
   })()`);
   assert.equal(submitted, true);
@@ -201,7 +200,7 @@ async function main() {
       "The renderer or preload bridge did not become ready.",
     );
     await client.waitFor(
-      `document.querySelector(".project-row span")?.textContent === "Home" && Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]:not([disabled])'))`,
+      `document.querySelector(".project-row span")?.textContent === "Home" && Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 SuoCode"]'))`,
       "The desktop app did not initialize its private Home workspace.",
       45_000,
     );
@@ -422,14 +421,16 @@ async function main() {
       const body = document.querySelector(".conversation-body");
       if (!body) return null;
       const probe = document.createElement("div");
-      probe.className = "markdown";
-      probe.innerHTML = "<p>测试过程中的长中文内容必须在很窄的聊天窗口中正确换行而不能被右侧文件栏遮挡。<code>very-long-inline-token-without-natural-breaks-0123456789</code></p>";
+      probe.className = "agent-turn-content";
+      probe.innerHTML = '<details class="tool-activity"><summary><span>思考了 7 次，编辑了 1 个文件，查看了 2 个文件，搜索 1 次，运行了 4 个命令，调用了 3 个工具</span><svg width="14"></svg></summary></details><div class="assistant-segment"><div class="markdown"><p>测试过程中的长中文内容必须在很窄的聊天窗口中正确换行而不能被右侧文件栏遮挡。<code>very-long-inline-token-without-natural-breaks-0123456789</code></p></div></div>';
       body.append(probe);
       const result = {
         paddingBottom: Number.parseFloat(getComputedStyle(body).paddingBottom),
         clientWidth: body.clientWidth,
         scrollWidth: body.scrollWidth,
         probeRight: probe.getBoundingClientRect().right,
+        probeScrollWidth: probe.scrollWidth,
+        probeClientWidth: probe.clientWidth,
         bodyRight: body.getBoundingClientRect().right,
       };
       probe.remove();
@@ -437,6 +438,7 @@ async function main() {
     })()`);
     assert.ok((narrowConversationLayout?.paddingBottom ?? 0) >= 175);
     assert.ok((narrowConversationLayout?.scrollWidth ?? 1) <= (narrowConversationLayout?.clientWidth ?? 0) + 1);
+    assert.ok((narrowConversationLayout?.probeScrollWidth ?? 1) <= (narrowConversationLayout?.probeClientWidth ?? 0) + 1);
     assert.ok((narrowConversationLayout?.probeRight ?? 1) <= (narrowConversationLayout?.bodyRight ?? 0) + 1);
     await client.evaluate(`window.resizeTo(1440, 900)`);
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not expand after panel compression.");
@@ -516,7 +518,7 @@ async function main() {
       return true;
     })()`);
     await client.waitFor(
-      `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]:not([disabled])')) && [...document.querySelectorAll(".project-row span")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
+      `Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 SuoCode"]')) && [...document.querySelectorAll(".project-row span")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
       "The packaged app could not create a project session through IPC.",
       45_000,
     );
@@ -547,24 +549,36 @@ async function main() {
       `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))`,
       "The file tree did not load an expanded folder on demand.",
     );
-    const draggedFileReference = await client.evaluate(`(async () => {
+    const draggedReferences = await client.evaluate(`(async () => {
+      const folder = [...document.querySelectorAll(".file-tree-node > button")].find((item) => item.textContent.includes("lazy-folder"));
       const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
       const conversation = document.querySelector(".conversation-pane");
-      if (!file || !conversation) return null;
-      const transfer = new DataTransfer();
-      file.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
-      conversation.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
-      conversation.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer }));
-      conversation.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      if (!folder || !file || !conversation) return null;
+      for (const source of [folder, file]) {
+        const transfer = new DataTransfer();
+        source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+        conversation.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
+        conversation.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+        conversation.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      }
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      const editor = document.querySelector('[aria-label="发送消息给 SuoCode"]');
       return {
-        chip: document.querySelector(".composer-file-chip")?.textContent || "",
+        tokens: [...document.querySelectorAll(".composer .prompt-reference-token")].map((token) => ({ kind: token.dataset.kind, path: token.dataset.path, text: token.textContent })),
+        value: editor?.dataset.value || "",
         overlay: document.querySelector(".conversation-pane")?.classList.contains("file-drag-active") ?? true,
       };
     })()`);
-    assert.match(draggedFileReference?.chip ?? "", /lazy-child\.txt/);
-    assert.equal(draggedFileReference?.overlay, false);
-    await client.evaluate(`document.querySelector(".composer-file-chip button")?.click()`);
+    assert.deepEqual(draggedReferences?.tokens.map((token) => token.kind), ["folder", "file"]);
+    assert.match(draggedReferences?.value ?? "", /<@folder:.*lazy-folder>/);
+    assert.match(draggedReferences?.value ?? "", /<@file:.*lazy-child\.txt>/);
+    assert.equal(draggedReferences?.overlay, false);
+    await client.evaluate(`(async () => {
+      for (let index = 0; index < 2; index += 1) {
+        document.querySelector(".composer .prompt-reference-remove")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      }
+    })()`);
     await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"))?.click()`);
     const previewPage = await waitForPreviewPage(port);
     const previewClient = new DevToolsClient(previewPage.webSocketDebuggerUrl);
@@ -619,24 +633,28 @@ async function main() {
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         const editor = document.querySelector(".user-message-editor");
         if (!editor) return { error: "missing editor" };
-        const edited = editor.value + " 已编辑";
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-        setter.call(editor, edited);
+        const edited = (editor.dataset.value || editor.textContent || "") + " <@folder:lazy-folder> 已编辑";
+        editor.append(document.createTextNode(" <@folder:lazy-folder> 已编辑"));
         editor.dispatchEvent(new Event("input", { bubbles: true }));
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         const warning = document.querySelector(".history-edit-warning")?.textContent || "";
         document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        const retained = document.querySelector(".user-bubble-button")?.textContent || "";
+        const retainedBubble = document.querySelector(".user-bubble-button");
+        const retained = retainedBubble?.dataset.promptValue || "";
+        const renderedReference = retainedBubble?.querySelector('.prompt-reference-token[data-kind="folder"]')?.textContent || "";
         document.querySelector(".user-bubble-button")?.click();
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        const editableReference = document.querySelector('.user-message-editor .prompt-reference-token[data-kind="folder"]')?.textContent || "";
         document.querySelector(".user-message-editor")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         const dialog = document.querySelector(".rewind-dialog")?.textContent || "";
         [...document.querySelectorAll(".rewind-dialog button")].find((button) => button.textContent === "取消")?.click();
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        return { warning, retained, edited, dialog, editorAfterCancel: Boolean(document.querySelector(".user-message-editor")) };
+        return { warning, retained, edited, dialog, renderedReference, editableReference, editorAfterCancel: Boolean(document.querySelector(".user-message-editor")) };
       })()`);
+      assert.match(historyEditInteraction.renderedReference, /lazy-folder/);
+      assert.match(historyEditInteraction.editableReference, /lazy-folder/);
       assert.match(historyEditInteraction.warning, /提示缓存命中率/);
       assert.equal(historyEditInteraction.retained, historyEditInteraction.edited);
       assert.match(historyEditInteraction.dialog, /工作区中已经产生的文件修改不会被恢复/);
@@ -686,7 +704,7 @@ async function main() {
 
       await client.send("Page.reload", { ignoreCache: true });
       await client.waitFor(
-        `document.querySelectorAll(".assistant-message").length >= 3`,
+        `document.querySelectorAll(".user-bubble-button").length >= 3 && document.querySelector(".timeline")?.textContent.includes(${JSON.stringify(terminalToken)})`,
         "The completed conversation was not restored after a renderer restart.",
         60_000,
       );
