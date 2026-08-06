@@ -8,11 +8,11 @@
 
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-button, textarea, input, select, [contenteditable] { color: inherit; font: inherit; }
+button, textarea, input, select { color: inherit; font: inherit; }
 button { border: 0; }
-button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible, [contenteditable]:focus-visible { outline: 2px solid #8f8f88; outline-offset: 1px; }
+button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #8f8f88; outline-offset: 1px; }
 .window-drag { -webkit-app-region: drag; }
-.no-drag, button, textarea, input, select, [contenteditable] { -webkit-app-region: no-drag; }
+.no-drag, button, textarea, input, select { -webkit-app-region: no-drag; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -122,7 +122,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .user-bubble { min-width: 0; max-width: min(680px, 88%); padding: 11px 15px; overflow-wrap: anywhere; word-break: break-word; border: 1px solid #deded9; border-radius: 16px 16px 4px 16px; background: #fff; box-shadow: 0 1px 2px rgb(30 30 27 / 3%); font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
 .user-bubble-button { display: block; color: inherit; text-align: left; cursor: text; }
 .user-bubble-button:disabled { cursor: default; }
-.user-message-editor { width: min(680px, 88%); min-height: 52px; max-height: 220px; overflow-y: auto; outline: 0; font-family: inherit; }
+.user-message-editor { width: min(680px, 88%); min-height: 52px; max-height: 220px; overflow-y: auto; outline: 0; resize: vertical; font-family: inherit; }
 .user-message-editor-shell { display: flex; width: min(680px, 88%); align-items: flex-end; flex-direction: column; }
 .user-message-editor-shell .user-message-editor { width: 100%; }
 .history-edit-warning { max-width: 100%; margin: 6px 4px 0; color: #a09f98; font-size: 9px; line-height: 1.45; text-align: right; }
@@ -207,23 +207,12 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .error-banner button { display: grid; padding: 2px; place-items: center; color: inherit; background: transparent; cursor: pointer; }
 .composer { position: relative; z-index: 1; width: 100%; overflow: hidden; border: 1px solid #d9d9d5; border-radius: 18px; background: #fff; box-shadow: 0 1px 2px rgb(23 23 20 / 4%), 0 8px 24px rgb(23 23 20 / 4%); }
 .composer:focus-within { border-color: #bdbdb7; box-shadow: 0 0 0 3px rgb(70 70 64 / 5%), 0 8px 24px rgb(23 23 20 / 4%); }
-.rich-prompt-editor { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-.rich-prompt-editor[data-empty="true"]::before { color: #a1a19c; content: attr(data-placeholder); pointer-events: none; }
-.composer .rich-prompt-editor { display: block; width: 100%; min-height: 86px; max-height: 128px; overflow-x: hidden; overflow-y: auto; padding: 14px 18px 6px; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 1.5; }
-.composer .rich-prompt-editor[aria-disabled="true"] { cursor: default; }
-.rich-prompt-editor::-webkit-scrollbar { width: 5px; }
-.rich-prompt-editor::-webkit-scrollbar-track { background: transparent; }
-.rich-prompt-editor::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 5px; background: #c7c7c2; background-clip: padding-box; }
-.prompt-text-segment { white-space: pre-wrap; }
-.prompt-reference-token { display: inline-flex; min-width: 0; max-width: min(100%, 260px); height: 24px; align-items: center; gap: 5px; margin: 0 2px; padding: 0 8px; vertical-align: -.35em; border: 1px solid #cfd8cf; border-radius: 7px; color: #4e6752; background: #eef4ee; font-size: .82em; line-height: 1; white-space: nowrap; }
-.prompt-reference-token[data-kind="folder"] { border-color: #d8d1bd; color: #716344; background: #f5f1e7; }
-.prompt-reference-token::before { flex: 0 0 auto; content: "›"; font-size: 12px; font-weight: 700; }
-.prompt-reference-token[data-kind="folder"]::before { content: "⌁"; }
-.prompt-reference-token > svg { flex: 0 0 auto; }
-.prompt-reference-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.prompt-reference-token.editable { padding-right: 4px; cursor: default; user-select: none; }
-.prompt-reference-token.editable .prompt-reference-remove { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; border-radius: 4px; color: #809083; font-size: 14px; line-height: 1; cursor: pointer; }
-.prompt-reference-token.editable .prompt-reference-remove:hover { color: #435647; background: rgb(82 105 86 / 10%); }
+.composer textarea { display: block; width: 100%; height: 86px; min-height: 86px; max-height: 128px; overflow-x: hidden; overflow-y: auto; padding: 14px 18px 6px; resize: none; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 1.5; }
+.composer textarea::placeholder { color: #a1a19c; }
+.composer textarea:disabled { cursor: default; }
+.composer textarea::-webkit-scrollbar { width: 5px; }
+.composer textarea::-webkit-scrollbar-track { background: transparent; }
+.composer textarea::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 5px; background: #c7c7c2; background-clip: padding-box; }
 .composer-toolbar { display: flex; align-items: center; min-height: 44px; padding: 4px 8px 8px 12px; }
 .agent-mode { display: inline-flex; max-width: 260px; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; color: #686863; background: #f4f4f1; font-size: 11px; font-weight: 500; cursor: pointer; }
 .agent-mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -442,7 +431,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   .composer-wrap { width: calc(100% - 24px); padding-bottom: 8px; }
   .composer-plan { width: calc(100% - 28px); }
   .composer-plan.collapsed { width: calc(100% - 52px); }
-  .composer .rich-prompt-editor { padding-inline: 14px; }
+  .composer textarea { padding-inline: 14px; }
   .composer-toolbar { padding-left: 8px; }
   .agent-mode { max-width: calc(100vw - 108px); }
   .model-popover { width: min(340px, calc(100vw - 24px)); }

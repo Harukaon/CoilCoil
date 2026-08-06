@@ -29,9 +29,9 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import type { CSSProperties, DragEvent as ReactDragEvent, FormEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, DragEvent as ReactDragEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -64,14 +64,6 @@ type ConversationTimelineItem =
 type ActivityEntry =
   | { kind: "thinking"; id: string; text: string }
   | { kind: "tool"; id: string; tool: ToolRun };
-type PromptReferenceKind = "file" | "folder";
-type PromptSegment =
-  | { kind: "text"; text: string }
-  | { kind: "reference"; referenceKind: PromptReferenceKind; path: string; raw: string };
-type RichPromptEditorHandle = {
-  focus: () => void;
-  insertReference: (kind: PromptReferenceKind, path: string) => void;
-};
 
 const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
 const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
@@ -117,227 +109,15 @@ function pathLabel(path: string): string {
   return normalized.split(/[\\/]/).at(-1) || path;
 }
 
-const PROMPT_REFERENCE_PATTERN = /<@(file|folder):([^>\n]+)>/g;
-
-function promptReferenceToken(kind: PromptReferenceKind, path: string): string {
-  return `<@${kind}:${path}>`;
+function absoluteProjectPath(root: string, value: string): string {
+  if (/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value)) return value;
+  const separator = root.includes("\\") ? "\\" : "/";
+  return `${root.replace(/[\\/]+$/, "")}${separator}${value.replace(/^[\\/]+/, "")}`;
 }
 
-function normalizeLegacyPromptReferences(value: string): string {
-  const match = value.match(/\n{2,}参考文件：\n((?:@[^\n]+\n?)*)$/);
-  if (match?.index === undefined) return value;
-  const references = match[1].split("\n").map((line) => line.trim()).filter((line) => line.startsWith("@")).map((line) => {
-    const path = line.slice(1);
-    const leaf = pathLabel(path);
-    return promptReferenceToken(leaf.includes(".") ? "file" : "folder", path);
-  });
-  return references.length ? `${value.slice(0, match.index).trimEnd()}\n\n${references.join(" ")}` : value;
+function quotePath(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
-
-function parsePromptSegments(value: string): PromptSegment[] {
-  const segments: PromptSegment[] = [];
-  let offset = 0;
-  for (const match of value.matchAll(PROMPT_REFERENCE_PATTERN)) {
-    const index = match.index ?? 0;
-    if (index > offset) segments.push({ kind: "text", text: value.slice(offset, index) });
-    segments.push({
-      kind: "reference",
-      referenceKind: match[1] as PromptReferenceKind,
-      path: match[2],
-      raw: match[0],
-    });
-    offset = index + match[0].length;
-  }
-  if (offset < value.length) segments.push({ kind: "text", text: value.slice(offset) });
-  return segments.length ? segments : [{ kind: "text", text: value }];
-}
-
-function createPromptReferenceElement(kind: PromptReferenceKind, path: string): HTMLSpanElement {
-  const token = document.createElement("span");
-  token.className = "prompt-reference-token editable";
-  token.contentEditable = "false";
-  token.dataset.kind = kind;
-  token.dataset.path = path;
-  token.title = path;
-
-  const label = document.createElement("span");
-  label.className = "prompt-reference-label";
-  label.textContent = pathLabel(path);
-  token.append(label);
-
-  const remove = document.createElement("span");
-  remove.className = "prompt-reference-remove";
-  remove.dataset.referenceRemove = "true";
-  remove.setAttribute("aria-hidden", "true");
-  remove.textContent = "×";
-  token.append(remove);
-  return token;
-}
-
-function renderPromptEditor(root: HTMLDivElement, value: string): void {
-  root.replaceChildren();
-  for (const segment of parsePromptSegments(value)) {
-    root.append(segment.kind === "text" ? document.createTextNode(segment.text) : createPromptReferenceElement(segment.referenceKind, segment.path));
-  }
-  root.dataset.empty = value.length ? "false" : "true";
-  root.dataset.value = value;
-}
-
-function serializePromptNode(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
-  if (!(node instanceof HTMLElement)) return "";
-  if (node.classList.contains("prompt-reference-token")) {
-    const kind = node.dataset.kind as PromptReferenceKind | undefined;
-    const path = node.dataset.path;
-    return kind && path ? promptReferenceToken(kind, path) : "";
-  }
-  if (node.tagName === "BR") return "\n";
-  const content = [...node.childNodes].map(serializePromptNode).join("");
-  return node !== node.parentElement?.lastChild && (node.tagName === "DIV" || node.tagName === "P") ? `${content}\n` : content;
-}
-
-function serializePromptEditor(root: HTMLDivElement): string {
-  return [...root.childNodes].map(serializePromptNode).join("").replaceAll("\u00a0", " ").replace(/\n{3,}/g, "\n\n");
-}
-
-function placeCaretAtEnd(root: HTMLElement): void {
-  const selection = window.getSelection();
-  if (!selection) return;
-  const range = document.createRange();
-  range.selectNodeContents(root);
-  range.collapse(false);
-  selection.removeAllRanges();
-  selection.addRange(range);
-}
-
-function RichPromptContent({ value }: { value: string }): React.JSX.Element {
-  return <>{parsePromptSegments(value).map((segment, index) => {
-    if (segment.kind === "text") return <span className="prompt-text-segment" key={`text-${index}`}>{segment.text}</span>;
-    return <span className="prompt-reference-token" data-kind={segment.referenceKind} title={segment.path} key={`${segment.raw}-${index}`}><span className="prompt-reference-label">{pathLabel(segment.path)}</span></span>;
-  })}</>;
-}
-
-const RichPromptEditor = forwardRef<RichPromptEditorHandle, {
-  value: string;
-  onChange: (value: string) => void;
-  onSubmit?: () => void;
-  onEscape?: () => void;
-  placeholder: string;
-  ariaLabel: string;
-  disabled?: boolean;
-  autoFocus?: boolean;
-  className?: string;
-}>(function RichPromptEditor({ value, onChange, onSubmit, onEscape, placeholder, ariaLabel, disabled = false, autoFocus = false, className = "" }, forwardedRef) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selectionRef = useRef<Range | undefined>(undefined);
-  const composing = useRef(false);
-
-  const rememberSelection = (): void => {
-    const root = rootRef.current;
-    const selection = window.getSelection();
-    if (!root || !selection?.rangeCount) return;
-    const range = selection.getRangeAt(0);
-    if (root.contains(range.commonAncestorContainer)) selectionRef.current = range.cloneRange();
-  };
-
-  const emitChange = (): void => {
-    const root = rootRef.current;
-    if (!root) return;
-    let next = serializePromptEditor(root);
-    if (!root.querySelector(".prompt-reference-token") && !next.trim()) {
-      root.replaceChildren();
-      next = "";
-    }
-    root.dataset.empty = next.length ? "false" : "true";
-    root.dataset.value = next;
-    onChange(next);
-    rememberSelection();
-  };
-
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root || serializePromptEditor(root) === value) return;
-    renderPromptEditor(root, value);
-  }, [value]);
-
-  useEffect(() => {
-    if (!autoFocus || disabled) return;
-    rootRef.current?.focus();
-    if (rootRef.current) placeCaretAtEnd(rootRef.current);
-  }, [autoFocus, disabled]);
-
-  useImperativeHandle(forwardedRef, () => ({
-    focus: () => rootRef.current?.focus(),
-    insertReference: (kind, path) => {
-      const root = rootRef.current;
-      if (!root || disabled) return;
-      root.focus();
-      const selection = window.getSelection();
-      const range = selectionRef.current && root.contains(selectionRef.current.commonAncestorContainer)
-        ? selectionRef.current.cloneRange()
-        : document.createRange();
-      if (!selectionRef.current || !root.contains(range.commonAncestorContainer)) {
-        range.selectNodeContents(root);
-        range.collapse(false);
-      }
-      range.deleteContents();
-      const fragment = document.createDocumentFragment();
-      fragment.append(createPromptReferenceElement(kind, path));
-      const trailing = document.createTextNode(" ");
-      fragment.append(trailing);
-      range.insertNode(fragment);
-      const nextRange = document.createRange();
-      nextRange.setStartAfter(trailing);
-      nextRange.collapse(true);
-      selection?.removeAllRanges();
-      selection?.addRange(nextRange);
-      selectionRef.current = nextRange.cloneRange();
-      emitChange();
-    },
-  }), [disabled, onChange]);
-
-  return <div
-    ref={rootRef}
-    className={`rich-prompt-editor ${className}`.trim()}
-    contentEditable={!disabled}
-    role="textbox"
-    aria-label={ariaLabel}
-    aria-multiline="true"
-    aria-disabled={disabled}
-    data-placeholder={placeholder}
-    data-empty={value.length ? "false" : "true"}
-    data-value={value}
-    suppressContentEditableWarning
-    onInput={emitChange}
-    onFocus={rememberSelection}
-    onKeyUp={rememberSelection}
-    onMouseUp={rememberSelection}
-    onCompositionStart={() => { composing.current = true; }}
-    onCompositionEnd={() => { composing.current = false; emitChange(); }}
-    onPaste={(event) => {
-      event.preventDefault();
-      document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
-    }}
-    onPointerDown={(event) => {
-      const remove = (event.target as HTMLElement).closest<HTMLElement>("[data-reference-remove]");
-      if (!remove) return;
-      event.preventDefault();
-      remove.closest(".prompt-reference-token")?.remove();
-      emitChange();
-      rootRef.current?.focus();
-    }}
-    onKeyDown={(event) => {
-      if (composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-      if (event.key === "Escape" && onEscape) {
-        event.preventDefault();
-        onEscape();
-      } else if (event.key === "Enter" && !event.shiftKey && onSubmit) {
-        event.preventDefault();
-        onSubmit();
-      }
-    }}
-  />;
-});
 
 function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
   const seen = new Set<string>();
@@ -449,10 +229,11 @@ function MessageView({ message, disabled, onRewind }: {
   onRewind: (message: ChatMessage, text: string) => Promise<void>;
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(() => normalizeLegacyPromptReferences(message.text));
+  const [value, setValue] = useState(message.text);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
-  useEffect(() => setValue(normalizeLegacyPromptReferences(message.text)), [message.text]);
+  const composingRef = useRef(false);
+  useEffect(() => setValue(message.text), [message.text]);
 
   useEffect(() => {
     if (!editing) return;
@@ -485,15 +266,25 @@ function MessageView({ message, disabled, onRewind }: {
         <div className="message-label">你</div>
         {editing ? (
           <div className="user-message-editor-shell" ref={editorRef}>
-            <RichPromptEditor
+            <textarea
               className="user-bubble user-message-editor"
               autoFocus
               value={value}
-              ariaLabel="编辑历史消息"
+              aria-label="编辑历史消息"
               placeholder="编辑历史消息"
-              onChange={setValue}
-              onEscape={() => setEditing(false)}
-              onSubmit={requestRewind}
+              onChange={(event) => setValue(event.target.value)}
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={() => { composingRef.current = false; }}
+              onKeyDown={(event) => {
+                if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setEditing(false);
+                } else if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  requestRewind();
+                }
+              }}
             />
             {value !== message.text ? <small className="history-edit-warning">修改历史消息会改变后续上下文，可能降低本次请求的提示缓存命中率。</small> : null}
           </div>
@@ -505,7 +296,7 @@ function MessageView({ message, disabled, onRewind }: {
             data-prompt-value={value}
             disabled={disabled || !message.entryId}
             onClick={() => setEditing(true)}
-          ><RichPromptContent value={value} /></button>
+          >{value}</button>
         )}
         {confirmOpen ? (
           <div className="modal-backdrop rewind-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmOpen(false); }}>
@@ -813,18 +604,20 @@ function replaceDirectoryChildren(nodes: FileNode[], path: string, children: Fil
   });
 }
 
-function FileTreeNode({ node, depth, onLoad, onOpen }: {
+function FileTreeNode({ node, root, depth, onLoad, onOpen }: {
   node: FileNode;
+  root: string;
   depth: number;
   onLoad: (path: string) => Promise<void>;
   onOpen: (node: FileNode) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const startReferenceDrag = (event: ReactDragEvent<HTMLButtonElement>): void => {
+  const startPathDrag = (event: ReactDragEvent<HTMLButtonElement>): void => {
+    const absolutePath = absoluteProjectPath(root, node.path);
     event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData("application/x-suocode-reference", JSON.stringify({ name: node.name, path: node.path, kind: node.kind }));
-    event.dataTransfer.setData("text/plain", promptReferenceToken(node.kind === "directory" ? "folder" : "file", node.path));
+    event.dataTransfer.setData("application/x-suocode-path", JSON.stringify({ path: absolutePath }));
+    event.dataTransfer.setData("text/plain", quotePath(absolutePath));
   };
   if (node.kind === "directory") {
     const toggle = async (): Promise<void> => {
@@ -840,17 +633,17 @@ function FileTreeNode({ node, depth, onLoad, onOpen }: {
     };
     return (
       <div className="file-tree-node">
-        <button type="button" draggable style={{ paddingLeft: 8 + depth * 13 }} onClick={() => void toggle()} onDragStart={startReferenceDrag}>
+        <button type="button" draggable style={{ paddingLeft: 8 + depth * 13 }} onClick={() => void toggle()} onDragStart={startPathDrag}>
           {loading ? <LoaderCircle className="spin" size={12} /> : open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <Folder size={14} />
           <span>{node.name}</span>
         </button>
-        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} onLoad={onLoad} onOpen={onOpen} />) : null}
+        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} root={root} depth={depth + 1} onLoad={onLoad} onOpen={onOpen} />) : null}
       </div>
     );
   }
   return (
-    <button className="file-leaf" type="button" draggable style={{ paddingLeft: 21 + depth * 13 }} onClick={() => onOpen(node)} onDragStart={startReferenceDrag}>
+    <button className="file-leaf" type="button" draggable style={{ paddingLeft: 21 + depth * 13 }} onClick={() => onOpen(node)} onDragStart={startPathDrag}>
       <File size={13} /><span>{node.name}</span>
     </button>
   );
@@ -879,7 +672,7 @@ function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSnapshot; 
   return (
     <div className="files-panel">
       <div className="file-tree">
-        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} depth={0} onLoad={loadDirectory} onOpen={onOpen} />) : <p className="panel-note">此文件夹为空。</p>}
+        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} root={project.cwd} depth={0} onLoad={loadDirectory} onOpen={onOpen} />) : <p className="panel-note">此文件夹为空。</p>}
         {error ? <p className="file-tree-error">{error}</p> : null}
       </div>
     </div>
@@ -1108,7 +901,8 @@ export default function App(): React.JSX.Element {
   const [modelChanging, setModelChanging] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const inputRef = useRef<RichPromptEditorHandle>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const runtimeSessionRef = useRef(new Map<string, string>());
@@ -1271,6 +1065,13 @@ export default function App(): React.JSX.Element {
     const viewport = timelineRef.current;
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [messages, tools]);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
+  }, [draft]);
 
   useEffect(() => {
     if (!snapshot?.running) return;
@@ -1466,6 +1267,14 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  };
+
   const selectComposerModel = async (model: ModelOption): Promise<void> => {
     if (!configuration || modelChanging) return;
     setModelChanging(true);
@@ -1491,30 +1300,44 @@ export default function App(): React.JSX.Element {
   ];
 
   const handleFileDragEnter = (event: ReactDragEvent<HTMLElement>): void => {
-    if (!event.dataTransfer.types.includes("application/x-suocode-reference")) return;
+    if (!event.dataTransfer.types.includes("application/x-suocode-path")) return;
     event.preventDefault();
     fileDragDepthRef.current += 1;
     setFileDragActive(true);
   };
 
   const handleFileDragLeave = (event: ReactDragEvent<HTMLElement>): void => {
-    if (!event.dataTransfer.types.includes("application/x-suocode-reference")) return;
+    if (!event.dataTransfer.types.includes("application/x-suocode-path")) return;
     fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
     if (fileDragDepthRef.current === 0) setFileDragActive(false);
   };
 
   const handleFileDrop = (event: ReactDragEvent<HTMLElement>): void => {
-    const serialized = event.dataTransfer.getData("application/x-suocode-reference");
+    const serialized = event.dataTransfer.getData("application/x-suocode-path");
     if (!serialized) return;
     event.preventDefault();
     fileDragDepthRef.current = 0;
     setFileDragActive(false);
     try {
-      const reference = JSON.parse(serialized) as Pick<FileNode, "kind" | "path">;
-      if (!reference.path || (reference.kind !== "file" && reference.kind !== "directory")) return;
-      inputRef.current?.insertReference(reference.kind === "directory" ? "folder" : "file", reference.path);
+      const dropped = JSON.parse(serialized) as { path?: string };
+      if (!dropped.path) return;
+      const input = inputRef.current;
+      const start = input?.selectionStart ?? draft.length;
+      const end = input?.selectionEnd ?? start;
+      const before = draft.slice(0, start);
+      const after = draft.slice(end);
+      const leadingSpace = before.length && !/\s$/.test(before) ? " " : "";
+      const trailingSpace = after.length && !/^\s/.test(after) ? " " : "";
+      const insertion = `${leadingSpace}${quotePath(dropped.path)}${trailingSpace}`;
+      const nextDraft = `${before}${insertion}${after}`;
+      const caret = start + insertion.length;
+      setDraft(nextDraft);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(caret, caret);
+      });
     } catch {
-      setError("无法添加拖入的文件。请重新拖动一次。");
+      setError("无法插入拖入的路径。请重新拖动一次。");
     }
   };
 
@@ -1558,7 +1381,7 @@ export default function App(): React.JSX.Element {
         {leftOpen ? <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><span><PanelLeft size={17} /></span></button> : null}
         {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
 
-        <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} onDragEnter={handleFileDragEnter} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-suocode-reference")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={handleFileDragLeave} onDrop={handleFileDrop}>
+        <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} onDragEnter={handleFileDragEnter} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-suocode-path")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={handleFileDragLeave} onDrop={handleFileDrop}>
           <header className="conversation-header window-drag">
             {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={() => setLeftOpen(true)}><PanelLeft size={17} /></button> : null}
             <div className="conversation-title"><strong title={activeConversation?.title ?? "新建对话"}>{truncateTitle(activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
@@ -1576,7 +1399,17 @@ export default function App(): React.JSX.Element {
             <div className="composer-stack">
               <ComposerPlan plan={projectState.plan} />
               <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
-                <RichPromptEditor ref={inputRef} value={draft} ariaLabel="发送消息给 SuoCode" placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"} disabled={!project || !snapshot || loading} onChange={setDraft} onSubmit={() => document.querySelector<HTMLFormElement>("form.composer")?.requestSubmit()} />
+                <textarea
+                  ref={inputRef}
+                  value={draft}
+                  aria-label="发送消息给 SuoCode"
+                  placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"}
+                  disabled={!project || !snapshot || loading}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onCompositionStart={() => { composingRef.current = true; }}
+                  onCompositionEnd={() => { composingRef.current = false; }}
+                  onKeyDown={handleComposerKeyDown}
+                />
                 <div className="composer-toolbar">
                   <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
                   {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" }, snapshot?.runtimeId)}><Square size={12} fill="currentColor" /></button> : null}

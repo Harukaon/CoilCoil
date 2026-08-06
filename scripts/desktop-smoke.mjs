@@ -134,9 +134,9 @@ async function clickInspector(client, label) {
 async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
   const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
   const submitted = await client.evaluate(`(async () => {
-    const input = document.querySelector('[contenteditable="true"][aria-label="发送消息给 SuoCode"]');
+    const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
     if (!input) return false;
-    input.replaceChildren(document.createTextNode(${JSON.stringify(prompt)}));
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, ${JSON.stringify(prompt)});
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     input.closest("form")?.requestSubmit();
@@ -200,7 +200,7 @@ async function main() {
       "The renderer or preload bridge did not become ready.",
     );
     await client.waitFor(
-      `document.querySelector(".project-row span")?.textContent === "Home" && Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 SuoCode"]'))`,
+      `document.querySelector(".project-row span")?.textContent === "Home" && Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]'))`,
       "The desktop app did not initialize its private Home workspace.",
       45_000,
     );
@@ -518,7 +518,7 @@ async function main() {
       return true;
     })()`);
     await client.waitFor(
-      `Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 SuoCode"]')) && [...document.querySelectorAll(".project-row span")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
+      `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')) && [...document.querySelectorAll(".project-row span")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
       "The packaged app could not create a project session through IPC.",
       45_000,
     );
@@ -538,6 +538,10 @@ async function main() {
     assert.equal(projectState.filePreview, false);
     await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
     await clickInspector(client, "文件");
+    await client.waitFor(
+      `[...document.querySelectorAll(".file-tree-node > button")].some((item) => item.textContent.includes("lazy-folder"))`,
+      "The file tree did not render the project root entries.",
+    );
     const lazyBeforeExpand = await client.evaluate(`({
       folder: [...document.querySelectorAll(".file-tree-node > button")].some((item) => item.textContent.includes("lazy-folder")),
       child: [...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))
@@ -549,7 +553,7 @@ async function main() {
       `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))`,
       "The file tree did not load an expanded folder on demand.",
     );
-    const draggedReferences = await client.evaluate(`(async () => {
+    const draggedPaths = await client.evaluate(`(async () => {
       const folder = [...document.querySelectorAll(".file-tree-node > button")].find((item) => item.textContent.includes("lazy-folder"));
       const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
       const conversation = document.querySelector(".conversation-pane");
@@ -560,24 +564,21 @@ async function main() {
         conversation.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
         conversation.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer }));
         conversation.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       }
-      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       const editor = document.querySelector('[aria-label="发送消息给 SuoCode"]');
       return {
-        tokens: [...document.querySelectorAll(".composer .prompt-reference-token")].map((token) => ({ kind: token.dataset.kind, path: token.dataset.path, text: token.textContent })),
-        value: editor?.dataset.value || "",
+        value: editor?.value || "",
         overlay: document.querySelector(".conversation-pane")?.classList.contains("file-drag-active") ?? true,
       };
     })()`);
-    assert.deepEqual(draggedReferences?.tokens.map((token) => token.kind), ["folder", "file"]);
-    assert.match(draggedReferences?.value ?? "", /<@folder:.*lazy-folder>/);
-    assert.match(draggedReferences?.value ?? "", /<@file:.*lazy-child\.txt>/);
-    assert.equal(draggedReferences?.overlay, false);
-    await client.evaluate(`(async () => {
-      for (let index = 0; index < 2; index += 1) {
-        document.querySelector(".composer .prompt-reference-remove")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-      }
+    assert.match(draggedPaths?.value ?? "", /'\/[^']+\/lazy-folder'/);
+    assert.match(draggedPaths?.value ?? "", /'\/[^']+\/lazy-folder\/lazy-child\.txt'/);
+    assert.equal(draggedPaths?.overlay, false);
+    await client.evaluate(`(() => {
+      const editor = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(editor, "");
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
     })()`);
     await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"))?.click()`);
     const previewPage = await waitForPreviewPage(port);
@@ -633,8 +634,8 @@ async function main() {
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         const editor = document.querySelector(".user-message-editor");
         if (!editor) return { error: "missing editor" };
-        const edited = (editor.dataset.value || editor.textContent || "") + " <@folder:lazy-folder> 已编辑";
-        editor.append(document.createTextNode(" <@folder:lazy-folder> 已编辑"));
+        const edited = editor.value + " 已编辑";
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(editor, edited);
         editor.dispatchEvent(new Event("input", { bubbles: true }));
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         const warning = document.querySelector(".history-edit-warning")?.textContent || "";
@@ -642,19 +643,15 @@ async function main() {
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         const retainedBubble = document.querySelector(".user-bubble-button");
         const retained = retainedBubble?.dataset.promptValue || "";
-        const renderedReference = retainedBubble?.querySelector('.prompt-reference-token[data-kind="folder"]')?.textContent || "";
         document.querySelector(".user-bubble-button")?.click();
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        const editableReference = document.querySelector('.user-message-editor .prompt-reference-token[data-kind="folder"]')?.textContent || "";
         document.querySelector(".user-message-editor")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         const dialog = document.querySelector(".rewind-dialog")?.textContent || "";
         [...document.querySelectorAll(".rewind-dialog button")].find((button) => button.textContent === "取消")?.click();
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        return { warning, retained, edited, dialog, renderedReference, editableReference, editorAfterCancel: Boolean(document.querySelector(".user-message-editor")) };
+        return { warning, retained, edited, dialog, editorAfterCancel: Boolean(document.querySelector(".user-message-editor")) };
       })()`);
-      assert.match(historyEditInteraction.renderedReference, /lazy-folder/);
-      assert.match(historyEditInteraction.editableReference, /lazy-folder/);
       assert.match(historyEditInteraction.warning, /提示缓存命中率/);
       assert.equal(historyEditInteraction.retained, historyEditInteraction.edited);
       assert.match(historyEditInteraction.dialog, /工作区中已经产生的文件修改不会被恢复/);
