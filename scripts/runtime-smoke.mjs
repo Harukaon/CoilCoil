@@ -101,10 +101,14 @@ try {
     if (!configuration.configuredProviders.includes(configuration.provider)) {
       throw new Error(`Live smoke test has no credential for ${configuration.provider}.`);
     }
+    const liveModel = configuration.models.find((model) => model.provider === configuration.provider && model.id === "gpt-5.6-luna" && model.configured)
+      ?? configuration.models.find((model) => model.provider === configuration.provider && model.id === configuration.modelId)
+      ?? configuration.models.find((model) => model.configured);
+    if (!liveModel) throw new Error("Live smoke test has no configured model.");
     await request({
       type: "configure_model",
-      provider: configuration.provider,
-      modelId: configuration.modelId,
+      provider: liveModel.provider,
+      modelId: liveModel.id,
       thinkingLevel: "low",
     });
     const settled = waitForEvent((event) => event.type === "run_state" && event.running === false);
@@ -115,6 +119,15 @@ try {
     await settled;
     const proofPath = join(projectDir, "runtime-proof.txt");
     if (!existsSync(proofPath) || readFileSync(proofPath, "utf8").trim() !== "SUOCODE_RUNTIME_OK") {
+      console.error(JSON.stringify({
+        runtimeError,
+        events: events.filter((event) => !["runtime_ready", "configuration_updated", "session_snapshot", "project_updated"].includes(event.type)).slice(-30).map((event) => ({
+          type: event.type,
+          running: event.running,
+          message: event.message?.text || event.message,
+          tool: event.tool ? { name: event.tool.name, status: event.tool.status, label: event.tool.label, output: event.tool.output } : undefined,
+        })),
+      }, null, 2));
       throw new Error("The live agent did not create the expected proof file.");
     }
     const writeToolEvent = events.find((event) => event.type === "tool_finished" && event.tool.name === "write");

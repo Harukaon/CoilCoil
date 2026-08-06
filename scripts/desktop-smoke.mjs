@@ -155,6 +155,44 @@ async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
   );
 }
 
+async function submitPromptWithScrollPause(client, prompt, expectedTool, timeout = 120_000) {
+  const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
+  await client.evaluate(`(async () => {
+    const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, ${JSON.stringify(prompt)});
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    input.closest("form")?.requestSubmit();
+  })()`);
+  await client.waitFor(`Boolean(document.querySelector(".agent-activity"))`, "The Agent did not enter a streaming state.");
+  const pausedAt = await client.evaluate(`(() => {
+    const body = document.querySelector(".conversation-body");
+    const timeline = document.querySelector(".timeline");
+    timeline.style.paddingTop = "1200px";
+    body.scrollTop = body.scrollHeight;
+    body.dispatchEvent(new Event("scroll", { bubbles: true }));
+    body.scrollTop = Math.max(0, body.scrollTop - 120);
+    body.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return body.scrollTop;
+  })()`);
+  await delay(1_200);
+  const stayedAt = await client.evaluate(`document.querySelector(".conversation-body")?.scrollTop ?? -1`);
+  assert.ok(Math.abs(stayedAt - pausedAt) <= 3, `Streaming forced the conversation from ${pausedAt}px to ${stayedAt}px after the user scrolled up.`);
+  await client.evaluate(`(() => {
+    const body = document.querySelector(".conversation-body");
+    const timeline = document.querySelector(".timeline");
+    timeline.style.paddingTop = "";
+    body.scrollTop = body.scrollHeight;
+    body.dispatchEvent(new Event("scroll", { bubbles: true }));
+  })()`);
+  await client.waitFor(
+    `window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "tool_finished" && event.toolName === ${JSON.stringify(expectedTool)}) && window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "run_state" && event.running === false)`,
+    `The packaged GUI did not complete the expected ${expectedTool} tool run.`,
+    timeout,
+  );
+  await client.waitFor(`!document.querySelector(".agent-activity")`, `The Agent run for ${expectedTool} did not settle.`, 30_000);
+}
+
 async function stopProcess(child) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
@@ -200,7 +238,7 @@ async function main() {
       "The renderer or preload bridge did not become ready.",
     );
     await client.waitFor(
-      `document.querySelector(".project-row span")?.textContent === "Home" && Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]'))`,
+      `document.querySelector(".project-name")?.textContent === "Home" && Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]'))`,
       "The desktop app did not initialize its private Home workspace.",
       45_000,
     );
@@ -208,7 +246,7 @@ async function main() {
       const home = await window.suocode.homeProject();
       return {
         home,
-        projectName: document.querySelector(".project-row span")?.textContent || "",
+        projectName: document.querySelector(".project-name")?.textContent || "",
         status: document.querySelector(".workspace-status")?.textContent || "",
       };
     })()`);
@@ -490,6 +528,30 @@ async function main() {
     await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 1_088, y: expandedHandle.y, button: "left", buttons: 0, clickCount: 1 });
     await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
+    const chatComposerAlignment = await client.evaluate(`(() => {
+      const body = document.querySelector(".conversation-body");
+      const composer = document.querySelector(".composer-wrap");
+      if (!body || !composer) return null;
+      let timeline = body.querySelector(".timeline");
+      const temporary = !timeline;
+      if (!timeline) {
+        timeline = document.createElement("div");
+        timeline.className = "timeline";
+        body.append(timeline);
+      }
+      const chatBounds = timeline.getBoundingClientRect();
+      const composerBounds = composer.getBoundingClientRect();
+      if (temporary) timeline.remove();
+      return {
+        chatLeft: chatBounds.left,
+        chatRight: chatBounds.right,
+        composerLeft: composerBounds.left,
+        composerRight: composerBounds.right,
+      };
+    })()`);
+    assert.ok(Math.abs(chatComposerAlignment.chatLeft - chatComposerAlignment.composerLeft) <= 5);
+    assert.ok(Math.abs(chatComposerAlignment.chatRight - chatComposerAlignment.composerRight) <= 5);
+
     const todoOverlayLayout = await client.evaluate(`(() => {
       const stack = document.querySelector(".composer-stack");
       if (!stack) return null;
@@ -518,14 +580,14 @@ async function main() {
       return true;
     })()`);
     await client.waitFor(
-      `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')) && [...document.querySelectorAll(".project-row span")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
+      `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')) && [...document.querySelectorAll(".project-name")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
       "The packaged app could not create a project session through IPC.",
       45_000,
     );
     const projectState = await client.evaluate(`({
       status: document.querySelector(".workspace-status")?.textContent || "",
       session: document.querySelector(".conversation-title")?.textContent || "",
-      projects: [...document.querySelectorAll(".project-row span")].map((item) => item.textContent || ""),
+      projects: [...document.querySelectorAll(".project-name")].map((item) => item.textContent || ""),
       headerBorder: getComputedStyle(document.querySelector(".conversation-header")).borderBottomWidth,
       inspectorTitle: document.querySelector(".inspector-header")?.textContent || "",
       filePreview: Boolean(document.querySelector(".file-preview"))
@@ -536,6 +598,59 @@ async function main() {
     assert.equal(projectState.headerBorder, "0px");
     assert.doesNotMatch(projectState.inspectorTitle, /项目作业/);
     assert.equal(projectState.filePreview, false);
+
+    const projectInteraction = await client.evaluate(`(async () => {
+      const tree = [...document.querySelectorAll(".project-tree")].find((item) => item.querySelector(".project-name")?.textContent === ${JSON.stringify(basename(projectDirectory))});
+      const toggle = tree?.querySelector(".project-toggle");
+      const add = tree?.querySelector(".project-add");
+      const titleBefore = document.querySelector(".conversation-title strong")?.textContent || "";
+      toggle?.click();
+      await new Promise((resolveWait) => setTimeout(resolveWait, 220));
+      const titleAfterCollapse = document.querySelector(".conversation-title strong")?.textContent || "";
+      const collapsed = toggle?.getAttribute("aria-expanded") === "false";
+      toggle?.click();
+      add?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => requestAnimationFrame(resolveWait)));
+      return {
+        titleBefore,
+        titleAfterCollapse,
+        collapsed,
+        pendingTitle: document.querySelector(".conversation-title strong")?.textContent || "",
+        pendingRow: Boolean(tree?.querySelector(".conversation-row.pending")),
+        loading: Boolean(document.querySelector(".loading-state")),
+        textareaDisabled: document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.disabled ?? true,
+      };
+    })()`);
+    assert.equal(projectInteraction.titleAfterCollapse, projectInteraction.titleBefore);
+    assert.equal(projectInteraction.collapsed, true);
+    assert.equal(projectInteraction.pendingTitle, "新 Agent");
+    assert.equal(projectInteraction.pendingRow, true);
+    assert.equal(projectInteraction.loading, false);
+    assert.equal(projectInteraction.textareaDisabled, false);
+
+    await client.evaluate(`(() => {
+      const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (value) => value.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
+      const textarea = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+      textarea?.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
+    })()`);
+    await client.waitFor(`Boolean(document.querySelector(".composer-images img"))`, "Pasted images did not appear in the composer.");
+    await client.evaluate(`(() => {
+      const home = [...document.querySelectorAll(".project-tree")].find((item) => item.querySelector(".project-name")?.textContent === "Home");
+      home?.querySelector(".project-add")?.click();
+    })()`);
+    await client.waitFor(`(() => {
+      const original = [...document.querySelectorAll(".project-tree")].find((item) => item.querySelector(".project-name")?.textContent === ${JSON.stringify(basename(projectDirectory))});
+      return !original?.querySelector(".conversation-row.pending") && !document.querySelector(".composer-images");
+    })()`, "The temporary conversation did not disappear after switching to another project.");
+
+    await client.evaluate(`(() => {
+      localStorage.setItem("suocode.active-project", ${JSON.stringify(projectDirectory)});
+      location.reload();
+    })()`);
+    await client.waitFor(`document.querySelector(".workspace-status")?.textContent.includes(${JSON.stringify(basename(projectDirectory))})`, "The project session did not restore after the temporary-session test.", 45_000);
+
     await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
     await clickInspector(client, "文件");
     await client.waitFor(
@@ -604,7 +719,15 @@ async function main() {
     await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
     if (live) {
-      await client.evaluate(`(() => {
+      await client.evaluate(`(async () => {
+        const configuration = await window.suocode.request({ type: "get_configuration" });
+        const model = configuration.models.find((item) => item.provider === configuration.provider && item.id === "gpt-5.6-luna" && item.configured)
+          ?? configuration.models.find((item) => item.provider === configuration.provider && item.id === configuration.modelId)
+          ?? configuration.models.find((item) => item.configured);
+        if (!model) throw new Error("No configured live GUI smoke model.");
+        await window.suocode.request({ type: "configure_model", provider: model.provider, modelId: model.id, thinkingLevel: "low" });
+        const activeTree = [...document.querySelectorAll(".project-tree")].find((item) => item.classList.contains("active"));
+        activeTree?.querySelector(".project-add")?.click();
         window.__suocodeSmokeEvents = [];
         window.__suocodeSmokeUnsubscribe?.();
         window.__suocodeSmokeUnsubscribe = window.suocode.onRuntimeEvent((event) => {
@@ -657,7 +780,7 @@ async function main() {
       assert.match(historyEditInteraction.dialog, /工作区中已经产生的文件修改不会被恢复/);
       assert.equal(historyEditInteraction.editorAfterCancel, true);
       await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
-      await submitPrompt(
+      await submitPromptWithScrollPause(
         client,
         `You must call the write tool before replying. Create ${fileName} in the current project with exactly this content: ${fileToken}. Do not use bash or edit. Then reply exactly ${fileToken}.`,
         "write",

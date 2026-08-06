@@ -4,6 +4,7 @@ import {
   SessionManager,
   SettingsManager,
   createAgentSession,
+  processImage,
   type AgentSession,
   type AgentSessionEvent,
   type SessionInfo,
@@ -16,6 +17,7 @@ import type {
   ContextUsage,
   FileNode,
   ModelOption,
+  PromptImage,
   ProjectSnapshot,
   RuntimeBootstrap,
   RuntimeConfiguration,
@@ -204,19 +206,23 @@ function sessionUsage(session: AgentSession): { contextUsage?: ContextUsage; tok
   };
 }
 
-function contentParts(content: unknown): { text: string; thinking: string } {
-  if (typeof content === "string") return { text: content, thinking: "" };
-  if (!Array.isArray(content)) return { text: "", thinking: "" };
+function contentParts(content: unknown): { text: string; thinking: string; images: PromptImage[] } {
+  if (typeof content === "string") return { text: content, thinking: "", images: [] };
+  if (!Array.isArray(content)) return { text: "", thinking: "", images: [] };
 
   const text: string[] = [];
   const thinking: string[] = [];
+  const images: PromptImage[] = [];
   for (const block of content) {
     if (!isRecord(block)) continue;
     if (block.type === "text" && typeof block.text === "string") text.push(block.text);
     if (block.type === "thinking" && typeof block.thinking === "string") thinking.push(block.thinking);
     if (block.type === "thinking" && typeof block.text === "string") thinking.push(block.text);
+    if (block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string") {
+      images.push({ mimeType: block.mimeType, data: block.data });
+    }
   }
-  return { text: text.join("\n"), thinking: thinking.join("\n") };
+  return { text: text.join("\n"), thinking: thinking.join("\n"), images };
 }
 
 function toolResultText(result: unknown): string {
@@ -248,7 +254,7 @@ function mapMessage(message: unknown, id: string, order: number, entryId?: strin
   const parts = contentParts(message.content);
 
   if (role === "user") {
-    return { id, entryId, order, role: "user", text: parts.text, timestamp: messageTimestamp(message) };
+    return { id, entryId, order, role: "user", text: parts.text, images: parts.images.length ? parts.images : undefined, timestamp: messageTimestamp(message) };
   }
   if (role === "assistant") {
     const stopReason = stringValue(message.stopReason);
@@ -298,6 +304,20 @@ function titleFromText(text: string): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
   if (!oneLine) return "新建对话";
   return oneLine.length > 64 ? `${oneLine.slice(0, 61)}…` : oneLine;
+}
+
+async function preparePromptImages(images: PromptImage[] | undefined): Promise<{ images: PromptImage[]; hints: string }> {
+  if (!images?.length) return { images: [], hints: "" };
+  const prepared: PromptImage[] = [];
+  const hints: string[] = [];
+  for (const [index, image] of images.entries()) {
+    if (!image.mimeType.startsWith("image/") || !image.data) throw new Error("粘贴的图片数据无效。");
+    const processed = await processImage(Buffer.from(image.data, "base64"), image.mimeType, { autoResizeImages: true });
+    if (!processed.ok) throw new Error(`第 ${index + 1} 张图片无法处理：${processed.message}`);
+    prepared.push({ id: image.id, name: image.name, mimeType: processed.mimeType, data: processed.data });
+    if (processed.hints.length) hints.push(`<image name="${image.name || `pasted-${index + 1}`}">${processed.hints.join("\n")}</image>`);
+  }
+  return { images: prepared, hints: hints.join("\n") };
 }
 
 function sessionSummary(info: SessionInfo): SessionSummary {
@@ -578,6 +598,7 @@ export class SuoCodeRuntime {
         id: model.id,
         name: model.name || model.id,
         reasoning: Boolean(model.reasoning),
+        supportsImages: model.input.includes("image"),
         supportedThinkingLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],
         contextWindow: typeof model.contextWindow === "number" ? model.contextWindow : undefined,
         configured: configuredSet.has(model.provider),
@@ -1020,16 +1041,18 @@ export class SuoCodeRuntime {
     }
   }
 
-  async prompt(text: string): Promise<{ accepted: true }> {
+  async prompt(text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    const prompt = text.trim();
+    const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
-    if (active.session.isStreaming) return this.steer(prompt);
+    if (active.session.isStreaming) return this.steer(prompt, images);
+    const prepared = await preparePromptImages(images);
+    const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
 
     const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
     if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
 
-    void active.session.prompt(prompt).catch((error) => {
+    void active.session.prompt(expandedPrompt, { images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined }).catch((error) => {
       this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       this.emitEvent({ type: "run_state", running: false });
     });
@@ -1053,11 +1076,16 @@ export class SuoCodeRuntime {
     return { accepted: true };
   }
 
-  async steer(text: string): Promise<{ accepted: true }> {
+  async steer(text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    const prompt = text.trim();
+    const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
-    await active.session.prompt(prompt, { streamingBehavior: "steer" });
+    const prepared = await preparePromptImages(images);
+    const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
+    await active.session.prompt(expandedPrompt, {
+      images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
+      streamingBehavior: "steer",
+    });
     return { accepted: true };
   }
 

@@ -18,6 +18,7 @@ import {
   KeyRound,
   LoaderCircle,
   MessageSquarePlus,
+  MoreHorizontal,
   PanelLeft,
   PanelRight,
   Plus,
@@ -29,9 +30,9 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import type { CSSProperties, DragEvent as ReactDragEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { ClipboardEvent as ReactClipboardEvent, CSSProperties, DragEvent as ReactDragEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -46,6 +47,7 @@ import type {
   RuntimeEvent,
   ResponseMetrics,
   ModelOption,
+  PromptImage,
   SessionSnapshot,
   SessionSummary,
   ThinkingLevel,
@@ -117,6 +119,25 @@ function absoluteProjectPath(root: string, value: string): string {
 
 function quotePath(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function imageDataUrl(image: PromptImage): string {
+  return `data:${image.mimeType};base64,${image.data}`;
+}
+
+async function clipboardImage(file: globalThis.File): Promise<PromptImage> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("无法读取粘贴的图片。"));
+    reader.readAsDataURL(file);
+  });
+  return {
+    id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+    name: file.name || "粘贴的图片",
+    mimeType: file.type || "image/png",
+    data: dataUrl.slice(dataUrl.indexOf(",") + 1),
+  };
 }
 
 function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
@@ -296,7 +317,10 @@ function MessageView({ message, disabled, onRewind }: {
             data-prompt-value={value}
             disabled={disabled || !message.entryId}
             onClick={() => setEditing(true)}
-          >{value}</button>
+          >
+            {value ? <span>{value}</span> : null}
+            {message.images?.length ? <span className="message-images">{message.images.map((image) => <img src={imageDataUrl(image)} alt={image.name ?? "附加图片"} key={image.id ?? image.data.slice(0, 24)} />)}</span> : null}
+          </button>
         )}
         {confirmOpen ? (
           <div className="modal-backdrop rewind-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmOpen(false); }}>
@@ -886,6 +910,10 @@ export default function App(): React.JSX.Element {
   const [inspectorView, setInspectorView] = useState<InspectorView>("files");
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivity>>({});
   const [draft, setDraft] = useState("");
+  const [draftImages, setDraftImages] = useState<PromptImage[]>([]);
+  const [pendingProjectPath, setPendingProjectPath] = useState<string>();
+  const [expandedSessionLists, setExpandedSessionLists] = useState<Set<string>>(new Set());
+  const [startingSession, setStartingSession] = useState(false);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
@@ -904,9 +932,11 @@ export default function App(): React.JSX.Element {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const runtimeSessionRef = useRef(new Map<string, string>());
   const fileDragDepthRef = useRef(0);
+  const optimisticMessageIdRef = useRef<string | undefined>(undefined);
 
   const applySnapshot = useCallback((next: SessionSnapshot): void => {
     snapshotRef.current = next;
@@ -921,6 +951,25 @@ export default function App(): React.JSX.Element {
         [next.session.path]: { runtimeId: next.runtimeId, running: next.running, unread: false },
       }));
     }
+  }, []);
+
+  const startPendingConversation = useCallback((selection: ProjectSelection): void => {
+    projectRef.current = selection;
+    setProject(selection);
+    window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
+    setExpandedProjects((current) => new Set(current).add(selection.path));
+    setPendingProjectPath(selection.path);
+    snapshotRef.current = undefined;
+    setSnapshot(undefined);
+    setMessages([]);
+    setTools([]);
+    setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
+    setDraft("");
+    setDraftImages([]);
+    setLoading(false);
+    setError(undefined);
+    shouldAutoScrollRef.current = true;
+    requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
   const handleRuntimeEvent = useCallback((event: RuntimeEvent, runtimeId?: string): void => {
@@ -959,7 +1008,14 @@ export default function App(): React.JSX.Element {
         break;
       case "message_started":
       case "message_finished":
-        setMessages((current) => upsertMessage(current, event.message));
+        setMessages((current) => {
+          const optimisticId = optimisticMessageIdRef.current;
+          const base = optimisticId && event.message.role === "user"
+            ? current.filter((message) => message.id !== optimisticId)
+            : current;
+          if (optimisticId && event.message.role === "user") optimisticMessageIdRef.current = undefined;
+          return upsertMessage(base, event.message);
+        });
         break;
       case "message_delta":
         setAgentPhase(event.field === "thinking" ? "思考" : "回复");
@@ -1015,6 +1071,8 @@ export default function App(): React.JSX.Element {
     setProject(selection);
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
     setExpandedProjects((current) => new Set(current).add(selection.path));
+    setPendingProjectPath(undefined);
+    setDraftImages([]);
     setLoading(true);
     setError(undefined);
     setMessages([]);
@@ -1061,10 +1119,10 @@ export default function App(): React.JSX.Element {
     return unsubscribe;
   }, [activateProject, handleRuntimeEvent]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const viewport = timelineRef.current;
-    if (viewport) viewport.scrollTop = viewport.scrollHeight;
-  }, [messages, tools]);
+    if (viewport && shouldAutoScrollRef.current) viewport.scrollTop = viewport.scrollHeight;
+  }, [messages, tools, snapshot?.running]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -1134,12 +1192,15 @@ export default function App(): React.JSX.Element {
 
   const activeConversation = snapshot?.session;
   const running = snapshot?.running ?? false;
+  const selectedModel = configuration?.models.find((model) => snapshot?.model
+    ? model.provider === snapshot.model.provider && model.id === snapshot.model.id
+    : model.provider === configuration.provider && model.id === configuration.modelId);
   const modelConfigured = Boolean(
-    snapshot?.model && configuration?.configuredProviders.includes(snapshot.model.provider),
+    selectedModel && configuration?.configuredProviders.includes(selectedModel.provider),
   );
   const timeline = useMemo<ConversationTimelineItem[]>(() => {
     const ordered = [
-      ...messages.filter((message) => message.role !== "tool" && (message.text || message.thinking)).map((message) => ({ kind: "message" as const, order: message.order, message })),
+      ...messages.filter((message) => message.role !== "tool" && (message.text || message.thinking || message.images?.length)).map((message) => ({ kind: "message" as const, order: message.order, message })),
       ...tools.map((tool) => ({ kind: "tool" as const, order: tool.order, tool })),
     ].sort((a, b) => a.order - b.order);
     const grouped: TimelineItem[] = [];
@@ -1197,28 +1258,26 @@ export default function App(): React.JSX.Element {
     const next = uniqueProjects([...projects, selection]);
     setProjects(next);
     window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next.filter((item) => item.kind === "workspace")));
-    await activateProject(selection);
+    setSessionsByProject((current) => ({ ...current, [selection.path]: current[selection.path] ?? [] }));
+    startPendingConversation(selection);
+    void window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: selection.path })
+      .then((sessions) => setSessionsByProject((current) => ({ ...current, [selection.path]: sessions })))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
   };
 
-  const startNewConversation = async (): Promise<void> => {
-    if (!project) return;
-    setLoading(true);
-    setError(undefined);
-    try {
-      applySnapshot(await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: project.path }));
-      setDraft("");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setLoading(false);
-      inputRef.current?.focus();
-    }
+  const startNewConversation = (owner = projectRef.current): void => {
+    if (!owner) return;
+    startPendingConversation(owner);
   };
 
   const openConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
     if (owner.path === project?.path && session.id === activeConversation?.id) return;
     setLoading(true);
     setError(undefined);
+    setPendingProjectPath(undefined);
+    setDraft("");
+    setDraftImages([]);
+    shouldAutoScrollRef.current = true;
     try {
       projectRef.current = owner;
       setProject(owner);
@@ -1251,20 +1310,62 @@ export default function App(): React.JSX.Element {
   const submitPrompt = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     const prompt = draft.trim();
-    if (!prompt || !project || !snapshot) return;
+    const images = draftImages;
+    if ((!prompt && !images.length) || !project || startingSession) return;
     if (!modelConfigured) {
       setError("发送第一条消息前，请先选择并配置模型。");
       setSettingsOpen(true);
       return;
     }
-    setDraft("");
-    setError(undefined);
-    try {
-      await window.suocode.request({ type: running ? "steer" : "prompt", text: prompt }, snapshot.runtimeId);
-    } catch (caught) {
-      setDraft(prompt);
-      setError(caught instanceof Error ? caught.message : String(caught));
+    if (images.length && !selectedModel?.supportsImages) {
+      setError("当前模型不支持图片输入，请切换到支持图片的模型。");
+      return;
     }
+    setDraft("");
+    setDraftImages([]);
+    setError(undefined);
+    shouldAutoScrollRef.current = true;
+    const optimisticId = `local-${Date.now()}-${Math.random()}`;
+    try {
+      let target = snapshotRef.current;
+      if (!target || pendingProjectPath === project.path) {
+        setStartingSession(true);
+        optimisticMessageIdRef.current = optimisticId;
+        setMessages([{ id: optimisticId, order: Date.now(), role: "user", text: prompt, images, timestamp: Date.now(), status: "succeeded" }]);
+        const created = await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: project.path });
+        snapshotRef.current = created;
+        if (created.runtimeId && created.session.path) runtimeSessionRef.current.set(created.runtimeId, created.session.path);
+        setSnapshot(created);
+        setTools(created.tools);
+        setProjectState(created.project);
+        setPendingProjectPath(undefined);
+        target = created;
+      }
+      await window.suocode.request({ type: target.running ? "steer" : "prompt", text: prompt, images }, target.runtimeId);
+    } catch (caught) {
+      optimisticMessageIdRef.current = undefined;
+      setDraft(prompt);
+      setDraftImages(images);
+      setMessages((current) => current.filter((message) => message.id !== optimisticId));
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setStartingSession(false);
+    }
+  };
+
+  const handleComposerPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    void Promise.all(files.map(clipboardImage))
+      .then((images) => setDraftImages((current) => [...current, ...images]))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
+  };
+
+  const handleTimelineScroll = (): void => {
+    const viewport = timelineRef.current;
+    if (!viewport) return;
+    shouldAutoScrollRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1;
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -1346,30 +1447,41 @@ export default function App(): React.JSX.Element {
       <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "keep-tiled" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
         <aside className="sidebar">
           <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
-          <nav className="primary-nav"><button className="nav-button" type="button" disabled={!project} onClick={() => void startNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
+          <nav className="primary-nav"><button className="nav-button" type="button" disabled={!project} onClick={() => startNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
           <section className="project-section">
             <div className="section-heading"><span>项目</span><button className="icon-button" type="button" aria-label="打开项目" onClick={() => void openProject()}><FolderOpen size={15} strokeWidth={1.7} /></button></div>
             {projects.length ? projects.map((item) => {
               const expanded = expandedProjects.has(item.path);
               const itemSessions = sessionsByProject[item.path] ?? [];
+              const hasPending = pendingProjectPath === item.path;
+              const showAll = expandedSessionLists.has(item.path);
+              const visibleSessions = showAll ? itemSessions : itemSessions.slice(0, hasPending ? 3 : 4);
+              const hiddenCount = itemSessions.length - visibleSessions.length;
               return (
                 <div className={`project-tree ${item.path === project?.path ? "active" : ""}`} key={item.path}>
-                  <button className="project-row" type="button" aria-expanded={expanded} onClick={() => {
-                    const activating = item.path !== project?.path;
-                    if (activating) void activateProject(item);
-                    setExpandedProjects((current) => {
+                  <div className="project-row">
+                    <button className="project-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedProjects((current) => {
                       const next = new Set(current);
-                      if (activating || !expanded) next.add(item.path); else next.delete(item.path);
+                      if (expanded) next.delete(item.path); else next.add(item.path);
                       return next;
-                    });
-                  }}><Folder size={15} strokeWidth={1.7} /><span>{item.name}</span>{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
-                  {expanded ? <div className="conversation-list">
-                    {itemSessions.map((session) => {
+                    })}>
+                      <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
+                      <span className="project-name">{item.name}</span>
+                    </button>
+                    <button className="project-add" type="button" aria-label={`在 ${item.name} 中新建对话`} onClick={() => startNewConversation(item)}><Plus size={14} /></button>
+                  </div>
+                  <div className={`conversation-list-shell ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
+                    <div className="conversation-list">
+                    {hasPending ? <button className="conversation-row active pending" type="button" onClick={() => inputRef.current?.focus()}><Circle size={11} strokeWidth={1.7} /><span>新 Agent</span><time>刚刚</time></button> : null}
+                    {visibleSessions.map((session) => {
                       const activity = sessionActivity[session.path];
                       return <button className={`conversation-row ${item.path === project?.path && session.id === activeConversation?.id ? "active" : ""}`} type="button" key={session.id} onClick={() => void openConversation(item, session)}>{activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <span className="conversation-unread" /> : <CircleDot size={11} strokeWidth={2} />}<span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>;
                     })}
-                    {!itemSessions.length ? <p className="empty-conversations">暂无对话</p> : null}
-                  </div> : null}
+                    {hiddenCount > 0 ? <button className="more-conversations" type="button" aria-label={`显示另外 ${hiddenCount} 个对话`} onClick={() => setExpandedSessionLists((current) => new Set(current).add(item.path))}><MoreHorizontal size={15} /></button> : null}
+                    {showAll && itemSessions.length > 4 ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => setExpandedSessionLists((current) => { const next = new Set(current); next.delete(item.path); return next; })}><ChevronUp size={14} /></button> : null}
+                    {!itemSessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
+                    </div>
+                  </div>
                 </div>
               );
             }) : (
@@ -1384,13 +1496,13 @@ export default function App(): React.JSX.Element {
         <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} onDragEnter={handleFileDragEnter} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-suocode-path")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={handleFileDragLeave} onDrop={handleFileDrop}>
           <header className="conversation-header window-drag">
             {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={() => setLeftOpen(true)}><PanelLeft size={17} /></button> : null}
-            <div className="conversation-title"><strong title={activeConversation?.title ?? "新建对话"}>{truncateTitle(activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
+            <div className="conversation-title"><strong title={pendingProjectPath ? "新 Agent" : activeConversation?.title ?? "新建对话"}>{truncateTitle(pendingProjectPath ? "新 Agent" : activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
             <div className="header-actions no-drag">
               {!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={() => setRightOpen(true)}><PanelRight size={17} /></button> : null}
             </div>
           </header>
 
-          <div className="conversation-body" ref={timelineRef}>
+          <div className="conversation-body" ref={timelineRef} onScroll={handleTimelineScroll}>
             {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} disabled={running} onRewind={rewindPrompt} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={snapshot?.model?.name ?? "Agent"} />)}{running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
           </div>
 
@@ -1399,21 +1511,23 @@ export default function App(): React.JSX.Element {
             <div className="composer-stack">
               <ComposerPlan plan={projectState.plan} />
               <form className="composer" onSubmit={(event) => void submitPrompt(event)}>
+                {draftImages.length ? <div className="composer-images">{draftImages.map((image) => <figure key={image.id ?? image.data.slice(0, 24)}><img src={imageDataUrl(image)} alt={image.name ?? "粘贴的图片"} /><button type="button" aria-label="移除图片" onClick={() => setDraftImages((current) => current.filter((item) => item !== image))}><X size={11} /></button></figure>)}</div> : null}
                 <textarea
                   ref={inputRef}
                   value={draft}
                   aria-label="发送消息给 SuoCode"
                   placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"}
-                  disabled={!project || !snapshot || loading}
+                  disabled={!project || loading || startingSession}
                   onChange={(event) => setDraft(event.target.value)}
+                  onPaste={handleComposerPaste}
                   onCompositionStart={() => { composingRef.current = true; }}
                   onCompositionEnd={() => { composingRef.current = false; }}
                   onKeyDown={handleComposerKeyDown}
                 />
                 <div className="composer-toolbar">
-                  <ModelPicker configuration={configuration} currentModel={snapshot?.model} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
+                  <ModelPicker configuration={configuration} currentModel={selectedModel} open={modelMenuOpen} busy={modelChanging} onOpenChange={setModelMenuOpen} onSelect={(model) => void selectComposerModel(model)} onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }} />
                   {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={() => void window.suocode.request({ type: "abort" }, snapshot?.runtimeId)}><Square size={12} fill="currentColor" /></button> : null}
-                  <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || !snapshot || !draft.trim()}><ArrowUp size={17} strokeWidth={2.2} /></button>
+                  <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || startingSession || (!draft.trim() && !draftImages.length)}><ArrowUp size={17} strokeWidth={2.2} /></button>
                 </div>
               </form>
             </div>

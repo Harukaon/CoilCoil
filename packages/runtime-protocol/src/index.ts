@@ -12,6 +12,7 @@ export interface ModelOption {
   id: string;
   name: string;
   reasoning: boolean;
+  supportsImages: boolean;
   supportedThinkingLevels: ThinkingLevel[];
   contextWindow?: number;
   configured: boolean;
@@ -38,12 +39,20 @@ export interface SessionSummary {
 
 export type ChatRole = "user" | "assistant" | "tool" | "system";
 
+export interface PromptImage {
+  id?: string;
+  mimeType: string;
+  data: string;
+  name?: string;
+}
+
 export interface ChatMessage {
   id: string;
   entryId?: string;
   order: number;
   role: ChatRole;
   text: string;
+  images?: PromptImage[];
   thinking?: string;
   timestamp: number;
   toolName?: string;
@@ -166,9 +175,9 @@ export type RuntimeCommand =
   | { type: "list_sessions"; cwd: string }
   | { type: "create_session"; cwd: string }
   | { type: "open_session"; cwd: string; sessionPath: string }
-  | { type: "prompt"; text: string }
+  | { type: "prompt"; text: string; images?: PromptImage[] }
   | { type: "rewind_prompt"; entryId: string; text: string }
-  | { type: "steer"; text: string }
+  | { type: "steer"; text: string; images?: PromptImage[] }
   | { type: "abort" }
   | { type: "refresh_project" }
   | { type: "list_directory"; path: string }
