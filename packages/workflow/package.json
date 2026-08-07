@@ -18,6 +18,7 @@
       "./extensions/compact-tool-render.ts",
       "./extensions/default-tools.ts",
       "./extensions/fast.ts",
+      "./extensions/mcp-adapter.ts",
       "./extensions/mcp-health.ts",
       "./extensions/project-memory.ts",
       "./extensions/response-metrics.ts",
@@ -27,6 +28,7 @@
     ]
   },
   "dependencies": {
+    "jiti": "2.7.0",
     "node-pty": "1.1.0"
   },
   "peerDependencies": {

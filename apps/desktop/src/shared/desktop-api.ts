@@ -32,6 +32,7 @@ export interface SuoCodeDesktopApi {
   homeProject(): Promise<ProjectSelection>;
   selectProject(): Promise<ProjectSelection | null>;
   setWindowMinimumWidth(width: number): Promise<void>;
+  openExternal(url: string): Promise<void>;
   openFilePreview(input: OpenFilePreviewInput): Promise<{ opened: boolean }>;
   getFilePreview(id: string): Promise<FilePreviewDocument>;
   onFilePreviewUpdated(listener: (document: FilePreviewDocument) => void): () => void;

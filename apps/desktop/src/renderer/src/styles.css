@@ -487,12 +487,25 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .model-settings-form { min-height: 0; overflow: auto; }
 .mcp-settings { display: grid; min-width: 0; min-height: 0; grid-template-columns: 190px minmax(0, 1fr); }
 .mcp-server-list { min-width: 0; min-height: 0; overflow: auto; padding: 10px; border-right: 1px solid #e3e3df; background: #f4f4f1; }
+.mcp-list-toolbar { display: flex; align-items: center; gap: 5px; }
 .mcp-server-list > button { display: grid; width: 100%; min-width: 0; gap: 3px; padding: 9px 10px; border-radius: 8px; color: #5f5f5a; text-align: left; background: transparent; cursor: pointer; }
 .mcp-server-list > button:hover, .mcp-server-list > button.active { color: #2e2e2b; background: #e7e7e3; }
 .mcp-server-list > button strong, .mcp-server-list > button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mcp-server-list > button strong { font-size: 11px; }
 .mcp-server-list > button small { color: #92928d; font-size: 9px; font-weight: 400; }
-.mcp-server-list .mcp-add-button { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; color: #3e3e3a; border: 1px dashed #cecec8; background: #fafaf8; }
+.mcp-server-list .mcp-add-button { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; color: #3e3e3a; border: 1px dashed #cecec8; background: #fafaf8; }
+.mcp-refresh-button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 7px; color: #74746f; background: #e9e9e5; cursor: pointer; }
+.mcp-refresh-button:disabled { opacity: .55; cursor: default; }
+.mcp-status-summary { margin: 7px 4px 5px !important; }
+.mcp-server-title { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.mcp-server-title strong { min-width: 0; flex: 1; }
+.mcp-server-title em { padding: 1px 5px; border-radius: 999px; color: #6f796b; background: #e0e8dd; font-size: 8px; font-style: normal; }
+.mcp-status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #aaa9a4; }
+.mcp-status-dot.connected { background: #5f8c62; box-shadow: 0 0 0 2px rgb(95 140 98 / 12%); }
+.mcp-status-dot.needs-auth { background: #c49343; }
+.mcp-status-dot.failed { background: #bd5b53; }
+.mcp-status-dot.cached { background: #71899d; }
+.mcp-status-dot.not-connected, .mcp-status-dot.unknown { background: #aaa9a4; }
 .mcp-server-list > p, .settings-loading { margin: 10px 4px; color: #92928d; font-size: 10px; line-height: 1.5; }
 .settings-loading { display: flex; align-items: center; gap: 6px; }
 .mcp-editor { min-width: 0; min-height: 0; overflow: auto; }
@@ -500,6 +513,19 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .mcp-editor-heading > div { display: grid; gap: 3px; }
 .mcp-editor-heading strong, .mcp-imports strong { color: #353532; font-size: 12px; }
 .mcp-editor-heading small, .mcp-imports small { color: #92928d; font-size: 9px; font-weight: 400; }
+.mcp-editor-actions { display: flex; flex: 0 0 auto; gap: 4px; }
+.mcp-runtime-card { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 8px 9px; border: 1px solid #deded9; border-radius: 8px; background: #f7f7f4; }
+.mcp-runtime-card > span { display: flex; min-width: 0; flex: 1; align-items: center; gap: 7px; }
+.mcp-runtime-card strong { color: #4b4b47; font-size: 10px; }
+.mcp-runtime-card small { color: #92928d; font-size: 9px; }
+.mcp-runtime-card > button, .mcp-auth-panel > button:not(.primary-button) { display: inline-flex; height: 27px; align-items: center; gap: 5px; padding: 0 8px; border-radius: 6px; color: #5e5e59; background: #e9e9e5; font-size: 9px; cursor: pointer; }
+.mcp-runtime-card > button:disabled { opacity: .5; cursor: default; }
+.mcp-auth-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 10px; padding: 10px; border: 1px solid #d9d5c6; border-radius: 8px; background: #fbf8ef; }
+.mcp-auth-panel strong { align-self: center; font-size: 11px; }
+.mcp-auth-panel p { grid-column: 1 / -1; margin: 0; color: #77736a; font-size: 9px; line-height: 1.45; }
+.mcp-auth-panel textarea { grid-column: 1 / -1; }
+.mcp-auth-panel .primary-button { justify-self: end; grid-column: 1 / -1; }
+.mcp-action-message { overflow: auto; max-height: 130px; padding: 9px 10px; border-radius: 8px; color: #5b6757; background: #eef4ec; font: 9px/1.5 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; }
 .danger-icon-button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 7px; color: #a84c45; background: #f8e9e7; cursor: pointer; }
 .checkbox-setting { display: flex !important; min-height: 34px; align-items: center; align-self: end; gap: 8px !important; }
 .checkbox-setting input { width: 14px; height: 14px; flex: 0 0 auto; }

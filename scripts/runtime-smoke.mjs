@@ -133,13 +133,21 @@ try {
     throw new Error("The Pi MCP adapter bridge did not isolate project-level configuration in the current workspace.");
   }
   await request({ type: "remove_mcp_server", cwd: projectDir, name: "project-smoke-server", scope: "project" });
+  const snapshot = await request({ type: "create_session", cwd: projectDir });
+  if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
+  if (!Array.isArray(snapshot.subagents)) throw new Error("Subagent activity was not included in the session snapshot.");
+  const mcpStatus = await request({ type: "get_mcp_status" });
+  if (!mcpStatus.servers.some((server) => server.name === "smoke-server") || typeof mcpStatus.totalTools !== "number") {
+    throw new Error("The extension-native MCP status bridge did not expose pi-mcp-adapter state.");
+  }
+  const failedMcpConnect = await request({ type: "connect_mcp_server", name: "smoke-server" });
+  if (!failedMcpConnect.text || failedMcpConnect.details?.mode !== "connect" || !failedMcpConnect.details?.error) {
+    throw new Error(`The extension-native MCP connect bridge did not return pi-mcp-adapter diagnostics: ${JSON.stringify(failedMcpConnect)}`);
+  }
   const removedMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "smoke-server", scope: "global" });
   if (removedMcp.servers.some((server) => server.name === "smoke-server")) {
     throw new Error("The Pi MCP adapter configuration bridge did not remove a SuoCode-owned server.");
   }
-  const snapshot = await request({ type: "create_session", cwd: projectDir });
-  if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
-  if (!Array.isArray(snapshot.subagents)) throw new Error("Subagent activity was not included in the session snapshot.");
   let invalidSubagentStopRejected = false;
   try {
     await request({ type: "stop_subagent", id: "missing-smoke-subagent", background: true });

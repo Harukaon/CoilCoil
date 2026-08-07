@@ -54,6 +54,8 @@ Examples:
 - Subagents reuse `pi-subagents`; SuoCode adds activity cards, execution details, and stop controls by projecting the extension's lifecycle.
 - Todo and workflow tools remain Pi extensions; the activity panel visualizes their structured state.
 
+This rule also applies to future capabilities: configuration screens, previews, dashboards, and controls are product UI, while the corresponding Agent behavior should remain an extension whenever a suitable extension exists. A Desktop-facing bridge may expose extension events and commands, but it must not duplicate the extension's protocol client, lifecycle manager, credential store, or tool implementation.
+
 Bundled extensions are still part of the SuoCode runtime distribution. Extension-first does not mean loading packages from the user's local Pi installation.
 
 ## Pi thin fork

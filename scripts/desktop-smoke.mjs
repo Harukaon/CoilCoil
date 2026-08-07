@@ -461,6 +461,26 @@ async function main() {
     assert.equal(configuredMcp?.excludeTools?.[0], "dangerous");
     assert.equal(configuredMcp?.exposeResources, false);
     assert.equal(configuredMcp?.debug, true);
+    const rejectedUnsafeExternalUrl = await client.evaluate(`window.suocode.openExternal("file:///tmp/suocode-smoke").then(() => false, () => true)`);
+    assert.equal(rejectedUnsafeExternalUrl, true, "The desktop external URL bridge accepted a non-HTTP URL.");
+    await delay(900);
+    const connectedMcpServer = await client.evaluate(`(() => {
+      const button = document.querySelector('button[aria-label="连接 MCP 服务器"]');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    assert.equal(connectedMcpServer, true, "The MCP extension connection action was not exposed in settings.");
+    await client.waitFor(
+      `Boolean(document.querySelector(".mcp-action-message")) || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
+      "The MCP extension connection action did not return diagnostics.",
+    );
+    const mcpConnectionState = await client.evaluate(`({
+      diagnostics: document.querySelector(".mcp-action-message")?.textContent || document.querySelector(".mcp-editor .settings-error")?.textContent || "",
+      ui: document.querySelector(".mcp-runtime-card")?.textContent || ""
+    })`);
+    assert.ok(mcpConnectionState.diagnostics, "The MCP adapter connection failure did not surface diagnostics.");
+    assert.match(mcpConnectionState.ui, /连接失败|未连接|已缓存|已连接|需要认证|状态未知/);
     const copiedProjectMcp = await client.evaluate(`(async () => {
       document.querySelector('button[aria-label="复制 MCP 服务器"]')?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));

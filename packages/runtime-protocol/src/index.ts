@@ -66,6 +66,25 @@ export interface McpConfigurationSnapshot {
   imports: McpImportConfiguration[];
 }
 
+export interface McpServerRuntimeStatus {
+  name: string;
+  status: "connected" | "needs-auth" | "failed" | "cached" | "not connected";
+  toolCount: number;
+  failedAgo: number | null;
+}
+
+export interface McpRuntimeStatus {
+  servers: McpServerRuntimeStatus[];
+  totalTools: number;
+  connectedCount: number;
+}
+
+export interface McpActionResult {
+  text: string;
+  details?: Record<string, unknown>;
+  status?: McpRuntimeStatus;
+}
+
 export interface SessionSummary {
   id: string;
   path: string;
@@ -260,9 +279,13 @@ export type RuntimeCommand =
     }
   | { type: "remove_provider_auth"; provider: string }
   | { type: "get_mcp_configuration"; cwd?: string }
+  | { type: "get_mcp_status" }
   | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
   | { type: "remove_mcp_server"; name: string; scope?: "global" | "project"; cwd?: string }
   | { type: "enable_mcp_imports"; imports: McpImportConfiguration["kind"][]; cwd?: string }
+  | { type: "connect_mcp_server"; name: string }
+  | { type: "start_mcp_auth"; name: string }
+  | { type: "complete_mcp_auth"; name: string; input: string }
   | { type: "stop_subagent"; id: string; background: boolean }
   | { type: "list_sessions"; cwd: string }
   | { type: "list_archived_sessions"; cwd: string }

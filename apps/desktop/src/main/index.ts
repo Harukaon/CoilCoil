@@ -16,6 +16,7 @@ import type { FilePreviewDocument, OpenFilePreviewInput, ProjectSelection, Runti
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
+const EXTERNAL_OPEN_CHANNEL = "external:open";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
@@ -364,6 +365,12 @@ app.whenReady().then(() => {
     if (!window || !Number.isFinite(requestedWidth)) return;
     const [, minimumHeight] = window.getMinimumSize();
     window.setMinimumSize(Math.max(315, Math.ceil(requestedWidth)), minimumHeight);
+  });
+  ipcMain.handle(EXTERNAL_OPEN_CHANNEL, async (_event, rawUrl: string): Promise<void> => {
+    if (typeof rawUrl !== "string") throw new Error("授权地址无效。");
+    const url = new URL(rawUrl);
+    if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("只允许打开 HTTP 或 HTTPS 授权地址。");
+    await shell.openExternal(url.toString());
   });
   ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openPreviewOrMenu(event, input));
   ipcMain.handle(PREVIEW_GET_CHANNEL, async (_event, id: string): Promise<FilePreviewDocument> => {

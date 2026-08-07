@@ -13,6 +13,7 @@ import type {
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
+const EXTERNAL_OPEN_CHANNEL = "external:open";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
@@ -33,6 +34,8 @@ const api: SuoCodeDesktopApi = {
     ipcRenderer.invoke(PROJECT_SELECT_CHANNEL) as Promise<ProjectSelection | null>,
   setWindowMinimumWidth: (width: number) =>
     ipcRenderer.invoke(WINDOW_MINIMUM_WIDTH_CHANNEL, width) as Promise<void>,
+  openExternal: (url: string) =>
+    ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url) as Promise<void>,
   openFilePreview: (input: OpenFilePreviewInput) =>
     ipcRenderer.invoke(PREVIEW_OPEN_CHANNEL, input) as Promise<{ opened: boolean }>,
   getFilePreview: (id: string) =>

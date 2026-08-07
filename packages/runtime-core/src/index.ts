@@ -19,8 +19,11 @@ import type {
   ContextUsage,
   FileNode,
   McpConfigurationSnapshot,
+  McpActionResult,
   McpImportConfiguration,
+  McpRuntimeStatus,
   McpServerConfiguration,
+  McpServerRuntimeStatus,
   ModelOption,
   PromptImage,
   ProjectSnapshot,
@@ -745,7 +748,6 @@ function resolvePackageDirectory(packageName: string): string {
 function bundledRuntimeResources(workflowDirectory: string): RuntimeResources {
   const packageDirectories = [
     workflowDirectory,
-    resolvePackageDirectory("pi-mcp-adapter"),
     resolvePackageDirectory("pi-subagents"),
   ];
   const resources = packageDirectories.map(resourcesFromManifest);
@@ -967,10 +969,11 @@ export class SuoCodeRuntime {
 
   private reloadMcpExtension(): void {
     if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
+    const active = this.active;
+    if (!active) return;
     this.mcpReloadTimer = setTimeout(() => {
       this.mcpReloadTimer = undefined;
-      if (!this.active || this.active.session.isStreaming) return;
-      const active = this.active;
+      if (this.active !== active || active.session.isStreaming) return;
       void active.session.reload()
         .then(async () => {
           if (this.active !== active) return;
@@ -980,6 +983,100 @@ export class SuoCodeRuntime {
           this.emitEvent({ type: "runtime_error", message: `MCP 扩展重新加载失败：${errorMessage(error)}`, detail: errorDetail(error) });
         });
     }, 750);
+  }
+
+  private mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const active = this.requireActive();
+    const requestId = `suocode-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `suocode:mcp:rpc:v1:reply:${requestId}`;
+    const timeoutMs = method === "status" ? 8_000 : 120_000;
+    return new Promise((resolvePromise, rejectPromise) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        callback();
+      };
+      const unsubscribe = active.eventBus.on(replyChannel, (raw) => {
+        if (!isRecord(raw)) return;
+        if (raw.success === true && isRecord(raw.data)) {
+          const data = raw.data;
+          finish(() => resolvePromise(data));
+          return;
+        }
+        const rpcError = isRecord(raw.error) ? stringValue(raw.error.message) : "MCP 扩展请求失败。";
+        finish(() => rejectPromise(new Error(rpcError || "MCP 扩展请求失败。")));
+      });
+      const timer = setTimeout(() => finish(() => rejectPromise(new Error("MCP 扩展请求超时。"))), timeoutMs);
+      active.eventBus.emit("suocode:mcp:rpc:v1:request", {
+        version: 1,
+        requestId,
+        method,
+        params,
+        source: { client: "suocode-desktop" },
+      });
+    });
+  }
+
+  private mcpStatusFromDetails(details: unknown): McpRuntimeStatus {
+    if (!isRecord(details) || details.mode !== "status" || !Array.isArray(details.servers)) {
+      throw new Error("pi-mcp-adapter 返回了无效的状态数据。");
+    }
+    const statuses = new Set<McpServerRuntimeStatus["status"]>(["connected", "needs-auth", "failed", "cached", "not connected"]);
+    const servers = details.servers.map((raw) => {
+      if (!isRecord(raw)) throw new Error("pi-mcp-adapter 返回了无效的 Server 状态。");
+      const status = stringValue(raw.status) as McpServerRuntimeStatus["status"];
+      if (!statuses.has(status)) throw new Error(`未知的 MCP Server 状态：${status || "empty"}`);
+      return {
+        name: stringValue(raw.name),
+        status,
+        toolCount: typeof raw.toolCount === "number" && Number.isFinite(raw.toolCount) ? raw.toolCount : 0,
+        failedAgo: typeof raw.failedAgo === "number" ? raw.failedAgo : null,
+      } satisfies McpServerRuntimeStatus;
+    });
+    return {
+      servers,
+      totalTools: typeof details.totalTools === "number" && Number.isFinite(details.totalTools) ? details.totalTools : 0,
+      connectedCount: typeof details.connectedCount === "number" && Number.isFinite(details.connectedCount) ? details.connectedCount : 0,
+    };
+  }
+
+  async getMcpStatus(): Promise<McpRuntimeStatus> {
+    const result = await this.mcpRpc("status");
+    return this.mcpStatusFromDetails(result.details);
+  }
+
+  private async mcpAction(method: "connect" | "auth-start" | "auth-complete", params: Record<string, unknown>): Promise<McpActionResult> {
+    const result = await this.mcpRpc(method, params);
+    let status: McpRuntimeStatus | undefined;
+    try {
+      status = await this.getMcpStatus();
+    } catch {
+      status = undefined;
+    }
+    return {
+      text: stringValue(result.text),
+      details: isRecord(result.details) ? result.details : undefined,
+      status,
+    };
+  }
+
+  async connectMcpServer(name: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    return this.mcpAction("connect", { server: name.trim() });
+  }
+
+  async startMcpAuth(name: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    return this.mcpAction("auth-start", { server: name.trim() });
+  }
+
+  async completeMcpAuth(name: string, input: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    if (!input.trim()) throw new Error("缺少 OAuth 回调内容。");
+    return this.mcpAction("auth-complete", { server: name.trim(), input: input.trim() });
   }
 
   async getMcpConfiguration(cwd?: string): Promise<McpConfigurationSnapshot> {
