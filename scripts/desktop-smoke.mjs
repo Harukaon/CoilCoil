@@ -557,6 +557,7 @@ async function main() {
     assert.equal(openedMcpSettings, true);
     await client.waitFor(`Boolean(document.querySelector(".mcp-settings"))`, "The MCP settings view did not open.");
     await client.waitFor(`!document.querySelector(".mcp-settings .settings-loading") && !document.querySelector(".mcp-add-button")?.disabled`, "The MCP settings did not finish loading.");
+    assert.equal(await client.evaluate(`Boolean(document.querySelector(".mcp-editor-actions"))`), false, "The redundant MCP header actions were still rendered.");
     const startedMcpDraft = await client.evaluate(`(() => {
       const button = document.querySelector(".mcp-add-button");
       if (!button || button.disabled) return false;
@@ -693,52 +694,37 @@ async function main() {
     })`);
     assert.ok(mcpConnectionState.diagnostics, "The MCP adapter connection failure did not surface diagnostics.");
     assert.match(mcpConnectionState.ui, /连接失败|未连接|已缓存|已连接|需要认证|状态未知|初始化中|暂不可用/);
-    const copiedProjectMcp = await client.evaluate(`(async () => {
-      document.querySelector('button[aria-label="复制 MCP 服务器"]')?.click();
+    const addedProjectMcp = await client.evaluate(`(async () => {
+      document.querySelector(".mcp-add-button")?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       const labels = [...document.querySelectorAll(".mcp-editor label")];
+      const name = labels.find((label) => label.textContent.startsWith("名称"))?.querySelector("input");
+      const command = labels.find((label) => label.textContent.startsWith("启动命令"))?.querySelector("input");
       const scope = labels.find((label) => label.textContent.startsWith("作用域"))?.querySelector("select");
-      if (!scope) return false;
+      if (!name || !command || !scope) return false;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(name, "desktop-smoke-mcp-project");
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(command, "/usr/bin/true");
+      command.dispatchEvent(new Event("input", { bubbles: true }));
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(scope, "project");
       scope.dispatchEvent(new Event("change", { bubbles: true }));
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       document.querySelector(".mcp-editor form")?.requestSubmit();
       return true;
     })()`);
-    assert.equal(copiedProjectMcp, true);
+    assert.equal(addedProjectMcp, true);
     await client.waitFor(
-      `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp-copy") || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
-      "The copied project MCP server did not settle.",
+      `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp-project") || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
+      "The project MCP server did not settle.",
     );
-    const copiedMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
-    const projectMcp = copiedMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp-copy");
+    const projectMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
+    const projectMcp = projectMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp-project");
     assert.equal(projectMcp?.scope, "project");
-    assert.equal(projectMcp?.source, copiedMcpSnapshot.projectConfigPath);
-    const removedProjectMcpServer = await client.evaluate(`(async () => {
-      const row = [...document.querySelectorAll(".mcp-server-list button")].find((button) => button.textContent.includes("desktop-smoke-mcp-copy"));
-      row?.click();
-      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-      const remove = document.querySelector('button[aria-label="移除 MCP 服务器"]');
-      if (!row || !remove) return false;
-      remove.click();
-      return true;
+    assert.equal(projectMcp?.source, projectMcpSnapshot.projectConfigPath);
+    await client.evaluate(`(async () => {
+      await window.suocode.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp-project", scope: "project", cwd: ${JSON.stringify(homeState.home.path)} });
+      await window.suocode.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp", scope: "global", cwd: ${JSON.stringify(homeState.home.path)} });
     })()`);
-    assert.equal(removedProjectMcpServer, true);
-    await client.waitFor(`![...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp-copy")`, "The project MCP copy was not removed.");
-    const removedMcpServer = await client.evaluate(`(async () => {
-      const row = [...document.querySelectorAll(".mcp-server-list button")].find((button) => button.textContent.includes("desktop-smoke-mcp"));
-      row?.click();
-      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-      const remove = document.querySelector('button[aria-label="移除 MCP 服务器"]');
-      if (!row || !remove) return false;
-      remove.click();
-      return true;
-    })()`);
-    assert.equal(removedMcpServer, true);
-    await client.waitFor(
-      `![...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp")`,
-      "The MCP server was not removed through the desktop settings.",
-    );
     await client.evaluate(`document.querySelector('button[aria-label="关闭设置"]')?.click()`);
 
     const openedArchive = await client.evaluate(`(() => {

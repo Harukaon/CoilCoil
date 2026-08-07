@@ -166,7 +166,6 @@
 .mcp-editor-heading > div { display: grid; gap: 3px; }
 .mcp-editor-heading strong, .mcp-imports strong { color: #353532; font-size: 12px; }
 .mcp-editor-heading small, .mcp-imports small { color: #92928d; font-size: 9px; font-weight: 400; }
-.mcp-editor-actions { display: flex; flex: 0 0 auto; gap: 4px; }
 .mcp-runtime-card { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 8px 9px; border: 1px solid #deded9; border-radius: 8px; background: #f7f7f4; }
 .mcp-runtime-card > span { display: flex; min-width: 0; flex: 1; align-items: center; gap: 7px; }
 .mcp-runtime-card strong { color: #4b4b47; font-size: 10px; }
