@@ -1287,7 +1287,7 @@ export class SuoCodeRuntime {
     input: ModelProviderConfigurationInput,
     existing: Record<string, unknown> | undefined,
     builtinIds: ReadonlySet<string>,
-  ): { id: string; provider: Record<string, unknown> } {
+  ): { id: string; provider: Record<string, unknown>; writeModelsConfig: boolean } {
     const draft = input.provider;
     const id = assertProviderId(draft.id);
     const isBuiltin = builtinIds.has(id);
@@ -1329,6 +1329,18 @@ export class SuoCodeRuntime {
       throw new Error("Pi API Key 引用应使用 $环境变量、${环境变量} 或 !命令。普通密钥请填写在私有 API 密钥输入框中。");
     }
 
+    // Native providers own their endpoint, transport, display name, and
+    // catalog. With no existing override, an API-key save must therefore be
+    // auth.json-only. A Pi value expression is the one exception because it
+    // necessarily belongs in models.json as the provider's apiKey value.
+    if (isBuiltin && !existing) {
+      return {
+        id,
+        provider: apiKeyReference ? { apiKey: apiKeyReference } : {},
+        writeModelsConfig: Boolean(apiKeyReference),
+      };
+    }
+
     const result: Record<string, unknown> = { ...cloneJson(existing ?? {}) };
     for (const key of ["name", "baseUrl", "api", "oauth", "headers", "compat", "authHeader", "models", "modelOverrides"]) delete result[key];
     const set = (key: string, value: unknown): void => {
@@ -1350,7 +1362,11 @@ export class SuoCodeRuntime {
     }
     const overrides = draft.modelOverrides && Object.keys(draft.modelOverrides).length ? draft.modelOverrides : undefined;
     set("modelOverrides", overrides);
-    return { id, provider: result };
+    return {
+      id,
+      provider: result,
+      writeModelsConfig: !isBuiltin || Boolean(existing) || Object.keys(result).length > 0,
+    };
   }
 
   async saveModelProviderConfiguration(input: ModelProviderConfigurationInput): Promise<ModelProviderSaveResult> {
@@ -1359,17 +1375,19 @@ export class SuoCodeRuntime {
     const builtinIds = new Set<string>([...getBuiltinProviders(), "radius"]);
     const existing = privateConfiguration.providers[input.provider.id.trim()];
     const next = this.validateModelProviderConfiguration(input, existing, builtinIds);
-    const previous = cloneJson(privateConfiguration);
-    privateConfiguration.providers[next.id] = next.provider;
-    this.writePrivateModelsConfiguration(privateConfiguration);
-    try {
-      await modelRuntime.refresh({ allowNetwork: false });
-      const runtimeError = modelRuntime.getError();
-      if (runtimeError?.includes("models.json") || runtimeError?.includes(`Provider \"${next.id}\"`)) throw new Error(runtimeError);
-    } catch (error) {
-      this.writePrivateModelsConfiguration(previous);
-      await modelRuntime.refresh({ allowNetwork: false });
-      throw new Error(`Pi 拒绝此服务商配置：${errorMessage(error)}`);
+    if (next.writeModelsConfig) {
+      const previous = cloneJson(privateConfiguration);
+      privateConfiguration.providers[next.id] = next.provider;
+      this.writePrivateModelsConfiguration(privateConfiguration);
+      try {
+        await modelRuntime.refresh({ allowNetwork: false });
+        const runtimeError = modelRuntime.getError();
+        if (runtimeError?.includes("models.json") || runtimeError?.includes(`Provider \"${next.id}\"`)) throw new Error(runtimeError);
+      } catch (error) {
+        this.writePrivateModelsConfiguration(previous);
+        await modelRuntime.refresh({ allowNetwork: false });
+        throw new Error(`Pi 拒绝此服务商配置：${errorMessage(error)}`);
+      }
     }
 
     if (input.apiKey?.trim()) {

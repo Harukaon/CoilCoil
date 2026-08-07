@@ -181,6 +181,38 @@ try {
   if (removedCustomProvider.models.some((model) => model.provider === "dog-provider")) {
     throw new Error("Removing a custom provider did not remove its Pi model catalog.");
   }
+  const builtinDirectory = await request({ type: "get_model_provider_configuration" });
+  const anthropic = builtinDirectory.providers.find((provider) => provider.id === "anthropic");
+  if (!anthropic || anthropic.source !== "built-in") throw new Error("The expected Pi Anthropic provider was not available as a native provider.");
+  await request({
+    type: "save_model_provider_configuration",
+    input: {
+      provider: {
+        id: anthropic.id,
+        name: anthropic.name,
+        baseUrl: anthropic.baseUrl,
+        api: anthropic.api,
+        oauth: anthropic.oauth,
+        headers: anthropic.headers,
+        compat: anthropic.compat,
+        authHeader: anthropic.authHeader,
+        replaceModels: anthropic.replaceModels,
+        models: anthropic.models,
+        modelOverrides: anthropic.modelOverrides,
+      },
+      apiKey: "suocode-builtin-auth-secret",
+      preserveApiKeyReference: false,
+    },
+  });
+  const builtinAfterCredential = await request({ type: "get_model_provider_configuration" });
+  const configuredAnthropic = builtinAfterCredential.providers.find((provider) => provider.id === "anthropic");
+  if (!configuredAnthropic?.apiKeyConfigured || configuredAnthropic.source !== "built-in") {
+    throw new Error("Saving a built-in Pi API key unexpectedly created a models.json provider override.");
+  }
+  const modelsAfterBuiltinCredential = JSON.parse(readFileSync(join(temporaryRoot, "agent", "models.json"), "utf8"));
+  if (modelsAfterBuiltinCredential.providers?.anthropic) {
+    throw new Error("A built-in Pi API key must stay in auth.json instead of creating an anthropic models.json override.");
+  }
   const savedMcp = await request({
     type: "save_mcp_server",
     cwd: projectDir,

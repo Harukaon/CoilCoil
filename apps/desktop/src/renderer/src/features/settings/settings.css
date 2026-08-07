@@ -108,6 +108,10 @@
 .provider-cost-grid label { font-size: 9px !important; }
 .provider-cost-grid input { min-width: 0; }
 .provider-builtins-summary { padding: 10px; border: 1px dashed #d7d7d2; border-radius: 8px; color: #80807b; background: #f8f8f5; font-size: 10px; }
+.provider-native-summary { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid #dce3d8; border-radius: 9px; color: #687462; background: #f2f6f0; }
+.provider-native-summary strong { color: #4d5c49; font-size: 10px; }
+.provider-native-summary p { margin: 0; font-size: 10px; line-height: 1.55; }
+.provider-credential-status { display: flex; height: 34px; align-items: center; padding: 0 9px; border: 1px solid #d7d7d2; border-radius: 8px; color: #5f775b; background: #f5f8f3; font-size: 11px; font-weight: 500; }
 .provider-default-model { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr) auto; align-items: end; gap: 14px; padding: 12px; border: 1px solid #deded9; border-radius: 10px; background: #f7f7f4; }
 .provider-default-model > div:first-child { display: grid; gap: 3px; align-self: center; }
 .provider-default-model .settings-grid { grid-template-columns: minmax(0, 1fr) 132px; }

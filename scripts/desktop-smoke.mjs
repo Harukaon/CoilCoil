@@ -463,10 +463,32 @@ async function main() {
     assert.ok(modelSettingsUi.customSelectCount >= 1, `Model settings did not render the in-app selection controls: ${modelSettingsUi.error}`);
     assert.equal(modelSettingsUi.headerDrag, true, "The settings page header did not preserve the macOS drag region.");
     assert.equal(modelSettingsUi.customProviderButton, true, "The model settings did not expose custom Pi provider creation.");
-    const startedCustomProvider = await client.evaluate(`(() => {
+    const selectedNativeProvider = await client.evaluate(`(() => {
+      const row = [...document.querySelectorAll(".provider-catalog-group button")]
+        .find((button) => button.querySelector("small")?.textContent === "anthropic");
+      if (!row) return false;
+      row.click();
+      return true;
+    })()`);
+    assert.equal(selectedNativeProvider, true, "The Pi Anthropic provider was not shown in the native provider catalog.");
+    await client.waitFor(`Boolean(document.querySelector(".provider-native-summary"))`, "A native Pi provider still opened the custom-provider form.");
+    const nativeProviderUi = await client.evaluate(`({
+      protocolSelector: Boolean(document.querySelector('.model-provider-settings button[aria-label="Pi 请求协议"]')),
+      baseUrlInput: Boolean(document.querySelector('input[placeholder="https://api.example.com/v1"]')),
+      credentialInput: Boolean(document.querySelector('.provider-native-summary ~ .provider-credential-grid input[type="password"]')),
+    })`);
+    assert.equal(nativeProviderUi.protocolSelector, false, "A native Pi provider must not prompt for a request protocol.");
+    assert.equal(nativeProviderUi.baseUrlInput, false, "A native Pi provider must not prompt for a Base URL.");
+    assert.equal(nativeProviderUi.credentialInput, true, "A native Pi provider did not expose its credential field.");
+    const openedCustomProvider = await client.evaluate(`(() => {
       const add = document.querySelector('[aria-label="添加自定义服务商"]');
       if (!add) return false;
       add.click();
+      return true;
+    })()`);
+    assert.equal(openedCustomProvider, true, "The custom Pi provider creation action was unavailable.");
+    await client.waitFor(`Boolean(document.querySelector('input[placeholder="例如 dog-provider"]'))`, "The custom Pi provider editor did not open.");
+    const filledCustomProvider = await client.evaluate(`(() => {
       const setValue = (selector, value) => {
         const input = document.querySelector(selector);
         if (!input) return false;
@@ -480,7 +502,7 @@ async function main() {
         && setValue('input[placeholder="https://api.example.com/v1"]', "http://127.0.0.1:40124/v1")
         && setValue('input[placeholder="例如 dog-coder-v1"]', "desktop-smoke-model");
     })()`);
-    assert.equal(startedCustomProvider, true, "The custom Pi provider editor did not accept editable provider/model fields.");
+    assert.equal(filledCustomProvider, true, "The custom Pi provider editor did not accept editable provider/model fields.");
     const savedCustomProvider = await client.evaluate(`(() => {
       const save = [...document.querySelectorAll('.provider-editor .primary-button')].find((button) => button.textContent.includes("保存服务商"));
       if (!save) return false;
