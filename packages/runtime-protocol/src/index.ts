@@ -161,6 +161,7 @@ export interface SubagentActivity {
   mode: "single" | "parallel" | "chain";
   status: SubagentActivityStatus;
   background: boolean;
+  controlReady?: boolean;
   currentTool?: string;
   currentPath?: string;
   recentTools?: SubagentRecentTool[];

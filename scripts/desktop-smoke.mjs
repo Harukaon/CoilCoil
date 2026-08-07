@@ -17,6 +17,27 @@ function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
+function descendantPids(rootPid) {
+  const rows = execFileSync("/bin/ps", ["-axo", "pid=,ppid="], { encoding: "utf8" })
+    .trim()
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(([pid, parentPid]) => Number.isInteger(pid) && Number.isInteger(parentPid));
+  const descendants = new Set();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [pid, parentPid] of rows) {
+      if (pid === rootPid || descendants.has(pid)) continue;
+      if (parentPid === rootPid || descendants.has(parentPid)) {
+        descendants.add(pid);
+        changed = true;
+      }
+    }
+  }
+  return descendants;
+}
+
 async function freePort() {
   const server = createServer();
   await new Promise((resolveListen, reject) => {
@@ -386,16 +407,18 @@ async function main() {
       assert.match(launcher, /ELECTRON_RUN_AS_NODE=1/);
       assert.ok(launcher.includes(expectedHelper), "The packaged worker launcher did not target the background Helper bundle.");
       assert.equal(execFileSync(nodeRuntimeLauncher, ["-e", "process.stdout.write(process.execPath)"], { encoding: "utf8" }), expectedHelper);
-      const dockProbe = spawn(nodeRuntimeLauncher, ["-e", "setTimeout(() => {}, 5000)"], { stdio: "ignore" });
+      const dockProbes = Array.from({ length: 3 }, () => spawn(nodeRuntimeLauncher, ["-e", "setTimeout(() => {}, 5000)"], { stdio: "ignore" }));
       await delay(750);
-      assert.equal(dockProbe.exitCode, null, "The packaged background worker launcher exited before the Dock probe.");
+      for (const dockProbe of dockProbes) assert.equal(dockProbe.exitCode, null, "A packaged background worker launcher exited before the Dock probe.");
       const appRecords = execFileSync("/usr/bin/lsappinfo", ["list"], { encoding: "utf8" }).split(/(?=\s*\d+\)\s)/);
-      const workerRecord = appRecords.find((record) => record.includes(`pid = ${dockProbe.pid} `));
-      if (workerRecord) {
-        assert.doesNotMatch(workerRecord, /^\s*\d+\)\s+"exec"/m, "The packaged worker appeared as a generic exec application.");
-        assert.doesNotMatch(workerRecord, /type="Foreground"/, "The packaged worker registered as a foreground Dock application.");
+      for (const dockProbe of dockProbes) {
+        const workerRecord = appRecords.find((record) => record.includes(`pid = ${dockProbe.pid} `));
+        if (workerRecord) {
+          assert.doesNotMatch(workerRecord, /^\s*\d+\)\s+"exec"/m, "A packaged worker appeared as a generic exec application.");
+          assert.doesNotMatch(workerRecord, /type="Foreground"/, "A packaged worker registered as a foreground Dock application.");
+        }
       }
-      await stopProcess(dockProbe);
+      await Promise.all(dockProbes.map((dockProbe) => stopProcess(dockProbe)));
     }
 
     const openedSettings = await client.evaluate(`(() => {
@@ -924,19 +947,25 @@ async function main() {
 
     const todoOverlayLayout = await client.evaluate(`(() => {
       const stack = document.querySelector(".composer-stack");
-      if (!stack) return null;
+      const overlays = stack?.querySelector(".composer-overlays");
+      const composer = stack?.querySelector(".composer");
+      if (!stack || !overlays || !composer) return null;
       const before = stack.getBoundingClientRect().height;
       const plan = document.createElement("section");
       plan.className = "composer-activity expanded";
       plan.innerHTML = '<div class="composer-activity-header"><strong>Todo</strong></div><div class="composer-activity-body"><ol><li>测试</li></ol></div>';
-      stack.prepend(plan);
+      overlays.append(plan);
       const after = stack.getBoundingClientRect().height;
       const position = getComputedStyle(plan).position;
+      const composerRect = composer.getBoundingClientRect();
+      const hit = document.elementFromPoint(composerRect.left + composerRect.width / 2, composerRect.top + 4);
+      const composerOwnsOverlap = Boolean(hit?.closest(".composer"));
       plan.remove();
-      return { before, after, position };
+      return { before, after, position, composerOwnsOverlap };
     })()`);
-    assert.equal(todoOverlayLayout?.position, "absolute");
+    assert.equal(todoOverlayLayout?.position, "relative");
     assert.equal(todoOverlayLayout?.after, todoOverlayLayout?.before);
+    assert.equal(todoOverlayLayout?.composerOwnsOverlap, true, "Todo/Agent activity rendered above the composer instead of behind it.");
 
     await client.evaluate(`(() => {
       const project = ${JSON.stringify({
@@ -1156,14 +1185,33 @@ async function main() {
       assert.equal(detailInteraction?.backdropCount, backdropCountBeforeDetail, "The subagent detail window added a blocking backdrop to the Agent workspace.");
       assert.equal(detailInteraction?.composerEnabled, true, "The subagent detail window disabled the composer.");
       await client.evaluate(`document.querySelector('button[aria-label="关闭子 Agent 详情"]')?.click()`);
+      const overlayLayout = await client.evaluate(`(() => {
+        const overlays = document.querySelector('.composer-overlays');
+        const activity = overlays?.querySelector('.composer-activity');
+        if (!overlays || !activity) return null;
+        const banner = document.createElement('div');
+        banner.className = 'error-banner';
+        banner.innerHTML = '<span>测试错误消息不会覆盖 Agent 活动</span>';
+        overlays.prepend(banner);
+        const bannerRect = banner.getBoundingClientRect();
+        const activityRect = activity.getBoundingClientRect();
+        banner.remove();
+        return { gap: activityRect.top - bannerRect.bottom };
+      })()`);
+      assert.ok((overlayLayout?.gap ?? -1) >= 7, `The error banner overlapped the Agent activity panel (${overlayLayout?.gap}px).`);
     }
 
     if (live) {
       const openedLiveConversation = await client.evaluate(`(async () => {
         const configuration = await window.suocode.request({ type: "get_configuration" });
-        const model = configuration.models.find((item) => item.provider === configuration.provider && item.id === "gpt-5.6-luna" && item.configured)
-          ?? configuration.models.find((item) => item.provider === configuration.provider && item.id === configuration.modelId)
-          ?? configuration.models.find((item) => item.configured);
+        const configured = configuration.models.filter((item) => item.configured);
+        const model = configured.find((item) => {
+          const identity = \`${'${item.provider} ${item.id} ${item.name}'}\`.toLowerCase();
+          return identity.includes("minimax") && /(^|[^a-z0-9])m3([^a-z0-9]|$)/i.test(identity);
+        })
+          ?? configured.find((item) => item.provider === configuration.provider && item.id === "gpt-5.6-sol")
+          ?? configured.find((item) => item.provider === configuration.provider && item.id === configuration.modelId)
+          ?? configured[0];
         if (!model) throw new Error("No configured live GUI smoke model.");
         await window.suocode.request({ type: "configure_model", provider: model.provider, modelId: model.id, thinkingLevel: "low" });
         const activeTree = [...document.querySelectorAll(".project-tree")].find((item) => item.classList.contains("active"));
@@ -1199,6 +1247,7 @@ async function main() {
       const fileToken = `DESKTOP_FILE_OK_${Date.now()}`;
       const terminalToken = `DESKTOP_TERMINAL_OK_${Date.now()}`;
       const subagentToken = `DESKTOP_SUBAGENT_OK_${Date.now()}`;
+      const stoppedSubagentToken = `DESKTOP_SUBAGENT_STOP_${Date.now()}`;
       const fileName = "suocode-desktop-smoke.txt";
       await submitPrompt(
         client,
@@ -1230,7 +1279,7 @@ async function main() {
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         return { warning, retained, edited, dialog, editorAfterCancel: Boolean(document.querySelector(".user-message-editor")) };
       })()`);
-      assert.match(historyEditInteraction.warning, /提示缓存命中率/);
+      assert.match(String(historyEditInteraction?.warning ?? ""), /提示缓存命中率/);
       assert.equal(historyEditInteraction.retained, historyEditInteraction.edited);
       assert.match(historyEditInteraction.dialog, /工作区中已经产生的文件修改不会被恢复/);
       assert.equal(historyEditInteraction.editorAfterCancel, true);
@@ -1262,6 +1311,45 @@ async function main() {
         throw new Error(`The subagent detail did not contain its final output.\nProjected events:\n${JSON.stringify(subagentEvents, null, 2)}\nPersisted session tail:\n${latestSession.split("\n").slice(-8).join("\n")}`);
       }
       await client.evaluate(`document.querySelector('button[aria-label="关闭子 Agent 详情"]')?.click()`);
+
+      const stopEventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
+      assert.equal(await fillAndSubmitComposer(
+        client,
+        `Call the subagent tool exactly once with agent scout and async true. Give it this exact task: Run the bash command sleep 90, then reply exactly ${stoppedSubagentToken}. Do not call subagent_wait, status, or another tool. After the background run starts, reply briefly that it started.`,
+      ), true);
+      await client.waitFor(
+        `window.__suocodeSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.background && (item.status === "pending" || item.status === "running")))`,
+        "The bundled subagent extension did not expose a live background run.",
+        120_000,
+      );
+      const descendantApplications = execFileSync("/usr/bin/lsappinfo", ["list"], { encoding: "utf8" })
+        .split(/(?=\s*\d+\)\s)/)
+        .filter((record) => [...descendantPids(child.pid)].some((pid) => record.includes(`pid = ${pid} `)));
+      for (const record of descendantApplications) {
+        assert.doesNotMatch(record, /^\s*\d+\)\s+"exec"/m, "A real subagent worker appeared in the Dock as a generic exec application.");
+        assert.doesNotMatch(record, /type="Foreground"/, "A real subagent worker registered as a foreground Dock application.");
+      }
+      await client.evaluate(`(() => {
+        const tab = [...document.querySelectorAll('.composer-activity-tabs button')].find((button) => button.textContent.includes('代理'));
+        tab?.click();
+      })()`);
+      await client.waitFor(`Boolean(document.querySelector('.subagent-stop'))`, "The Agent activity panel did not expose the background stop control.");
+      assert.equal(await client.evaluate(`(() => {
+        const button = document.querySelector('.subagent-stop');
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`), true);
+      await client.waitFor(
+        `window.__suocodeSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.background && item.status === "stopped"))`,
+        "The background subagent did not transition to stopped after the UI control was clicked.",
+        60_000,
+      );
+      await client.waitFor(
+        `window.__suocodeSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "run_state" && event.running === false)`,
+        "The parent Agent did not settle after stopping its background subagent.",
+        60_000,
+      );
 
       await client.evaluate(`document.querySelector('button[aria-label="刷新项目"]')?.click()`);
 

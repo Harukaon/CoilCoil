@@ -267,7 +267,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 @keyframes loader-wave { 0%, 70%, 100% { height: 30%; opacity: .48; } 35% { height: 88%; opacity: 1; } }
 
 .composer-wrap { position: relative; z-index: 2; width: min(var(--chat-content-width), calc(100% - 48px)); min-width: 0; margin: 0 auto; padding-bottom: 12px; }
-.composer-stack { position: relative; display: flex; align-items: center; flex-direction: column; }
+.composer-stack { position: relative; isolation: isolate; display: flex; align-items: center; flex-direction: column; }
+.composer-overlays { position: absolute; z-index: 0; bottom: calc(100% - 10px); left: 0; display: flex; width: 100%; min-width: 0; align-items: center; flex-direction: column; gap: 8px; pointer-events: none; }
+.composer-overlays > * { pointer-events: auto; }
+.composer-overlays .composer-activity { position: relative; bottom: auto; left: auto; transform: none; }
 .composer-activity { position: absolute; z-index: 0; bottom: calc(100% - 10px); left: 50%; width: calc(100% - 52px); overflow: hidden; border: 1px solid #deded9; border-bottom-color: #e5e5e1; border-radius: 15px 15px 0 0; background: rgb(250 250 248 / 98%); box-shadow: 0 -5px 20px rgb(28 28 25 / 4%); transform: translateX(-50%); }
 .composer-activity.collapsed { width: calc(100% - 92px); }
 .composer-activity-header { display: flex; min-width: 0; height: 38px; align-items: center; padding: 0 9px 8px 13px; color: #686863; font-size: 11px; }
@@ -306,10 +309,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .subagent-stop { display: inline-flex; height: 24px; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid #deded9; border-radius: 7px; color: #777772; background: #fafaf8; font-size: 9px; cursor: pointer; }
 .subagent-stop:hover { color: #a43b35; border-color: #dfb7b3; background: #fff8f7; }
 .subagent-status { align-self: center; color: #9a9a95; white-space: nowrap; }
-.error-banner { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 8px 10px; border: 1px solid #e6c9c5; border-radius: 9px; color: #9a413a; background: #fff7f5; font-size: 11px; }
-.error-banner span { min-width: 0; flex: 1; }
+.error-banner { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; margin: 0; padding: 8px 10px; border: 1px solid #e6c9c5; border-radius: 9px; color: #9a413a; background: #fff7f5; font-size: 11px; }
+.error-banner span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .error-banner button { display: grid; padding: 2px; place-items: center; color: inherit; background: transparent; cursor: pointer; }
-.composer { position: relative; z-index: 1; width: 100%; overflow: hidden; border: 1px solid #d9d9d5; border-radius: 18px; background: #fff; box-shadow: 0 1px 2px rgb(23 23 20 / 4%), 0 8px 24px rgb(23 23 20 / 4%); }
+.composer { position: relative; z-index: 2; width: 100%; overflow: hidden; border: 1px solid #d9d9d5; border-radius: 18px; background: #fff; box-shadow: 0 1px 2px rgb(23 23 20 / 4%), 0 8px 24px rgb(23 23 20 / 4%); }
 .composer:focus-within { border-color: #bdbdb7; box-shadow: 0 0 0 3px rgb(70 70 64 / 5%), 0 8px 24px rgb(23 23 20 / 4%); }
 .composer-images { display: flex; gap: 8px; padding: 10px 14px 0; overflow-x: auto; }
 .composer-images figure { position: relative; width: 58px; height: 58px; flex: 0 0 auto; margin: 0; }

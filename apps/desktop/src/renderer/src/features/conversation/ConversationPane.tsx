@@ -131,9 +131,11 @@ export function ConversationPane({
       </div>
 
       <div className="composer-wrap">
-        {error ? <div className="error-banner"><AlertCircle size={14} /><span>{error}</span><button type="button" onClick={() => onError(undefined)}><X size={13} /></button></div> : null}
         <div className="composer-stack">
-          <ActivityPanel todo={projectState.plan} subagents={subagents} onStopSubagent={onStopSubagent} />
+          <div className="composer-overlays">
+            {error ? <div className="error-banner"><AlertCircle size={14} /><span>{error}</span><button type="button" onClick={() => onError(undefined)}><X size={13} /></button></div> : null}
+            <ActivityPanel todo={projectState.plan} subagents={subagents} onStopSubagent={onStopSubagent} />
+          </div>
           <ConversationComposer project={project} running={running} loading={loading} startingSession={startingSession} draft={draft} images={draftImages} inputRef={inputRef} configuration={configuration} selectedModel={selectedModel} modelMenuOpen={modelMenuOpen} modelChanging={modelChanging} onSubmit={onSubmit} onDraftChange={onDraftChange} onImagesChange={onImagesChange} onPaste={onPaste} onCompositionStart={onCompositionStart} onCompositionEnd={onCompositionEnd} onKeyDown={onKeyDown} onModelMenuOpenChange={onModelMenuOpenChange} onSelectModel={onSelectModel} onOpenSettings={onOpenSettings} onAbort={onAbort} />
         </div>
         <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} />

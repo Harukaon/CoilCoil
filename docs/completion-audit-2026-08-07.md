@@ -51,9 +51,9 @@
 | --- | --- | --- |
 | Todo 与子 Agent 共用可切换活动面板 | 已验证 | `ActivityPanel` 与 Desktop smoke。 |
 | 子 Agent 时间线卡片、详情、工具/消息/Reasoning 投影 | 已验证 | 标准 Pi Session fixture、Runtime smoke、Desktop smoke。 |
-| 停止子 Agent | 已验证 | Runtime RPC 错误路径和 UI 控件；真实长任务停止仍需可用 Provider 环境复核。 |
+| 停止子 Agent | 已验证 | Runtime 直接复用 `pi-subagents` 的持久化异步运行状态与停止请求；MiniMax M3 真实长任务从 UI 停止后进入 stopped，父 Agent 正常收敛。 |
 | 子 Agent 不产生独立 Workspace 会话 | 已验证 | 投影基于父工具调用。 |
-| macOS 不出现 `exec` Dock 图标 | 待人工复核 | 已改为真实 Helper Bundle 路径的 Headless wrapper；Desktop smoke 检查无 generic `exec`/Foreground 注册。仍需同时运行多个真实子 Agent 人工观察 Dock。 |
+| macOS 不出现 `exec` Dock 图标 | 已验证 | 打包 Desktop smoke 同时启动三个 Headless Helper，并在真实子 Agent 运行期间递归检查进程树与 LaunchServices；没有 descendant 注册为 `exec` 或 Foreground。 |
 
 ## 文件与预览
 
@@ -83,9 +83,9 @@
 | UI 新增/编辑/复制/移除，全局和项目作用域 | 已验证 | Runtime smoke 与最新打包 Desktop smoke 均覆盖扩展原生配置、复制、项目作用域和移除。 |
 | stdio、HTTP、env、headers、auth、生命周期、超时、direct tools、排除、资源、debug | 已验证 | Typed bridge 直接映射扩展原生 schema；Runtime smoke 覆盖持久化，打包 Desktop smoke 覆盖高级字段。 |
 | 启用/停用 Server | 已验证 | 升级并固定 `pi-mcp-adapter` 2.21.0，直接调用其 `writeProjectServerDisabledOverride` 与 reload 生命周期；Runtime smoke 和打包 Desktop smoke 均覆盖停用、状态投影和恢复启用。 |
-| 状态、工具数量、测试连接、重连 | 已验证 | Runtime 订阅扩展稳定事件 `pi-mcp-adapter/status/v1`；Runtime smoke 验证扩展状态和失败诊断，打包 Desktop smoke 验证设置页连接动作与状态展示。 |
-| 资源数量 | 已验证 | 直接投影 `pi-mcp-adapter` 2.21.0 原生状态中的 `resourceCount` / `totalResources`；Runtime smoke 验证字段存在，设置页展示服务器与汇总资源数。 |
-| OAuth 认证/登出 UI | 部分完成 | 认证开始、浏览器授权页、回调输入、认证完成与登出均复用 `pi-mcp-adapter` 原生命令/流程；Runtime smoke 已验证登出桥，安全外链已测。仍缺真实 OAuth Server 的完整授权与撤销验证。 |
+| 状态、工具数量、测试连接、重连 | 已验证 | Runtime 订阅扩展稳定事件 `pi-mcp-adapter/status/v1`；干净 HOME 的 Runtime smoke 使用官方 MCP SDK stdio fixture 完成真实连接和工具发现，并保留失败诊断覆盖；打包 Desktop smoke 验证设置页动作与状态展示。 |
+| 资源数量 | 已验证 | 直接投影 `pi-mcp-adapter` 2.21.0 原生状态中的 `resourceCount` / `totalResources`；真实 stdio fixture 暴露资源并验证发现计数，设置页展示服务器与汇总资源数。 |
+| OAuth 认证/登出 UI | 已验证 | 使用官方 MCP SDK 的本地受保护 Resource Server 与 OAuth Provider，Runtime smoke 完成 DCR、PKCE、授权回调、Token 交换、受保护工具发现、登出及登出后重新要求认证；产品仍复用 `pi-mcp-adapter` 原生命令/流程。 |
 | 凭据遮盖和错误脱敏 | 已验证 | MCP 编辑器对敏感 env/header 键只显示掩码并在未修改时保留原值；Runtime 对扩展动作文本、结构化 details 和错误执行递归脱敏。Runtime 与打包 Desktop smoke 使用哨兵凭据验证不回显。 |
 
 ## Terminal 工作区
@@ -105,3 +105,13 @@
 3. `npm run check`、`npm test`、Runtime smoke、最新打包 Desktop smoke 全部通过。
 4. 至少一个可用 Provider 下完成真实新会话、工具、图片、MCP、子 Agent 与停止流程。
 5. 最新 DMG/ZIP 从干净用户数据目录启动并完成首次配置验证。
+
+## 最终验证记录
+
+- `npm run check`：通过。
+- `npm test`：47/47 通过。
+- `node scripts/runtime-smoke.mjs`：通过。
+- `node scripts/runtime-smoke.mjs --live`：MiniMax M3 真实模型与工具执行通过。
+- `node scripts/desktop-smoke.mjs`：最新打包应用通过。
+- `node scripts/desktop-smoke.mjs --live`：MiniMax M3 真实 Agent、工具、恢复会话、子 Agent 停止与打包进程检查通过。
+- `npm run package:desktop`：生成最新 arm64 DMG 与 ZIP；测试使用独立临时用户数据目录启动打包应用。

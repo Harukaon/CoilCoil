@@ -7,8 +7,12 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryRoot = mkdtempSync(join(tmpdir(), "suocode-runtime-smoke-"));
 const projectDir = join(temporaryRoot, "project");
+const homeDir = join(temporaryRoot, "home");
+const mcpSmokeServerPath = join(root, "scripts", "fixtures", "mcp-smoke-server.mjs");
+const mcpOAuthSmokeServerPath = join(root, "scripts", "fixtures", "mcp-oauth-smoke-server.mjs");
 const live = process.argv.includes("--live");
 mkdirSync(projectDir, { recursive: true });
+mkdirSync(homeDir, { recursive: true });
 writeFileSync(join(projectDir, "README.md"), "# Runtime smoke project\n", "utf8");
 const largeDirectory = join(projectDir, "aaa-large");
 mkdirSync(largeDirectory);
@@ -17,12 +21,31 @@ for (let index = 0; index < 1_205; index += 1) {
 }
 writeFileSync(join(projectDir, "zz-root.txt"), "root sibling\n", "utf8");
 
+const oauthFixture = fork(mcpOAuthSmokeServerPath, [], { stdio: ["ignore", "pipe", "pipe", "ipc"] });
+let oauthFixtureError = "";
+oauthFixture.stderr.on("data", (chunk) => { oauthFixtureError += chunk; });
+const oauthFixtureReady = await new Promise((resolveReady, rejectReady) => {
+  const timeout = setTimeout(() => rejectReady(new Error(`OAuth MCP fixture did not start. ${oauthFixtureError}`)), 15_000);
+  oauthFixture.once("message", (message) => {
+    clearTimeout(timeout);
+    if (message?.type === "ready" && message.mcpServerUrl) resolveReady(message);
+    else rejectReady(new Error(`OAuth MCP fixture returned an invalid startup message: ${JSON.stringify(message)}`));
+  });
+  oauthFixture.once("exit", (code) => {
+    clearTimeout(timeout);
+    rejectReady(new Error(`OAuth MCP fixture exited during startup (${code}). ${oauthFixtureError}`));
+  });
+});
+
 const child = fork(join(root, "apps/desktop/out/main/runtime.js"), [], {
   env: {
     ...process.env,
+    HOME: homeDir,
+    XDG_CONFIG_HOME: join(homeDir, ".config"),
     SUOCODE_AGENT_DIR: join(temporaryRoot, "agent"),
     SUOCODE_SESSION_DIR: join(temporaryRoot, "sessions"),
     SUOCODE_LEGACY_AGENT_DIR: live ? join(homedir(), ".pi", "agent") : join(temporaryRoot, "no-legacy"),
+    PI_MCP_ADAPTER_TEST_AUTH_STORE: "memory",
   },
   stdio: ["ignore", "pipe", "pipe", "ipc"],
 });
@@ -53,6 +76,18 @@ function request(command) {
     pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
     child.send({ id, command });
   });
+}
+
+function chooseLiveSmokeModel(configuration) {
+  const configured = configuration.models.filter((model) => model.configured);
+  const minimaxM3 = configured.find((model) => {
+    const identity = `${model.provider} ${model.id} ${model.name}`.toLowerCase();
+    return identity.includes("minimax") && /(^|[^a-z0-9])m3([^a-z0-9]|$)/i.test(identity);
+  });
+  return minimaxM3
+    ?? configured.find((model) => model.provider === configuration.provider && model.id === "gpt-5.6-sol")
+    ?? configured.find((model) => model.provider === configuration.provider && model.id === configuration.modelId)
+    ?? configured[0];
 }
 
 function waitForEvent(predicate, timeoutMs = 180_000) {
@@ -92,7 +127,7 @@ try {
   const bootstrap = await request({ type: "bootstrap" });
   if (!bootstrap?.configuration?.models) throw new Error("Bootstrap did not return model configuration.");
   const initialMcp = await request({ type: "get_mcp_configuration", cwd: projectDir });
-  if (!initialMcp?.configPath?.startsWith(temporaryRoot) || initialMcp.servers.some((server) => server.name === "smoke-server")) {
+  if (!initialMcp?.configPath?.startsWith(temporaryRoot) || initialMcp.servers.length !== 0) {
     throw new Error("MCP configuration was not isolated inside the SuoCode runtime.");
   }
   const savedMcp = await request({
@@ -103,14 +138,14 @@ try {
       scope: "global",
       transport: "stdio",
       command: process.execPath,
-      args: ["-e", "process.exit(0)"],
+      args: [mcpSmokeServerPath],
       env: { SUOCODE_MCP_SMOKE: "1", PRIVATE_TOKEN: mcpSecret },
       headers: {},
       lifecycle: "lazy",
       idleTimeout: 3,
       requestTimeoutMs: 4_500,
-      exposeResources: false,
-      directTools: ["ping"],
+      exposeResources: true,
+      directTools: ["echo"],
       excludeTools: ["dangerous"],
       debug: true,
     },
@@ -124,8 +159,8 @@ try {
     || smokeMcp.env.PRIVATE_TOKEN !== mcpSecret
     || smokeMcp.idleTimeout !== 3
     || smokeMcp.requestTimeoutMs !== 4_500
-    || smokeMcp.exposeResources !== false
-    || smokeMcp.directTools?.[0] !== "ping"
+    || smokeMcp.exposeResources !== true
+    || smokeMcp.directTools?.[0] !== "echo"
     || smokeMcp.excludeTools?.[0] !== "dangerous"
     || smokeMcp.debug !== true
   ) {
@@ -167,21 +202,100 @@ try {
     throw new Error("The pi-mcp-adapter project override did not re-enable the MCP server.");
   }
   await waitForMcpStatus((status) => status.state === "ready" && status.servers.some((server) => server.name === "smoke-server" && server.status !== "disabled"));
-  const failedMcpConnect = await request({ type: "connect_mcp_server", name: "smoke-server" });
+  const connectedMcp = await request({ type: "connect_mcp_server", name: "smoke-server" });
+  if (!connectedMcp.text || connectedMcp.details?.error || connectedMcp.status?.servers?.find((server) => server.name === "smoke-server")?.status !== "connected") {
+    throw new Error(`The bundled pi-mcp-adapter did not connect to the real stdio MCP fixture: ${JSON.stringify(connectedMcp)}`);
+  }
+  const connectedMcpStatus = await waitForMcpStatus((status) => status.servers.some((server) => server.name === "smoke-server" && server.status === "connected" && server.toolCount >= 1 && server.resourceCount >= 1));
+  if (connectedMcpStatus.totalTools < 1 || connectedMcpStatus.totalResources < 1) {
+    throw new Error(`The real MCP tool/resource discovery was not projected: ${JSON.stringify(connectedMcpStatus)}`);
+  }
+  await request({
+    type: "save_mcp_server",
+    cwd: projectDir,
+    server: {
+      ...smokeMcp,
+      name: "failing-smoke-server",
+      command: process.execPath,
+      args: ["-e", "process.exit(0)"],
+      exposeResources: false,
+      directTools: false,
+    },
+  });
+  const failedMcpConnect = await request({ type: "connect_mcp_server", name: "failing-smoke-server" });
   if (!failedMcpConnect.text || failedMcpConnect.details?.mode !== "connect" || !failedMcpConnect.details?.error) {
     throw new Error(`The extension-native MCP connect bridge did not return pi-mcp-adapter diagnostics: ${JSON.stringify(failedMcpConnect)}`);
   }
   if (JSON.stringify(failedMcpConnect).includes(mcpSecret)) {
     throw new Error("The MCP action bridge leaked a configured credential in diagnostics.");
   }
-  const loggedOutMcp = await request({ type: "logout_mcp_server", name: "smoke-server" });
+  const loggedOutMcp = await request({ type: "logout_mcp_server", name: "failing-smoke-server" });
   if (!loggedOutMcp.text || loggedOutMcp.details?.mode !== "logout" || loggedOutMcp.details?.loggedOut !== true) {
     throw new Error(`The extension-native MCP logout bridge did not invoke pi-mcp-adapter: ${JSON.stringify(loggedOutMcp)}`);
   }
-  const removedMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "smoke-server", scope: "global" });
-  if (removedMcp.servers.some((server) => server.name === "smoke-server")) {
-    throw new Error("The Pi MCP adapter configuration bridge did not remove a SuoCode-owned server.");
+  const removedFailingMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "failing-smoke-server", scope: "global" });
+  if (removedFailingMcp.servers.some((server) => server.name === "failing-smoke-server")) {
+    throw new Error("The Pi MCP adapter configuration bridge did not remove the failing test server.");
   }
+
+  const oauthServerName = `oauth-smoke-${oauthFixtureReady.instanceId}`;
+  await request({
+    type: "save_mcp_server",
+    cwd: projectDir,
+    server: {
+      name: oauthServerName,
+      scope: "global",
+      transport: "http",
+      args: [],
+      env: {},
+      url: oauthFixtureReady.mcpServerUrl,
+      headers: {},
+      auth: "oauth",
+      lifecycle: "lazy",
+      exposeResources: false,
+      directTools: true,
+      excludeTools: [],
+      debug: true,
+      disabled: false,
+    },
+  });
+  await waitForMcpStatus((status) => status.servers.some((server) => server.name === oauthServerName));
+  const unauthenticatedConnect = await request({ type: "connect_mcp_server", name: oauthServerName });
+  if (unauthenticatedConnect.details?.error !== "auth_required" || !unauthenticatedConnect.status?.servers?.some((server) => server.name === oauthServerName && server.status === "needs-auth")) {
+    throw new Error(`The OAuth-protected MCP fixture did not require authentication: ${JSON.stringify(unauthenticatedConnect)}`);
+  }
+  const authStarted = await request({ type: "start_mcp_auth", name: oauthServerName });
+  const authorizationUrl = authStarted.details?.authorizationUrl;
+  if (!authorizationUrl || authStarted.details?.mode !== "auth-start") {
+    throw new Error(`The pi-mcp-adapter did not start the real OAuth authorization-code flow: ${JSON.stringify(authStarted)}`);
+  }
+  const authorizationResponse = await fetch(authorizationUrl, { redirect: "manual" });
+  const callbackUrl = authorizationResponse.headers.get("location");
+  if (authorizationResponse.status < 300 || authorizationResponse.status >= 400 || !callbackUrl?.includes("code=") || !callbackUrl.includes("state=")) {
+    throw new Error(`The OAuth fixture did not issue a PKCE callback redirect: ${authorizationResponse.status} ${callbackUrl}`);
+  }
+  const authCompleted = await request({ type: "complete_mcp_auth", name: oauthServerName, input: callbackUrl });
+  if (authCompleted.details?.authenticated !== true || authCompleted.details?.error) {
+    throw new Error(`The OAuth callback/token exchange did not complete: ${JSON.stringify(authCompleted)}`);
+  }
+  const authenticatedConnect = await request({ type: "connect_mcp_server", name: oauthServerName });
+  if (authenticatedConnect.details?.error || !authenticatedConnect.status?.servers?.some((server) => server.name === oauthServerName && server.status === "connected" && server.toolCount >= 1)) {
+    throw new Error(`The OAuth token did not authorize the MCP connection: ${JSON.stringify(authenticatedConnect)}`);
+  }
+  const oauthServerState = await (await fetch(new URL("/status", oauthFixtureReady.mcpServerUrl))).json();
+  if (oauthServerState.clients < 1 || oauthServerState.tokens < 1 || oauthServerState.authorizedMcpRequests < 1) {
+    throw new Error(`The real OAuth server did not observe registration, token issuance, and an authorized MCP request: ${JSON.stringify(oauthServerState)}`);
+  }
+  const oauthLogout = await request({ type: "logout_mcp_server", name: oauthServerName });
+  if (oauthLogout.details?.loggedOut !== true || oauthLogout.details?.error) {
+    throw new Error(`The extension-native OAuth logout did not clear credentials: ${JSON.stringify(oauthLogout)}`);
+  }
+  const connectAfterLogout = await request({ type: "connect_mcp_server", name: oauthServerName });
+  if (connectAfterLogout.details?.error !== "auth_required" || connectAfterLogout.status?.servers?.some((server) => server.name === oauthServerName && server.status === "connected")) {
+    throw new Error(`The OAuth credential remained usable after logout: ${JSON.stringify(connectAfterLogout)}`);
+  }
+  await request({ type: "remove_mcp_server", cwd: projectDir, name: oauthServerName, scope: "global" });
+
   let invalidSubagentStopRejected = false;
   try {
     await request({ type: "stop_subagent", id: "missing-smoke-subagent", background: true });
@@ -287,9 +401,7 @@ try {
     if (!configuration.configuredProviders.includes(configuration.provider)) {
       throw new Error(`Live smoke test has no credential for ${configuration.provider}.`);
     }
-    const liveModel = configuration.models.find((model) => model.provider === configuration.provider && model.id === "gpt-5.6-luna" && model.configured)
-      ?? configuration.models.find((model) => model.provider === configuration.provider && model.id === configuration.modelId)
-      ?? configuration.models.find((model) => model.configured);
+    const liveModel = chooseLiveSmokeModel(configuration);
     if (!liveModel) throw new Error("Live smoke test has no configured model.");
     await request({
       type: "configure_model",
@@ -350,6 +462,18 @@ try {
     if (!restored.contextUsage?.contextWindow || restored.tokenUsage.output <= 0) {
       throw new Error("Context and token usage were not included in the restored session snapshot.");
     }
+    const mcpEchoToken = `SUOCODE_MCP_ECHO_${Date.now()}`;
+    const mcpEventStart = events.length;
+    const mcpSettled = waitForEvent((event) => event.type === "run_state" && event.running === false);
+    await request({
+      type: "prompt",
+      text: `Call the smoke_server_echo tool exactly once with text ${mcpEchoToken}. Do not call any other tool. Then reply exactly ${mcpEchoToken}.`,
+    });
+    await mcpSettled;
+    const mcpToolEvent = events.slice(mcpEventStart).find((event) => event.type === "tool_finished" && event.tool.name === "smoke_server_echo");
+    if (!mcpToolEvent || !mcpToolEvent.tool.output.includes(`MCP_ECHO:${mcpEchoToken}`)) {
+      throw new Error(`The live Agent did not execute the direct tool supplied by pi-mcp-adapter: ${JSON.stringify(events.slice(mcpEventStart))}`);
+    }
     const rewindTarget = restored.messages.find((message) => message.role === "user");
     if (!rewindTarget?.entryId) throw new Error("Historical user messages did not expose a Pi session entry ID.");
     const rewindToken = `SUOCODE_REWIND_OK_${Date.now()}`;
@@ -373,9 +497,16 @@ try {
     }
   }
 
+  const removedMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "smoke-server", scope: "global" });
+  if (removedMcp.servers.some((server) => server.name === "smoke-server")) {
+    throw new Error("The Pi MCP adapter configuration bridge did not remove the real test server.");
+  }
+
   process.stdout.write(`SuoCode runtime smoke passed${live ? " (live model + tool execution)" : ""}.\n`);
 } finally {
   if (child.connected) child.disconnect();
   child.kill("SIGTERM");
+  if (oauthFixture.connected) oauthFixture.send({ type: "shutdown" });
+  oauthFixture.kill("SIGTERM");
   rmSync(temporaryRoot, { recursive: true, force: true });
 }

@@ -103,12 +103,14 @@ interface McpAdapterConfigModule {
 interface PiSubagentsStatusModule {
   ASYNC_DIR: string;
   RESULTS_DIR: string;
+  deliverStopRequest(input: { asyncDir: string; source?: string }): void;
   listAsyncRuns(asyncDirRoot: string, options?: {
     states?: string[];
     sessionId?: string;
     resultsDir?: string;
   }): Array<{
     id: string;
+    asyncDir: string;
     state: "queued" | "running" | "complete" | "failed" | "paused" | "stopped";
     mode: "single" | "parallel" | "chain";
     startedAt: number;
@@ -155,9 +157,11 @@ function loadPiSubagentsStatusModule(): Promise<PiSubagentsStatusModule> {
   piSubagentsStatusModule ??= Promise.all([
     jiti.import(join(packageDirectory, "src", "runs", "background", "async-status.ts")),
     jiti.import(join(packageDirectory, "src", "shared", "types.ts")),
-  ]).then(([status, shared]) => ({
+    jiti.import(join(packageDirectory, "src", "runs", "background", "control-channel.ts")),
+  ]).then(([status, shared, control]) => ({
     ...(status as Pick<PiSubagentsStatusModule, "listAsyncRuns">),
     ...(shared as Pick<PiSubagentsStatusModule, "ASYNC_DIR" | "RESULTS_DIR">),
+    ...(control as Pick<PiSubagentsStatusModule, "deliverStopRequest">),
   }));
   return piSubagentsStatusModule;
 }
@@ -463,6 +467,7 @@ function subagentActivitiesFromResult(result: unknown, fallbackRunId: string, ba
       mode,
       status: failed,
       background: isBackground,
+      controlReady: !isBackground && runId !== fallbackRunId,
       currentTool: stringValue(progressItem?.currentTool) || undefined,
       currentPath: stringValue(progressItem?.currentPath) || undefined,
       recentTools: subagentRecentTools(progressItem?.recentTools),
@@ -1591,7 +1596,7 @@ export class SuoCodeRuntime {
       const statusModule = await loadPiSubagentsStatusModule();
       if (active !== this.active) return;
       const runs = statusModule.listAsyncRuns(statusModule.ASYNC_DIR, {
-        sessionId: active.session.sessionId,
+        sessionId: active.session.sessionFile ?? active.session.sessionId,
         resultsDir: statusModule.RESULTS_DIR,
       });
       const updatedAt = Date.now();
@@ -1605,6 +1610,7 @@ export class SuoCodeRuntime {
         mode: run.mode,
         status: subagentStatus(step.status, subagentStatus(run.state)),
         background: true,
+        controlReady: run.state === "running",
         currentTool: step.currentTool ?? run.currentTool,
         currentPath: step.currentPath ?? run.currentPath,
         recentTools: subagentRecentTools(step.recentTools),
@@ -1623,6 +1629,12 @@ export class SuoCodeRuntime {
             this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
           });
         }, 750);
+      } else if ([...active.subagents.values()].some((activity) => activity.background && activity.status === "running" && activity.controlReady !== true && Date.now() - activity.updatedAt < 15_000)) {
+        this.subagentRefreshTimer = setTimeout(() => {
+          void this.refreshAsyncSubagents().catch((error) => {
+            this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+          });
+        }, 250);
       }
     } catch (error) {
       this.emitEvent({ type: "runtime_error", message: `子 Agent 状态读取失败：${errorMessage(error)}`, detail: errorDetail(error) });
@@ -1664,8 +1676,20 @@ export class SuoCodeRuntime {
 
   async stopSubagent(id: string, background: boolean): Promise<{ stopped: true }> {
     if (!id.trim()) throw new Error("缺少子 Agent 标识。");
-    await this.subagentRpc(background ? "stop" : "interrupt", id.trim());
     const active = this.requireActive();
+    if (background) {
+      const statusModule = await loadPiSubagentsStatusModule();
+      const runs = statusModule.listAsyncRuns(statusModule.ASYNC_DIR, {
+        states: ["running"],
+        sessionId: active.session.sessionFile ?? active.session.sessionId,
+        resultsDir: statusModule.RESULTS_DIR,
+      });
+      const run = runs.find((candidate) => candidate.id === id.trim());
+      if (!run) throw new Error("后台子 Agent 尚未进入可停止状态，或已经结束。");
+      statusModule.deliverStopRequest({ asyncDir: run.asyncDir, source: "suocode-desktop" });
+    } else {
+      await this.subagentRpc("interrupt", id.trim());
+    }
     for (const [key, activity] of active.subagents) {
       if (activity.runId === id || activity.id === id) {
         active.subagents.set(key, { ...activity, status: "stopped", updatedAt: Date.now() });
@@ -1778,6 +1802,7 @@ export class SuoCodeRuntime {
               mode: Array.isArray(args.tasks) ? "parallel" : Array.isArray(args.chain) ? "chain" : "single",
               status: "running",
               background,
+              controlReady: false,
               toolCount: 0,
               tokens: 0,
               durationMs: 0,
@@ -1855,13 +1880,21 @@ export class SuoCodeRuntime {
             else {
               const placeholder = active.subagents.get(`${tool.id}:0`);
               if (placeholder) {
-                active.subagents.set(placeholder.id, {
+                const rawResult = isRecord(event.result) ? event.result : undefined;
+                const details = rawResult && isRecord(rawResult.details) ? rawResult.details : undefined;
+                const actualRunId = stringValue(details?.asyncId) || stringValue(details?.runId);
+                const updated = {
                   ...placeholder,
+                  id: actualRunId ? `${actualRunId}:0` : placeholder.id,
+                  runId: actualRunId || placeholder.runId,
                   status: event.isError ? "failed" : placeholder.background ? "running" : "completed",
+                  controlReady: false,
                   error: event.isError ? tool.output : placeholder.error,
                   durationMs: Date.now() - placeholder.updatedAt,
                   updatedAt: Date.now(),
-                });
+                } satisfies SubagentActivity;
+                active.subagents.delete(placeholder.id);
+                active.subagents.set(updated.id, updated);
                 this.publishSubagents();
               }
             }

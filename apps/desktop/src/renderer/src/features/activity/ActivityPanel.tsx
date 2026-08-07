@@ -86,10 +86,13 @@ export function ActivityPanel({
           <ol className="composer-subagent-list">
             {subagents.map((activity) => {
               const active = activity.status === "pending" || activity.status === "running" || activity.status === "paused";
+              const controllable = active && activity.controlReady === true;
               return <li className={activity.status} key={activity.id}>
                 <span className="subagent-state-icon">{activity.status === "running" ? <LoaderCircle className="spin" size={14} /> : activity.status === "completed" ? <CheckCircle2 size={14} /> : <Bot size={14} />}</span>
                 <span className="subagent-copy"><strong>{activity.agent}</strong>{activity.task ? <span>{activity.task}</span> : null}<small>{agentSummary(activity)}{activity.currentPath ? ` · ${activity.currentPath}` : ""}</small>{activity.error ? <small className="subagent-error">{activity.error}</small> : null}</span>
-                {active ? <button className="subagent-stop" type="button" aria-label={`停止 ${activity.agent}`} onClick={() => onStopSubagent(activity)}><Square size={10} fill="currentColor" /><span>停止</span></button> : <small className="subagent-status">{statusLabel(activity.status)}</small>}
+                {controllable
+                  ? <button className="subagent-stop" type="button" aria-label={`停止 ${activity.agent}`} onClick={() => onStopSubagent(activity)}><Square size={10} fill="currentColor" /><span>停止</span></button>
+                  : <small className="subagent-status">{active ? "启动中" : statusLabel(activity.status)}</small>}
               </li>;
             })}
           </ol>
