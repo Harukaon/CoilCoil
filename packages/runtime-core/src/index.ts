@@ -13,6 +13,7 @@ import {
   type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type {
   ChangedFile,
   ChangeStatus,
@@ -25,6 +26,11 @@ import type {
   McpRuntimeStatus,
   McpServerConfiguration,
   McpServerRuntimeStatus,
+  ModelProviderConfiguration,
+  ModelProviderConfigurationInput,
+  ModelProviderConfigurationSnapshot,
+  ModelProviderModelConfiguration,
+  ModelProviderSaveResult,
   ModelOption,
   PromptImage,
   ProjectSnapshot,
@@ -173,6 +179,206 @@ function recordOfStrings(value: unknown): Record<string, string> {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+const MASKED_CONFIGURATION_VALUE = "••••••";
+
+const MODEL_PROVIDER_APIS: ModelProviderConfigurationSnapshot["supportedApis"] = [
+  { id: "openai-completions", label: "OpenAI Chat Completions", description: "兼容性最高，适合绝大多数 OpenAI 兼容服务。" },
+  { id: "openai-responses", label: "OpenAI Responses", description: "OpenAI Responses API。" },
+  { id: "azure-openai-responses", label: "Azure OpenAI Responses", description: "Azure OpenAI 的 Responses API。" },
+  { id: "openai-codex-responses", label: "OpenAI Codex Responses", description: "OpenAI Codex 专用 Responses 流。" },
+  { id: "anthropic-messages", label: "Anthropic Messages", description: "Anthropic Claude API 及兼容网关。" },
+  { id: "google-generative-ai", label: "Google Generative AI", description: "Google AI Studio / Generative Language API。" },
+  { id: "google-vertex", label: "Google Vertex AI", description: "Google Vertex AI。" },
+  { id: "mistral-conversations", label: "Mistral Conversations", description: "Mistral 原生 Conversations API。" },
+  { id: "bedrock-converse-stream", label: "Amazon Bedrock Converse", description: "Amazon Bedrock Converse Stream API。" },
+  { id: "pi-messages", label: "Pi Messages", description: "Pi 原生 Messages 流协议，适用于实现该协议的私有服务。" },
+];
+
+interface PrivateModelsConfiguration {
+  providers: Record<string, Record<string, unknown>>;
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/** Pi accepts JSON comments in models.json; keep private configurations editable through the GUI. */
+function stripJsonComments(value: string): string {
+  let output = "";
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    const next = value[index + 1];
+    if (quoted) {
+      output += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+      output += character;
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      index += 1;
+      while (index + 1 < value.length && value[index + 1] !== "\n" && value[index + 1] !== "\r") index += 1;
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      index += 2;
+      while (index < value.length && !(value[index] === "*" && value[index + 1] === "/")) index += 1;
+      if (index < value.length) index += 1;
+      continue;
+    }
+    output += character;
+  }
+  return output;
+}
+
+function optionalString(record: Record<string, unknown>, key: string): string | undefined {
+  return typeof record[key] === "string" && record[key].trim() ? record[key] : undefined;
+}
+
+function optionalBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
+  return typeof record[key] === "boolean" ? record[key] : undefined;
+}
+
+function optionalPositiveNumber(record: Record<string, unknown>, key: string): number | undefined {
+  return typeof record[key] === "number" && Number.isFinite(record[key]) && record[key] > 0 ? record[key] : undefined;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function stringRecord(value: unknown, redact = false): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  if (!entries.length) return undefined;
+  return Object.fromEntries(entries.map(([key, entry]) => [key, redact && sensitiveConfigurationKey(key) && entry ? MASKED_CONFIGURATION_VALUE : entry]));
+}
+
+function safeUnknownRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? cloneJson(value) : undefined;
+}
+
+function thinkingLevelMap(value: unknown): Partial<Record<ThinkingLevel, string | null>> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value).filter((entry): entry is [ThinkingLevel, string | null] =>
+    ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(entry[0])
+      && (typeof entry[1] === "string" || entry[1] === null),
+  );
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function modelCost(value: unknown): ModelProviderModelConfiguration["cost"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const input = typeof value.input === "number" ? value.input : undefined;
+  const output = typeof value.output === "number" ? value.output : undefined;
+  const cacheRead = typeof value.cacheRead === "number" ? value.cacheRead : undefined;
+  const cacheWrite = typeof value.cacheWrite === "number" ? value.cacheWrite : undefined;
+  const tiers = Array.isArray(value.tiers)
+    ? value.tiers.flatMap((tier) => {
+      if (!isRecord(tier)) return [];
+      const inputTokensAbove = typeof tier.inputTokensAbove === "number" ? tier.inputTokensAbove : undefined;
+      const tierInput = typeof tier.input === "number" ? tier.input : undefined;
+      const tierOutput = typeof tier.output === "number" ? tier.output : undefined;
+      const tierCacheRead = typeof tier.cacheRead === "number" ? tier.cacheRead : undefined;
+      const tierCacheWrite = typeof tier.cacheWrite === "number" ? tier.cacheWrite : undefined;
+      return inputTokensAbove === undefined || tierInput === undefined || tierOutput === undefined || tierCacheRead === undefined || tierCacheWrite === undefined
+        ? []
+        : [{ inputTokensAbove, input: tierInput, output: tierOutput, cacheRead: tierCacheRead, cacheWrite: tierCacheWrite }];
+    })
+    : undefined;
+  return input === undefined || output === undefined || cacheRead === undefined || cacheWrite === undefined
+    ? undefined
+    : { input, output, cacheRead, cacheWrite, tiers: tiers?.length ? tiers : undefined };
+}
+
+function modelConfiguration(value: unknown, fallbackId?: string): ModelProviderModelConfiguration | undefined {
+  if (!isRecord(value)) return undefined;
+  const id = optionalString(value, "id") ?? fallbackId;
+  if (!id) return undefined;
+  const input = Array.isArray(value.input)
+    ? value.input.filter((item): item is "text" | "image" => item === "text" || item === "image")
+    : undefined;
+  return {
+    id,
+    name: optionalString(value, "name"),
+    api: optionalString(value, "api"),
+    baseUrl: optionalString(value, "baseUrl"),
+    reasoning: optionalBoolean(value, "reasoning"),
+    thinkingLevelMap: thinkingLevelMap(value.thinkingLevelMap),
+    input: input?.length ? input : undefined,
+    contextWindow: optionalPositiveNumber(value, "contextWindow"),
+    maxTokens: optionalPositiveNumber(value, "maxTokens"),
+    cost: modelCost(value.cost),
+    samplingParams: safeUnknownRecord(value.samplingParams),
+    headers: stringRecord(value.headers, true),
+    compat: safeUnknownRecord(value.compat),
+  };
+}
+
+function modelConfigurationForStorage(
+  model: ModelProviderModelConfiguration,
+  existing?: Record<string, unknown>,
+): Record<string, unknown> {
+  const headers = mergeMaskedStringRecord(model.headers, objectValue(existing?.headers));
+  const result: Record<string, unknown> = {
+    id: model.id.trim(),
+  };
+  const assign = (key: string, value: unknown): void => {
+    if (value !== undefined && value !== "") result[key] = value;
+  };
+  assign("name", model.name?.trim());
+  assign("api", model.api?.trim());
+  assign("baseUrl", model.baseUrl?.trim());
+  assign("reasoning", model.reasoning);
+  assign("thinkingLevelMap", model.thinkingLevelMap);
+  assign("input", model.input?.length ? model.input : undefined);
+  assign("contextWindow", model.contextWindow);
+  assign("maxTokens", model.maxTokens);
+  assign("cost", model.cost);
+  assign("samplingParams", model.samplingParams);
+  assign("headers", Object.keys(headers).length ? headers : undefined);
+  assign("compat", model.compat);
+  return result;
+}
+
+function mergeMaskedStringRecord(
+  value: Record<string, string> | undefined,
+  existing: Record<string, unknown> | undefined,
+): Record<string, string> {
+  const previous = stringRecord(existing) ?? {};
+  return Object.fromEntries(Object.entries(value ?? {}).map(([key, entry]) => [
+    key,
+    entry === MASKED_CONFIGURATION_VALUE && previous[key] !== undefined ? previous[key] : entry,
+  ]));
+}
+
+function assertProviderId(value: string): string {
+  const id = value.trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) {
+    throw new Error("服务商 ID 只能使用字母、数字、点、短横线或下划线，并且必须以字母或数字开头。");
+  }
+  return id;
+}
+
+function assertOptionalUrl(value: string | undefined, label: string): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  try {
+    const parsed = new URL(normalized);
+    if (!/^https?:$/.test(parsed.protocol)) throw new Error("Unsupported protocol");
+  } catch {
+    throw new Error(`${label}必须是完整的 http:// 或 https:// 地址。`);
+  }
+  return normalized;
 }
 
 export interface SuoCodeRuntimeOptions {
@@ -952,6 +1158,259 @@ export class SuoCodeRuntime {
       models,
       migratedLegacyCredentials: this.migratedLegacyCredentials,
     };
+  }
+
+  private modelsConfigurationPath(): string {
+    return join(this.agentDir, "models.json");
+  }
+
+  private readPrivateModelsConfiguration(): PrivateModelsConfiguration {
+    const path = this.modelsConfigurationPath();
+    if (!existsSync(path)) return { providers: {} };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripJsonComments(readFileSync(path, "utf8")));
+    } catch (error) {
+      throw new Error(`无法读取 SuoCode 私有 models.json：${errorMessage(error)}`);
+    }
+    if (!isRecord(parsed) || !isRecord(parsed.providers)) {
+      throw new Error("SuoCode 私有 models.json 必须包含 providers 对象。");
+    }
+    const providers = Object.fromEntries(
+      Object.entries(parsed.providers).filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1])),
+    );
+    return { providers: cloneJson(providers) };
+  }
+
+  private writePrivateModelsConfiguration(configuration: PrivateModelsConfiguration): void {
+    mkdirSync(this.agentDir, { recursive: true });
+    const path = this.modelsConfigurationPath();
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(configuration, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // A private runtime still works when a filesystem does not support POSIX permissions.
+    }
+  }
+
+  private modelProviderFromConfiguration(
+    providerId: string,
+    provider: Record<string, unknown> | undefined,
+    runtimeModels: readonly { id: string; name?: string; api?: string; baseUrl?: string; reasoning?: boolean; input: readonly string[]; contextWindow?: number; maxTokens?: number; thinkingLevelMap?: Record<string, string | null | undefined>; cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: Array<{ inputTokensAbove: number; input: number; output: number; cacheRead: number; cacheWrite: number }> }; samplingParams?: Record<string, unknown>; headers?: Record<string, string>; compat?: object }[],
+    providerName: string | undefined,
+    builtins: ReadonlySet<string>,
+    modelRuntime: ModelRuntime,
+  ): ModelProviderConfiguration {
+    const configuredModels = Array.isArray(provider?.models)
+      ? provider.models.map((item) => modelConfiguration(item)).filter((item): item is ModelProviderModelConfiguration => Boolean(item))
+      : runtimeModels.map((model) => ({
+        id: model.id,
+        name: model.name,
+        api: model.api,
+        baseUrl: model.baseUrl,
+        reasoning: model.reasoning,
+        thinkingLevelMap: thinkingLevelMap(model.thinkingLevelMap),
+        input: model.input.filter((item): item is "text" | "image" => item === "text" || item === "image"),
+        contextWindow: model.contextWindow,
+        maxTokens: model.maxTokens,
+        cost: model.cost && typeof model.cost.input === "number" && typeof model.cost.output === "number" && typeof model.cost.cacheRead === "number" && typeof model.cost.cacheWrite === "number"
+          ? { input: model.cost.input, output: model.cost.output, cacheRead: model.cost.cacheRead, cacheWrite: model.cost.cacheWrite, tiers: model.cost.tiers?.map((tier) => ({ ...tier })) }
+          : undefined,
+        samplingParams: model.samplingParams ? cloneJson(model.samplingParams) : undefined,
+        headers: model.headers ? stringRecord(model.headers, true) : undefined,
+        compat: safeUnknownRecord(model.compat),
+      }));
+    const modelOverrides = objectValue(provider?.modelOverrides);
+    const mappedOverrides = modelOverrides
+      ? Object.fromEntries(Object.entries(modelOverrides).flatMap(([modelId, value]) => {
+        const model = modelConfiguration(value, modelId);
+        if (!model) return [];
+        const { id: _id, api: _api, baseUrl: _baseUrl, ...override } = model;
+        return [[modelId, override]];
+      })) as ModelProviderConfiguration["modelOverrides"]
+      : undefined;
+    const apiKey = provider ? optionalString(provider, "apiKey") : undefined;
+    const apiKeyReference = apiKey?.startsWith("$") || apiKey?.startsWith("!") ? apiKey : undefined;
+    return {
+      id: providerId,
+      name: provider ? optionalString(provider, "name") ?? providerName ?? providerId : providerName ?? providerId,
+      baseUrl: provider ? optionalString(provider, "baseUrl") : undefined,
+      api: provider ? optionalString(provider, "api") : undefined,
+      oauth: provider?.oauth === "radius" ? "radius" : undefined,
+      headers: provider ? stringRecord(provider.headers, true) : undefined,
+      compat: provider ? safeUnknownRecord(provider.compat) : undefined,
+      authHeader: provider ? optionalBoolean(provider, "authHeader") : undefined,
+      apiKeyReference,
+      hasPrivateApiKeyReference: Boolean(apiKey && !apiKeyReference),
+      apiKeyConfigured: modelRuntime.hasConfiguredAuth(providerId) || Boolean(apiKey),
+      replaceModels: Array.isArray(provider?.models),
+      models: configuredModels,
+      modelOverrides: mappedOverrides && Object.keys(mappedOverrides).length ? mappedOverrides : undefined,
+      source: provider ? builtins.has(providerId) ? "override" : "custom" : "built-in",
+    };
+  }
+
+  async getModelProviderConfiguration(): Promise<ModelProviderConfigurationSnapshot> {
+    const modelRuntime = await this.ready();
+    const privateConfiguration = this.readPrivateModelsConfiguration();
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius"]);
+    const providers = new Map(modelRuntime.getProviders().map((provider) => [provider.id, provider.name || provider.id]));
+    const allModels = modelRuntime.getModels();
+    const models = new Map<string, Array<(typeof allModels)[number]>>();
+    for (const model of modelRuntime.getModels()) {
+      const values = models.get(model.provider) ?? [];
+      values.push(model);
+      models.set(model.provider, values);
+    }
+    const ids = new Set([...providers.keys(), ...Object.keys(privateConfiguration.providers)]);
+    const configuration = [...ids].map((id) => this.modelProviderFromConfiguration(
+      id,
+      privateConfiguration.providers[id],
+      models.get(id) ?? [],
+      providers.get(id),
+      builtinIds,
+      modelRuntime,
+    )).sort((left, right) => {
+      const rank = (source: ModelProviderConfiguration["source"]): number => source === "custom" ? 0 : source === "override" ? 1 : 2;
+      return rank(left.source) - rank(right.source) || Number(right.apiKeyConfigured) - Number(left.apiKeyConfigured) || left.name!.localeCompare(right.name!);
+    });
+    return {
+      configPath: this.modelsConfigurationPath(),
+      providers: configuration,
+      supportedApis: MODEL_PROVIDER_APIS,
+    };
+  }
+
+  private validateModelProviderConfiguration(
+    input: ModelProviderConfigurationInput,
+    existing: Record<string, unknown> | undefined,
+    builtinIds: ReadonlySet<string>,
+  ): { id: string; provider: Record<string, unknown> } {
+    const draft = input.provider;
+    const id = assertProviderId(draft.id);
+    const isBuiltin = builtinIds.has(id);
+    const baseUrl = assertOptionalUrl(draft.baseUrl, "Base URL");
+    const api = draft.api?.trim() || undefined;
+    const knownApis = new Set(MODEL_PROVIDER_APIS.map((option) => option.id));
+    if (api && !knownApis.has(api)) throw new Error(`“${api}”不是当前 Pi 支持的请求协议。`);
+    if (draft.oauth && draft.oauth !== "radius") throw new Error("Pi 当前仅支持 radius OAuth 服务商。");
+
+    const seenModelIds = new Set<string>();
+    const models = draft.models.map((model) => {
+      const modelId = model.id.trim();
+      if (!modelId) throw new Error("每个模型都需要模型 ID。`id` 会原样发送给服务商。");
+      if (seenModelIds.has(modelId)) throw new Error(`模型 ID “${modelId}”重复。`);
+      seenModelIds.add(modelId);
+      const modelApi = model.api?.trim();
+      if (modelApi && !knownApis.has(modelApi)) throw new Error(`模型 ${modelId} 使用了 Pi 不支持的请求协议“${modelApi}”。`);
+      assertOptionalUrl(model.baseUrl, `模型 ${modelId} 的 Base URL`);
+      if (model.input?.length && !model.input.includes("text")) throw new Error(`模型 ${modelId} 至少需要支持文本输入。`);
+      for (const [label, value] of [["上下文窗口", model.contextWindow], ["最大输出", model.maxTokens]] as const) {
+        if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new Error(`模型 ${modelId} 的${label}必须是大于 0 的数字。`);
+      }
+      if (model.cost && [model.cost.input, model.cost.output, model.cost.cacheRead, model.cost.cacheWrite].some((value) => !Number.isFinite(value) || value < 0)) {
+        throw new Error(`模型 ${modelId} 的成本参数必须是非负数字。`);
+      }
+      if (model.cost?.tiers?.some((tier) => !Number.isFinite(tier.inputTokensAbove) || tier.inputTokensAbove < 0 || [tier.input, tier.output, tier.cacheRead, tier.cacheWrite].some((value) => !Number.isFinite(value) || value < 0))) {
+        throw new Error(`模型 ${modelId} 的成本阶梯参数必须是非负数字。`);
+      }
+      return model;
+    });
+    const isCustom = !isBuiltin && (!existing || !builtinIds.has(id));
+    if (isCustom) {
+      if (!baseUrl) throw new Error("自定义服务商需要 Base URL。");
+      if (!api) throw new Error("自定义服务商需要选择 Pi 请求协议。");
+      if (!draft.replaceModels || !models.length) throw new Error("自定义服务商至少需要定义一个模型。`models` 是 Pi 识别新服务商的必填目录。");
+    }
+    const apiKeyReference = draft.apiKeyReference?.trim();
+    if (apiKeyReference && !apiKeyReference.startsWith("$") && !apiKeyReference.startsWith("!")) {
+      throw new Error("Pi API Key 引用应使用 $环境变量、${环境变量} 或 !命令。普通密钥请填写在私有 API 密钥输入框中。");
+    }
+
+    const result: Record<string, unknown> = { ...cloneJson(existing ?? {}) };
+    for (const key of ["name", "baseUrl", "api", "oauth", "headers", "compat", "authHeader", "models", "modelOverrides"]) delete result[key];
+    const set = (key: string, value: unknown): void => {
+      if (value !== undefined && value !== "") result[key] = value;
+    };
+    set("name", draft.name?.trim());
+    set("baseUrl", baseUrl);
+    set("api", api);
+    set("oauth", draft.oauth);
+    const headers = mergeMaskedStringRecord(draft.headers, objectValue(existing?.headers));
+    set("headers", Object.keys(headers).length ? headers : undefined);
+    set("compat", draft.compat && Object.keys(draft.compat).length ? draft.compat : undefined);
+    set("authHeader", draft.authHeader);
+    if (apiKeyReference) result.apiKey = apiKeyReference;
+    else if (!input.preserveApiKeyReference) delete result.apiKey;
+    if (draft.replaceModels) {
+      const existingModels = Array.isArray(existing?.models) ? existing.models.filter(isRecord) : [];
+      result.models = models.map((model) => modelConfigurationForStorage(model, existingModels.find((item) => optionalString(item, "id") === model.id)));
+    }
+    const overrides = draft.modelOverrides && Object.keys(draft.modelOverrides).length ? draft.modelOverrides : undefined;
+    set("modelOverrides", overrides);
+    return { id, provider: result };
+  }
+
+  async saveModelProviderConfiguration(input: ModelProviderConfigurationInput): Promise<ModelProviderSaveResult> {
+    const modelRuntime = await this.ready();
+    const privateConfiguration = this.readPrivateModelsConfiguration();
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius"]);
+    const existing = privateConfiguration.providers[input.provider.id.trim()];
+    const next = this.validateModelProviderConfiguration(input, existing, builtinIds);
+    const previous = cloneJson(privateConfiguration);
+    privateConfiguration.providers[next.id] = next.provider;
+    this.writePrivateModelsConfiguration(privateConfiguration);
+    try {
+      await modelRuntime.refresh({ allowNetwork: false });
+      const runtimeError = modelRuntime.getError();
+      if (runtimeError?.includes("models.json") || runtimeError?.includes(`Provider \"${next.id}\"`)) throw new Error(runtimeError);
+    } catch (error) {
+      this.writePrivateModelsConfiguration(previous);
+      await modelRuntime.refresh({ allowNetwork: false });
+      throw new Error(`Pi 拒绝此服务商配置：${errorMessage(error)}`);
+    }
+
+    if (input.apiKey?.trim()) {
+      try {
+        const key = input.apiKey.trim();
+        await modelRuntime.login(next.id, "api_key", { prompt: async () => key, notify: () => undefined });
+      } catch (error) {
+        throw new Error(`服务商配置已保存，但无法保存私有 API 密钥：${errorMessage(error)}`);
+      }
+    }
+
+    const configuration = await this.getConfiguration();
+    this.emitEvent({ type: "configuration_updated", configuration });
+    const saved = await this.getModelProviderConfiguration();
+    const provider = saved.providers.find((item) => item.id === next.id);
+    if (!provider) throw new Error("Pi 已刷新，但未能读取刚保存的服务商。");
+    return { provider, configuration };
+  }
+
+  async removeModelProviderConfiguration(providerId: string): Promise<RuntimeConfiguration> {
+    const id = assertProviderId(providerId);
+    const privateConfiguration = this.readPrivateModelsConfiguration();
+    const existing = privateConfiguration.providers[id];
+    if (!existing) throw new Error("此服务商没有可移除的 SuoCode 私有配置。");
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius"]);
+    const modelRuntime = await this.ready();
+    if (!builtinIds.has(id)) {
+      try {
+        await modelRuntime.logout(id);
+      } catch {
+        // A malformed/removed provider may not expose a logout handler; config removal still proceeds.
+      }
+    }
+    delete privateConfiguration.providers[id];
+    this.writePrivateModelsConfiguration(privateConfiguration);
+    await modelRuntime.refresh({ allowNetwork: false });
+    const runtimeError = modelRuntime.getError();
+    if (runtimeError?.includes("models.json")) throw new Error(`Pi 无法重新加载服务商目录：${runtimeError}`);
+    const configuration = await this.getConfiguration();
+    this.emitEvent({ type: "configuration_updated", configuration });
+    return configuration;
   }
 
   async configureModel(input: {

@@ -1,5 +1,5 @@
-import { AlertCircle, ArrowLeft, Cable, Copy, ExternalLink, KeyRound, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Search, Settings, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, ArrowLeft, Cable, Copy, ExternalLink, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type {
   McpConfigurationSnapshot,
@@ -8,8 +8,8 @@ import type {
   McpServerConfiguration,
   McpServerRuntimeStatus,
   RuntimeConfiguration,
-  ThinkingLevel,
 } from "@suocode/runtime-protocol";
+import { ModelSettings } from "./ModelSettings";
 import "./settings.css";
 
 type SettingsSection = "models" | "mcp";
@@ -26,14 +26,6 @@ const mcpStatusLabel: Record<McpServerRuntimeStatus["status"], string> = {
 
 function mcpStatusClass(status: McpServerRuntimeStatus["status"] | undefined): string {
   return status?.replace(" ", "-") ?? "unknown";
-}
-
-function thinkingLevelForModel(
-  model: RuntimeConfiguration["models"][number] | undefined,
-  requested: ThinkingLevel,
-): ThinkingLevel {
-  if (!model?.supportedThinkingLevels.length) return "off";
-  return model.supportedThinkingLevels.includes(requested) ? requested : model.supportedThinkingLevels[0];
 }
 
 function blankMcpServer(): McpServerConfiguration {
@@ -72,90 +64,6 @@ function parseStringMap(value: string, label: string, original: Record<string, s
     key,
     entry === MASKED_SECRET_VALUE && Object.hasOwn(original, key) ? original[key] : entry,
   ]));
-}
-
-function ModelSettings({ configuration, onSaved, runtimeId }: {
-  configuration?: RuntimeConfiguration;
-  onSaved: (configuration: RuntimeConfiguration) => void;
-  runtimeId?: string;
-}): React.JSX.Element {
-  const providers = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const model of configuration?.models ?? []) map.set(model.provider, model.providerName);
-    return [...map].sort((a, b) => {
-      const aConfigured = configuration?.configuredProviders.includes(a[0]) ? 1 : 0;
-      const bConfigured = configuration?.configuredProviders.includes(b[0]) ? 1 : 0;
-      return bConfigured - aConfigured || a[1].localeCompare(b[1]);
-    });
-  }, [configuration]);
-  const [provider, setProvider] = useState("");
-  const [modelId, setModelId] = useState("");
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("medium");
-  const [apiKey, setApiKey] = useState("");
-  const [modelSearch, setModelSearch] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    if (!configuration) return;
-    const nextProvider = configuration.provider || configuration.configuredProviders[0] || providers[0]?.[0] || "";
-    const providerModels = configuration.models.filter((model) => model.provider === nextProvider);
-    const nextModel = providerModels.find((model) => model.id === configuration.modelId) ?? providerModels[0];
-    setProvider(nextProvider);
-    setModelId(nextModel?.id || "");
-    setThinkingLevel(thinkingLevelForModel(nextModel, configuration.thinkingLevel));
-    setApiKey("");
-    setModelSearch("");
-    setError(undefined);
-  }, [configuration, providers]);
-
-  const models = useMemo(() => (configuration?.models ?? []).filter((model) =>
-    model.provider === provider && (!modelSearch || `${model.name} ${model.id}`.toLowerCase().includes(modelSearch.toLowerCase())),
-  ), [configuration, modelSearch, provider]);
-  const selectedModel = configuration?.models.find((model) => model.provider === provider && model.id === modelId);
-  const availableThinkingLevels: ThinkingLevel[] = selectedModel?.supportedThinkingLevels?.length ? selectedModel.supportedThinkingLevels : ["off"];
-  const configured = configuration?.configuredProviders.includes(provider) ?? false;
-
-  const chooseProvider = (value: string): void => {
-    const first = configuration?.models.find((model) => model.provider === value);
-    setProvider(value);
-    setModelId(first?.id || "");
-    setThinkingLevel((current) => thinkingLevelForModel(first, current));
-    setModelSearch("");
-  };
-
-  const save = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-    if (!provider || !modelId) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      onSaved(await window.suocode.request<RuntimeConfiguration>({
-        type: "configure_model",
-        provider,
-        modelId,
-        thinkingLevel,
-        apiKey: apiKey || undefined,
-      }, runtimeId));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <form className="model-settings-form" onSubmit={(event) => void save(event)}>
-      <label>服务商<select value={provider} onChange={(event) => chooseProvider(event.target.value)}>{providers.map(([id, name]) => <option value={id} key={id}>{name}{configuration?.configuredProviders.includes(id) ? " · 已配置" : ""}</option>)}</select></label>
-      <label>模型<span className="model-search"><Search size={14} /><input value={modelSearch} placeholder="筛选模型" onChange={(event) => setModelSearch(event.target.value)} /></span><select size={7} value={modelId} onChange={(event) => { const value = event.target.value; setModelId(value); setThinkingLevel((current) => thinkingLevelForModel(configuration?.models.find((item) => item.provider === provider && item.id === value), current)); }}>{models.map((model) => <option value={model.id} key={model.id}>{model.name} · {model.id}{model.reasoning ? " · reasoning" : ""}</option>)}</select></label>
-      <div className="settings-grid">
-        <label>Thinking<select value={thinkingLevel} disabled={availableThinkingLevels.length === 1} onChange={(event) => setThinkingLevel(event.target.value as ThinkingLevel)}>{availableThinkingLevels.map((level) => <option value={level} key={level}>{level}</option>)}</select></label>
-        <label>API 密钥<span className="secret-input"><KeyRound size={14} /><input type="password" value={apiKey} autoComplete="off" placeholder={configured ? "已配置，留空可保留" : "粘贴服务商 API 密钥"} onChange={(event) => setApiKey(event.target.value)} /></span></label>
-      </div>
-      {error ? <div className="settings-error"><AlertCircle size={14} />{error}</div> : null}
-      <footer><span>{configured ? "服务商凭据可用" : "首次发送消息前需要配置凭据。"}</span><button className="primary-button" type="submit" disabled={saving || !provider || !modelId}>{saving ? <LoaderCircle className="spin" size={15} /> : null}保存模型设置</button></footer>
-    </form>
-  );
 }
 
 function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): React.JSX.Element {
@@ -452,7 +360,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
         <button className="settings-back" type="button" aria-label="关闭设置" onClick={onClose}><ArrowLeft size={15} />返回工作区</button>
       </aside>
       <section className="settings-page" role="region">
-        <header className="settings-page-header"><div><span className="settings-icon">{section === "models" ? <Settings size={17} /> : <Network size={17} />}</span><div><h1 id="settings-title">{section === "models" ? "模型与服务商" : "MCP"}</h1><p>模型凭据和 MCP 配置均保存在 SuoCode 的私有运行时中。</p></div></div></header>
+        <header className="settings-page-header window-drag"><div><span className="settings-icon">{section === "models" ? <Settings size={17} /> : <Network size={17} />}</span><div><h1 id="settings-title">{section === "models" ? "模型与服务商" : "MCP"}</h1><p>模型凭据和 MCP 配置均保存在 SuoCode 的私有运行时中。</p></div></div></header>
         <div className="settings-page-content">
           {section === "models" ? <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} /> : <McpSettings runtimeId={runtimeId} cwd={cwd} />}
         </div>

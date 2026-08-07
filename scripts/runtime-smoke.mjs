@@ -130,6 +130,57 @@ try {
   if (!initialMcp?.configPath?.startsWith(temporaryRoot) || initialMcp.servers.length !== 0) {
     throw new Error("MCP configuration was not isolated inside the SuoCode runtime.");
   }
+  const customProviderSecret = "suocode-custom-provider-secret";
+  const customProvider = await request({
+    type: "save_model_provider_configuration",
+    input: {
+      provider: {
+        id: "dog-provider",
+        name: "DogProvider",
+        baseUrl: "http://127.0.0.1:40123/v1",
+        api: "openai-completions",
+        headers: { "X-Provider": "dog" },
+        compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
+        authHeader: true,
+        replaceModels: true,
+        models: [{
+          id: "dog-coder-v1",
+          name: "Dog Coder V1",
+          reasoning: true,
+          input: ["text", "image"],
+          contextWindow: 65536,
+          maxTokens: 8192,
+          cost: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            tiers: [{ inputTokensAbove: 32000, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }],
+          },
+          samplingParams: { temperature: 0.2 },
+        }],
+        modelOverrides: {},
+      },
+      apiKey: customProviderSecret,
+      preserveApiKeyReference: false,
+    },
+  });
+  if (customProvider.provider?.id !== "dog-provider" || !customProvider.configuration.models.some((model) => model.provider === "dog-provider" && model.id === "dog-coder-v1")) {
+    throw new Error("The Pi custom provider configuration did not create its model catalog.");
+  }
+  const customProviderDirectory = await request({ type: "get_model_provider_configuration" });
+  const dogProvider = customProviderDirectory.providers.find((provider) => provider.id === "dog-provider");
+  if (!dogProvider || dogProvider.name !== "DogProvider" || !dogProvider.apiKeyConfigured || dogProvider.models[0]?.input?.includes("image") !== true || dogProvider.models[0]?.cost?.tiers?.[0]?.inputTokensAbove !== 32000) {
+    throw new Error("The custom provider configuration was not projected back to the desktop runtime.");
+  }
+  const modelsJson = readFileSync(join(temporaryRoot, "agent", "models.json"), "utf8");
+  if (modelsJson.includes(customProviderSecret)) {
+    throw new Error("A private API key leaked into models.json instead of Pi auth.json.");
+  }
+  const removedCustomProvider = await request({ type: "remove_model_provider_configuration", provider: "dog-provider" });
+  if (removedCustomProvider.models.some((model) => model.provider === "dog-provider")) {
+    throw new Error("Removing a custom provider did not remove its Pi model catalog.");
+  }
   const savedMcp = await request({
     type: "save_mcp_server",
     cwd: projectDir,

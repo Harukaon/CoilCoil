@@ -450,6 +450,57 @@ async function main() {
     await client.waitFor(`Boolean(document.querySelector(".settings-tabs"))`, "The settings dialog did not open.");
     assert.equal(await client.evaluate(`Boolean(document.querySelector(".settings-screen"))`), true, "Settings did not switch to the dedicated settings screen.");
     assert.equal(await client.evaluate(`Boolean(document.querySelector(".settings-screen")?.closest(".modal-backdrop"))`), false, "Settings is still rendered inside a modal backdrop.");
+    await client.waitFor(`Boolean(document.querySelector(".model-provider-settings"))`, "The Pi model provider settings view did not render.");
+    await client.waitFor(`Boolean(document.querySelector(".model-provider-settings .settings-select")) || Boolean(document.querySelector(".model-provider-settings .settings-error"))`, "The Pi model provider settings did not finish loading.");
+    const modelSettingsUi = await client.evaluate(`(() => ({
+      nativeSelectCount: document.querySelectorAll(".model-provider-settings select").length,
+      customSelectCount: document.querySelectorAll(".model-provider-settings .settings-select").length,
+      headerDrag: document.querySelector(".settings-page-header")?.classList.contains("window-drag") === true,
+      customProviderButton: Boolean(document.querySelector('[aria-label="添加自定义服务商"]')),
+      error: document.querySelector(".model-provider-settings .settings-error")?.textContent || "",
+    }))()`);
+    assert.equal(modelSettingsUi.nativeSelectCount, 0, "Model settings still uses a native select menu.");
+    assert.ok(modelSettingsUi.customSelectCount >= 1, `Model settings did not render the in-app selection controls: ${modelSettingsUi.error}`);
+    assert.equal(modelSettingsUi.headerDrag, true, "The settings page header did not preserve the macOS drag region.");
+    assert.equal(modelSettingsUi.customProviderButton, true, "The model settings did not expose custom Pi provider creation.");
+    const startedCustomProvider = await client.evaluate(`(() => {
+      const add = document.querySelector('[aria-label="添加自定义服务商"]');
+      if (!add) return false;
+      add.click();
+      const setValue = (selector, value) => {
+        const input = document.querySelector(selector);
+        if (!input) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      };
+      return setValue('input[placeholder="例如 dog-provider"]', "desktop-smoke-provider")
+        && setValue('input[placeholder="例如 DogProvider"]', "Desktop Smoke Provider")
+        && setValue('input[placeholder="https://api.example.com/v1"]', "http://127.0.0.1:40124/v1")
+        && setValue('input[placeholder="例如 dog-coder-v1"]', "desktop-smoke-model");
+    })()`);
+    assert.equal(startedCustomProvider, true, "The custom Pi provider editor did not accept editable provider/model fields.");
+    const savedCustomProvider = await client.evaluate(`(() => {
+      const save = [...document.querySelectorAll('.provider-editor .primary-button')].find((button) => button.textContent.includes("保存服务商"));
+      if (!save) return false;
+      save.click();
+      return true;
+    })()`);
+    assert.equal(savedCustomProvider, true, "The custom Pi provider save action was unavailable.");
+    await client.waitFor(`(async () => {
+      const snapshot = await window.suocode.request({ type: "get_model_provider_configuration" });
+      return snapshot.providers.some((provider) => provider.id === "desktop-smoke-provider" && provider.models.some((model) => model.id === "desktop-smoke-model"));
+    })()`, "The custom provider entered through the settings UI was not persisted in Pi models.json.");
+    const openedProtocolMenu = await client.evaluate(`(() => {
+      const button = document.querySelector('.model-provider-settings button[aria-label="Pi 请求协议"]');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    assert.equal(openedProtocolMenu, true, "The custom Pi protocol selector did not open.");
+    await client.waitFor(`Boolean(document.querySelector(".settings-select-popover"))`, "The in-app Pi protocol menu did not render.");
+    await client.evaluate(`document.body.click()`);
     const openedMcpSettings = await client.evaluate(`(() => {
       const mcp = [...document.querySelectorAll(".settings-tabs button")].find((button) => button.textContent.includes("MCP"));
       if (!mcp) return false;

@@ -153,6 +153,12 @@ export class RuntimeServer {
         return runtime.initialize();
       case "get_configuration":
         return runtime.getConfiguration();
+      case "get_model_provider_configuration":
+        return runtime.getModelProviderConfiguration();
+      case "save_model_provider_configuration":
+        return runtime.saveModelProviderConfiguration(command.input);
+      case "remove_model_provider_configuration":
+        return runtime.removeModelProviderConfiguration(command.provider);
       case "configure_model":
         return runtime.configureModel(command);
       case "remove_provider_auth":

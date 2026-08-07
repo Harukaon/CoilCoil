@@ -27,6 +27,93 @@ export interface RuntimeConfiguration {
   migratedLegacyCredentials: boolean;
 }
 
+/**
+ * Pi's built-in streaming transports that can be configured through
+ * `models.json`. The runtime deliberately keeps the value as a string so a
+ * newer Pi transport can be exposed before SuoCode itself needs a release.
+ */
+export interface ModelProviderApiOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface ModelCostConfiguration {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  tiers?: Array<{
+    inputTokensAbove: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  }>;
+}
+
+/** A serializable subset of a Pi `models.json` model definition. */
+export interface ModelProviderModelConfiguration {
+  id: string;
+  name?: string;
+  api?: string;
+  baseUrl?: string;
+  reasoning?: boolean;
+  thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
+  input?: Array<"text" | "image">;
+  contextWindow?: number;
+  maxTokens?: number;
+  cost?: ModelCostConfiguration;
+  samplingParams?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  compat?: Record<string, unknown>;
+}
+
+/**
+ * A provider entry projected from SuoCode's private Pi `models.json`.
+ * Credentials are intentionally represented only as availability/reference
+ * metadata; the literal key stays in Pi's private auth store.
+ */
+export interface ModelProviderConfiguration {
+  id: string;
+  name?: string;
+  baseUrl?: string;
+  api?: string;
+  oauth?: "radius";
+  headers?: Record<string, string>;
+  compat?: Record<string, unknown>;
+  authHeader?: boolean;
+  /** Pi value expression such as `$MY_KEY` or `!op read ...`, never a raw key. */
+  apiKeyReference?: string;
+  /** A literal `models.json` API key exists but is intentionally redacted. */
+  hasPrivateApiKeyReference: boolean;
+  apiKeyConfigured: boolean;
+  /** `models` exists in models.json and replaces Pi's catalog for this provider. */
+  replaceModels: boolean;
+  models: ModelProviderModelConfiguration[];
+  modelOverrides?: Record<string, Omit<ModelProviderModelConfiguration, "id" | "api" | "baseUrl">>;
+  source: "built-in" | "custom" | "override";
+}
+
+/** Editable provider input. `apiKey` is write-only and never returned. */
+export interface ModelProviderConfigurationInput {
+  provider: Omit<ModelProviderConfiguration, "apiKeyConfigured" | "hasPrivateApiKeyReference" | "source">;
+  apiKey?: string;
+  /** Keep an existing redacted literal or expression from models.json. */
+  preserveApiKeyReference?: boolean;
+}
+
+export interface ModelProviderConfigurationSnapshot {
+  configPath: string;
+  providers: ModelProviderConfiguration[];
+  supportedApis: ModelProviderApiOption[];
+}
+
+export interface ModelProviderSaveResult {
+  provider: ModelProviderConfiguration;
+  configuration: RuntimeConfiguration;
+}
+
 export type McpTransport = "stdio" | "http";
 
 export interface McpServerConfiguration {
@@ -279,6 +366,9 @@ export interface RuntimeBootstrap {
 export type RuntimeCommand =
   | { type: "bootstrap" }
   | { type: "get_configuration" }
+  | { type: "get_model_provider_configuration" }
+  | { type: "save_model_provider_configuration"; input: ModelProviderConfigurationInput }
+  | { type: "remove_model_provider_configuration"; provider: string }
   | {
       type: "configure_model";
       provider: string;
