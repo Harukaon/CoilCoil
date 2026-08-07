@@ -88,20 +88,52 @@ try {
     cwd: projectDir,
     server: {
       name: "smoke-server",
+      scope: "global",
       transport: "stdio",
       command: process.execPath,
       args: ["-e", "process.exit(0)"],
       env: { SUOCODE_MCP_SMOKE: "1" },
       headers: {},
       lifecycle: "lazy",
-      directTools: false,
+      idleTimeout: 3,
+      requestTimeoutMs: 4_500,
+      exposeResources: false,
+      directTools: ["ping"],
+      excludeTools: ["dangerous"],
+      debug: true,
     },
   });
   const smokeMcp = savedMcp.servers.find((server) => server.name === "smoke-server");
-  if (!smokeMcp || smokeMcp.command !== process.execPath || smokeMcp.env.SUOCODE_MCP_SMOKE !== "1") {
-    throw new Error("The Pi MCP adapter configuration bridge did not persist a stdio server.");
+  if (
+    !smokeMcp
+    || smokeMcp.scope !== "global"
+    || smokeMcp.command !== process.execPath
+    || smokeMcp.env.SUOCODE_MCP_SMOKE !== "1"
+    || smokeMcp.idleTimeout !== 3
+    || smokeMcp.requestTimeoutMs !== 4_500
+    || smokeMcp.exposeResources !== false
+    || smokeMcp.directTools?.[0] !== "ping"
+    || smokeMcp.excludeTools?.[0] !== "dangerous"
+    || smokeMcp.debug !== true
+  ) {
+    throw new Error("The Pi MCP adapter configuration bridge did not preserve the extension server schema.");
   }
-  const removedMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "smoke-server" });
+  const savedProjectMcp = await request({
+    type: "save_mcp_server",
+    cwd: projectDir,
+    server: {
+      ...smokeMcp,
+      name: "project-smoke-server",
+      scope: "project",
+      debug: false,
+    },
+  });
+  const projectMcp = savedProjectMcp.servers.find((server) => server.name === "project-smoke-server");
+  if (projectMcp?.scope !== "project" || projectMcp.source !== savedProjectMcp.projectConfigPath || !existsSync(savedProjectMcp.projectConfigPath)) {
+    throw new Error("The Pi MCP adapter bridge did not isolate project-level configuration in the current workspace.");
+  }
+  await request({ type: "remove_mcp_server", cwd: projectDir, name: "project-smoke-server", scope: "project" });
+  const removedMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "smoke-server", scope: "global" });
   if (removedMcp.servers.some((server) => server.name === "smoke-server")) {
     throw new Error("The Pi MCP adapter configuration bridge did not remove a SuoCode-owned server.");
   }

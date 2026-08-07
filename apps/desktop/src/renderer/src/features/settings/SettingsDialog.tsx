@@ -1,4 +1,4 @@
-import { AlertCircle, KeyRound, LoaderCircle, Network, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { AlertCircle, Copy, KeyRound, LoaderCircle, Network, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type {
@@ -21,12 +21,16 @@ function thinkingLevelForModel(
 function blankMcpServer(): McpServerConfiguration {
   return {
     name: "",
+    scope: "global",
     transport: "stdio",
     args: [],
     env: {},
     headers: {},
     lifecycle: "lazy",
+    exposeResources: true,
     directTools: false,
+    excludeTools: [],
+    debug: false,
   };
 }
 
@@ -131,6 +135,8 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   const [argsText, setArgsText] = useState("");
   const [envText, setEnvText] = useState("{}");
   const [headersText, setHeadersText] = useState("{}");
+  const [directToolsText, setDirectToolsText] = useState("");
+  const [excludeToolsText, setExcludeToolsText] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
@@ -142,6 +148,8 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
     setArgsText(next.args.join("\n"));
     setEnvText(JSON.stringify(next.env, null, 2));
     setHeadersText(JSON.stringify(next.headers, null, 2));
+    setDirectToolsText(Array.isArray(next.directTools) ? next.directTools.join("\n") : "");
+    setExcludeToolsText(next.excludeTools.join("\n"));
     setError(undefined);
   };
 
@@ -176,6 +184,11 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
         args: argsText.split("\n").map((item) => item.trim()).filter(Boolean),
         env: parseStringMap(envText, "环境变量"),
         headers: parseStringMap(headersText, "请求头"),
+        bearerTokenEnv: draft.bearerTokenEnv?.trim() || undefined,
+        idleTimeout: draft.idleTimeout === undefined || Number.isNaN(draft.idleTimeout) ? undefined : draft.idleTimeout,
+        requestTimeoutMs: draft.requestTimeoutMs === undefined || Number.isNaN(draft.requestTimeoutMs) ? undefined : draft.requestTimeoutMs,
+        directTools: directToolsText.trim() ? directToolsText.split("\n").map((item) => item.trim()).filter(Boolean) : draft.directTools === true,
+        excludeTools: excludeToolsText.split("\n").map((item) => item.trim()).filter(Boolean),
       };
       const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "save_mcp_server", server, previousName: selectedName, cwd }, runtimeId);
       setConfiguration(next);
@@ -188,11 +201,12 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   };
 
   const remove = async (): Promise<void> => {
-    if (!selectedName || draft.sourceKind !== "user" || draft.source !== configuration?.configPath) return;
+    const ownedSource = draft.source === configuration?.configPath || draft.source === configuration?.projectConfigPath;
+    if (!selectedName || !ownedSource) return;
     setSaving(true);
     setError(undefined);
     try {
-      const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "remove_mcp_server", name: selectedName, cwd }, runtimeId);
+      const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "remove_mcp_server", name: selectedName, scope: draft.scope, cwd }, runtimeId);
       setConfiguration(next);
       selectServer(next.servers[0]);
     } catch (caught) {
@@ -220,15 +234,19 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
     <div className="mcp-settings">
       <aside className="mcp-server-list">
         <button className="mcp-add-button" type="button" onClick={() => selectServer()}><Plus size={13} />添加服务器</button>
-        {loading ? <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载 MCP 配置…</div> : configuration?.servers.map((server) => <button className={server.name === selectedName ? "active" : ""} type="button" key={server.name} onClick={() => selectServer(server)}><strong>{server.name}</strong><small>{server.transport === "http" ? server.url : server.command}</small></button>)}
+        {loading ? <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载 MCP 配置…</div> : configuration?.servers.map((server) => <button className={server.name === selectedName ? "active" : ""} type="button" key={server.name} onClick={() => selectServer(server)}><strong>{server.name}</strong><small>{server.scope === "project" ? "当前项目" : "全局"} · {server.transport === "http" ? server.url : server.command}</small></button>)}
         {!loading && !configuration?.servers.length ? <p>尚未配置 MCP 服务器。</p> : null}
       </aside>
       <section className="mcp-editor">
         <form onSubmit={(event) => void save(event)}>
-          <div className="mcp-editor-heading"><div><strong>{selectedName ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</strong><small>配置由内置的 pi-mcp-adapter 读取并执行。</small></div>{selectedName && draft.sourceKind === "user" && draft.source === configuration?.configPath ? <button className="danger-icon-button" type="button" aria-label="移除 MCP 服务器" onClick={() => void remove()}><Trash2 size={14} /></button> : null}</div>
-          <div className="settings-grid"><label>名称<input value={draft.name} placeholder="例如 github" onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label><label>连接方式<select value={draft.transport} onChange={(event) => setDraft((current) => ({ ...current, transport: event.target.value as McpServerConfiguration["transport"] }))}><option value="stdio">stdio 命令</option><option value="http">HTTP</option></select></label></div>
-          {draft.transport === "stdio" ? <><label>启动命令<input value={draft.command ?? ""} placeholder="npx" onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))} /></label><label>参数（每行一个）<textarea value={argsText} placeholder="-y&#10;@modelcontextprotocol/server-filesystem" onChange={(event) => setArgsText(event.target.value)} /></label><div className="settings-grid"><label>工作目录<input value={draft.cwd ?? ""} placeholder="可选" onChange={(event) => setDraft((current) => ({ ...current, cwd: event.target.value }))} /></label><label>环境变量 JSON<textarea value={envText} onChange={(event) => setEnvText(event.target.value)} /></label></div></> : <><label>服务器地址<input value={draft.url ?? ""} placeholder="https://example.com/mcp" onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} /></label><div className="settings-grid"><label>认证<select value={String(draft.auth ?? "auto")} onChange={(event) => setDraft((current) => ({ ...current, auth: event.target.value === "auto" ? undefined : event.target.value === "false" ? false : event.target.value as "oauth" | "bearer" }))}><option value="auto">自动检测</option><option value="oauth">OAuth</option><option value="bearer">Bearer</option><option value="false">不认证</option></select></label><label>请求头 JSON<textarea value={headersText} onChange={(event) => setHeadersText(event.target.value)} /></label></div></>}
-          <div className="settings-grid"><label>生命周期<select value={draft.lifecycle} onChange={(event) => setDraft((current) => ({ ...current, lifecycle: event.target.value as McpServerConfiguration["lifecycle"] }))}><option value="lazy">按需连接</option><option value="keep-alive">保持连接</option><option value="eager">启动时连接</option></select></label><label className="checkbox-setting"><input type="checkbox" checked={draft.directTools} onChange={(event) => setDraft((current) => ({ ...current, directTools: event.target.checked }))} />直接注册服务器工具</label></div>
+          <div className="mcp-editor-heading"><div><strong>{selectedName ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</strong><small>配置由内置的 pi-mcp-adapter 读取并执行。</small></div><span className="mcp-editor-actions">{selectedName ? <button className="icon-button" type="button" aria-label="复制 MCP 服务器" onClick={() => { const copy = { ...draft, name: `${draft.name}-copy`, source: undefined, sourceKind: undefined }; setSelectedName(undefined); setDraft(copy); }}><Copy size={14} /></button> : null}{selectedName && ((draft.scope === "global" && draft.source === configuration?.configPath) || (draft.scope === "project" && draft.source === configuration?.projectConfigPath)) ? <button className="danger-icon-button" type="button" aria-label="移除 MCP 服务器" onClick={() => void remove()}><Trash2 size={14} /></button> : null}</span></div>
+          <div className="settings-grid"><label>名称<input value={draft.name} placeholder="例如 github" onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label><label>作用域<select value={draft.scope} disabled={!cwd} onChange={(event) => setDraft((current) => ({ ...current, scope: event.target.value as McpServerConfiguration["scope"] }))}><option value="global">全局</option><option value="project">当前项目</option></select></label></div>
+          <label>连接方式<select value={draft.transport} onChange={(event) => setDraft((current) => ({ ...current, transport: event.target.value as McpServerConfiguration["transport"] }))}><option value="stdio">stdio 命令</option><option value="http">HTTP</option></select></label>
+          {draft.transport === "stdio" ? <><label>启动命令<input value={draft.command ?? ""} placeholder="npx" onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))} /></label><label>参数（每行一个）<textarea value={argsText} placeholder="-y&#10;@modelcontextprotocol/server-filesystem" onChange={(event) => setArgsText(event.target.value)} /></label><div className="settings-grid"><label>工作目录<input value={draft.cwd ?? ""} placeholder="可选" onChange={(event) => setDraft((current) => ({ ...current, cwd: event.target.value }))} /></label><label>环境变量 JSON<textarea value={envText} onChange={(event) => setEnvText(event.target.value)} /></label></div></> : <><label>服务器地址<input value={draft.url ?? ""} placeholder="https://example.com/mcp" onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} /></label><div className="settings-grid"><label>认证<select value={String(draft.auth ?? "auto")} onChange={(event) => setDraft((current) => ({ ...current, auth: event.target.value === "auto" ? undefined : event.target.value === "false" ? false : event.target.value as "oauth" | "bearer" }))}><option value="auto">自动检测</option><option value="oauth">OAuth</option><option value="bearer">Bearer</option><option value="false">不认证</option></select></label><label>Bearer 环境变量<input value={draft.bearerTokenEnv ?? ""} placeholder="例如 GITHUB_TOKEN" onChange={(event) => setDraft((current) => ({ ...current, bearerTokenEnv: event.target.value }))} /></label></div><label>请求头 JSON<textarea value={headersText} onChange={(event) => setHeadersText(event.target.value)} /></label></>}
+          <div className="settings-grid"><label>生命周期<select value={draft.lifecycle} onChange={(event) => setDraft((current) => ({ ...current, lifecycle: event.target.value as McpServerConfiguration["lifecycle"] }))}><option value="lazy">按需连接</option><option value="keep-alive">保持连接</option><option value="eager">启动时连接</option></select></label><label>空闲超时（分钟）<input type="number" min="0" value={draft.idleTimeout ?? ""} placeholder="使用扩展默认值" onChange={(event) => setDraft((current) => ({ ...current, idleTimeout: event.target.value ? Number(event.target.value) : undefined }))} /></label></div>
+          <div className="settings-grid"><label>请求超时（毫秒）<input type="number" min="0" value={draft.requestTimeoutMs ?? ""} placeholder="使用扩展默认值" onChange={(event) => setDraft((current) => ({ ...current, requestTimeoutMs: event.target.value ? Number(event.target.value) : undefined }))} /></label><label className="checkbox-setting"><input type="checkbox" checked={draft.debug} onChange={(event) => setDraft((current) => ({ ...current, debug: event.target.checked }))} />显示服务器调试输出</label></div>
+          <div className="settings-grid"><label>直接注册的工具（每行一个）<textarea value={directToolsText} placeholder="留空时使用下面的全部开关" onChange={(event) => setDirectToolsText(event.target.value)} /></label><label>排除工具（每行一个）<textarea value={excludeToolsText} onChange={(event) => setExcludeToolsText(event.target.value)} /></label></div>
+          <div className="settings-grid"><label className="checkbox-setting"><input type="checkbox" checked={draft.directTools === true} disabled={Boolean(directToolsText.trim())} onChange={(event) => setDraft((current) => ({ ...current, directTools: event.target.checked }))} />直接注册全部服务器工具</label><label className="checkbox-setting"><input type="checkbox" checked={draft.exposeResources} onChange={(event) => setDraft((current) => ({ ...current, exposeResources: event.target.checked }))} />向 Agent 暴露资源</label></div>
           {draft.source && draft.source !== configuration?.configPath ? <p className="mcp-source-note">当前配置来自 {draft.source}。保存后会在 SuoCode 私有配置中创建同名覆盖，不会修改外部应用。</p> : null}
           {error ? <div className="settings-error"><AlertCircle size={14} />{error}</div> : null}
           <footer><span>{configuration?.configPath}</span><button className="primary-button" type="submit" disabled={saving || !draft.name.trim()}>{saving ? <LoaderCircle className="spin" size={15} /> : null}保存 MCP</button></footer>

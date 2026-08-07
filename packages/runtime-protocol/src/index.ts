@@ -31,6 +31,7 @@ export type McpTransport = "stdio" | "http";
 
 export interface McpServerConfiguration {
   name: string;
+  scope: "global" | "project";
   transport: McpTransport;
   command?: string;
   args: string[];
@@ -39,8 +40,14 @@ export interface McpServerConfiguration {
   url?: string;
   headers: Record<string, string>;
   auth?: "oauth" | "bearer" | false;
+  bearerTokenEnv?: string;
   lifecycle: "keep-alive" | "lazy" | "eager";
-  directTools: boolean;
+  idleTimeout?: number;
+  requestTimeoutMs?: number;
+  exposeResources: boolean;
+  directTools: boolean | string[];
+  excludeTools: string[];
+  debug: boolean;
   source?: string;
   sourceKind?: "user" | "project" | "import";
 }
@@ -54,6 +61,7 @@ export interface McpImportConfiguration {
 
 export interface McpConfigurationSnapshot {
   configPath: string;
+  projectConfigPath?: string;
   servers: McpServerConfiguration[];
   imports: McpImportConfiguration[];
 }
@@ -253,7 +261,7 @@ export type RuntimeCommand =
   | { type: "remove_provider_auth"; provider: string }
   | { type: "get_mcp_configuration"; cwd?: string }
   | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
-  | { type: "remove_mcp_server"; name: string; cwd?: string }
+  | { type: "remove_mcp_server"; name: string; scope?: "global" | "project"; cwd?: string }
   | { type: "enable_mcp_imports"; imports: McpImportConfiguration["kind"][]; cwd?: string }
   | { type: "stop_subagent"; id: string; background: boolean }
   | { type: "list_sessions"; cwd: string }

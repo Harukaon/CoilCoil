@@ -86,6 +86,7 @@ interface McpAdapterConfigModule {
     imports: Array<{ kind: McpImportConfiguration["kind"]; path: string; serverCount: number }>;
   };
   getPiGlobalConfigPath(overridePath?: string): string;
+  getProjectPiConfigPath(cwd?: string): string;
   getServerProvenance(overridePath?: string, cwd?: string): Map<string, { path: string; kind: "user" | "project" | "import" }>;
   loadMcpConfig(overridePath?: string, cwd?: string): {
     imports?: McpImportConfiguration["kind"][];
@@ -985,17 +986,20 @@ export class SuoCodeRuntime {
     const adapter = await loadMcpAdapterConfigModule();
     const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     const resolvedCwd = this.mcpCwd(cwd);
+    const projectConfigPath = cwd ? adapter.getProjectPiConfigPath(resolvedCwd) : undefined;
     const config = adapter.loadMcpConfig(configPath, resolvedCwd);
     const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
     const provenance = adapter.getServerProvenance(configPath, resolvedCwd);
     const enabledImports = new Set(config.imports ?? []);
     return {
       configPath,
+      projectConfigPath,
       imports: discovery.imports.map((entry) => ({ ...entry, enabled: enabledImports.has(entry.kind) })),
       servers: Object.entries(config.mcpServers).map(([name, raw]) => {
         const source = provenance.get(name);
         return {
           name,
+          scope: source?.kind === "project" ? "project" : "global",
           transport: typeof raw.url === "string" ? "http" : "stdio",
           command: typeof raw.command === "string" ? raw.command : undefined,
           args: stringArray(raw.args),
@@ -1004,8 +1008,14 @@ export class SuoCodeRuntime {
           url: typeof raw.url === "string" ? raw.url : undefined,
           headers: recordOfStrings(raw.headers),
           auth: raw.auth === "oauth" || raw.auth === "bearer" || raw.auth === false ? raw.auth : undefined,
+          bearerTokenEnv: typeof raw.bearerTokenEnv === "string" ? raw.bearerTokenEnv : undefined,
           lifecycle: raw.lifecycle === "keep-alive" || raw.lifecycle === "eager" ? raw.lifecycle : "lazy",
-          directTools: raw.directTools === true,
+          idleTimeout: typeof raw.idleTimeout === "number" ? raw.idleTimeout : undefined,
+          requestTimeoutMs: typeof raw.requestTimeoutMs === "number" ? raw.requestTimeoutMs : undefined,
+          exposeResources: raw.exposeResources !== false,
+          directTools: raw.directTools === true ? true : stringArray(raw.directTools),
+          excludeTools: stringArray(raw.excludeTools),
+          debug: raw.debug === true,
           source: source?.path,
           sourceKind: source?.kind,
         } satisfies McpServerConfiguration;
@@ -1018,14 +1028,29 @@ export class SuoCodeRuntime {
     if (!name || !/^[A-Za-z0-9._-]+$/.test(name)) throw new Error("MCP 名称只能包含字母、数字、点、下划线和连字符。");
     if (server.transport === "stdio" && !server.command?.trim()) throw new Error("stdio MCP 需要填写启动命令。");
     if (server.transport === "http" && !server.url?.trim()) throw new Error("HTTP MCP 需要填写服务器地址。");
+    if (server.scope === "project" && !cwd) throw new Error("项目级 MCP 需要当前工作区。");
+    if (server.idleTimeout !== undefined && (!Number.isFinite(server.idleTimeout) || server.idleTimeout < 0)) throw new Error("空闲超时必须是大于等于 0 的分钟数。");
+    if (server.requestTimeoutMs !== undefined && (!Number.isFinite(server.requestTimeoutMs) || server.requestTimeoutMs < 0)) throw new Error("请求超时必须是大于等于 0 的毫秒数。");
     const adapter = await loadMcpAdapterConfigModule();
-    const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    if (previousName && previousName !== name) this.removeMcpServerFromFile(configPath, previousName);
+    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    const resolvedCwd = this.mcpCwd(cwd);
+    const configPath = server.scope === "project" ? adapter.getProjectPiConfigPath(resolvedCwd) : globalConfigPath;
+    if (previousName) {
+      const previous = (await this.getMcpConfiguration(cwd)).servers.find((item) => item.name === previousName);
+      const previousPath = previous?.scope === "project" ? adapter.getProjectPiConfigPath(resolvedCwd) : globalConfigPath;
+      if (previousName !== name || previousPath !== configPath) this.removeMcpServerFromFile(previousPath, previousName);
+    }
     const definition: Record<string, unknown> = server.transport === "http"
       ? { url: server.url?.trim(), ...(Object.keys(server.headers).length ? { headers: server.headers } : {}), ...(server.auth !== undefined ? { auth: server.auth } : {}) }
       : { command: server.command?.trim(), ...(server.args.length ? { args: server.args } : {}), ...(Object.keys(server.env).length ? { env: server.env } : {}), ...(server.cwd?.trim() ? { cwd: server.cwd.trim() } : {}) };
     definition.lifecycle = server.lifecycle;
-    if (server.directTools) definition.directTools = true;
+    if (server.bearerTokenEnv?.trim()) definition.bearerTokenEnv = server.bearerTokenEnv.trim();
+    if (server.idleTimeout !== undefined) definition.idleTimeout = server.idleTimeout;
+    if (server.requestTimeoutMs !== undefined) definition.requestTimeoutMs = server.requestTimeoutMs;
+    if (!server.exposeResources) definition.exposeResources = false;
+    if (server.directTools === true || (Array.isArray(server.directTools) && server.directTools.length)) definition.directTools = server.directTools;
+    if (server.excludeTools.length) definition.excludeTools = server.excludeTools;
+    if (server.debug) definition.debug = true;
     adapter.writeSharedServerEntry(configPath, name, definition);
     this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);
@@ -1042,9 +1067,12 @@ export class SuoCodeRuntime {
     renameSync(temporaryPath, configPath);
   }
 
-  async removeMcpServer(name: string, cwd?: string): Promise<McpConfigurationSnapshot> {
+  async removeMcpServer(name: string, scope: "global" | "project" = "global", cwd?: string): Promise<McpConfigurationSnapshot> {
     const adapter = await loadMcpAdapterConfigModule();
-    const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    if (scope === "project" && !cwd) throw new Error("项目级 MCP 需要当前工作区。");
+    const configPath = scope === "project"
+      ? adapter.getProjectPiConfigPath(this.mcpCwd(cwd))
+      : adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     this.removeMcpServerFromFile(configPath, name);
     this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);

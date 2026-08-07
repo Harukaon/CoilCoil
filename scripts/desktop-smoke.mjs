@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -208,6 +208,8 @@ function subagentFixtureEntries(snapshot, token) {
   const toolId = `desktop-subagent-tool-${token}`;
   const userId = `desktop-subagent-user-${token}`;
   const callId = `desktop-subagent-call-${token}`;
+  const resultId = `desktop-subagent-result-${token}`;
+  const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
   return [
     { type: "session", version: 3, id: snapshot.session.id, timestamp, cwd: snapshot.session.cwd },
     {
@@ -217,7 +219,10 @@ function subagentFixtureEntries(snapshot, token) {
       timestamp,
       message: {
         role: "user",
-        content: [{ type: "text", text: `子 Agent 投影测试 ${token}` }],
+        content: [
+          { type: "text", text: `子 Agent 投影测试 ${token}` },
+          { type: "image", mimeType: "image/png", data: pixel },
+        ],
         timestamp: Date.now(),
       },
     },
@@ -239,7 +244,7 @@ function subagentFixtureEntries(snapshot, token) {
     },
     {
       type: "message",
-      id: `desktop-subagent-result-${token}`,
+      id: resultId,
       parentId: callId,
       timestamp,
       message: {
@@ -262,6 +267,23 @@ function subagentFixtureEntries(snapshot, token) {
           }],
         },
         isError: false,
+        timestamp: Date.now(),
+      },
+    },
+    {
+      type: "message",
+      id: `desktop-provider-error-${token}`,
+      parentId: resultId,
+      timestamp,
+      message: {
+        role: "assistant",
+        content: [],
+        api: "openai-responses",
+        provider: "smoke",
+        model: "smoke",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: "error",
+        errorMessage: `Connection error. ${token}`,
         timestamp: Date.now(),
       },
     },
@@ -333,11 +355,27 @@ async function main() {
     assert.equal(homeState.projectName, "Home");
     assert.match(homeState.status, /Home/);
     if (process.platform === "darwin") {
-      const nodeRuntimeLink = join(dirname(homeState.home.path), "agent", "runtime-bin", "node");
-      assert.equal(await realpath(nodeRuntimeLink), join(
+      const nodeRuntimeLauncher = join(dirname(homeState.home.path), "agent", "runtime-bin", "node");
+      const expectedHelper = join(
         repositoryRoot,
         "apps/desktop/release/mac-arm64/SuoCode.app/Contents/Frameworks/SuoCode Helper.app/Contents/MacOS/SuoCode Helper",
-      ));
+      );
+      assert.equal((await lstat(nodeRuntimeLauncher)).isSymbolicLink(), false, "The packaged worker launcher must not execute the Electron Helper through a generic node symlink.");
+      const launcher = await readFile(nodeRuntimeLauncher, "utf8");
+      assert.match(launcher, /^#!\/bin\/sh\n/);
+      assert.match(launcher, /ELECTRON_RUN_AS_NODE=1/);
+      assert.ok(launcher.includes(expectedHelper), "The packaged worker launcher did not target the background Helper bundle.");
+      assert.equal(execFileSync(nodeRuntimeLauncher, ["-e", "process.stdout.write(process.execPath)"], { encoding: "utf8" }), expectedHelper);
+      const dockProbe = spawn(nodeRuntimeLauncher, ["-e", "setTimeout(() => {}, 5000)"], { stdio: "ignore" });
+      await delay(750);
+      assert.equal(dockProbe.exitCode, null, "The packaged background worker launcher exited before the Dock probe.");
+      const appRecords = execFileSync("/usr/bin/lsappinfo", ["list"], { encoding: "utf8" }).split(/(?=\s*\d+\)\s)/);
+      const workerRecord = appRecords.find((record) => record.includes(`pid = ${dockProbe.pid} `));
+      if (workerRecord) {
+        assert.doesNotMatch(workerRecord, /^\s*\d+\)\s+"exec"/m, "The packaged worker appeared as a generic exec application.");
+        assert.doesNotMatch(workerRecord, /type="Foreground"/, "The packaged worker registered as a foreground Dock application.");
+      }
+      await stopProcess(dockProbe);
     }
 
     const openedSettings = await client.evaluate(`(() => {
@@ -361,14 +399,31 @@ async function main() {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
         input.dispatchEvent(new Event("input", { bubbles: true }));
       };
+      const setTextarea = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
       document.querySelector(".mcp-add-button")?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       const labels = [...document.querySelectorAll(".mcp-editor label")];
-      const name = labels.find((label) => label.firstChild?.textContent === "名称")?.querySelector("input");
-      const command = labels.find((label) => label.firstChild?.textContent === "启动命令")?.querySelector("input");
-      if (!name || !command) return false;
+      const findLabel = (text) => labels.find((label) => label.textContent.startsWith(text));
+      const name = findLabel("名称")?.querySelector("input");
+      const command = findLabel("启动命令")?.querySelector("input");
+      const idleTimeout = findLabel("空闲超时")?.querySelector("input");
+      const requestTimeout = findLabel("请求超时")?.querySelector("input");
+      const directTools = findLabel("直接注册的工具")?.querySelector("textarea");
+      const excludeTools = findLabel("排除工具")?.querySelector("textarea");
+      const debug = findLabel("显示服务器调试输出")?.querySelector('input[type="checkbox"]');
+      const exposeResources = findLabel("向 Agent 暴露资源")?.querySelector('input[type="checkbox"]');
+      if (!name || !command || !idleTimeout || !requestTimeout || !directTools || !excludeTools || !debug || !exposeResources) return false;
       setInput(name, "desktop-smoke-mcp");
       setInput(command, "/usr/bin/true");
+      setInput(idleTimeout, "3");
+      setInput(requestTimeout, "4500");
+      setTextarea(directTools, "ping");
+      setTextarea(excludeTools, "dangerous");
+      debug.click();
+      exposeResources.click();
       await new Promise((resolveWait) => setTimeout(resolveWait, 100));
       return true;
     })()`);
@@ -378,17 +433,70 @@ async function main() {
       "The MCP editor did not accept the server fields.",
     );
     await client.evaluate(`document.querySelector(".mcp-editor form")?.requestSubmit()`);
-    await client.waitFor(
-      `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp") || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
-      "The MCP settings save did not settle.",
-    );
+    try {
+      await client.waitFor(
+        `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp") || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
+        "The MCP settings save did not settle.",
+      );
+    } catch (error) {
+      const diagnostic = await client.evaluate(`(async () => ({
+        names: [...document.querySelectorAll(".mcp-server-list strong")].map((item) => item.textContent || ""),
+        error: document.querySelector(".mcp-editor .settings-error")?.textContent || "",
+        button: document.querySelector(".mcp-editor .primary-button")?.textContent || "",
+        disabled: document.querySelector(".mcp-editor .primary-button")?.disabled ?? null,
+        draftName: [...document.querySelectorAll(".mcp-editor label")].find((label) => label.textContent.startsWith("名称"))?.querySelector("input")?.value || "",
+        runtime: (await window.suocode.request({ type: "get_mcp_configuration" })).servers.map((server) => server.name)
+      }))()`);
+      throw new Error(`${error instanceof Error ? error.message : String(error)} ${JSON.stringify(diagnostic)}`);
+    }
     const mcpUiSaveState = await client.evaluate(`({ saved: [...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp"), error: document.querySelector(".mcp-editor .settings-error")?.textContent || "" })`);
     assert.equal(mcpUiSaveState.saved, true, `The MCP server saved through the desktop settings did not appear: ${mcpUiSaveState.error}`);
     const mcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration" })`);
-    assert.equal(mcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp")?.command, "/usr/bin/true");
-    const removedMcpServer = await client.evaluate(`(() => {
+    const configuredMcp = mcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp");
+    assert.equal(configuredMcp?.command, "/usr/bin/true");
+    assert.equal(configuredMcp?.scope, "global");
+    assert.equal(configuredMcp?.idleTimeout, 3);
+    assert.equal(configuredMcp?.requestTimeoutMs, 4500);
+    assert.equal(configuredMcp?.directTools?.[0], "ping");
+    assert.equal(configuredMcp?.excludeTools?.[0], "dangerous");
+    assert.equal(configuredMcp?.exposeResources, false);
+    assert.equal(configuredMcp?.debug, true);
+    const copiedProjectMcp = await client.evaluate(`(async () => {
+      document.querySelector('button[aria-label="复制 MCP 服务器"]')?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      const labels = [...document.querySelectorAll(".mcp-editor label")];
+      const scope = labels.find((label) => label.textContent.startsWith("作用域"))?.querySelector("select");
+      if (!scope) return false;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(scope, "project");
+      scope.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      document.querySelector(".mcp-editor form")?.requestSubmit();
+      return true;
+    })()`);
+    assert.equal(copiedProjectMcp, true);
+    await client.waitFor(
+      `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp-copy") || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
+      "The copied project MCP server did not settle.",
+    );
+    const copiedMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
+    const projectMcp = copiedMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp-copy");
+    assert.equal(projectMcp?.scope, "project");
+    assert.equal(projectMcp?.source, copiedMcpSnapshot.projectConfigPath);
+    const removedProjectMcpServer = await client.evaluate(`(async () => {
+      const row = [...document.querySelectorAll(".mcp-server-list button")].find((button) => button.textContent.includes("desktop-smoke-mcp-copy"));
+      row?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      const remove = document.querySelector('button[aria-label="移除 MCP 服务器"]');
+      if (!row || !remove) return false;
+      remove.click();
+      return true;
+    })()`);
+    assert.equal(removedProjectMcpServer, true);
+    await client.waitFor(`![...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp-copy")`, "The project MCP copy was not removed.");
+    const removedMcpServer = await client.evaluate(`(async () => {
       const row = [...document.querySelectorAll(".mcp-server-list button")].find((button) => button.textContent.includes("desktop-smoke-mcp"));
       row?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       const remove = document.querySelector('button[aria-label="移除 MCP 服务器"]');
       if (!row || !remove) return false;
       remove.click();
@@ -902,7 +1010,30 @@ async function main() {
         60_000,
       );
       await client.evaluate(`[...document.querySelectorAll(".conversation-row")].find((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))?.click()`);
+      await client.waitFor(`document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The packaged renderer did not restore the historical image.", 60_000);
+      const historicalImageBeforePaste = await client.evaluate(`(async () => {
+        document.querySelector(".user-bubble-button")?.click();
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+        const editor = document.querySelector('textarea[aria-label="编辑历史消息"]');
+        const before = document.querySelectorAll(".user-message-editor-shell .message-image img").length;
+        const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (value) => value.charCodeAt(0));
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([bytes], "history-paste.png", { type: "image/png" }));
+        editor?.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
+        return before;
+      })()`);
+      assert.equal(historicalImageBeforePaste, 1);
+      await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .message-image img").length === 2`, "The pasted historical image did not appear in the editor.");
+      await client.evaluate(`document.querySelector('button[aria-label="移除历史图片"]')?.click()`);
+      await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .message-image img").length === 1`, "The historical image was not removed from the editor.");
+      await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
+      await client.waitFor(`!document.querySelector('textarea[aria-label="编辑历史消息"]') && document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The edited historical image state did not return to the message bubble.");
       await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The packaged renderer did not restore the pi-subagents timeline card.", 60_000);
+      const preservedProviderFailure = await client.evaluate(`({
+        tool: Boolean(document.querySelector(".subagent-timeline-card")),
+        error: [...document.querySelectorAll(".assistant-message.error")].some((item) => item.textContent.includes(${JSON.stringify(fixtureToken)}))
+      })`);
+      assert.deepEqual(preservedProviderFailure, { tool: true, error: true });
       const backdropCountBeforeDetail = await client.evaluate(`document.querySelectorAll(".modal-backdrop").length`);
       await client.evaluate(`document.querySelector(".subagent-timeline-card")?.click()`);
       await client.waitFor(`document.querySelector(".subagent-detail-window")?.textContent.includes(${JSON.stringify(fixtureToken)})`, "The packaged renderer did not show the structured subagent details.");

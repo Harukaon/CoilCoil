@@ -7,7 +7,7 @@ import type {
 } from "@suocode/runtime-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { watch, type FSWatcher } from "node:fs";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
@@ -162,8 +162,9 @@ class RuntimeHost {
     if (this.child?.connected) return;
     const runtimeEntry = join(__dirname, "runtime.js");
     const executableName = basename(process.execPath);
-    const nodeExecutable = process.platform === "darwin" && app.isPackaged
-      ? join(dirname(dirname(process.execPath)), "Frameworks", `${executableName} Helper.app`, "Contents", "MacOS", `${executableName} Helper`)
+    const macHelperExecutable = join(dirname(dirname(process.execPath)), "Frameworks", `${executableName} Helper.app`, "Contents", "MacOS", `${executableName} Helper`);
+    const nodeExecutable = process.platform === "darwin" && existsSync(macHelperExecutable)
+      ? macHelperExecutable
       : process.execPath;
     const child = fork(runtimeEntry, [], {
       execPath: process.execPath,
