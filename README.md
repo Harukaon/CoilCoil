@@ -37,7 +37,7 @@ SuoCode/
 └── docs/                     # Architecture and upstream maintenance
 ```
 
-See [the runtime architecture](docs/architecture.md), [the current Desktop bug list](docs/desktop-bugs-2026-08-07.md), [the product roadmap](docs/product-roadmap-2026-08-07.md), and [Pi upstream maintenance](docs/pi-upstream.md) for implementation details.
+See [the runtime architecture](docs/architecture.md), [the multi-Agent development guide](docs/multi-agent-development.md), [the current Desktop bug list](docs/desktop-bugs-2026-08-07.md), [the product roadmap](docs/product-roadmap-2026-08-07.md), and [Pi upstream maintenance](docs/pi-upstream.md) for implementation details.
 
 ## Setup
 
