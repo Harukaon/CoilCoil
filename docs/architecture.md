@@ -66,6 +66,16 @@ Sensitive MCP environment and header values remain in the adapter-compatible con
 
 This rule also applies to future capabilities: configuration screens, previews, dashboards, and controls are product UI, while the corresponding Agent behavior should remain an extension whenever a suitable extension exists. A Desktop-facing bridge may expose extension events and commands, but it must not duplicate the extension's protocol client, lifecycle manager, credential store, or tool implementation.
 
+Every new Agent-facing requirement must pass an extension-reuse review before implementation begins:
+
+1. Check Pi core and the extensions already bundled by SuoCode for the capability.
+2. Check maintained third-party Pi extensions when the bundled set does not provide it.
+3. Record which extension owns execution, configuration, lifecycle, persistence, cancellation, and diagnostics.
+4. Design the Desktop work as configuration, visualization, and control surfaces over that owner.
+5. Document any missing headless event or command as a thin adapter/fork requirement instead of silently creating a parallel implementation.
+
+This review applies equally to MCP, subagents, Todo, skills, memory, approvals, browser automation, background jobs, and future Agent tools.
+
 Bundled extensions are still part of the SuoCode runtime distribution. Extension-first does not mean loading packages from the user's local Pi installation.
 
 ## Pi thin fork

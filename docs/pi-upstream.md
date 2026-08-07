@@ -12,6 +12,14 @@ Product behavior should remain in SuoCode packages whenever Pi's public SDK or
 extension APIs are sufficient. Changes belong in `vendor/pi` only when the
 embedded runtime requires a capability that cannot be implemented outside Pi.
 
+## SuoCode thin patches
+
+- `packages/coding-agent/src/index.ts` re-exports Pi's existing HTTP dispatcher
+  helper for SDK embedders. The CLI and RPC entry points already invoke this
+  helper; SuoCode invokes the same implementation before embedded provider SDKs
+  make requests, preserving Pi's proxy, timeout, HTTP/2 and Undici error
+  handling instead of maintaining a second network stack.
+
 ## Update from upstream
 
 ```bash
@@ -21,4 +29,3 @@ git subtree pull --prefix=vendor/pi pi-upstream main --squash
 
 Before accepting an update, run Pi's own checks as well as the SuoCode runtime
 and workflow test suites.
-

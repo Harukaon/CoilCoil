@@ -90,11 +90,17 @@ class DevToolsClient {
   }
 
   async evaluate(expression) {
-    const response = await this.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    });
+    let response;
+    try {
+      response = await this.send("Runtime.evaluate", {
+        expression,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+    } catch (error) {
+      const summary = expression.replaceAll(/\s+/g, " ").trim().slice(0, 220);
+      throw new Error(`${error.message} while evaluating: ${summary}`, { cause: error });
+    }
     if (response.exceptionDetails) {
       throw new Error(response.exceptionDetails.exception?.description || "Renderer evaluation failed.");
     }
@@ -131,23 +137,42 @@ async function clickInspector(client, label) {
   })()`);
 }
 
-async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
-  const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
-  const submitted = await client.evaluate(`(async () => {
+async function fillAndSubmitComposer(client, prompt) {
+  const filled = await client.evaluate(`(() => {
     const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
     if (!input) return false;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, ${JSON.stringify(prompt)});
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-    input.closest("form")?.requestSubmit();
     return true;
   })()`);
+  assert.equal(filled, true);
+  await delay(75);
+  return client.evaluate(`(() => {
+    const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+    const form = input?.closest("form");
+    if (!form) return false;
+    form.requestSubmit();
+    return true;
+  })()`);
+}
+
+async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
+  const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
+  const submitted = await fillAndSubmitComposer(client, prompt);
   assert.equal(submitted, true);
-  await client.waitFor(
-    `window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "tool_finished" && event.toolName === ${JSON.stringify(expectedTool)}) && window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "run_state" && event.running === false)`,
-    `The packaged GUI did not complete the expected ${expectedTool} tool run.`,
-    timeout,
-  );
+  try {
+    await client.waitFor(
+      `window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "tool_finished" && event.toolName === ${JSON.stringify(expectedTool)}) && window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "run_state" && event.running === false)`,
+      `The packaged GUI did not complete the expected ${expectedTool} tool run.`,
+      timeout,
+    );
+  } catch (error) {
+    const diagnostics = await client.evaluate(`({
+      events: window.__suocodeSmokeEvents?.slice(${eventStart}) ?? [],
+      conversation: document.querySelector(".conversation-scroll")?.textContent ?? "",
+    })`).catch(() => undefined);
+    throw new Error(`${error.message}\nDesktop live diagnostics:\n${JSON.stringify(diagnostics, null, 2)}`);
+  }
   await client.waitFor(
     `!document.querySelector(".agent-activity")`,
     `The Agent run for ${expectedTool} did not settle.`,
@@ -157,13 +182,7 @@ async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
 
 async function submitPromptWithScrollPause(client, prompt, expectedTool, timeout = 120_000) {
   const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
-  await client.evaluate(`(async () => {
-    const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, ${JSON.stringify(prompt)});
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-    input.closest("form")?.requestSubmit();
-  })()`);
+  assert.equal(await fillAndSubmitComposer(client, prompt), true);
   await client.waitFor(`Boolean(document.querySelector(".agent-activity"))`, "The Agent did not enter a streaming state.");
   const pausedAt = await client.evaluate(`(() => {
     const body = document.querySelector(".conversation-body");
@@ -396,6 +415,17 @@ async function main() {
     assert.equal(openedMcpSettings, true);
     await client.waitFor(`Boolean(document.querySelector(".mcp-settings"))`, "The MCP settings view did not open.");
     await client.waitFor(`!document.querySelector(".mcp-settings .settings-loading") && !document.querySelector(".mcp-add-button")?.disabled`, "The MCP settings did not finish loading.");
+    const startedMcpDraft = await client.evaluate(`(() => {
+      const button = document.querySelector(".mcp-add-button");
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    })()`);
+    assert.equal(startedMcpDraft, true);
+    await client.waitFor(
+      `document.querySelector(".mcp-editor-heading strong")?.textContent === "添加 MCP 服务器"`,
+      "The MCP editor did not enter add-server mode.",
+    );
     const savedMcpServer = await client.evaluate(`(async () => {
       const secret = "desktop-mcp-secret-do-not-display";
       const setInput = (input, value) => {
@@ -406,8 +436,6 @@ async function main() {
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, value);
         input.dispatchEvent(new Event("input", { bubbles: true }));
       };
-      document.querySelector(".mcp-add-button")?.click();
-      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       const labels = [...document.querySelectorAll(".mcp-editor label")];
       const findLabel = (text) => labels.find((label) => label.textContent.startsWith(text));
       const name = findLabel("名称")?.querySelector("input");
@@ -821,6 +849,10 @@ async function main() {
     await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x: rightHandle.x, y: rightHandle.y, button: "left", buttons: 1, clickCount: 1 });
     await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 20, y: rightHandle.y, button: "left", buttons: 1 });
     await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 20, y: rightHandle.y, button: "left", buttons: 0, clickCount: 1 });
+    await client.waitFor(
+      `(document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? Infinity) <= 316`,
+      "The right panel drag did not reduce the conversation pane to its 315px minimum.",
+    );
     const narrowConversation = await client.evaluate(`({
       conversation: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
       inspector: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
@@ -1047,18 +1079,18 @@ async function main() {
       );
       await client.evaluate(`[...document.querySelectorAll(".conversation-row")].find((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))?.click()`);
       await client.waitFor(`document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The packaged renderer did not restore the historical image.", 60_000);
-      const historicalImageBeforePaste = await client.evaluate(`(async () => {
-        document.querySelector(".user-bubble-button")?.click();
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      await client.evaluate(`document.querySelector(".user-bubble-button")?.click()`);
+      await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="编辑历史消息"]'))`, "The historical message did not enter edit mode.");
+      const historicalImageBeforePaste = await client.evaluate(`(() => {
         const editor = document.querySelector('textarea[aria-label="编辑历史消息"]');
         const before = document.querySelectorAll(".user-message-editor-shell .message-image img").length;
         const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (value) => value.charCodeAt(0));
         const transfer = new DataTransfer();
         transfer.items.add(new File([bytes], "history-paste.png", { type: "image/png" }));
-        editor?.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
-        return before;
+        const dispatched = editor?.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer })) ?? false;
+        return { before, files: transfer.files.length, dispatched };
       })()`);
-      assert.equal(historicalImageBeforePaste, 1);
+      assert.deepEqual(historicalImageBeforePaste, { before: 1, files: 1, dispatched: false });
       await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .message-image img").length === 2`, "The pasted historical image did not appear in the editor.");
       await client.evaluate(`document.querySelector('button[aria-label="移除历史图片"]')?.click()`);
       await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .message-image img").length === 1`, "The historical image was not removed from the editor.");
@@ -1097,7 +1129,7 @@ async function main() {
     }
 
     if (live) {
-      await client.evaluate(`(async () => {
+      const openedLiveConversation = await client.evaluate(`(async () => {
         const configuration = await window.suocode.request({ type: "get_configuration" });
         const model = configuration.models.find((item) => item.provider === configuration.provider && item.id === "gpt-5.6-luna" && item.configured)
           ?? configuration.models.find((item) => item.provider === configuration.provider && item.id === configuration.modelId)
@@ -1105,16 +1137,30 @@ async function main() {
         if (!model) throw new Error("No configured live GUI smoke model.");
         await window.suocode.request({ type: "configure_model", provider: model.provider, modelId: model.id, thinkingLevel: "low" });
         const activeTree = [...document.querySelectorAll(".project-tree")].find((item) => item.classList.contains("active"));
-        activeTree?.querySelector(".project-add")?.click();
+        const addButton = [...(activeTree?.querySelectorAll("button.project-action") ?? [])]
+          .find((button) => button.getAttribute("aria-label")?.includes("新建对话"));
+        if (!addButton) return false;
+        addButton.click();
+        return true;
+      })()`);
+      assert.equal(openedLiveConversation, true, "The live smoke could not open a fresh project conversation.");
+      await client.waitFor(
+        `Boolean(document.querySelector(".conversation-row.pending.active")) && document.querySelector(".conversation-title strong")?.textContent === "新对话"`,
+        "The live smoke did not enter the temporary new-conversation state.",
+      );
+      await client.evaluate(`(() => {
         window.__suocodeSmokeEvents = [];
         window.__suocodeSmokeUnsubscribe?.();
-        window.__suocodeSmokeUnsubscribe = window.suocode.onRuntimeEvent((event) => {
+        window.__suocodeSmokeUnsubscribe = window.suocode.onRuntimeEvent((event, runtimeId) => {
           window.__suocodeSmokeEvents.push({
             type: event.type,
+            runtimeId,
             field: event.type === "message_delta" ? event.field : undefined,
             running: event.type === "run_state" ? event.running : undefined,
             toolName: event.type === "tool_started" || event.type === "tool_finished" ? event.tool.name : undefined,
             toolOutput: event.type === "tool_finished" ? event.tool.output : undefined,
+            message: event.type === "runtime_error" ? event.message : undefined,
+            subagents: event.type === "subagents_updated" ? event.subagents : undefined,
           });
         });
         return true;
@@ -1179,7 +1225,12 @@ async function main() {
       await client.evaluate(`document.querySelector(".subagent-timeline-card")?.click()`);
       await client.waitFor(`Boolean(document.querySelector(".subagent-detail-window"))`, "The non-blocking subagent detail window did not open.");
       const subagentDetail = await client.evaluate(`document.querySelector(".subagent-detail-window")?.textContent || ""`);
-      assert.match(subagentDetail, new RegExp(subagentToken));
+      if (!subagentDetail.includes(subagentToken)) {
+        const sessions = await client.evaluate(`window.suocode.request({ type: "list_sessions", cwd: ${JSON.stringify(projectDirectory)} })`);
+        const latestSession = sessions[0]?.path ? await readFile(sessions[0].path, "utf8").catch(() => "") : "";
+        const subagentEvents = await client.evaluate(`window.__suocodeSmokeEvents?.filter((event) => event.type === "subagents_updated" || event.toolName === "subagent") ?? []`);
+        throw new Error(`The subagent detail did not contain its final output.\nProjected events:\n${JSON.stringify(subagentEvents, null, 2)}\nPersisted session tail:\n${latestSession.split("\n").slice(-8).join("\n")}`);
+      }
       await client.evaluate(`document.querySelector('button[aria-label="关闭子 Agent 详情"]')?.click()`);
 
       await client.evaluate(`document.querySelector('button[aria-label="刷新项目"]')?.click()`);

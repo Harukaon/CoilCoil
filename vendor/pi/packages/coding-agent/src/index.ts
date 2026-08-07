@@ -49,6 +49,14 @@ export {
 	shouldCompact,
 } from "./core/compaction/index.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
+export {
+	applyHttpProxySettings,
+	configureHttpDispatcher,
+	DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+	formatHttpIdleTimeoutMs,
+	HTTP_IDLE_TIMEOUT_CHOICES,
+	parseHttpIdleTimeoutMs,
+} from "./core/http-dispatcher.ts";
 // Extension system
 export type {
 	AgentEndEvent,

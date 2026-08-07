@@ -3,6 +3,7 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  configureHttpDispatcher,
   createEventBus,
   createAgentSession,
   processImage,
@@ -835,6 +836,10 @@ export class SuoCodeRuntime {
   private mcpReloadTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: SuoCodeRuntimeOptions) {
+    // The Pi CLI configures its Undici dispatcher before provider SDKs run.
+    // Embedded SDK consumers must do the same or Node's default dispatcher can
+    // negotiate HTTP/2 and surface idle stream errors as uncaught exceptions.
+    configureHttpDispatcher();
     this.agentDir = resolve(options.agentDir);
     this.sessionDir = resolve(options.sessionDir);
     this.workflowDir = resolveWorkflowDirectory(options.workflowDir);
@@ -1331,6 +1336,7 @@ export class SuoCodeRuntime {
     }
 
     const settingsManager = SettingsManager.create(cwd, this.agentDir, { projectTrusted: true });
+    configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
     const eventBus = createEventBus();
     const loader = new DefaultResourceLoader({
       cwd,
