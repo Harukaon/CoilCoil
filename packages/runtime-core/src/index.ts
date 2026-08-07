@@ -231,6 +231,25 @@ function stringValue(value: unknown): string {
   return "";
 }
 
+function sensitiveConfigurationKey(key: string): boolean {
+  return /(?:authorization|api[-_]?key|token|secret|password|cookie|credential)/i.test(key);
+}
+
+function redactSensitiveText(value: string, secrets: readonly string[]): string {
+  let redacted = value;
+  for (const secret of [...new Set(secrets)].filter(Boolean).sort((left, right) => right.length - left.length)) {
+    redacted = redacted.split(secret).join("[REDACTED]");
+  }
+  return redacted;
+}
+
+function redactSensitiveValue(value: unknown, secrets: readonly string[]): unknown {
+  if (typeof value === "string") return redactSensitiveText(value, secrets);
+  if (Array.isArray(value)) return value.map((entry) => redactSensitiveValue(entry, secrets));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactSensitiveValue(entry, secrets)]));
+}
+
 function purposeFromArgs(args: Record<string, unknown>): string | undefined {
   for (const field of WORKFLOW_PURPOSE_FIELDS) {
     const value = args[field];
@@ -1052,8 +1071,35 @@ export class SuoCodeRuntime {
     };
   }
 
+  private async mcpSensitiveValues(cwd?: string): Promise<string[]> {
+    const configuration = await this.getMcpConfiguration(cwd);
+    const secrets: string[] = [];
+    for (const server of configuration.servers) {
+      for (const [key, value] of [...Object.entries(server.env), ...Object.entries(server.headers)]) {
+        if (sensitiveConfigurationKey(key) && value && !/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(value)) secrets.push(value);
+      }
+      if (server.url) {
+        try {
+          const parsed = new URL(server.url);
+          if (parsed.username) secrets.push(decodeURIComponent(parsed.username));
+          if (parsed.password) secrets.push(decodeURIComponent(parsed.password));
+          for (const [key, value] of parsed.searchParams) if (sensitiveConfigurationKey(key) && value) secrets.push(value);
+        } catch {
+          // Invalid URLs are rejected when saved; imported malformed entries have no safe structured secrets to inspect.
+        }
+      }
+    }
+    return secrets;
+  }
+
   async getMcpStatus(): Promise<McpRuntimeStatus> {
-    const result = await this.mcpRpc("status");
+    const secrets = await this.mcpSensitiveValues();
+    let result: Record<string, unknown>;
+    try {
+      result = await this.mcpRpc("status");
+    } catch (error) {
+      throw new Error(redactSensitiveText(errorMessage(error), secrets));
+    }
     const status = this.mcpStatusFromDetails(result.details);
     if (status) return status;
     const details = isRecord(result.details) ? result.details : {};
@@ -1068,12 +1114,18 @@ export class SuoCodeRuntime {
       totalTools: 0,
       connectedCount: 0,
       state: details.error === "init_failed" ? "unavailable" : "initializing",
-      diagnostic: stringValue(details.message) || stringValue(result.text) || undefined,
+      diagnostic: redactSensitiveText(stringValue(details.message) || stringValue(result.text), secrets) || undefined,
     };
   }
 
   private async mcpAction(method: "connect" | "auth-start" | "auth-complete" | "logout", params: Record<string, unknown>): Promise<McpActionResult> {
-    const result = await this.mcpRpc(method, params);
+    const secrets = await this.mcpSensitiveValues();
+    let result: Record<string, unknown>;
+    try {
+      result = await this.mcpRpc(method, params);
+    } catch (error) {
+      throw new Error(redactSensitiveText(errorMessage(error), secrets));
+    }
     let status: McpRuntimeStatus | undefined;
     try {
       status = await this.getMcpStatus();
@@ -1081,8 +1133,8 @@ export class SuoCodeRuntime {
       status = undefined;
     }
     return {
-      text: stringValue(result.text),
-      details: isRecord(result.details) ? result.details : undefined,
+      text: redactSensitiveText(stringValue(result.text), secrets),
+      details: isRecord(result.details) ? redactSensitiveValue(result.details, secrets) as Record<string, unknown> : undefined,
       status,
     };
   }

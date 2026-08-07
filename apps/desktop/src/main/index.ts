@@ -156,7 +156,7 @@ async function createPreviewWindow(input: OpenFilePreviewInput): Promise<void> {
   else void window.loadFile(join(__dirname, "../renderer/index.html"), { query: { preview: id } });
 }
 
-async function openPreviewOrMenu(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<{ opened: boolean }> {
+async function openPreviewOrMenu(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<{ opened: boolean; actions?: Array<"reveal" | "force-text" | "trash"> }> {
   const target = await safePreviewPath(input);
   if (previewKind(target.path, Boolean(input.forceText))) {
     await createPreviewWindow(input);
@@ -173,7 +173,7 @@ async function openPreviewOrMenu(event: Electron.IpcMainInvokeEvent, input: Open
       if (result.response === 1) await shell.trashItem(target.path);
     })() },
   ]).popup({ window: owner });
-  return { opened: false };
+  return { opened: false, actions: ["reveal", "force-text", "trash"] };
 }
 
 function isEventEnvelope(message: RuntimeWireMessage): message is RuntimeEventEnvelope {

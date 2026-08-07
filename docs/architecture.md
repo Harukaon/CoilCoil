@@ -62,6 +62,8 @@ When `pi-mcp-adapter` is reloading, its native `not_initialized` or `init_failed
 
 The Desktop logout control invokes the adapter's existing `/mcp logout <server>` command through the same event bridge. SuoCode does not delete or reinterpret the adapter's credential store itself.
 
+Sensitive MCP environment and header values remain in the adapter-compatible configuration, but the editor renders sensitive keys as masks and preserves the stored value when the mask is left untouched. Adapter diagnostics are recursively redacted in Runtime Core before crossing the Desktop IPC boundary.
+
 This rule also applies to future capabilities: configuration screens, previews, dashboards, and controls are product UI, while the corresponding Agent behavior should remain an extension whenever a suitable extension exists. A Desktop-facing bridge may expose extension events and commands, but it must not duplicate the extension's protocol client, lifecycle manager, credential store, or tool implementation.
 
 Bundled extensions are still part of the SuoCode runtime distribution. Extension-first does not mean loading packages from the user's local Pi installation.

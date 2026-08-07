@@ -77,6 +77,7 @@ function waitForEvent(predicate, timeoutMs = 180_000) {
 }
 
 try {
+  const mcpSecret = "suocode-mcp-secret-do-not-leak";
   const bootstrap = await request({ type: "bootstrap" });
   if (!bootstrap?.configuration?.models) throw new Error("Bootstrap did not return model configuration.");
   const initialMcp = await request({ type: "get_mcp_configuration", cwd: projectDir });
@@ -92,7 +93,7 @@ try {
       transport: "stdio",
       command: process.execPath,
       args: ["-e", "process.exit(0)"],
-      env: { SUOCODE_MCP_SMOKE: "1" },
+      env: { SUOCODE_MCP_SMOKE: "1", PRIVATE_TOKEN: mcpSecret },
       headers: {},
       lifecycle: "lazy",
       idleTimeout: 3,
@@ -109,6 +110,7 @@ try {
     || smokeMcp.scope !== "global"
     || smokeMcp.command !== process.execPath
     || smokeMcp.env.SUOCODE_MCP_SMOKE !== "1"
+    || smokeMcp.env.PRIVATE_TOKEN !== mcpSecret
     || smokeMcp.idleTimeout !== 3
     || smokeMcp.requestTimeoutMs !== 4_500
     || smokeMcp.exposeResources !== false
@@ -143,6 +145,9 @@ try {
   const failedMcpConnect = await request({ type: "connect_mcp_server", name: "smoke-server" });
   if (!failedMcpConnect.text || failedMcpConnect.details?.mode !== "connect" || !failedMcpConnect.details?.error) {
     throw new Error(`The extension-native MCP connect bridge did not return pi-mcp-adapter diagnostics: ${JSON.stringify(failedMcpConnect)}`);
+  }
+  if (JSON.stringify(failedMcpConnect).includes(mcpSecret)) {
+    throw new Error("The MCP action bridge leaked a configured credential in diagnostics.");
   }
   const loggedOutMcp = await request({ type: "logout_mcp_server", name: "smoke-server" });
   if (!loggedOutMcp.text || loggedOutMcp.details?.mode !== "logout" || loggedOutMcp.details?.loggedOut !== true) {

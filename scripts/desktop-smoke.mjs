@@ -302,6 +302,7 @@ async function main() {
   execFileSync("git", ["init", "--quiet", projectDirectory]);
   await mkdir(join(projectDirectory, "lazy-folder"));
   await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "lazy\n", "utf8");
+  await writeFile(join(projectDirectory, "unknown-format.suocode-smoke"), "unknown\n", "utf8");
   const port = await freePort();
   const logs = [];
   const child = spawn(appBinary, [
@@ -396,6 +397,7 @@ async function main() {
     await client.waitFor(`Boolean(document.querySelector(".mcp-settings"))`, "The MCP settings view did not open.");
     await client.waitFor(`!document.querySelector(".mcp-settings .settings-loading") && !document.querySelector(".mcp-add-button")?.disabled`, "The MCP settings did not finish loading.");
     const savedMcpServer = await client.evaluate(`(async () => {
+      const secret = "desktop-mcp-secret-do-not-display";
       const setInput = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
         input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -414,15 +416,17 @@ async function main() {
       const requestTimeout = findLabel("请求超时")?.querySelector("input");
       const directTools = findLabel("直接注册的工具")?.querySelector("textarea");
       const excludeTools = findLabel("排除工具")?.querySelector("textarea");
+      const environment = findLabel("环境变量 JSON")?.querySelector("textarea");
       const debug = findLabel("显示服务器调试输出")?.querySelector('input[type="checkbox"]');
       const exposeResources = findLabel("向 Agent 暴露资源")?.querySelector('input[type="checkbox"]');
-      if (!name || !command || !idleTimeout || !requestTimeout || !directTools || !excludeTools || !debug || !exposeResources) return false;
+      if (!name || !command || !idleTimeout || !requestTimeout || !directTools || !excludeTools || !environment || !debug || !exposeResources) return false;
       setInput(name, "desktop-smoke-mcp");
       setInput(command, "/usr/bin/true");
       setInput(idleTimeout, "3");
       setInput(requestTimeout, "4500");
       setTextarea(directTools, "ping");
       setTextarea(excludeTools, "dangerous");
+      setTextarea(environment, JSON.stringify({ PRIVATE_TOKEN: secret }));
       debug.click();
       exposeResources.click();
       await new Promise((resolveWait) => setTimeout(resolveWait, 100));
@@ -450,8 +454,14 @@ async function main() {
       }))()`);
       throw new Error(`${error instanceof Error ? error.message : String(error)} ${JSON.stringify(diagnostic)}`);
     }
-    const mcpUiSaveState = await client.evaluate(`({ saved: [...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp"), error: document.querySelector(".mcp-editor .settings-error")?.textContent || "" })`);
+    const mcpUiSaveState = await client.evaluate(`({
+      saved: [...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp"),
+      error: document.querySelector(".mcp-editor .settings-error")?.textContent || "",
+      environment: [...document.querySelectorAll(".mcp-editor label")].find((label) => label.textContent.startsWith("环境变量 JSON"))?.querySelector("textarea")?.value || ""
+    })`);
     assert.equal(mcpUiSaveState.saved, true, `The MCP server saved through the desktop settings did not appear: ${mcpUiSaveState.error}`);
+    assert.ok(mcpUiSaveState.environment.includes("••••••"), "The MCP editor did not mask a sensitive environment value.");
+    assert.ok(!mcpUiSaveState.environment.includes("desktop-mcp-secret-do-not-display"), "The MCP editor exposed a sensitive environment value after saving.");
     const mcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration" })`);
     const configuredMcp = mcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp");
     assert.equal(configuredMcp?.command, "/usr/bin/true");
@@ -462,6 +472,7 @@ async function main() {
     assert.equal(configuredMcp?.excludeTools?.[0], "dangerous");
     assert.equal(configuredMcp?.exposeResources, false);
     assert.equal(configuredMcp?.debug, true);
+    assert.equal(configuredMcp?.env?.PRIVATE_TOKEN, "desktop-mcp-secret-do-not-display");
     const rejectedUnsafeExternalUrl = await client.evaluate(`window.suocode.openExternal("file:///tmp/suocode-smoke").then(() => false, () => true)`);
     assert.equal(rejectedUnsafeExternalUrl, true, "The desktop external URL bridge accepted a non-HTTP URL.");
     await delay(900);
@@ -960,6 +971,10 @@ async function main() {
     })`);
     assert.equal(lazyBeforeExpand.folder, true);
     assert.equal(lazyBeforeExpand.child, false);
+    const unknownFileFallback = await client.evaluate(`window.suocode.openFilePreview({ root: ${JSON.stringify(projectDirectory)}, path: "unknown-format.suocode-smoke" })`);
+    assert.deepEqual(unknownFileFallback, { opened: false, actions: ["reveal", "force-text", "trash"] });
+    await client.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+    await client.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
     await client.evaluate(`[...document.querySelectorAll(".file-tree-node > button")].find((item) => item.textContent.includes("lazy-folder"))?.click()`);
     await client.waitFor(
       `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))`,

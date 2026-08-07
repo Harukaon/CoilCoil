@@ -13,6 +13,7 @@ import type {
 import "./settings.css";
 
 type SettingsSection = "models" | "mcp";
+const MASKED_SECRET_VALUE = "••••••";
 
 const mcpStatusLabel: Record<McpServerRuntimeStatus["status"], string> = {
   connected: "已连接",
@@ -50,14 +51,25 @@ function blankMcpServer(): McpServerConfiguration {
   };
 }
 
-function parseStringMap(value: string, label: string): Record<string, string> {
+function sensitiveConfigurationKey(key: string): boolean {
+  return /(?:authorization|api[-_]?key|token|secret|password|cookie|credential)/i.test(key);
+}
+
+function maskedStringMap(value: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, sensitiveConfigurationKey(key) && entry ? MASKED_SECRET_VALUE : entry]));
+}
+
+function parseStringMap(value: string, label: string, original: Record<string, string> = {}): Record<string, string> {
   const trimmed = value.trim();
   if (!trimmed) return {};
   const parsed: unknown = JSON.parse(trimmed);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some((item) => typeof item !== "string")) {
     throw new Error(`${label}必须是字符串键值的 JSON 对象。`);
   }
-  return parsed as Record<string, string>;
+  return Object.fromEntries(Object.entries(parsed as Record<string, string>).map(([key, entry]) => [
+    key,
+    entry === MASKED_SECRET_VALUE && Object.hasOwn(original, key) ? original[key] : entry,
+  ]));
 }
 
 function ModelSettings({ configuration, onSaved, runtimeId }: {
@@ -151,6 +163,8 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   const [argsText, setArgsText] = useState("");
   const [envText, setEnvText] = useState("{}");
   const [headersText, setHeadersText] = useState("{}");
+  const [originalEnv, setOriginalEnv] = useState<Record<string, string>>({});
+  const [originalHeaders, setOriginalHeaders] = useState<Record<string, string>>({});
   const [directToolsText, setDirectToolsText] = useState("");
   const [excludeToolsText, setExcludeToolsText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -168,8 +182,10 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
     setSelectedName(server?.name);
     setDraft(next);
     setArgsText(next.args.join("\n"));
-    setEnvText(JSON.stringify(next.env, null, 2));
-    setHeadersText(JSON.stringify(next.headers, null, 2));
+    setOriginalEnv({ ...next.env });
+    setOriginalHeaders({ ...next.headers });
+    setEnvText(JSON.stringify(maskedStringMap(next.env), null, 2));
+    setHeadersText(JSON.stringify(maskedStringMap(next.headers), null, 2));
     setDirectToolsText(Array.isArray(next.directTools) ? next.directTools.join("\n") : "");
     setExcludeToolsText(next.excludeTools.join("\n"));
     setActionMessage(undefined);
@@ -228,8 +244,8 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
         url: draft.url?.trim() || undefined,
         cwd: draft.cwd?.trim() || undefined,
         args: argsText.split("\n").map((item) => item.trim()).filter(Boolean),
-        env: parseStringMap(envText, "环境变量"),
-        headers: parseStringMap(headersText, "请求头"),
+        env: parseStringMap(envText, "环境变量", originalEnv),
+        headers: parseStringMap(headersText, "请求头", originalHeaders),
         bearerTokenEnv: draft.bearerTokenEnv?.trim() || undefined,
         idleTimeout: draft.idleTimeout === undefined || Number.isNaN(draft.idleTimeout) ? undefined : draft.idleTimeout,
         requestTimeoutMs: draft.requestTimeoutMs === undefined || Number.isNaN(draft.requestTimeoutMs) ? undefined : draft.requestTimeoutMs,

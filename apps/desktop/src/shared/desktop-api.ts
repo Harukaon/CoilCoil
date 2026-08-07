@@ -28,6 +28,13 @@ export interface OpenFilePreviewInput {
   forceText?: boolean;
 }
 
+export type FileFallbackAction = "reveal" | "force-text" | "trash";
+
+export interface OpenFilePreviewResult {
+  opened: boolean;
+  actions?: FileFallbackAction[];
+}
+
 export type TerminalLaunchKind = "shell" | "claude" | "codex" | "pi";
 
 export interface DesktopTerminalSession {
@@ -62,7 +69,7 @@ export interface SuoCodeDesktopApi {
   selectProject(): Promise<ProjectSelection | null>;
   setWindowMinimumWidth(width: number): Promise<void>;
   openExternal(url: string): Promise<void>;
-  openFilePreview(input: OpenFilePreviewInput): Promise<{ opened: boolean }>;
+  openFilePreview(input: OpenFilePreviewInput): Promise<OpenFilePreviewResult>;
   getFilePreview(id: string): Promise<FilePreviewDocument>;
   onFilePreviewUpdated(listener: (document: FilePreviewDocument) => void): () => void;
   listTerminals(): Promise<DesktopTerminalSession[]>;
