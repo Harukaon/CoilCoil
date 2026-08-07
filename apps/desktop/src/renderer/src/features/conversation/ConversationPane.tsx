@@ -25,6 +25,16 @@ function truncateTitle(value: string, maximum = 10): string {
   return characters.length > maximum ? `${characters.slice(0, maximum).join("")}…` : value;
 }
 
+function turnModelName(
+  model: ChatMessage["model"],
+  configuration: RuntimeConfiguration | undefined,
+  fallback: string,
+): string {
+  if (!model) return fallback;
+  return configuration?.models.find((candidate) => candidate.provider === model.provider && candidate.id === model.id)?.name
+    ?? model.id;
+}
+
 export function ConversationPane({
   fileDragActive,
   leftOpen,
@@ -127,7 +137,7 @@ export function ConversationPane({
       </header>
 
       <div className="conversation-body" ref={timelineRef} onScroll={onTimelineScroll}>
-        {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} disabled={running} onRewind={onRewind} onError={onError} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={snapshot?.model?.name ?? "Agent"} onStopSubagent={onStopSubagent} />)}{running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
+        {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} disabled={running} onRewind={onRewind} onError={onError} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")} onStopSubagent={onStopSubagent} />)}{running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
       </div>
 
       <div className="composer-wrap">

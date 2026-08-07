@@ -35,9 +35,12 @@ export function buildConversationTimeline(messages: ChatMessage[], tools: ToolRu
       turns.push({ kind: "user", order: item.order, message: item.message });
       continue;
     }
+    const model = item.kind === "message" && item.message.role === "assistant" ? item.message.model : undefined;
     const previous = turns.at(-1);
-    if (previous?.kind === "agent") previous.items.push(item);
-    else turns.push({ kind: "agent", order: item.order, items: [item] });
+    if (previous?.kind === "agent") {
+      previous.items.push(item);
+      previous.model ??= model;
+    } else turns.push({ kind: "agent", order: item.order, items: [item], model });
   }
   return turns;
 }

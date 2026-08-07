@@ -14,6 +14,12 @@ function quotePath(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function relativeProjectPath(root: string, value: string): string {
+  const normalizedRoot = root.replaceAll("\\", "/").replace(/\/$/, "");
+  const normalizedValue = value.replaceAll("\\", "/");
+  return normalizedValue === normalizedRoot ? "." : normalizedValue.startsWith(`${normalizedRoot}/`) ? normalizedValue.slice(normalizedRoot.length + 1) : value;
+}
+
 function replaceDirectoryChildren(nodes: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return nodes.map((node) => {
     if (node.path === path && node.kind === "directory") return { ...node, children };
@@ -34,6 +40,13 @@ function FileContextMenu({ node, root, onTrashed, onError }: {
   onTrashed: (path: string) => void;
   onError: (message: string) => void;
 }): React.JSX.Element {
+  const copy = async (value: string): Promise<void> => {
+    try {
+      await window.suocode.copyText(value);
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
   const run = async (action: "reveal" | "trash"): Promise<void> => {
     try {
       const result = await window.suocode.performProjectFileAction({ root, path: node.path, action });
@@ -45,6 +58,9 @@ function FileContextMenu({ node, root, onTrashed, onError }: {
   return (
     <ContextMenu.Portal>
       <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
+        <ContextMenu.Item className="conversation-context-item" onSelect={() => void copy(absoluteProjectPath(root, node.path))}>复制绝对路径</ContextMenu.Item>
+        <ContextMenu.Item className="conversation-context-item" onSelect={() => void copy(relativeProjectPath(root, node.path))}>复制相对路径</ContextMenu.Item>
+        <ContextMenu.Separator className="file-context-separator" />
         <ContextMenu.Item className="conversation-context-item" onSelect={() => void run("reveal")}>在访达中显示</ContextMenu.Item>
         <ContextMenu.Separator className="file-context-separator" />
         <ContextMenu.Item className="conversation-context-item file-context-danger" onSelect={() => void run("trash")}>移到废纸篓</ContextMenu.Item>

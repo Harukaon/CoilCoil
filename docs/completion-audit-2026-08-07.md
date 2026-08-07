@@ -18,6 +18,7 @@
 | CLI 与 Desktop 共用 Runtime Core | 已验证 | Workspace 构建、类型检查和 Runtime smoke。 |
 | 不向 Renderer 暴露 Node | 已验证 | Desktop smoke 检查 `window.require` / `window.process` 不存在。 |
 | 超限桌面代码按功能域拆分 | 已验证 | 全局样式从 613 行降至 507 行；设置/MCP 与预览样式归入功能目录，生产构建和打包 Desktop smoke 通过。 |
+| 设置使用独立页面而非模态弹窗 | 已验证 | 打包 Desktop smoke 验证设置会替换工作区主界面，使用左侧栏目导航与右侧配置内容，不存在模态背景层。 |
 
 ## 对话与历史
 
@@ -39,6 +40,7 @@
 | --- | --- | --- |
 | Home 与多个 Workspace 同时挂载 | 已验证 | Desktop smoke。 |
 | Workspace 行只展开/折叠，不自动切会话 | 已验证 | Desktop smoke。 |
+| Workspace 与会话列表使用紧凑纵向间距 | 已验证 | 每组只在会话列表末尾保留 3px，组间 2px；打包 Desktop smoke 检查最终计算样式。 |
 | 每组最多四条、临时新对话、更多展开 | 已验证 | Desktop smoke。 |
 | 会话右键归档、归档查看与恢复 | 已验证 | Runtime 与 Desktop smoke。 |
 | 单 Runtime 进程内的多会话并行、运行中和未读完成状态 | 已验证 | Runtime Server 单元测试、真实 MiniMax M3 并发 smoke，以及打包应用进程树检查；切换会话不终止后台 Agent。 |
@@ -60,6 +62,7 @@
 | 需求 | 状态 | 当前证据 / 缺口 |
 | --- | --- | --- |
 | 文件树逐层懒加载 | 已验证 | Runtime 与 Desktop smoke 使用 1205 项目录 fixture。 |
+| 文件树右键复制绝对路径与相对路径 | 已验证 | Typed IPC 使用 Electron 系统剪贴板；打包 Desktop smoke 打开文件右键菜单并通过 `pbpaste` 验证两种路径。 |
 | 右侧只保留文件面板 | 已验证 | Desktop smoke。 |
 | 文本、Markdown、HTML、PDF 独立非模态预览 | 已验证 | 打包应用预览 smoke。 |
 | 预览磁盘实时更新 | 已验证 | Desktop smoke 修改文件后检查窗口内容。 |

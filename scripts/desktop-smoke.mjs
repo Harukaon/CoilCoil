@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -167,6 +167,13 @@ async function clickInspector(client, label) {
     button.click();
     return true;
   })()`);
+}
+
+async function dismissFirstRunSettings(client, required) {
+  if (!required) return;
+  await client.waitFor(`Boolean(document.querySelector('.settings-screen'))`, "The first-run settings screen did not appear after reload.", 45_000);
+  await client.evaluate(`document.querySelector('.settings-screen button[aria-label="关闭设置"]')?.click()`);
+  await client.waitFor(`Boolean(document.querySelector('.conversation-pane'))`, "The workspace did not return after closing first-run settings.", 10_000);
 }
 
 async function fillAndSubmitComposer(client, prompt) {
@@ -392,6 +399,7 @@ async function main() {
     if (!hasConfiguredProvider) {
       await client.waitFor(`Boolean(document.querySelector('button[aria-label="关闭设置"]'))`, "The first-run model settings dialog did not open.");
       await client.evaluate(`document.querySelector('button[aria-label="关闭设置"]')?.click()`);
+      await client.waitFor(`Boolean(document.querySelector('.conversation-pane'))`, "The workspace did not return after closing first-run settings.", 10_000);
     }
     const homeState = await client.evaluate(`(async () => {
       const home = await window.suocode.homeProject();
@@ -440,6 +448,8 @@ async function main() {
     })()`);
     assert.equal(openedSettings, true);
     await client.waitFor(`Boolean(document.querySelector(".settings-tabs"))`, "The settings dialog did not open.");
+    assert.equal(await client.evaluate(`Boolean(document.querySelector(".settings-screen"))`), true, "Settings did not switch to the dedicated settings screen.");
+    assert.equal(await client.evaluate(`Boolean(document.querySelector(".settings-screen")?.closest(".modal-backdrop"))`), false, "Settings is still rendered inside a modal backdrop.");
     const openedMcpSettings = await client.evaluate(`(() => {
       const mcp = [...document.querySelectorAll(".settings-tabs button")].find((button) => button.textContent.includes("MCP"));
       if (!mcp) return false;
@@ -992,9 +1002,12 @@ async function main() {
       })};
       localStorage.setItem("suocode.mounted-projects", JSON.stringify([project]));
       localStorage.setItem("suocode.active-project", project.path);
+      window.__suocodeSmokeReloading = true;
       location.reload();
       return true;
     })()`);
+    await client.waitFor(`typeof window.__suocodeSmokeReloading === "undefined"`, "The packaged renderer did not finish the project reload.", 45_000);
+    await dismissFirstRunSettings(client, !hasConfiguredProvider);
     await client.waitFor(
       `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')) && [...document.querySelectorAll(".project-name")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
       "The packaged app could not create a project session through IPC.",
@@ -1006,7 +1019,10 @@ async function main() {
       projects: [...document.querySelectorAll(".project-name")].map((item) => item.textContent || ""),
       headerBorder: getComputedStyle(document.querySelector(".conversation-header")).borderBottomWidth,
       inspectorTitle: document.querySelector(".inspector-header")?.textContent || "",
-      filePreview: Boolean(document.querySelector(".file-preview"))
+      filePreview: Boolean(document.querySelector(".file-preview")),
+      workspaceGap: getComputedStyle(document.querySelector(".project-tree")).rowGap,
+      workspaceMargin: getComputedStyle(document.querySelectorAll(".project-tree")[1]).marginTop,
+      conversationBottomPadding: getComputedStyle(document.querySelector(".conversation-list")).paddingBottom,
     })`);
     assert.match(projectState.status, new RegExp(basename(projectDirectory)));
     assert.ok(projectState.session.length > 0);
@@ -1014,6 +1030,11 @@ async function main() {
     assert.equal(projectState.headerBorder, "0px");
     assert.doesNotMatch(projectState.inspectorTitle, /项目作业/);
     assert.equal(projectState.filePreview, false);
+    assert.deepEqual(
+      { gap: projectState.workspaceGap, margin: projectState.workspaceMargin, bottom: projectState.conversationBottomPadding },
+      { gap: "1px", margin: "2px", bottom: "3px" },
+      "Workspace groups retained the oversized conversation spacing.",
+    );
 
     const projectInteraction = await client.evaluate(`(async () => {
       const tree = [...document.querySelectorAll(".project-tree")].find((item) => item.querySelector(".project-name")?.textContent === ${JSON.stringify(basename(projectDirectory))});
@@ -1035,9 +1056,12 @@ async function main() {
         pendingRow: Boolean(tree?.querySelector(".conversation-row.pending")),
         loading: Boolean(document.querySelector(".loading-state")),
         textareaDisabled: document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.disabled ?? true,
+        conversationPane: Boolean(document.querySelector(".conversation-pane")),
+        terminalPane: Boolean(document.querySelector(".terminal-workspace")),
+        activeProjects: [...document.querySelectorAll(".project-tree.active .project-name")].map((item) => item.textContent),
       };
     })()`);
-    assert.equal(projectInteraction.titleAfterCollapse, projectInteraction.titleBefore);
+    assert.equal(projectInteraction.titleAfterCollapse, projectInteraction.titleBefore, `Collapsing a Workspace changed the active conversation: ${JSON.stringify(projectInteraction)}`);
     assert.equal(projectInteraction.collapsed, true);
     assert.equal(projectInteraction.pendingTitle, "新对话");
     assert.equal(projectInteraction.pendingRow, true);
@@ -1063,8 +1087,11 @@ async function main() {
 
     await client.evaluate(`(() => {
       localStorage.setItem("suocode.active-project", ${JSON.stringify(projectDirectory)});
+      window.__suocodeSmokeReloading = true;
       location.reload();
     })()`);
+    await client.waitFor(`typeof window.__suocodeSmokeReloading === "undefined"`, "The packaged renderer did not finish the temporary-session reload.", 45_000);
+    await dismissFirstRunSettings(client, !hasConfiguredProvider);
     await client.waitFor(`document.querySelector(".workspace-status")?.textContent.includes(${JSON.stringify(basename(projectDirectory))})`, "The project session did not restore after the temporary-session test.", 45_000);
 
     await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
@@ -1088,6 +1115,25 @@ async function main() {
       `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))`,
       "The file tree did not load an expanded folder on demand.",
     );
+    const fileContextMenu = await client.evaluate(`(async () => {
+      const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
+      if (!file) return null;
+      file.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 180, clientY: 180 }));
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      return [...document.querySelectorAll(".conversation-context-menu .conversation-context-item")].map((item) => item.textContent);
+    })()`);
+    assert.deepEqual(fileContextMenu, ["复制绝对路径", "复制相对路径", "在访达中显示", "移到废纸篓"]);
+    await client.evaluate(`([...document.querySelectorAll(".conversation-context-menu .conversation-context-item")].find((item) => item.textContent === "复制绝对路径"))?.click()`);
+    await delay(50);
+    assert.equal(execFileSync("pbpaste", { encoding: "utf8" }).trim(), join(await realpath(projectDirectory), "lazy-folder", "lazy-child.txt"));
+    await client.evaluate(`(() => {
+      const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
+      file?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 180, clientY: 180 }));
+    })()`);
+    await client.waitFor(`[...document.querySelectorAll(".conversation-context-menu .conversation-context-item")].some((item) => item.textContent === "复制相对路径")`, "The relative-path context action did not reopen.");
+    await client.evaluate(`([...document.querySelectorAll(".conversation-context-menu .conversation-context-item")].find((item) => item.textContent === "复制相对路径"))?.click()`);
+    await delay(50);
+    assert.equal(execFileSync("pbpaste", { encoding: "utf8" }).trim(), join("lazy-folder", "lazy-child.txt"));
     const draggedPaths = await client.evaluate(`(async () => {
       const folder = [...document.querySelectorAll(".file-tree-node > button")].find((item) => item.textContent.includes("lazy-folder"));
       const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
@@ -1146,8 +1192,11 @@ async function main() {
       await writeFile(fixturePath, `${subagentFixtureEntries(fixtureSession, fixtureToken).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
       await client.evaluate(`(() => {
         localStorage.setItem("suocode.activeProject", ${JSON.stringify(projectDirectory)});
+        window.__suocodeSmokeReloading = true;
         location.reload();
       })()`);
+      await client.waitFor(`typeof window.__suocodeSmokeReloading === "undefined"`, "The packaged renderer did not finish the fixture-session reload.", 45_000);
+      await dismissFirstRunSettings(client, !hasConfiguredProvider);
       await client.waitFor(
         `[...document.querySelectorAll(".conversation-row")].some((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))`,
         "The packaged sidebar did not discover the subagent fixture session.",
@@ -1400,7 +1449,10 @@ async function main() {
       assert.equal(await client.evaluate(`Boolean(document.querySelector(".file-preview"))`), false);
       assert.equal((await readFile(join(projectDirectory, fileName), "utf8")).trim(), fileToken);
 
+      await client.evaluate(`window.__suocodeSmokeReloading = true`);
       await client.send("Page.reload", { ignoreCache: true });
+      await client.waitFor(`typeof window.__suocodeSmokeReloading === "undefined"`, "The packaged renderer did not finish the final reload.", 45_000);
+      await dismissFirstRunSettings(client, !hasConfiguredProvider);
       await client.waitFor(
         `document.querySelectorAll(".user-bubble-button").length >= 3 && document.querySelector(".timeline")?.textContent.includes(${JSON.stringify(terminalToken)})`,
         "The completed conversation was not restored after a renderer restart.",

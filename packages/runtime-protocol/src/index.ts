@@ -117,6 +117,7 @@ export interface ChatMessage {
   entryId?: string;
   order: number;
   role: ChatRole;
+  model?: Pick<ModelOption, "provider" | "id">;
   text: string;
   images?: PromptImage[];
   thinking?: string;

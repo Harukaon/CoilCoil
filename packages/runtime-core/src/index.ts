@@ -521,10 +521,13 @@ function mapMessage(message: unknown, id: string, order: number, entryId?: strin
   if (role === "assistant") {
     const stopReason = stringValue(message.stopReason);
     const failed = stopReason === "error" || stopReason === "aborted";
+    const provider = stringValue(message.provider);
+    const modelId = stringValue(message.model);
     return {
       id,
       order,
       role: "assistant",
+      model: provider && modelId ? { provider, id: modelId } : undefined,
       text: parts.text || (failed ? stringValue(message.errorMessage) : ""),
       thinking: parts.thinking || undefined,
       timestamp: messageTimestamp(message),

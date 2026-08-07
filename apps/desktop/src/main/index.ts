@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
 import type { CreateTerminalInput, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload } from "../shared/desktop-api";
 import { TerminalManager } from "./terminal-manager";
 
@@ -18,6 +18,7 @@ const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const EXTERNAL_OPEN_CHANNEL = "external:open";
+const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
@@ -413,6 +414,10 @@ app.whenReady().then(() => {
     const url = new URL(rawUrl);
     if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("只允许打开 HTTP 或 HTTPS 授权地址。");
     await shell.openExternal(url.toString());
+  });
+  ipcMain.handle(CLIPBOARD_WRITE_CHANNEL, (_event, text: string): void => {
+    if (typeof text !== "string" || text.length > 1_000_000) throw new Error("剪贴板内容无效。");
+    clipboard.writeText(text);
   });
   ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openPreviewOrMenu(event, input));
   ipcMain.handle(PROJECT_FILE_ACTION_CHANNEL, (event, input: ProjectFileActionInput) => performProjectFileAction(event, input));

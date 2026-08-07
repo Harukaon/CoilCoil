@@ -106,12 +106,12 @@ export function WorkspaceSidebar({
               </div>
               <div className={`conversation-list-shell ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
                 <div className="conversation-list">
-                  {hasPending ? <button className="conversation-row active pending" type="button" onClick={onFocusPending}><Circle size={11} strokeWidth={1.7} /><span>新对话</span><time>刚刚</time></button> : null}
+                  {hasPending ? <button className="conversation-row active pending" type="button" onClick={onFocusPending}><span className="conversation-status"><Circle size={11} strokeWidth={1.7} /></span><span className="conversation-title-text">新对话</span><time>刚刚</time></button> : null}
                   {visibleSessions.map((session) => {
                     const activity = sessionActivity[session.path];
                     return <ContextMenu.Root key={session.id}>
                       <ContextMenu.Trigger asChild>
-                        <button className={`conversation-row ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`} type="button" onClick={() => onOpenConversation(project, session)}>{activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <span className="conversation-unread" /> : <CircleDot size={11} strokeWidth={2} />}<span>{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>
+                        <button className={`conversation-row ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`} type="button" onClick={() => onOpenConversation(project, session)}><span className="conversation-status">{activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <i className="conversation-unread" /> : <CircleDot size={11} strokeWidth={2} />}</span><span className="conversation-title-text">{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>
                       </ContextMenu.Trigger>
                       <ContextMenu.Portal>
                         <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>

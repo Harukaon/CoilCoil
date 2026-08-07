@@ -13,7 +13,7 @@ export type TimelineItem =
 
 export type ConversationTimelineItem =
   | { kind: "user"; order: number; message: ChatMessage }
-  | { kind: "agent"; order: number; items: TimelineItem[] };
+  | { kind: "agent"; order: number; items: TimelineItem[]; model?: ChatMessage["model"] };
 
 type ActivityEntry =
   | { kind: "thinking"; id: string; text: string }

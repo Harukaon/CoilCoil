@@ -518,6 +518,10 @@ export default function App(): React.JSX.Element {
     { id: "files", label: "文件", icon: Files },
   ];
 
+  if (settingsOpen) {
+    return <SettingsDialog configuration={configuration} open onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} />;
+  }
+
   return (
     <>
       <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "keep-tiled" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
@@ -612,7 +616,6 @@ export default function App(): React.JSX.Element {
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
       </main>
-      <SettingsDialog configuration={configuration} open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} />
     </>
   );
 }

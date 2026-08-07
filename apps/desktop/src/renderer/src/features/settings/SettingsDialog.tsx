@@ -1,4 +1,4 @@
-import { AlertCircle, Cable, Copy, ExternalLink, KeyRound, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Search, Settings, Trash2, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Cable, Copy, ExternalLink, KeyRound, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Search, Settings, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type {
@@ -441,12 +441,22 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
   useEffect(() => { if (!open) setSection("models"); }, [open]);
   if (!open) return null;
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <header><div><span className="settings-icon">{section === "models" ? <Settings size={16} /> : <Network size={16} />}</span><div><h2 id="settings-title">设置</h2><p>模型凭据和 MCP 配置均保存在 SuoCode 的私有运行时中。</p></div></div><button className="icon-button" type="button" aria-label="关闭设置" onClick={onClose}><X size={17} /></button></header>
-        <nav className="settings-tabs"><button className={section === "models" ? "active" : ""} type="button" onClick={() => setSection("models")}><Settings size={14} />模型与服务商</button><button className={section === "mcp" ? "active" : ""} type="button" onClick={() => setSection("mcp")}><Network size={14} />MCP</button></nav>
-        {section === "models" ? <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} /> : <McpSettings runtimeId={runtimeId} cwd={cwd} />}
+    <main className="settings-screen" aria-labelledby="settings-title">
+      <aside className="settings-sidebar">
+        <div className="settings-window-drag window-drag" />
+        <div className="settings-sidebar-brand"><span className="brand-mark">S</span><strong>SuoCode</strong></div>
+        <nav className="settings-tabs" aria-label="设置栏目">
+          <button className={section === "models" ? "active" : ""} type="button" onClick={() => setSection("models")}><Settings size={15} />模型与服务商</button>
+          <button className={section === "mcp" ? "active" : ""} type="button" onClick={() => setSection("mcp")}><Network size={15} />MCP</button>
+        </nav>
+        <button className="settings-back" type="button" aria-label="关闭设置" onClick={onClose}><ArrowLeft size={15} />返回工作区</button>
+      </aside>
+      <section className="settings-page" role="region">
+        <header className="settings-page-header"><div><span className="settings-icon">{section === "models" ? <Settings size={17} /> : <Network size={17} />}</span><div><h1 id="settings-title">{section === "models" ? "模型与服务商" : "MCP"}</h1><p>模型凭据和 MCP 配置均保存在 SuoCode 的私有运行时中。</p></div></div></header>
+        <div className="settings-page-content">
+          {section === "models" ? <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} /> : <McpSettings runtimeId={runtimeId} cwd={cwd} />}
+        </div>
       </section>
-    </div>
+    </main>
   );
 }
