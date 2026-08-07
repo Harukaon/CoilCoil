@@ -55,8 +55,11 @@ git worktree add ../SuoCode-agent-a agent/a
 
 每个新 worktree 都需要准备自己的依赖。不要手工复制或共享正在被其他环境使用的 `node_modules`。
 
+Pi 的模型目录数据属于生成文件，不会随 Git worktree 一起出现。首次准备环境时先在当前 worktree 中生成模型数据，再执行完整安装：
+
 ```bash
 cd /Users/hao/Desktop/project/SuoCode-agent-a
+npm run hydrate:model-data --prefix vendor/pi
 npm run setup
 ```
 
