@@ -35,6 +35,19 @@ export interface OpenFilePreviewResult {
   actions?: FileFallbackAction[];
 }
 
+export type ProjectFileAction = "reveal" | "trash";
+
+export interface ProjectFileActionInput {
+  root: string;
+  path: string;
+  action: ProjectFileAction;
+}
+
+export interface ProjectFileActionResult {
+  completed: boolean;
+  trashed?: boolean;
+}
+
 export type TerminalLaunchKind = "shell" | "claude" | "codex" | "pi";
 
 export interface DesktopTerminalSession {
@@ -70,6 +83,7 @@ export interface SuoCodeDesktopApi {
   setWindowMinimumWidth(width: number): Promise<void>;
   openExternal(url: string): Promise<void>;
   openFilePreview(input: OpenFilePreviewInput): Promise<OpenFilePreviewResult>;
+  performProjectFileAction(input: ProjectFileActionInput): Promise<ProjectFileActionResult>;
   getFilePreview(id: string): Promise<FilePreviewDocument>;
   onFilePreviewUpdated(listener: (document: FilePreviewDocument) => void): () => void;
   listTerminals(): Promise<DesktopTerminalSession[]>;

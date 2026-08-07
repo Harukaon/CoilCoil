@@ -308,11 +308,45 @@ test("extension injects global project-scoped memory without creating project .p
   assert.equal(harness.registeredTools(), 0);
   assert.deepEqual([...harness.commands.keys()], ["memory"]);
   assert.equal(harness.handlers.has("agent_end"), false);
-  assert.equal(harness.handlers.has("agent_settled"), false);
+  assert.equal(harness.handlers.has("agent_settled"), true);
   assert.equal(harness.handlers.has("tool_call"), false);
   assert.match(result.systemPrompt, /<project_folder_memory>/);
   assert.equal(await readFile(join(memoryRoot, "A", "MEMORY.md"), "utf8"), "");
   assert.equal(await pathMissing(join(project, ".pi")), true);
+});
+
+test("settled sessions are summarized in the background and injected into later prompts", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, '{"type":"message","message":{"role":"user","content":"部署端口是 8443"}}\n', "utf8");
+  const launches: MemoryWorkerLaunch[] = [];
+  const children: FakeWorker[] = [];
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+    spawnWorker: (launch) => {
+      launches.push(launch);
+      const child = new FakeWorker();
+      children.push(child);
+      return child;
+    },
+  });
+  const context = contextFor(project, sessionFile);
+
+  await harness.handlers.get("agent_settled")?.[0]({}, context);
+  assert.equal(launches.length, 1);
+  assert.match(launches[0].args.join("\n"), new RegExp((await realpath(sessionFile)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  await writeFile(paths.memoryFile, "稳定部署端口：8443", "utf8");
+  children[0].emit("exit", 0, null);
+  await waitFor(() => pathMissing(paths.workerLockFile));
+
+  const injected = await harness.handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, context);
+  assert.match(injected.systemPrompt, /稳定部署端口：8443/);
 });
 
 test("Pi started inside global .pi memory cannot recursively trigger /memory", async (t) => {

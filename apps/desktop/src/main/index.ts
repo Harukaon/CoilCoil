@@ -9,10 +9,10 @@ import type {
 import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
-import type { CreateTerminalInput, FilePreviewDocument, OpenFilePreviewInput, ProjectSelection, RuntimeRequestPayload } from "../shared/desktop-api";
+import type { CreateTerminalInput, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload } from "../shared/desktop-api";
 import { TerminalManager } from "./terminal-manager";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
@@ -24,6 +24,7 @@ const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_GET_CHANNEL = "preview:get";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
+const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
 const TERMINAL_LIST_CHANNEL = "terminal:list";
 const TERMINAL_CREATE_CHANNEL = "terminal:create";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
@@ -59,7 +60,7 @@ interface PreviewRecord {
 
 const previews = new Map<string, PreviewRecord>();
 
-async function safePreviewPath(input: OpenFilePreviewInput): Promise<{ root: string; path: string }> {
+async function safeProjectPath(input: Pick<OpenFilePreviewInput, "root" | "path">): Promise<{ root: string; path: string }> {
   const root = await realpath(input.root);
   const candidate = isAbsolute(input.path) ? resolve(input.path) : resolve(root, input.path);
   const path = await realpath(candidate);
@@ -67,8 +68,51 @@ async function safePreviewPath(input: OpenFilePreviewInput): Promise<{ root: str
   if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
     throw new Error("所选文件不在当前项目中。");
   }
-  if (!(await stat(path)).isFile()) throw new Error("所选路径不是文件。");
   return { root, path };
+}
+
+async function safePreviewPath(input: OpenFilePreviewInput): Promise<{ root: string; path: string }> {
+  const target = await safeProjectPath(input);
+  if (!(await stat(target.path)).isFile()) throw new Error("所选路径不是文件。");
+  return target;
+}
+
+async function safeProjectEntryPath(
+  input: Pick<ProjectFileActionInput, "root" | "path">,
+): Promise<{ root: string; path: string }> {
+  const root = await realpath(input.root);
+  const path = isAbsolute(input.path) ? resolve(input.path) : resolve(root, input.path);
+  const rel = relative(root, path);
+  if (!rel || rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
+    throw new Error(!rel ? "不能对工作区根目录执行此操作。" : "所选项目条目不在当前项目中。");
+  }
+  await lstat(path);
+  return { root, path };
+}
+
+async function performProjectFileAction(
+  event: Electron.IpcMainInvokeEvent,
+  input: ProjectFileActionInput,
+): Promise<ProjectFileActionResult> {
+  const target = await safeProjectEntryPath(input);
+  if (input.action === "reveal") {
+    shell.showItemInFolder(target.path);
+    return { completed: true };
+  }
+  if (input.action !== "trash") throw new Error("不支持的文件操作。");
+  const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const options = {
+    type: "warning" as const,
+    title: "移到废纸篓",
+    message: `确定要将“${basename(target.path)}”移到废纸篓吗？`,
+    buttons: ["取消", "移到废纸篓"],
+    defaultId: 0,
+    cancelId: 0,
+  };
+  const result = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+  if (result.response !== 1) return { completed: false, trashed: false };
+  await shell.trashItem(target.path);
+  return { completed: true, trashed: true };
 }
 
 async function listProjectDirectory(rootValue: string, relativePath = ""): Promise<FileNode[]> {
@@ -410,6 +454,7 @@ app.whenReady().then(() => {
     await shell.openExternal(url.toString());
   });
   ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openPreviewOrMenu(event, input));
+  ipcMain.handle(PROJECT_FILE_ACTION_CHANNEL, (event, input: ProjectFileActionInput) => performProjectFileAction(event, input));
   ipcMain.handle(PREVIEW_GET_CHANNEL, async (_event, id: string): Promise<FilePreviewDocument> => {
     const record = previews.get(id);
     if (!record) throw new Error("文件预览窗口已失效。");

@@ -8,6 +8,8 @@ import type {
   CreateTerminalInput,
   FilePreviewDocument,
   OpenFilePreviewInput,
+  ProjectFileActionInput,
+  ProjectFileActionResult,
   ProjectSelection,
   RuntimeEventPayload,
   RuntimeRequestPayload,
@@ -23,6 +25,7 @@ const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_GET_CHANNEL = "preview:get";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
+const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
 const TERMINAL_LIST_CHANNEL = "terminal:list";
 const TERMINAL_CREATE_CHANNEL = "terminal:create";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
@@ -49,6 +52,8 @@ const api: SuoCodeDesktopApi = {
     ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url) as Promise<void>,
   openFilePreview: (input: OpenFilePreviewInput) =>
     ipcRenderer.invoke(PREVIEW_OPEN_CHANNEL, input) as Promise<{ opened: boolean }>,
+  performProjectFileAction: (input: ProjectFileActionInput) =>
+    ipcRenderer.invoke(PROJECT_FILE_ACTION_CHANNEL, input) as Promise<ProjectFileActionResult>,
   getFilePreview: (id: string) =>
     ipcRenderer.invoke(PREVIEW_GET_CHANNEL, id) as Promise<FilePreviewDocument>,
   onFilePreviewUpdated: (listener: (document: FilePreviewDocument) => void) => {

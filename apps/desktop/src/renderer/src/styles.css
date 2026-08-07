@@ -97,6 +97,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .conversation-context-item { display: flex; height: 30px; align-items: center; padding: 0 9px; border-radius: 7px; color: #3f3f3b; font-size: 12px; outline: none; cursor: default; user-select: none; }
 .conversation-context-item[data-highlighted] { color: #20201e; background: #e9e9e5; }
 .conversation-context-item[data-disabled] { color: #aaa9a4; }
+.file-context-separator { height: 1px; margin: 4px 6px; background: #e5e5e1; }
+.file-context-danger { color: #a04740; }
+.file-context-danger[data-highlighted] { color: #8d312b; background: #f7e9e7; }
 @keyframes context-menu-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
 .archive-popover { z-index: 120; width: min(330px, calc(100vw - 24px)); overflow: hidden; border: 1px solid #deded9; border-radius: 13px; color: #363633; background: rgb(251 251 249 / 98%); box-shadow: 0 18px 48px rgb(31 31 28 / 16%), 0 3px 10px rgb(31 31 28 / 8%); animation: context-menu-in 130ms cubic-bezier(.16, 1, .3, 1); }
 .archive-popover > header { display: flex; min-height: 54px; align-items: center; justify-content: space-between; padding: 10px 13px; border-bottom: 1px solid #e7e7e3; }
@@ -115,7 +118,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .archive-session button:hover:not(:disabled) { color: #252523; background: #deded9; }
 .archive-session button:disabled { opacity: .55; cursor: default; }
 .archive-empty { margin: 0; padding: 34px 12px; color: #999994; text-align: center; font-size: 11px; }
-.more-conversations { display: grid; width: 30px; height: 24px; margin-left: 5px; padding: 0; place-items: center; border-radius: 6px; color: #858580; background: transparent; cursor: pointer; }
+.more-conversations { display: flex; width: calc(100% - 4px); height: 24px; align-items: center; justify-content: center; margin: 2px 2px 0; padding: 0; border-radius: 6px; color: #858580; background: transparent; cursor: pointer; }
 .more-conversations:hover { color: #242422; background: #e4e4e1; }
 .empty-conversations { margin: 6px 8px; color: #999994; font-size: 12px; }
 .open-project-card { display: flex; width: 100%; gap: 8px; align-items: center; padding: 8px; border-radius: 8px; text-align: left; background: transparent; cursor: pointer; }
@@ -273,7 +276,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .composer-overlays .composer-activity { position: relative; bottom: auto; left: auto; transform: none; }
 .composer-activity { position: absolute; z-index: 0; bottom: calc(100% - 10px); left: 50%; width: calc(100% - 52px); overflow: hidden; border: 1px solid #deded9; border-bottom-color: #e5e5e1; border-radius: 15px 15px 0 0; background: rgb(250 250 248 / 98%); box-shadow: 0 -5px 20px rgb(28 28 25 / 4%); transform: translateX(-50%); }
 .composer-activity.collapsed { width: calc(100% - 92px); }
-.composer-activity-header { display: flex; min-width: 0; height: 38px; align-items: center; padding: 0 9px 8px 13px; color: #686863; font-size: 11px; }
+.composer-activity-header { display: flex; min-width: 0; height: 38px; align-items: center; padding: 0 9px 8px 13px; color: #686863; font-size: 11px; cursor: pointer; }
 .composer-activity-header > strong { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .composer-activity-tabs { display: flex; min-width: 0; align-items: center; gap: 3px; }
 .composer-activity-tabs button { display: inline-flex; height: 25px; align-items: center; gap: 5px; padding: 0 8px; border-radius: 7px; color: #8b8b86; background: transparent; font-size: 11px; font-weight: 600; cursor: pointer; }

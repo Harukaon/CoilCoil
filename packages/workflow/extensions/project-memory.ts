@@ -679,6 +679,37 @@ export default function projectMemoryExtension(
     }
   };
 
+  const summarizeSession = async (
+    ctx: ExtensionContext,
+    notifyStarted: boolean,
+  ): Promise<"started" | "busy" | "skipped" | "failed"> => {
+    if (await memoryIsDisabled(ctx.cwd, env)) return "skipped";
+    if (!ctx.model) return "skipped";
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    if (!sessionFile || !(await pathExists(sessionFile))) return "skipped";
+
+    try {
+      const { paths } = await prepareMemory(ctx.cwd, storageRoot);
+      const result = await launchWorker({
+        paths,
+        sessionFile: await canonicalPath(sessionFile),
+        provider: ctx.model.provider,
+        model: ctx.model.id,
+      }, (error) => notifyOnce(
+        backgroundWarningState,
+        ctx,
+        error,
+        "后台记忆整理失败",
+      ));
+      if (notifyStarted && result === "started") ctx.ui.notify("记忆整理已在后台启动", "info");
+      if (notifyStarted && result === "busy") ctx.ui.notify("当前项目已有记忆整理正在运行", "info");
+      return result;
+    } catch (error) {
+      notifyOnce(backgroundWarningState, ctx, error, "后台记忆整理失败");
+      return "failed";
+    }
+  };
+
   pi.registerCommand("memory", {
     description: "立即在后台整理当前项目记忆",
     handler: async (args, ctx) => {
@@ -699,29 +730,7 @@ export default function projectMemoryExtension(
         ctx.ui.notify("当前会话没有可读取的 session 文件", "warning");
         return;
       }
-
-      try {
-        const { paths } = await prepareMemory(ctx.cwd, storageRoot);
-        const result = await launchWorker({
-          paths,
-          sessionFile: await canonicalPath(sessionFile),
-          provider: ctx.model.provider,
-          model: ctx.model.id,
-        }, (error) => notifyOnce(
-          backgroundWarningState,
-          ctx,
-          error,
-          "后台记忆整理失败",
-        ));
-
-        if (result === "started") {
-          ctx.ui.notify("记忆整理已在后台启动", "info");
-        } else if (result === "busy") {
-          ctx.ui.notify("当前项目已有记忆整理正在运行", "info");
-        }
-      } catch (error) {
-        notifyOnce(backgroundWarningState, ctx, error, "后台记忆整理失败");
-      }
+      await summarizeSession(ctx, true);
     },
   });
 
@@ -746,6 +755,10 @@ export default function projectMemoryExtension(
       notifyOnce(warningState, ctx, error, "项目记忆注入失败");
       return undefined;
     }
+  });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    await summarizeSession(ctx, false);
   });
 
 }

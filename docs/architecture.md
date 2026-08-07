@@ -37,6 +37,8 @@ Desktop starts the runtime with dedicated Agent and session directories inside t
 
 Subagents and background memory workers launch the Pi CLI shipped inside SuoCode using the current runtime executable. They do not discover or invoke a `pi` executable from the user's shell `PATH`. MCP uses SuoCode's own Agent directory plus standard/project MCP configuration files; secrets are never copied into the repository or installation image.
 
+Project memory remains owned by the bundled `project-memory` Pi extension. Once a foreground Agent request emits `agent_settled`, the extension starts the isolated bundled memory worker and returns without blocking the conversation UI. The worker summarizes the persisted session into the project-scoped memory directory. Later requests in the same project receive that memory through `before_agent_start`; Desktop does not maintain a second memory database or depend on the user's local Pi installation.
+
 Each project session uses Pi's `SessionManager`. The runtime translates Pi message and tool events into stable SuoCode events, reconstructs tool/plan/terminal state when a session is reopened, and refreshes Git and file state after mutations.
 
 ## Extension-first product architecture

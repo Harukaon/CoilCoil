@@ -59,17 +59,34 @@ export function ActivityPanel({
   const title = tab === "todo"
     ? "Todo"
     : runningAgents > 0 ? `${runningAgents} 个代理正在执行` : "代理执行记录";
+  const toggleExpanded = (): void => setExpanded((value) => !value);
 
   return (
     <section className={`composer-activity ${expanded ? "expanded" : "collapsed"}`} aria-label="Agent 活动">
-      <div className="composer-activity-header">
+      <div
+        className="composer-activity-header"
+        role="button"
+        tabIndex={0}
+        aria-label={expanded ? "收起活动" : "展开活动"}
+        aria-expanded={expanded}
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest("button")) return;
+          toggleExpanded();
+        }}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          toggleExpanded();
+        }}
+      >
         {hasBoth ? (
           <div className="composer-activity-tabs" role="tablist" aria-label="活动类型">
             <button className={tab === "todo" ? "active" : ""} type="button" role="tab" aria-selected={tab === "todo"} onClick={() => { setTab("todo"); setExpanded(true); }}>Todo</button>
             <button className={tab === "subagents" ? "active" : ""} type="button" role="tab" aria-selected={tab === "subagents"} onClick={() => { setTab("subagents"); setExpanded(true); }}>代理 <small>{runningAgents || subagents.length}</small></button>
           </div>
         ) : <strong>{title}</strong>}
-        <button className="composer-activity-toggle" type="button" aria-label={expanded ? "收起活动" : "展开活动"} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+        <button className="composer-activity-toggle" type="button" aria-label={expanded ? "收起活动" : "展开活动"} aria-expanded={expanded} onClick={toggleExpanded}>
           <small>{tab === "todo" ? `${completed}/${todo.length}` : `${runningAgents}/${subagents.length}`}</small>
           {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
         </button>
