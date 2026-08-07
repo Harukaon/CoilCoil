@@ -7,7 +7,24 @@ import type {
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url);
-const mcpAdapter = (jiti("pi-mcp-adapter/index.ts") as { default: (pi: ExtensionAPI) => void }).default;
+const mcpAdapter = (jiti("pi-mcp-adapter") as { default: (pi: ExtensionAPI) => void }).default;
+const MCP_STATUS_EVENT = "pi-mcp-adapter/status/v1";
+
+interface McpStatusSnapshot {
+  version: 1;
+  servers: Array<{
+    name: string;
+    status: "connected" | "cached" | "failed" | "needs-auth" | "not-connected" | "disabled";
+    toolCount: number;
+    resourceCount?: number;
+    failedAgoSeconds?: number;
+    disabled: boolean;
+  }>;
+  totalTools: number;
+  totalResources: number;
+  connectedCount: number;
+  disabledCount: number;
+}
 
 export const MCP_RPC_PROTOCOL_VERSION = 1;
 export const MCP_RPC_REQUEST_EVENT = "suocode:mcp:rpc:v1:request";
@@ -80,6 +97,7 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
   let proxyTool: McpProxyTool | undefined;
   let mcpCommand: { handler: (args: string, context: ExtensionCommandContext) => Promise<void> } | undefined;
   let context: ExtensionContext | undefined;
+  let statusSnapshot: McpStatusSnapshot | undefined;
   const registerTool = pi.registerTool.bind(pi);
   const registerCommand = pi.registerCommand.bind(pi);
 
@@ -94,6 +112,11 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
   mcpAdapter(pi);
   pi.registerTool = registerTool as ExtensionAPI["registerTool"];
   pi.registerCommand = registerCommand as ExtensionAPI["registerCommand"];
+
+  const unsubscribeStatus = pi.events.on(MCP_STATUS_EVENT, (raw) => {
+    if (!isRecord(raw) || raw.version !== 1 || !Array.isArray(raw.servers)) return;
+    statusSnapshot = raw as unknown as McpStatusSnapshot;
+  });
 
   pi.on("session_start", async (_event, nextContext) => {
     context = nextContext;
@@ -128,12 +151,15 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
         context ?? ({} as ExtensionContext),
       ) as McpProxyResult;
       if (result.isError) throw new Error(resultText(result) || "MCP 扩展请求失败。");
+      const details = request.method === "status" && statusSnapshot
+        ? { ...(isRecord(result.details) ? result.details : {}), ...statusSnapshot, mode: "status" }
+        : result.details;
       pi.events.emit(`${MCP_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
         version: MCP_RPC_PROTOCOL_VERSION,
         requestId: request.requestId,
         method: request.method,
         success: true,
-        data: { text: resultText(result), details: result.details },
+        data: { text: resultText(result), details },
       });
     } catch (error) {
       pi.events.emit(`${MCP_RPC_REPLY_EVENT_PREFIX}${id}`, {
@@ -146,6 +172,8 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
   });
   pi.on("session_shutdown", async () => {
     context = undefined;
+    statusSnapshot = undefined;
+    unsubscribeStatus();
     unsubscribeRpc();
   });
 }

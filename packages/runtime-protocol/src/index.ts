@@ -48,12 +48,13 @@ export interface McpServerConfiguration {
   directTools: boolean | string[];
   excludeTools: string[];
   debug: boolean;
+  disabled: boolean;
   source?: string;
   sourceKind?: "user" | "project" | "import";
 }
 
 export interface McpImportConfiguration {
-  kind: "cursor" | "claude-code" | "claude-desktop" | "codex" | "windsurf" | "vscode";
+  kind: "cursor" | "claude-code" | "claude-desktop" | "codex" | "opencode" | "windsurf" | "vscode";
   path: string;
   serverCount: number;
   enabled: boolean;
@@ -68,15 +69,19 @@ export interface McpConfigurationSnapshot {
 
 export interface McpServerRuntimeStatus {
   name: string;
-  status: "connected" | "needs-auth" | "failed" | "cached" | "not connected";
+  status: "connected" | "needs-auth" | "failed" | "cached" | "not connected" | "disabled";
   toolCount: number;
+  resourceCount: number;
   failedAgo: number | null;
+  disabled: boolean;
 }
 
 export interface McpRuntimeStatus {
   servers: McpServerRuntimeStatus[];
   totalTools: number;
+  totalResources: number;
   connectedCount: number;
+  disabledCount: number;
   state?: "ready" | "initializing" | "unavailable";
   diagnostic?: string;
 }
@@ -284,6 +289,7 @@ export type RuntimeCommand =
   | { type: "get_mcp_status" }
   | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
   | { type: "remove_mcp_server"; name: string; scope?: "global" | "project"; cwd?: string }
+  | { type: "set_mcp_server_enabled"; name: string; enabled: boolean; cwd: string }
   | { type: "enable_mcp_imports"; imports: McpImportConfiguration["kind"][]; cwd?: string }
   | { type: "connect_mcp_server"; name: string }
   | { type: "start_mcp_auth"; name: string }

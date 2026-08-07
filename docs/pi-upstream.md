@@ -19,6 +19,11 @@ embedded runtime requires a capability that cannot be implemented outside Pi.
   helper; SuoCode invokes the same implementation before embedded provider SDKs
   make requests, preserving Pi's proxy, timeout, HTTP/2 and Undici error
   handling instead of maintaining a second network stack.
+- `packages/coding-agent/src/core/agent-session.ts` emits `session_start` after
+  SDK reloads whenever an extension registered that lifecycle handler, even
+  when the embedder has no TUI bindings. Extensions such as `pi-mcp-adapter`
+  clean their state on `session_shutdown`; without the matching reload start
+  event they remain uninitialized in headless AgentSession consumers.
 
 ## Update from upstream
 

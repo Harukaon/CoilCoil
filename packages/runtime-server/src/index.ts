@@ -53,6 +53,8 @@ export class RuntimeServer {
         return this.runtime.saveMcpServer(command.server, command.previousName, command.cwd);
       case "remove_mcp_server":
         return this.runtime.removeMcpServer(command.name, command.scope, command.cwd);
+      case "set_mcp_server_enabled":
+        return this.runtime.setMcpServerEnabled(command.name, command.enabled, command.cwd);
       case "enable_mcp_imports":
         return this.runtime.enableMcpImports(command.imports, command.cwd);
       case "connect_mcp_server":

@@ -60,6 +60,8 @@ Examples:
 
 When `pi-mcp-adapter` is reloading, its native `not_initialized` or `init_failed` result is projected as “初始化中” or “暂不可用”. SuoCode does not mistake that lifecycle state for a new MCP schema and does not fall back to a second protocol implementation.
 
+MCP enable/disable uses the adapter's native `disabled` field and project override writer. Tool, resource, connection, and disabled counts come from the adapter's stable `pi-mcp-adapter/status/v1` event. The Desktop does not infer these states by opening its own MCP connection.
+
 The Desktop logout control invokes the adapter's existing `/mcp logout <server>` command through the same event bridge. SuoCode does not delete or reinterpret the adapter's credential store itself.
 
 Sensitive MCP environment and header values remain in the adapter-compatible configuration, but the editor renders sensitive keys as masks and preserves the stored value when the mask is left untouched. Adapter diagnostics are recursively redacted in Runtime Core before crossing the Desktop IPC boundary.

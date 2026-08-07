@@ -29,7 +29,8 @@
   },
   "dependencies": {
     "jiti": "2.7.0",
-    "node-pty": "1.1.0"
+    "node-pty": "1.1.0",
+    "pi-mcp-adapter": "2.21.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

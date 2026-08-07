@@ -82,9 +82,9 @@
 | 复用 `pi-mcp-adapter`，不重写 MCP 协议 | 已验证 | 配置、连接、状态和 OAuth 动作均调用扩展原生实现；SuoCode 只增加事件总线与 typed IPC 薄桥。 |
 | UI 新增/编辑/复制/移除，全局和项目作用域 | 已验证 | Runtime smoke 与最新打包 Desktop smoke 均覆盖扩展原生配置、复制、项目作用域和移除。 |
 | stdio、HTTP、env、headers、auth、生命周期、超时、direct tools、排除、资源、debug | 已验证 | Typed bridge 直接映射扩展原生 schema；Runtime smoke 覆盖持久化，打包 Desktop smoke 覆盖高级字段。 |
-| 启用/停用 Server | 未完成 | 扩展 2.11.0 没有 Server enabled 字段；需要扩展薄 API/上游设计，不能另造不兼容字段。 |
-| 状态、工具数量、测试连接、重连 | 已验证 | Runtime smoke 验证扩展状态和失败诊断；打包 Desktop smoke 验证设置页连接动作与状态展示。 |
-| 资源数量 | 未完成 | 当前扩展公开状态只提供工具数量，需要扩展增加资源统计字段。 |
+| 启用/停用 Server | 已验证 | 升级并固定 `pi-mcp-adapter` 2.21.0，直接调用其 `writeProjectServerDisabledOverride` 与 reload 生命周期；Runtime smoke 和打包 Desktop smoke 均覆盖停用、状态投影和恢复启用。 |
+| 状态、工具数量、测试连接、重连 | 已验证 | Runtime 订阅扩展稳定事件 `pi-mcp-adapter/status/v1`；Runtime smoke 验证扩展状态和失败诊断，打包 Desktop smoke 验证设置页连接动作与状态展示。 |
+| 资源数量 | 已验证 | 直接投影 `pi-mcp-adapter` 2.21.0 原生状态中的 `resourceCount` / `totalResources`；Runtime smoke 验证字段存在，设置页展示服务器与汇总资源数。 |
 | OAuth 认证/登出 UI | 部分完成 | 认证开始、浏览器授权页、回调输入、认证完成与登出均复用 `pi-mcp-adapter` 原生命令/流程；Runtime smoke 已验证登出桥，安全外链已测。仍缺真实 OAuth Server 的完整授权与撤销验证。 |
 | 凭据遮盖和错误脱敏 | 已验证 | MCP 编辑器对敏感 env/header 键只显示掩码并在未修改时保留原值；Runtime 对扩展动作文本、结构化 details 和错误执行递归脱敏。Runtime 与打包 Desktop smoke 使用哨兵凭据验证不回显。 |
 

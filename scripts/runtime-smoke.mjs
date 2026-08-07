@@ -76,6 +76,17 @@ function waitForEvent(predicate, timeoutMs = 180_000) {
   });
 }
 
+async function waitForMcpStatus(predicate, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  let status;
+  while (Date.now() < deadline) {
+    status = await request({ type: "get_mcp_status" });
+    if (predicate(status)) return status;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+  }
+  throw new Error(`Timed out waiting for MCP status: ${JSON.stringify(status)}`);
+}
+
 try {
   const mcpSecret = "suocode-mcp-secret-do-not-leak";
   const bootstrap = await request({ type: "bootstrap" });
@@ -139,9 +150,23 @@ try {
   if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
   if (!Array.isArray(snapshot.subagents)) throw new Error("Subagent activity was not included in the session snapshot.");
   const mcpStatus = await request({ type: "get_mcp_status" });
-  if (!mcpStatus.servers.some((server) => server.name === "smoke-server") || typeof mcpStatus.totalTools !== "number") {
-    throw new Error("The extension-native MCP status bridge did not expose pi-mcp-adapter state.");
+  if (!mcpStatus.servers.some((server) => server.name === "smoke-server") || typeof mcpStatus.totalTools !== "number" || typeof mcpStatus.totalResources !== "number") {
+    throw new Error(`The extension-native MCP status bridge did not expose pi-mcp-adapter state: ${JSON.stringify(mcpStatus)}`);
   }
+  const disabledMcp = await request({ type: "set_mcp_server_enabled", name: "smoke-server", enabled: false, cwd: projectDir });
+  if (disabledMcp.servers.find((server) => server.name === "smoke-server")?.disabled !== true) {
+    throw new Error("The pi-mcp-adapter project override did not disable the MCP server.");
+  }
+  const disabledStatus = await waitForMcpStatus((status) => status.servers.some((server) => server.name === "smoke-server" && server.status === "disabled"));
+  const disabledServerStatus = disabledStatus.servers.find((server) => server.name === "smoke-server");
+  if (disabledServerStatus?.status !== "disabled" || disabledServerStatus.disabled !== true || disabledStatus.disabledCount < 1) {
+    throw new Error(`The extension-native MCP status did not project the disabled server: ${JSON.stringify(disabledStatus)}`);
+  }
+  const enabledMcp = await request({ type: "set_mcp_server_enabled", name: "smoke-server", enabled: true, cwd: projectDir });
+  if (enabledMcp.servers.find((server) => server.name === "smoke-server")?.disabled === true) {
+    throw new Error("The pi-mcp-adapter project override did not re-enable the MCP server.");
+  }
+  await waitForMcpStatus((status) => status.state === "ready" && status.servers.some((server) => server.name === "smoke-server" && server.status !== "disabled"));
   const failedMcpConnect = await request({ type: "connect_mcp_server", name: "smoke-server" });
   if (!failedMcpConnect.text || failedMcpConnect.details?.mode !== "connect" || !failedMcpConnect.details?.error) {
     throw new Error(`The extension-native MCP connect bridge did not return pi-mcp-adapter diagnostics: ${JSON.stringify(failedMcpConnect)}`);

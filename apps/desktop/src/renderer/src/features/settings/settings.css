@@ -44,6 +44,7 @@
 .mcp-status-dot.needs-auth { background: #c49343; }
 .mcp-status-dot.failed { background: #bd5b53; }
 .mcp-status-dot.cached { background: #71899d; }
+.mcp-status-dot.disabled { background: #8d8d88; box-shadow: inset 0 0 0 1px #73736f; }
 .mcp-status-dot.not-connected, .mcp-status-dot.unknown { background: #aaa9a4; }
 .mcp-server-list > p, .settings-loading { margin: 10px 4px; color: #92928d; font-size: 10px; line-height: 1.5; }
 .settings-loading { display: flex; align-items: center; gap: 6px; }

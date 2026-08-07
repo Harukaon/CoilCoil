@@ -394,4 +394,25 @@ describe("AgentSession model and extension characterization", () => {
 
 		expect(lifecycleEvents).toEqual(["start:startup", "shutdown:reload", "start:reload"]);
 	});
+
+	it("reload emits session_start for headless lifecycle-only extensions", async () => {
+		const lifecycleEvents: string[] = [];
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_start", async (event) => {
+						lifecycleEvents.push(`start:${event.reason}`);
+					});
+					pi.on("session_shutdown", async (event) => {
+						lifecycleEvents.push(`shutdown:${event.reason}`);
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+
+		await harness.session.reload();
+
+		expect(lifecycleEvents).toEqual(["shutdown:reload", "start:reload"]);
+	});
 });

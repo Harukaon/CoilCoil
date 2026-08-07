@@ -149,7 +149,7 @@ MCP 的协议实现、连接管理和工具暴露全部复用 SuoCode 已内置�
 ### 产品边界
 
 - `pi-mcp-adapter` 是唯一的 MCP 实现层，继续负责 stdio、Streamable HTTP、SSE fallback、OAuth、生命周期、连接测试、工具缓存和代理工具。
-- SuoCode 不定义另一套 MCP Server schema，UI 字段直接对应 `pi-mcp-adapter` 2.11.0 支持的配置格式。
+- SuoCode 不定义另一套 MCP Server schema，UI 字段直接对应固定版本 `pi-mcp-adapter` 2.21.0 支持的配置格式。
 - 全局配置写入 SuoCode 自己的 Agent 目录下的 `mcp.json`，不读取、覆盖或修改用户本机 Pi 的 `~/.pi/agent/mcp.json`。
 - 项目级配置沿用扩展已支持的 `.mcp.json` / `.pi/mcp.json` 规则，不创造新的 SuoCode 专有 MCP 文件格式。
 - Renderer 不直接读写文件；Electron/Runtime 只充当安全的配置读写桥梁。
@@ -166,6 +166,8 @@ MCP 的协议实现、连接管理和工具暴露全部复用 SuoCode 已内置�
 - 支持全局 MCP 和项目级 MCP，并清楚显示配置来源与生效范围。
 - “测试连接”“重新连接”“认证”和状态展示调用 `pi-mcp-adapter` 已有能力，不在 SuoCode 中另写连接器。
 - 成功连接后的 tools、resources 和状态信息直接使用扩展已有的 manager/cache 结果。
+- 启用与停用使用扩展原生 `disabled` 配置和项目级 override writer，不创建 SuoCode 专有开关。
+- 状态面板订阅扩展稳定的 `pi-mcp-adapter/status/v1` 事件，直接投影工具、资源、连接和停用统计。
 - 保存配置后通知当前 Agent Session reload，或者调用扩展现有 reconnect 流程，不需要重启整个 SuoCode。
 
 ### 凭据与环境变量

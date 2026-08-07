@@ -2621,7 +2621,8 @@ export class AgentSession {
 			this._extensionUIContext ||
 			this._extensionCommandContextActions ||
 			this._extensionShutdownHandler ||
-			this._extensionErrorListener;
+			this._extensionErrorListener ||
+			this._extensionRunner.hasHandlers("session_start");
 		if (hasBindings) {
 			await options?.beforeSessionStart?.();
 			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });

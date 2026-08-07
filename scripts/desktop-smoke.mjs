@@ -482,6 +482,10 @@ async function main() {
       }))()`);
       throw new Error(`${error instanceof Error ? error.message : String(error)} ${JSON.stringify(diagnostic)}`);
     }
+    await client.waitFor(
+      `[...document.querySelectorAll(".mcp-editor label")].find((label) => label.textContent.startsWith("环境变量 JSON"))?.querySelector("textarea")?.value.includes("••••••")`,
+      "The MCP editor did not finish replacing the saved sensitive value with its mask.",
+    );
     const mcpUiSaveState = await client.evaluate(`({
       saved: [...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp"),
       error: document.querySelector(".mcp-editor .settings-error")?.textContent || "",
@@ -501,6 +505,32 @@ async function main() {
     assert.equal(configuredMcp?.exposeResources, false);
     assert.equal(configuredMcp?.debug, true);
     assert.equal(configuredMcp?.env?.PRIVATE_TOKEN, "desktop-mcp-secret-do-not-display");
+    const disabledMcpServer = await client.evaluate(`(() => {
+      const button = document.querySelector('button[aria-label="停用 MCP 服务器"]');
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    })()`);
+    assert.equal(disabledMcpServer, true, "The MCP adapter-native disable action was not exposed in settings.");
+    await client.waitFor(
+      `Boolean(document.querySelector('button[aria-label="启用 MCP 服务器"]'))`,
+      "The MCP settings did not reflect the disabled project override.",
+    );
+    const disabledMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
+    assert.equal(disabledMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp")?.disabled, true);
+    const enabledMcpServer = await client.evaluate(`(() => {
+      const button = document.querySelector('button[aria-label="启用 MCP 服务器"]');
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    })()`);
+    assert.equal(enabledMcpServer, true, "The MCP adapter-native enable action was not exposed in settings.");
+    await client.waitFor(
+      `Boolean(document.querySelector('button[aria-label="停用 MCP 服务器"]'))`,
+      "The MCP settings did not clear the disabled project override.",
+    );
+    const enabledMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
+    assert.equal(enabledMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp")?.disabled, false);
     const rejectedUnsafeExternalUrl = await client.evaluate(`window.suocode.openExternal("file:///tmp/suocode-smoke").then(() => false, () => true)`);
     assert.equal(rejectedUnsafeExternalUrl, true, "The desktop external URL bridge accepted a non-HTTP URL.");
     await delay(900);

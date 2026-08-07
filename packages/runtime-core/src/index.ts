@@ -97,6 +97,7 @@ interface McpAdapterConfigModule {
     mcpServers: Record<string, Record<string, unknown>>;
   };
   writeSharedServerEntry(path: string, serverName: string, entry: Record<string, unknown>): string;
+  writeProjectServerDisabledOverride(overridePath: string | undefined, cwd: string, serverName: string, disabled: boolean): { path: string; changed: boolean };
 }
 
 interface PiSubagentsStatusModule {
@@ -1056,22 +1057,27 @@ export class SuoCodeRuntime {
         : String(details);
       throw new Error(`pi-mcp-adapter 返回了无效的状态数据：${shape}`);
     }
-    const statuses = new Set<McpServerRuntimeStatus["status"]>(["connected", "needs-auth", "failed", "cached", "not connected"]);
+    const statuses = new Set<McpServerRuntimeStatus["status"]>(["connected", "needs-auth", "failed", "cached", "not connected", "disabled"]);
     const servers = details.servers.map((raw) => {
       if (!isRecord(raw)) throw new Error("pi-mcp-adapter 返回了无效的 Server 状态。");
-      const status = stringValue(raw.status) as McpServerRuntimeStatus["status"];
+      const rawStatus = stringValue(raw.status);
+      const status = (rawStatus === "not-connected" ? "not connected" : rawStatus) as McpServerRuntimeStatus["status"];
       if (!statuses.has(status)) throw new Error(`未知的 MCP Server 状态：${status || "empty"}`);
       return {
         name: stringValue(raw.name),
         status,
         toolCount: typeof raw.toolCount === "number" && Number.isFinite(raw.toolCount) ? raw.toolCount : 0,
-        failedAgo: typeof raw.failedAgo === "number" ? raw.failedAgo : null,
+        resourceCount: typeof raw.resourceCount === "number" && Number.isFinite(raw.resourceCount) ? raw.resourceCount : 0,
+        failedAgo: typeof raw.failedAgoSeconds === "number" ? raw.failedAgoSeconds : typeof raw.failedAgo === "number" ? raw.failedAgo : null,
+        disabled: raw.disabled === true || status === "disabled",
       } satisfies McpServerRuntimeStatus;
     });
     return {
       servers,
       totalTools: typeof details.totalTools === "number" && Number.isFinite(details.totalTools) ? details.totalTools : 0,
+      totalResources: typeof details.totalResources === "number" && Number.isFinite(details.totalResources) ? details.totalResources : servers.reduce((sum, server) => sum + server.resourceCount, 0),
       connectedCount: typeof details.connectedCount === "number" && Number.isFinite(details.connectedCount) ? details.connectedCount : 0,
+      disabledCount: typeof details.disabledCount === "number" && Number.isFinite(details.disabledCount) ? details.disabledCount : servers.filter((server) => server.disabled).length,
       state: "ready",
     };
   }
@@ -1112,12 +1118,16 @@ export class SuoCodeRuntime {
     return {
       servers: configuration.servers.map((server) => ({
         name: server.name,
-        status: "not connected" as const,
+        status: server.disabled ? "disabled" as const : "not connected" as const,
         toolCount: 0,
+        resourceCount: 0,
         failedAgo: null,
+        disabled: server.disabled,
       })),
       totalTools: 0,
+      totalResources: 0,
       connectedCount: 0,
+      disabledCount: configuration.servers.filter((server) => server.disabled).length,
       state: details.error === "init_failed" ? "unavailable" : "initializing",
       diagnostic: redactSensitiveText(stringValue(details.message) || stringValue(result.text), secrets) || undefined,
     };
@@ -1199,6 +1209,7 @@ export class SuoCodeRuntime {
           directTools: raw.directTools === true ? true : stringArray(raw.directTools),
           excludeTools: stringArray(raw.excludeTools),
           debug: raw.debug === true,
+          disabled: raw.disabled === true,
           source: source?.path,
           sourceKind: source?.kind,
         } satisfies McpServerConfiguration;
@@ -1234,6 +1245,7 @@ export class SuoCodeRuntime {
     if (server.directTools === true || (Array.isArray(server.directTools) && server.directTools.length)) definition.directTools = server.directTools;
     if (server.excludeTools.length) definition.excludeTools = server.excludeTools;
     if (server.debug) definition.debug = true;
+    if (server.disabled) definition.disabled = true;
     adapter.writeSharedServerEntry(configPath, name, definition);
     this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);
@@ -1259,6 +1271,19 @@ export class SuoCodeRuntime {
     this.removeMcpServerFromFile(configPath, name);
     this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);
+  }
+
+  async setMcpServerEnabled(name: string, enabled: boolean, cwd: string): Promise<McpConfigurationSnapshot> {
+    const normalizedName = name.trim();
+    if (!normalizedName) throw new Error("缺少 MCP Server 名称。");
+    const adapter = await loadMcpAdapterConfigModule();
+    const resolvedCwd = this.mcpCwd(cwd);
+    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    const effective = adapter.loadMcpConfig(globalConfigPath, resolvedCwd);
+    if (!effective.mcpServers[normalizedName]) throw new Error(`MCP Server 不存在：${normalizedName}`);
+    adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, normalizedName, !enabled);
+    this.reloadMcpExtension();
+    return this.getMcpConfiguration(resolvedCwd);
   }
 
   async enableMcpImports(imports: McpImportConfiguration["kind"][], cwd?: string): Promise<McpConfigurationSnapshot> {
