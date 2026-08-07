@@ -10,6 +10,7 @@ import type {
   RuntimeConfiguration,
   ThinkingLevel,
 } from "@suocode/runtime-protocol";
+import "./settings.css";
 
 type SettingsSection = "models" | "mcp";
 

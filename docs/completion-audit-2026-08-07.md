@@ -17,6 +17,7 @@
 | 工作流、MCP、子 Agent 以 Pi 扩展形式随包交付 | 已验证 | Runtime 显式加载 `@suocode/workflow`、`pi-mcp-adapter`、`pi-subagents`。 |
 | CLI 与 Desktop 共用 Runtime Core | 已验证 | Workspace 构建、类型检查和 Runtime smoke。 |
 | 不向 Renderer 暴露 Node | 已验证 | Desktop smoke 检查 `window.require` / `window.process` 不存在。 |
+| 超限桌面代码按功能域拆分 | 已验证 | 全局样式从 613 行降至 507 行；设置/MCP 与预览样式归入功能目录，生产构建和打包 Desktop smoke 通过。 |
 
 ## 对话与历史
 

@@ -441,104 +441,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .file-tree-error { margin: 8px; color: #a45149; font-size: 10px; line-height: 1.4; }
 .conversation-pane.file-drag-active::after { position: absolute; z-index: 30; inset: 10px; display: grid; content: "拖放到此处引用文件"; place-items: center; border: 1px dashed #8c9b88; border-radius: 14px; color: #657261; background: rgb(247 249 245 / 84%); backdrop-filter: blur(3px); font-size: 12px; font-weight: 600; pointer-events: none; }
 
-.preview-window { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: 58px minmax(0, 1fr) 26px; background: #f8f8f6; }
-.preview-window.has-warning { grid-template-rows: 58px auto minmax(0, 1fr) 26px; }
-.preview-window-header { display: flex; min-width: 0; align-items: center; gap: 16px; padding: 0 16px 0 84px; border-bottom: 1px solid #e1e1de; }
-.preview-window-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; }
-.preview-window-title strong { flex: 0 1 auto; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.preview-window-title span { min-width: 0; overflow: hidden; color: #969691; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.preview-mode { display: flex; flex: 0 0 auto; gap: 2px; padding: 3px; border-radius: 8px; background: #ecece8; }
-.preview-mode button { display: flex; height: 27px; align-items: center; gap: 5px; padding: 0 8px; border-radius: 6px; color: #777772; background: transparent; font-size: 10px; cursor: pointer; }
-.preview-mode button.active { color: #292927; background: #fff; box-shadow: 0 1px 2px rgb(20 20 18 / 8%); }
-.preview-warning { padding: 7px 14px; border-bottom: 1px solid #eadcbf; color: #8b682d; background: #fff8e8; font-size: 10px; }
-.preview-window-content { min-width: 0; min-height: 0; overflow: auto; }
-.text-preview { min-width: max-content; min-height: 100%; margin: 0; padding: 20px 22px; color: #353532; background: #f8f8f6; font: 12px/1.65 "SFMono-Regular", Consolas, monospace; tab-size: 2; white-space: pre; }
-.preview-markdown { width: min(820px, calc(100% - 48px)); margin: 0 auto; padding: 28px 0 60px; font-size: 14px; }
-.html-preview, .pdf-preview { width: 100%; height: 100%; border: 0; background: #fff; }
-.preview-window-status { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 0 10px; border-top: 1px solid #e5e5e2; color: #999994; font-size: 9px; }
-.preview-loading, .preview-error { display: grid; width: 100%; height: 100%; place-items: center; color: #858580; background: #f8f8f6; font-size: 12px; }
-.preview-error { color: #a45149; }
-
-.modal-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(30 30 27 / 32%); backdrop-filter: blur(2px); }
-.settings-dialog { display: grid; width: min(820px, 100%); max-height: min(760px, calc(100vh - 48px)); overflow: hidden; grid-template-rows: auto auto minmax(0, 1fr); border: 1px solid #d4d4cf; border-radius: 16px; background: #fafaf8; box-shadow: 0 24px 80px rgb(24 24 21 / 24%); }
-.settings-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; padding: 18px 18px 15px; border-bottom: 1px solid #e3e3df; }
-.settings-dialog > header > div { display: flex; gap: 11px; }
-.settings-icon { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid #d9d9d4; border-radius: 9px; background: #fff; }
-.settings-dialog h2 { margin: 0; font-size: 15px; font-weight: 650; }
-.settings-dialog header p { margin: 3px 0 0; color: #898984; font-size: 10px; }
-.settings-dialog form { display: grid; gap: 15px; padding: 17px 18px 18px; }
-.settings-dialog label { display: grid; gap: 7px; color: #5d5d59; font-size: 11px; font-weight: 550; }
-.settings-dialog select, .settings-dialog input, .settings-dialog textarea { width: 100%; border: 1px solid #d7d7d2; border-radius: 8px; color: #343431; background: #fff; font-size: 11px; }
-.settings-dialog select:not([size]) { height: 34px; padding: 0 9px; }
-.settings-dialog select[size] { min-height: 180px; padding: 4px; }
-.settings-dialog select[size] option { padding: 6px 7px; border-radius: 5px; }
-.settings-dialog input { height: 34px; padding: 0 9px; }
-.settings-dialog textarea { min-height: 72px; resize: vertical; padding: 8px 9px; font: 10px/1.5 "SFMono-Regular", Consolas, monospace; }
-.model-search, .secret-input { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 9px; border: 1px solid #d7d7d2; border-radius: 8px; color: #8b8b86; background: #fff; }
-.model-search input, .secret-input input { height: 100%; padding: 0; border: 0; outline: 0; background: transparent; }
-.settings-grid { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; }
-.settings-error { display: flex; align-items: flex-start; gap: 7px; padding: 9px 10px; border: 1px solid #e5c5c1; border-radius: 8px; color: #9a413a; background: #fff5f3; font-size: 11px; line-height: 1.4; }
-.settings-dialog footer { display: flex; align-items: center; gap: 12px; padding-top: 3px; }
-.settings-dialog footer > span { min-width: 0; flex: 1; color: #898984; font-size: 10px; }
-.settings-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid #e3e3df; background: #f4f4f1; }
-.settings-tabs button { display: inline-flex; height: 30px; align-items: center; gap: 6px; padding: 0 10px; border-radius: 7px; color: #777772; background: transparent; font-size: 10px; cursor: pointer; }
-.settings-tabs button:hover { background: #eaeae6; }
-.settings-tabs button.active { color: #2e2e2b; background: #fff; box-shadow: 0 1px 2px rgb(25 25 22 / 8%); }
-.model-settings-form { min-height: 0; overflow: auto; }
-.mcp-settings { display: grid; min-width: 0; min-height: 0; grid-template-columns: 190px minmax(0, 1fr); }
-.mcp-server-list { min-width: 0; min-height: 0; overflow: auto; padding: 10px; border-right: 1px solid #e3e3df; background: #f4f4f1; }
-.mcp-list-toolbar { display: flex; align-items: center; gap: 5px; }
-.mcp-server-list > button { display: grid; width: 100%; min-width: 0; gap: 3px; padding: 9px 10px; border-radius: 8px; color: #5f5f5a; text-align: left; background: transparent; cursor: pointer; }
-.mcp-server-list > button:hover, .mcp-server-list > button.active { color: #2e2e2b; background: #e7e7e3; }
-.mcp-server-list > button strong, .mcp-server-list > button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mcp-server-list > button strong { font-size: 11px; }
-.mcp-server-list > button small { color: #92928d; font-size: 9px; font-weight: 400; }
-.mcp-server-list .mcp-add-button { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; color: #3e3e3a; border: 1px dashed #cecec8; background: #fafaf8; }
-.mcp-refresh-button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 7px; color: #74746f; background: #e9e9e5; cursor: pointer; }
-.mcp-refresh-button:disabled { opacity: .55; cursor: default; }
-.mcp-status-summary { margin: 7px 4px 5px !important; }
-.mcp-server-title { display: flex; min-width: 0; align-items: center; gap: 6px; }
-.mcp-server-title strong { min-width: 0; flex: 1; }
-.mcp-server-title em { padding: 1px 5px; border-radius: 999px; color: #6f796b; background: #e0e8dd; font-size: 8px; font-style: normal; }
-.mcp-status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #aaa9a4; }
-.mcp-status-dot.connected { background: #5f8c62; box-shadow: 0 0 0 2px rgb(95 140 98 / 12%); }
-.mcp-status-dot.needs-auth { background: #c49343; }
-.mcp-status-dot.failed { background: #bd5b53; }
-.mcp-status-dot.cached { background: #71899d; }
-.mcp-status-dot.not-connected, .mcp-status-dot.unknown { background: #aaa9a4; }
-.mcp-server-list > p, .settings-loading { margin: 10px 4px; color: #92928d; font-size: 10px; line-height: 1.5; }
-.settings-loading { display: flex; align-items: center; gap: 6px; }
-.mcp-editor { min-width: 0; min-height: 0; overflow: auto; }
-.mcp-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.mcp-editor-heading > div { display: grid; gap: 3px; }
-.mcp-editor-heading strong, .mcp-imports strong { color: #353532; font-size: 12px; }
-.mcp-editor-heading small, .mcp-imports small { color: #92928d; font-size: 9px; font-weight: 400; }
-.mcp-editor-actions { display: flex; flex: 0 0 auto; gap: 4px; }
-.mcp-runtime-card { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 8px 9px; border: 1px solid #deded9; border-radius: 8px; background: #f7f7f4; }
-.mcp-runtime-card > span { display: flex; min-width: 0; flex: 1; align-items: center; gap: 7px; }
-.mcp-runtime-card strong { color: #4b4b47; font-size: 10px; }
-.mcp-runtime-card small { color: #92928d; font-size: 9px; }
-.mcp-runtime-card > button, .mcp-auth-panel > button:not(.primary-button) { display: inline-flex; height: 27px; align-items: center; gap: 5px; padding: 0 8px; border-radius: 6px; color: #5e5e59; background: #e9e9e5; font-size: 9px; cursor: pointer; }
-.mcp-runtime-card > button:disabled { opacity: .5; cursor: default; }
-.mcp-auth-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 10px; padding: 10px; border: 1px solid #d9d5c6; border-radius: 8px; background: #fbf8ef; }
-.mcp-auth-panel strong { align-self: center; font-size: 11px; }
-.mcp-auth-panel p { grid-column: 1 / -1; margin: 0; color: #77736a; font-size: 9px; line-height: 1.45; }
-.mcp-auth-panel textarea { grid-column: 1 / -1; }
-.mcp-auth-panel .primary-button { justify-self: end; grid-column: 1 / -1; }
-.mcp-action-message { overflow: auto; max-height: 130px; padding: 9px 10px; border-radius: 8px; color: #5b6757; background: #eef4ec; font: 9px/1.5 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; }
-.danger-icon-button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 7px; color: #a84c45; background: #f8e9e7; cursor: pointer; }
-.checkbox-setting { display: flex !important; min-height: 34px; align-items: center; align-self: end; gap: 8px !important; }
-.checkbox-setting input { width: 14px; height: 14px; flex: 0 0 auto; }
-.mcp-source-note { margin: 0; padding: 9px 10px; border-radius: 8px; color: #74643e; background: #f5f0e2; font-size: 10px; line-height: 1.5; }
-.mcp-imports { display: grid; gap: 10px; margin: 0 18px 18px; padding: 13px; border: 1px solid #dfdfda; border-radius: 10px; background: #fff; }
-.mcp-imports > div:first-child { display: grid; gap: 3px; }
-.mcp-import-list { display: flex; flex-wrap: wrap; gap: 6px; }
-.mcp-import-list span { display: grid; min-width: 92px; gap: 2px; padding: 7px 8px; border: 1px solid #dfdfda; border-radius: 7px; color: #72726d; background: #f7f7f4; }
-.mcp-import-list span.enabled { border-color: #b9c7b5; color: #586755; background: #eef4ec; }
-.mcp-import-list b { font-size: 10px; }
-.mcp-imports > button { justify-self: start; height: 30px; padding: 0 10px; border-radius: 7px; color: #fff; background: #3b3b38; font-size: 10px; cursor: pointer; }
-.primary-button { display: inline-flex; height: 34px; align-items: center; justify-content: center; gap: 7px; padding: 0 15px; border-radius: 8px; color: #fff; background: #292927; font-size: 11px; font-weight: 600; cursor: pointer; }
-.primary-button:disabled { opacity: .5; cursor: default; }
 
 @media (max-width: 1280px) {
   .inspector-nav button span { display: none; }
@@ -571,9 +473,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
     box-shadow: 12px 0 32px rgb(28 28 25 / 12%);
   }
 
-  .mcp-settings { grid-template-columns: 130px minmax(0, 1fr); }
-  .settings-grid { grid-template-columns: 1fr; }
-
   .app-shell:not(.keep-tiled) .sidebar-drag-region { inset-inline: 80px 64px; }
   .app-shell:not(.keep-tiled) .sidebar-toggle { top: 2px; left: calc(min(var(--sidebar-width), calc(100vw - 48px)) - 52px); width: 50px; height: 50px; border-radius: 10px; }
   .app-shell:not(.keep-tiled) .sidebar-toggle span { width: 30px; height: 30px; border-radius: 7px; }
@@ -605,9 +504,4 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   .agent-mode { max-width: calc(100vw - 108px); }
   .model-popover { width: min(340px, calc(100vw - 24px)); }
   .workspace-status { padding-inline: 4px; }
-  .modal-backdrop { padding: 10px; }
-  .settings-dialog { max-height: calc(100vh - 20px); border-radius: 13px; }
-  .settings-dialog > header { padding: 14px; }
-  .settings-dialog form { padding: 14px; }
-  .settings-grid { grid-template-columns: minmax(0, 1fr); }
 }

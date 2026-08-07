@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { FilePreviewDocument } from "../../shared/desktop-api";
+import "./features/files/preview.css";
 
 export default function PreviewApp({ id }: { id: string }): React.JSX.Element {
   const [document, setDocument] = useState<FilePreviewDocument>();
