@@ -161,7 +161,11 @@ try {
         }],
         modelOverrides: {},
       },
-      apiKey: customProviderSecret,
+      credential: {
+        method: "api-key",
+        values: { key: customProviderSecret },
+        preserveFields: [],
+      },
       preserveApiKeyReference: false,
     },
   });
@@ -171,7 +175,7 @@ try {
   const customProviderDirectory = await request({ type: "get_model_provider_configuration" });
   const dogProvider = customProviderDirectory.providers.find((provider) => provider.id === "dog-provider");
   if (!dogProvider || dogProvider.name !== "DogProvider" || !dogProvider.apiKeyConfigured || dogProvider.models[0]?.input?.includes("image") !== true || dogProvider.models[0]?.cost?.tiers?.[0]?.inputTokensAbove !== 32000) {
-    throw new Error("The custom provider configuration was not projected back to the desktop runtime.");
+    throw new Error(`The custom provider configuration was not projected back to the desktop runtime: ${JSON.stringify(dogProvider)}`);
   }
   const modelsJson = readFileSync(join(temporaryRoot, "agent", "models.json"), "utf8");
   if (modelsJson.includes(customProviderSecret)) {
@@ -200,7 +204,11 @@ try {
         models: anthropic.models,
         modelOverrides: anthropic.modelOverrides,
       },
-      apiKey: "suocode-builtin-auth-secret",
+      credential: {
+        method: "api-key",
+        values: { key: "suocode-builtin-auth-secret" },
+        preserveFields: [],
+      },
       preserveApiKeyReference: false,
     },
   });
@@ -212,6 +220,64 @@ try {
   const modelsAfterBuiltinCredential = JSON.parse(readFileSync(join(temporaryRoot, "agent", "models.json"), "utf8"));
   if (modelsAfterBuiltinCredential.providers?.anthropic) {
     throw new Error("A built-in Pi API key must stay in auth.json instead of creating an anthropic models.json override.");
+  }
+  const azure = builtinAfterCredential.providers.find((provider) => provider.id === "azure-openai-responses");
+  const azureFields = azure?.credential.methods.find((method) => method.id === "api-key")?.fields ?? [];
+  if (!azure || !azureFields.some((field) => field.id === "AZURE_OPENAI_BASE_URL") || !azureFields.some((field) => field.id === "AZURE_OPENAI_RESOURCE_NAME")) {
+    throw new Error("Azure OpenAI did not expose the endpoint/resource configuration required by Pi.");
+  }
+  const vertex = builtinAfterCredential.providers.find((provider) => provider.id === "google-vertex");
+  if (!vertex?.credential.methods.some((method) => method.id === "adc") || !vertex.credential.methods.some((method) => method.id === "service-account")) {
+    throw new Error("Google Vertex did not expose Pi's ADC and service-account authentication paths.");
+  }
+  const bedrock = builtinAfterCredential.providers.find((provider) => provider.id === "amazon-bedrock");
+  if (!bedrock?.credential.methods.some((method) => method.id === "aws-profile") || !bedrock.credential.methods.some((method) => method.id === "iam-keys") || !bedrock.credential.methods.some((method) => method.id === "credential-chain")) {
+    throw new Error("Amazon Bedrock did not expose Pi's supported AWS credential paths.");
+  }
+  const azureSecret = "suocode-azure-secret";
+  const configuredAzureResult = await request({
+    type: "save_model_provider_configuration",
+    input: {
+      provider: {
+        id: azure.id,
+        name: azure.name,
+        baseUrl: azure.baseUrl,
+        api: azure.api,
+        oauth: azure.oauth,
+        headers: azure.headers,
+        compat: azure.compat,
+        authHeader: azure.authHeader,
+        replaceModels: azure.replaceModels,
+        models: azure.models,
+        modelOverrides: azure.modelOverrides,
+      },
+      credential: {
+        method: "api-key",
+        values: {
+          key: azureSecret,
+          AZURE_OPENAI_BASE_URL: "https://smoke-resource.openai.azure.com",
+          AZURE_OPENAI_API_VERSION: "2024-02-01",
+          AZURE_OPENAI_DEPLOYMENT_NAME_MAP: "gpt-4o=smoke-gpt4o",
+        },
+        preserveFields: [],
+      },
+      preserveApiKeyReference: false,
+    },
+  });
+  const configuredAzure = configuredAzureResult.provider;
+  const configuredAzureFields = configuredAzure.credential.methods.find((method) => method.id === "api-key")?.fields ?? [];
+  const azureKeyField = configuredAzureFields.find((field) => field.id === "key");
+  const azureEndpointField = configuredAzureFields.find((field) => field.id === "AZURE_OPENAI_BASE_URL");
+  if (!configuredAzure.apiKeyConfigured || !azureKeyField?.configured || azureKeyField.value !== undefined || azureEndpointField?.value !== "https://smoke-resource.openai.azure.com") {
+    throw new Error("Azure OpenAI credentials were not projected safely after saving.");
+  }
+  const authJson = JSON.parse(readFileSync(join(temporaryRoot, "agent", "auth.json"), "utf8"));
+  if (authJson["azure-openai-responses"]?.key !== azureSecret || authJson["azure-openai-responses"]?.env?.AZURE_OPENAI_BASE_URL !== "https://smoke-resource.openai.azure.com") {
+    throw new Error("Azure OpenAI key and endpoint were not stored together in Pi auth.json.");
+  }
+  const modelsAfterAzureCredential = JSON.parse(readFileSync(join(temporaryRoot, "agent", "models.json"), "utf8"));
+  if (modelsAfterAzureCredential.providers?.["azure-openai-responses"]) {
+    throw new Error("Azure OpenAI connection settings must not create a custom models.json provider override.");
   }
   const savedMcp = await request({
     type: "save_mcp_server",

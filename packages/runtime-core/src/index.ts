@@ -1,5 +1,6 @@
 import {
   DefaultResourceLoader,
+  AuthStorage,
   ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -7,12 +8,18 @@ import {
   createEventBus,
   createAgentSession,
   processImage,
+  readStoredCredential,
   type AgentSession,
   type AgentSessionEvent,
   type EventBusController,
   type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
-import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+  type ApiKeyCredential,
+  type Provider,
+} from "@earendil-works/pi-ai";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type {
   ChangedFile,
@@ -29,6 +36,9 @@ import type {
   ModelProviderConfiguration,
   ModelProviderConfigurationInput,
   ModelProviderConfigurationSnapshot,
+  ModelProviderCredentialConfiguration,
+  ModelProviderCredentialField,
+  ModelProviderCredentialMethod,
   ModelProviderModelConfiguration,
   ModelProviderSaveResult,
   ModelOption,
@@ -195,6 +205,170 @@ const MODEL_PROVIDER_APIS: ModelProviderConfigurationSnapshot["supportedApis"] =
   { id: "bedrock-converse-stream", label: "Amazon Bedrock Converse", description: "Amazon Bedrock Converse Stream API。" },
   { id: "pi-messages", label: "Pi Messages", description: "Pi 原生 Messages 流协议，适用于实现该协议的私有服务。" },
 ];
+
+type CredentialFieldDefinition = Omit<ModelProviderCredentialField, "configured" | "value">;
+type CredentialMethodDefinition = Omit<ModelProviderCredentialMethod, "fields"> & {
+  fields: CredentialFieldDefinition[];
+};
+
+const credentialField = (
+  id: string,
+  label: string,
+  input: CredentialFieldDefinition["input"],
+  required: boolean,
+  placeholder?: string,
+  description?: string,
+): CredentialFieldDefinition => ({ id, label, input, required, placeholder, description });
+
+const BUILTIN_CREDENTIAL_METHODS: Record<string, CredentialMethodDefinition[]> = {
+  "azure-openai-responses": [{
+    id: "api-key",
+    label: "Azure OpenAI API Key",
+    description: "API 密钥负责认证；Azure 端点与资源名决定请求发送到哪里，两者至少填写一项。",
+    fields: [
+      credentialField("key", "API 密钥", "secret", true, "Azure OpenAI API Key"),
+      credentialField("AZURE_OPENAI_BASE_URL", "Azure 端点", "text", false, "https://your-resource.openai.azure.com", "支持 Azure OpenAI、Cognitive Services 与 Azure AI 根地址；Pi 会自动规范化为 /openai/v1。"),
+      credentialField("AZURE_OPENAI_RESOURCE_NAME", "Azure 资源名", "text", false, "your-resource", "不填写端点时，Pi 会由资源名生成 Azure OpenAI 地址。"),
+      credentialField("AZURE_OPENAI_API_VERSION", "API 版本", "text", false, "留空使用 v1", "对应 AZURE_OPENAI_API_VERSION。"),
+      credentialField("AZURE_OPENAI_DEPLOYMENT_NAME_MAP", "模型与部署名映射", "textarea", false, "gpt-4o=my-gpt4o,gpt-5=my-gpt5", "仅当 Azure Deployment 名称与 Pi 模型 ID 不一致时填写，多个映射使用逗号分隔。"),
+    ],
+  }],
+  "cloudflare-ai-gateway": [{
+    id: "api-key",
+    label: "Cloudflare AI Gateway",
+    description: "对应 Pi 的 Cloudflare AI Gateway 登录流程。三个字段都参与请求认证。",
+    fields: [
+      credentialField("key", "Cloudflare API Token", "secret", true, "Cloudflare API Token"),
+      credentialField("CLOUDFLARE_ACCOUNT_ID", "Account ID", "text", true, "Cloudflare Account ID"),
+      credentialField("CLOUDFLARE_GATEWAY_ID", "Gateway ID", "text", true, "AI Gateway slug"),
+    ],
+  }],
+  "cloudflare-workers-ai": [{
+    id: "api-key",
+    label: "Cloudflare Workers AI",
+    description: "对应 Pi 的 Cloudflare Workers AI 登录流程。",
+    fields: [
+      credentialField("key", "Cloudflare API Token", "secret", true, "Cloudflare API Token"),
+      credentialField("CLOUDFLARE_ACCOUNT_ID", "Account ID", "text", true, "Cloudflare Account ID"),
+    ],
+  }],
+  "google-vertex": [
+    {
+      id: "api-key",
+      label: "Google Cloud API Key",
+      description: "使用 Vertex Express Mode API Key；不需要 ADC 项目与区域参数。",
+      fields: [credentialField("key", "API 密钥", "secret", true, "Google Cloud API Key")],
+    },
+    {
+      id: "adc",
+      label: "Application Default Credentials",
+      description: "使用 gcloud application-default login 创建的本机 ADC。",
+      fields: [
+        credentialField("GOOGLE_CLOUD_PROJECT", "Project ID", "text", true, "my-gcp-project"),
+        credentialField("GOOGLE_CLOUD_LOCATION", "Location", "text", true, "us-central1"),
+      ],
+    },
+    {
+      id: "service-account",
+      label: "Service Account 文件",
+      description: "使用服务账号 JSON 文件以及明确的项目和区域。",
+      fields: [
+        credentialField("GOOGLE_APPLICATION_CREDENTIALS", "凭据文件路径", "text", true, "/absolute/path/service-account.json"),
+        credentialField("GOOGLE_CLOUD_PROJECT", "Project ID", "text", true, "my-gcp-project"),
+        credentialField("GOOGLE_CLOUD_LOCATION", "Location", "text", true, "us-central1"),
+      ],
+    },
+  ],
+  "amazon-bedrock": [
+    {
+      id: "bearer-token",
+      label: "Bedrock Bearer Token",
+      description: "对应 Pi 的 Bearer token 登录方式。",
+      fields: [
+        credentialField("key", "Bearer Token", "secret", true, "AWS Bedrock bearer token"),
+        credentialField("AWS_REGION", "AWS Region", "text", false, "us-east-1"),
+      ],
+    },
+    {
+      id: "aws-profile",
+      label: "AWS Profile",
+      description: "使用 ~/.aws 中已配置的 Profile；Profile 名称会保存在 SuoCode 私有凭据中。",
+      fields: [
+        credentialField("AWS_PROFILE", "Profile 名称", "text", true, "default"),
+        credentialField("AWS_REGION", "AWS Region", "text", false, "us-east-1"),
+      ],
+    },
+    {
+      id: "iam-keys",
+      label: "IAM 访问密钥",
+      description: "使用 AWS_ACCESS_KEY_ID、AWS_SECRET_ACCESS_KEY 和可选的 Session Token。",
+      fields: [
+        credentialField("AWS_ACCESS_KEY_ID", "Access Key ID", "secret", true, "AKIA…"),
+        credentialField("AWS_SECRET_ACCESS_KEY", "Secret Access Key", "secret", true, "AWS Secret Access Key"),
+        credentialField("AWS_SESSION_TOKEN", "Session Token", "secret", false, "临时凭据使用，可选"),
+        credentialField("AWS_REGION", "AWS Region", "text", false, "us-east-1"),
+      ],
+    },
+    {
+      id: "credential-chain",
+      label: "现有 AWS Credential Chain",
+      description: "使用运行环境已有的 IAM、ECS Task Role 或 Web Identity 凭据，不在 SuoCode 中保存密钥。",
+      fields: [credentialField("AWS_REGION", "AWS Region", "text", false, "us-east-1")],
+    },
+  ],
+};
+
+function selectedCredentialMethod(providerId: string, credential: ApiKeyCredential | undefined): string | undefined {
+  const methods = BUILTIN_CREDENTIAL_METHODS[providerId];
+  if (!methods?.length) return credential ? "api-key" : undefined;
+  if (providerId === "amazon-bedrock") {
+    if (credential?.key) return "bearer-token";
+    if (credential?.env?.AWS_PROFILE) return "aws-profile";
+    if (credential?.env?.AWS_ACCESS_KEY_ID || credential?.env?.AWS_SECRET_ACCESS_KEY) return "iam-keys";
+    return credential ? "credential-chain" : methods[0].id;
+  }
+  if (providerId === "google-vertex") {
+    if (credential?.key) return "api-key";
+    if (credential?.env?.GOOGLE_APPLICATION_CREDENTIALS) return "service-account";
+    if (credential?.env?.GOOGLE_CLOUD_PROJECT || credential?.env?.GOOGLE_CLOUD_LOCATION) return "adc";
+  }
+  return methods[0].id;
+}
+
+function credentialMethodsForProvider(provider: Provider | undefined): CredentialMethodDefinition[] {
+  if (!provider?.auth.apiKey) return [];
+  return BUILTIN_CREDENTIAL_METHODS[provider.id] ?? [{
+    id: "api-key",
+    label: provider.auth.apiKey.name || "API 密钥",
+    fields: [credentialField("key", provider.auth.apiKey.name || "API 密钥", "secret", true, "粘贴 API 密钥")],
+  }];
+}
+
+function credentialConfiguration(
+  provider: Provider | undefined,
+  credential: ApiKeyCredential | undefined,
+): ModelProviderCredentialConfiguration {
+  const methods = credentialMethodsForProvider(provider);
+  return {
+    name: provider?.auth.apiKey?.name,
+    selectedMethod: selectedCredentialMethod(provider?.id ?? "", credential) ?? methods[0]?.id,
+    methods: methods.map((method) => ({
+      ...method,
+      fields: method.fields.map((field) => {
+        const raw = field.id === "key" ? credential?.key : credential?.env?.[field.id];
+        return {
+          ...field,
+          configured: Boolean(raw),
+          value: field.input === "secret" ? undefined : raw,
+        };
+      }),
+    })),
+    oauth: provider?.auth.oauth ? {
+      name: provider.auth.oauth.name,
+      label: provider.auth.oauth.loginLabel ?? provider.auth.oauth.name,
+    } : undefined,
+  };
+}
 
 interface PrivateModelsConfiguration {
   providers: Record<string, Record<string, unknown>>;
@@ -1199,7 +1373,7 @@ export class SuoCodeRuntime {
     providerId: string,
     provider: Record<string, unknown> | undefined,
     runtimeModels: readonly { id: string; name?: string; api?: string; baseUrl?: string; reasoning?: boolean; input: readonly string[]; contextWindow?: number; maxTokens?: number; thinkingLevelMap?: Record<string, string | null | undefined>; cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: Array<{ inputTokensAbove: number; input: number; output: number; cacheRead: number; cacheWrite: number }> }; samplingParams?: Record<string, unknown>; headers?: Record<string, string>; compat?: object }[],
-    providerName: string | undefined,
+    runtimeProvider: Provider | undefined,
     builtins: ReadonlySet<string>,
     modelRuntime: ModelRuntime,
   ): ModelProviderConfiguration {
@@ -1233,6 +1407,9 @@ export class SuoCodeRuntime {
       : undefined;
     const apiKey = provider ? optionalString(provider, "apiKey") : undefined;
     const apiKeyReference = apiKey?.startsWith("$") || apiKey?.startsWith("!") ? apiKey : undefined;
+    const storedCredential = readStoredCredential(providerId, join(this.agentDir, "auth.json"));
+    const storedApiKeyCredential = storedCredential?.type === "api_key" ? storedCredential : undefined;
+    const providerName = runtimeProvider?.name;
     return {
       id: providerId,
       name: provider ? optionalString(provider, "name") ?? providerName ?? providerId : providerName ?? providerId,
@@ -1245,6 +1422,7 @@ export class SuoCodeRuntime {
       apiKeyReference,
       hasPrivateApiKeyReference: Boolean(apiKey && !apiKeyReference),
       apiKeyConfigured: modelRuntime.hasConfiguredAuth(providerId) || Boolean(apiKey),
+      credential: credentialConfiguration(runtimeProvider, storedApiKeyCredential),
       replaceModels: Array.isArray(provider?.models),
       models: configuredModels,
       modelOverrides: mappedOverrides && Object.keys(mappedOverrides).length ? mappedOverrides : undefined,
@@ -1256,7 +1434,7 @@ export class SuoCodeRuntime {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
     const builtinIds = new Set<string>([...getBuiltinProviders(), "radius"]);
-    const providers = new Map(modelRuntime.getProviders().map((provider) => [provider.id, provider.name || provider.id]));
+    const providers = new Map(modelRuntime.getProviders().map((provider) => [provider.id, provider]));
     const allModels = modelRuntime.getModels();
     const models = new Map<string, Array<(typeof allModels)[number]>>();
     for (const model of modelRuntime.getModels()) {
@@ -1329,11 +1507,24 @@ export class SuoCodeRuntime {
       throw new Error("Pi API Key 引用应使用 $环境变量、${环境变量} 或 !命令。普通密钥请填写在私有 API 密钥输入框中。");
     }
 
-    // Native providers own their endpoint, transport, display name, and
-    // catalog. With no existing override, an API-key save must therefore be
-    // auth.json-only. A Pi value expression is the one exception because it
-    // necessarily belongs in models.json as the provider's apiKey value.
-    if (isBuiltin && !existing) {
+    const providerHeaders = mergeMaskedStringRecord(draft.headers, objectValue(existing?.headers));
+    const providerCompat = draft.compat && Object.keys(draft.compat).length ? draft.compat : undefined;
+    const modelOverrides = draft.modelOverrides && Object.keys(draft.modelOverrides).length ? draft.modelOverrides : undefined;
+    const hasBuiltinOverride = Boolean(
+      baseUrl
+      || api
+      || draft.oauth
+      || Object.keys(providerHeaders).length
+      || providerCompat
+      || draft.authHeader !== undefined
+      || draft.replaceModels
+      || modelOverrides,
+    );
+
+    // A native provider credential save must stay auth.json-only. Provider
+    // endpoint/catalog overrides still belong in models.json when the user
+    // explicitly configures them under the advanced options.
+    if (isBuiltin && !existing && !hasBuiltinOverride) {
       return {
         id,
         provider: apiKeyReference ? { apiKey: apiKeyReference } : {},
@@ -1346,13 +1537,12 @@ export class SuoCodeRuntime {
     const set = (key: string, value: unknown): void => {
       if (value !== undefined && value !== "") result[key] = value;
     };
-    set("name", draft.name?.trim());
+    if (!isBuiltin || existing?.name !== undefined) set("name", draft.name?.trim());
     set("baseUrl", baseUrl);
     set("api", api);
     set("oauth", draft.oauth);
-    const headers = mergeMaskedStringRecord(draft.headers, objectValue(existing?.headers));
-    set("headers", Object.keys(headers).length ? headers : undefined);
-    set("compat", draft.compat && Object.keys(draft.compat).length ? draft.compat : undefined);
+    set("headers", Object.keys(providerHeaders).length ? providerHeaders : undefined);
+    set("compat", providerCompat);
     set("authHeader", draft.authHeader);
     if (apiKeyReference) result.apiKey = apiKeyReference;
     else if (!input.preserveApiKeyReference) delete result.apiKey;
@@ -1360,13 +1550,66 @@ export class SuoCodeRuntime {
       const existingModels = Array.isArray(existing?.models) ? existing.models.filter(isRecord) : [];
       result.models = models.map((model) => modelConfigurationForStorage(model, existingModels.find((item) => optionalString(item, "id") === model.id)));
     }
-    const overrides = draft.modelOverrides && Object.keys(draft.modelOverrides).length ? draft.modelOverrides : undefined;
-    set("modelOverrides", overrides);
+    set("modelOverrides", modelOverrides);
     return {
       id,
       provider: result,
       writeModelsConfig: !isBuiltin || Boolean(existing) || Object.keys(result).length > 0,
     };
+  }
+
+  private async saveProviderCredential(
+    providerId: string,
+    input: ModelProviderConfigurationInput,
+    modelRuntime: ModelRuntime,
+  ): Promise<void> {
+    const legacyKey = input.apiKey?.trim();
+    if (!input.credential && !legacyKey) return;
+
+    const runtimeProvider = modelRuntime.getProviders().find((provider) => provider.id === providerId);
+    if (!runtimeProvider?.auth.apiKey) throw new Error(`服务商 ${providerId} 不支持 API Key 或 Pi 凭据配置。`);
+    const methods = credentialMethodsForProvider(runtimeProvider);
+    if (!methods.length) throw new Error(`服务商 ${providerId} 没有可用的 API Key 配置方式。`);
+
+    const credentialInput = input.credential ?? {
+      method: methods[0].id,
+      values: { key: legacyKey ?? "" },
+      preserveFields: [],
+    };
+    const method = methods.find((item) => item.id === credentialInput.method);
+    if (!method) throw new Error(`“${credentialInput.method}”不是 ${runtimeProvider.name} 支持的凭据方式。`);
+
+    const current = readStoredCredential(providerId, join(this.agentDir, "auth.json"));
+    const currentApiKey = current?.type === "api_key" ? current : undefined;
+    const preserve = new Set(credentialInput.preserveFields);
+    const values = Object.fromEntries(Object.entries(credentialInput.values).map(([key, value]) => [key, value.trim()]));
+    const knownEnvironmentFields = new Set(methods.flatMap((item) => item.fields.map((field) => field.id)).filter((id) => id !== "key"));
+    const env = { ...(currentApiKey?.env ?? {}) };
+    for (const field of knownEnvironmentFields) delete env[field];
+
+    let key: string | undefined;
+    for (const field of method.fields) {
+      const submitted = values[field.id];
+      const previous = field.id === "key" ? currentApiKey?.key : currentApiKey?.env?.[field.id];
+      const value = submitted || (preserve.has(field.id) ? previous : undefined);
+      if (field.required && !value) throw new Error(`${runtimeProvider.name} 的“${field.label}”不能为空。`);
+      if (!value) continue;
+      if (field.id === "key") key = value;
+      else env[field.id] = value;
+    }
+
+    if (providerId === "azure-openai-responses" && !env.AZURE_OPENAI_BASE_URL && !env.AZURE_OPENAI_RESOURCE_NAME) {
+      throw new Error("Azure OpenAI 需要填写 Endpoint / Base URL 或 Resource Name。两者至少填写一项。");
+    }
+
+    const credential: ApiKeyCredential = {
+      type: "api_key",
+      ...(key ? { key } : {}),
+      ...(Object.keys(env).length ? { env } : {}),
+    };
+    const authStorage = AuthStorage.create(join(this.agentDir, "auth.json"));
+    await authStorage.modify(providerId, async () => credential);
+    await modelRuntime.refresh({ providers: [providerId], allowNetwork: false });
   }
 
   async saveModelProviderConfiguration(input: ModelProviderConfigurationInput): Promise<ModelProviderSaveResult> {
@@ -1390,13 +1633,10 @@ export class SuoCodeRuntime {
       }
     }
 
-    if (input.apiKey?.trim()) {
-      try {
-        const key = input.apiKey.trim();
-        await modelRuntime.login(next.id, "api_key", { prompt: async () => key, notify: () => undefined });
-      } catch (error) {
-        throw new Error(`服务商配置已保存，但无法保存私有 API 密钥：${errorMessage(error)}`);
-      }
+    try {
+      await this.saveProviderCredential(next.id, input, modelRuntime);
+    } catch (error) {
+      throw new Error(`服务商配置已保存，但无法保存 Pi 凭据：${errorMessage(error)}`);
     }
 
     const configuration = await this.getConfiguration();

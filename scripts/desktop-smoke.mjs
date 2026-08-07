@@ -475,11 +475,36 @@ async function main() {
     const nativeProviderUi = await client.evaluate(`({
       protocolSelector: Boolean(document.querySelector('.model-provider-settings button[aria-label="Pi 请求协议"]')),
       baseUrlInput: Boolean(document.querySelector('input[placeholder="https://api.example.com/v1"]')),
-      credentialInput: Boolean(document.querySelector('.provider-native-summary ~ .provider-credential-grid input[type="password"]')),
+      credentialInput: Boolean(document.querySelector('.provider-credential-editor input[type="password"]')),
     })`);
     assert.equal(nativeProviderUi.protocolSelector, false, "A native Pi provider must not prompt for a request protocol.");
     assert.equal(nativeProviderUi.baseUrlInput, false, "A native Pi provider must not prompt for a Base URL.");
     assert.equal(nativeProviderUi.credentialInput, true, "A native Pi provider did not expose its credential field.");
+    const selectedAzureProvider = await client.evaluate(`(() => {
+      const row = [...document.querySelectorAll(".provider-catalog-group button")].find((button) => button.textContent.includes("azure-openai-responses"));
+      if (!row) return false;
+      row.click();
+      return true;
+    })()`);
+    assert.equal(selectedAzureProvider, true, "The Pi Azure OpenAI provider was not shown in the provider catalog.");
+    await client.waitFor(`Boolean(document.querySelector('input[placeholder="https://your-resource.openai.azure.com"]'))`, "Azure OpenAI did not expose its Pi endpoint configuration.");
+    const azureProviderUi = await client.evaluate(`(() => {
+      const labels = [...document.querySelectorAll(".provider-credential-fields label")].map((label) => label.textContent);
+      const advanced = document.querySelector(".provider-editor form > details.provider-advanced");
+      const reference = advanced ? [...advanced.querySelectorAll("label")].find((label) => label.textContent.startsWith("Pi 密钥引用")) : null;
+      return {
+        hasEndpoint: labels.some((label) => label.includes("Azure 端点")),
+        hasResource: labels.some((label) => label.includes("Azure 资源名")),
+        advancedClosed: advanced instanceof HTMLDetailsElement && !advanced.open,
+        referenceExists: Boolean(reference),
+        referenceHidden: Boolean(reference) && !reference.checkVisibility(),
+      };
+    })()`);
+    assert.equal(azureProviderUi.hasEndpoint, true, "Azure OpenAI endpoint was omitted from the native Pi form.");
+    assert.equal(azureProviderUi.hasResource, true, "Azure OpenAI resource name was omitted from the native Pi form.");
+    assert.equal(azureProviderUi.advancedClosed, true, "Provider advanced options must be collapsed by default.");
+    assert.equal(azureProviderUi.referenceExists, true, "The Pi key reference was not placed inside provider advanced options.");
+    assert.equal(azureProviderUi.referenceHidden, true, "Pi key references must stay hidden under advanced options by default.");
     const openedCustomProvider = await client.evaluate(`(() => {
       const add = document.querySelector('[aria-label="添加自定义服务商"]');
       if (!add) return false;

@@ -23,7 +23,7 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.ts";
-export { readStoredCredential } from "./core/auth-storage.ts";
+export { AuthStorage, readStoredCredential } from "./core/auth-storage.ts";
 // Compaction
 export {
 	type BranchPreparation,
@@ -49,14 +49,6 @@ export {
 	shouldCompact,
 } from "./core/compaction/index.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
-export {
-	applyHttpProxySettings,
-	configureHttpDispatcher,
-	DEFAULT_HTTP_IDLE_TIMEOUT_MS,
-	formatHttpIdleTimeoutMs,
-	HTTP_IDLE_TIMEOUT_CHOICES,
-	parseHttpIdleTimeoutMs,
-} from "./core/http-dispatcher.ts";
 // Extension system
 export type {
 	AgentEndEvent,
@@ -175,6 +167,14 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+export {
+	applyHttpProxySettings,
+	configureHttpDispatcher,
+	DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+	formatHttpIdleTimeoutMs,
+	HTTP_IDLE_TIMEOUT_CHOICES,
+	parseHttpIdleTimeoutMs,
+} from "./core/http-dispatcher.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
@@ -410,7 +410,7 @@ export {
 export { copyToClipboard } from "./utils/clipboard.ts";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
 export { convertToPng } from "./utils/image-convert.ts";
-export { processImage, type ProcessImageOptions, type ProcessImageResult } from "./utils/image-process.ts";
+export { type ProcessImageOptions, type ProcessImageResult, processImage } from "./utils/image-process.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
 // Shell utilities
 export { getShellConfig } from "./utils/shell.ts";

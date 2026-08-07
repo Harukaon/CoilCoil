@@ -4,6 +4,8 @@ import type {
   ModelProviderConfiguration,
   ModelProviderConfigurationInput,
   ModelProviderConfigurationSnapshot,
+  ModelProviderCredentialConfiguration,
+  ModelProviderCredentialField,
   ModelProviderModelConfiguration,
   ModelProviderSaveResult,
   RuntimeConfiguration,
@@ -165,8 +167,70 @@ function sourceLabel(source: ModelProviderConfiguration["source"]): string {
   return source === "custom" ? "自定义" : source === "override" ? "内置覆盖" : "Pi 内置";
 }
 
+function customCredentialConfiguration(): ModelProviderCredentialConfiguration {
+  return {
+    name: "API 密钥",
+    selectedMethod: "api-key",
+    methods: [{
+      id: "api-key",
+      label: "API 密钥",
+      fields: [{
+        id: "key",
+        label: "API 密钥",
+        input: "secret",
+        required: false,
+        placeholder: "粘贴 API 密钥；本地服务可留空",
+        configured: false,
+      }],
+    }],
+  };
+}
+
+function methodFields(
+  configuration: ModelProviderCredentialConfiguration,
+  method: string,
+): ModelProviderCredentialField[] {
+  return configuration.methods.find((item) => item.id === method)?.fields ?? [];
+}
+
 function NumberInput({ value, onChange, placeholder }: { value?: number; onChange: (value: number | undefined) => void; placeholder?: string }): React.JSX.Element {
   return <input type="number" min="0" value={value ?? ""} placeholder={placeholder} onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))} />;
+}
+
+function ProviderCredentialEditor({
+  configuration,
+  method,
+  values,
+  configured,
+  onMethodChange,
+  onValueChange,
+}: {
+  configuration: ModelProviderCredentialConfiguration;
+  method: string;
+  values: Record<string, string>;
+  configured: boolean;
+  onMethodChange: (method: string) => void;
+  onValueChange: (field: string, value: string) => void;
+}): React.JSX.Element {
+  const active = configuration.methods.find((item) => item.id === method) ?? configuration.methods[0];
+  return (
+    <section className="provider-credential-editor">
+      <header>
+        <div><strong>连接与认证</strong><small>这里展示当前 Pi 服务商真正需要的认证方式和运行参数，配置保存在 SuoCode 私有运行时中。</small></div>
+        <span className={configured ? "configured" : ""}>{configured ? "已配置" : "未配置"}</span>
+      </header>
+      {configuration.methods.length > 1 ? <label>认证方式<SettingsSelect value={active?.id ?? ""} options={configuration.methods.map((item) => ({ value: item.id, label: item.label, detail: item.description }))} ariaLabel="服务商认证方式" onChange={onMethodChange} /></label> : null}
+      {active ? <>
+        {configuration.methods.length === 1 ? <div className="provider-credential-method"><strong>{active.label}</strong>{active.description ? <p>{active.description}</p> : null}</div> : active.description ? <p className="provider-credential-description">{active.description}</p> : null}
+        {active.fields.length ? <div className="provider-credential-fields">{active.fields.map((field) => <label className={field.input === "textarea" ? "wide" : ""} key={field.id}>
+          <span>{field.label}<em className={field.required ? "required" : ""}>{field.required ? "必填" : "可选"}</em></span>
+          {field.input === "textarea" ? <textarea value={values[field.id] ?? ""} placeholder={field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} /> : field.input === "secret" ? <span className="secret-input"><KeyRound size={14} /><input type="password" value={values[field.id] ?? ""} autoComplete="off" placeholder={field.configured ? "已配置；留空即可保留" : field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} /></span> : <input value={values[field.id] ?? ""} placeholder={field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} />}
+          {field.description ? <small>{field.description}</small> : null}
+        </label>)}</div> : <p className="provider-credential-description">此方式使用应用运行环境中已经存在的凭据，不需要在这里填写密钥。</p>}
+      </> : <div className="provider-oauth-only"><strong>{configuration.oauth?.label ?? "Pi 订阅登录"}</strong><p>此 Provider 由 Pi 的 OAuth 登录流程认证，不使用 API Key。</p></div>}
+      {configuration.oauth && configuration.methods.length ? <div className="provider-oauth-note">Pi 同时支持 <strong>{configuration.oauth.label}</strong> 订阅登录；订阅凭据与 API 密钥是两种独立的登录方式，后一次登录会替换前一次凭据。</div> : null}
+    </section>
+  );
 }
 
 function ProviderModelCard({
@@ -224,7 +288,11 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const [providerCompatText, setProviderCompatText] = useState("{}");
   const [overridesText, setOverridesText] = useState("{}");
   const [modelAdvanced, setModelAdvanced] = useState<Record<string, ModelAdvancedText>>({});
-  const [apiKey, setApiKey] = useState("");
+  const [credentialConfiguration, setCredentialConfiguration] = useState<ModelProviderCredentialConfiguration>(customCredentialConfiguration());
+  const [credentialMethod, setCredentialMethod] = useState("api-key");
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
+  const [credentialPreserveFields, setCredentialPreserveFields] = useState<string[]>([]);
+  const [credentialDirty, setCredentialDirty] = useState(false);
   const [preserveApiKeyReference, setPreserveApiKeyReference] = useState(false);
   const [defaultModelId, setDefaultModelId] = useState("");
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("medium");
@@ -243,7 +311,13 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setProviderCompatText(jsonText(provider.compat));
     setOverridesText(jsonText(provider.modelOverrides));
     setModelAdvanced(initialAdvancedText(nextDraft.models));
-    setApiKey("");
+    setCredentialConfiguration(provider.credential);
+    const nextMethod = provider.credential.selectedMethod ?? provider.credential.methods[0]?.id ?? "";
+    const fields = methodFields(provider.credential, nextMethod);
+    setCredentialMethod(nextMethod);
+    setCredentialValues(Object.fromEntries(fields.flatMap((field) => field.value === undefined ? [] : [[field.id, field.value]])));
+    setCredentialPreserveFields(fields.filter((field) => field.input === "secret" && field.configured).map((field) => field.id));
+    setCredentialDirty(false);
     setPreserveApiKeyReference(provider.hasPrivateApiKeyReference || Boolean(provider.apiKeyReference));
     const available = nextConfiguration?.models.filter((model) => model.provider === provider.id) ?? [];
     const current = nextConfiguration?.provider === provider.id ? nextConfiguration.modelId : undefined;
@@ -288,7 +362,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   }, [configuration, draft]);
   const activeDefaultModel = defaultModels.find((model) => model.id === defaultModelId) ?? defaultModels[0];
   const thinkingOptions = activeDefaultModel ? modelThinkingLevels(activeDefaultModel, configuration, draft?.id ?? "").map((level) => THINKING_OPTIONS.find((option) => option.value === level)!).filter(Boolean) : THINKING_OPTIONS.filter((option) => option.value === "off");
-  const isBuiltinProvider = selectedSource === "built-in";
+  const isPiBuiltinProvider = selectedSource !== "custom";
 
   const selectProvider = (provider: ModelProviderConfiguration): void => applyProvider(provider);
   const addProvider = (): void => {
@@ -303,7 +377,12 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setProviderCompatText("{}");
     setOverridesText("{}");
     setModelAdvanced(initialAdvancedText(next.models));
-    setApiKey("");
+    const credential = customCredentialConfiguration();
+    setCredentialConfiguration(credential);
+    setCredentialMethod(credential.selectedMethod ?? "api-key");
+    setCredentialValues({});
+    setCredentialPreserveFields([]);
+    setCredentialDirty(false);
     setPreserveApiKeyReference(false);
     setDefaultModelId(next.models[0]?.id ?? "");
     setThinkingLevel("medium");
@@ -315,6 +394,19 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     ...current,
     models: current.models.map((model) => model.uid === uidValue ? next : model),
   } : current);
+
+  const updateCredentialMethod = (method: string): void => {
+    const fields = methodFields(credentialConfiguration, method);
+    setCredentialMethod(method);
+    setCredentialValues(Object.fromEntries(fields.flatMap((field) => field.value === undefined ? [] : [[field.id, field.value]])));
+    setCredentialPreserveFields(fields.filter((field) => field.input === "secret" && field.configured).map((field) => field.id));
+    setCredentialDirty(true);
+  };
+
+  const updateCredentialValue = (field: string, value: string): void => {
+    setCredentialValues((current) => ({ ...current, [field]: value }));
+    setCredentialDirty(true);
+  };
 
   const buildInput = (): ModelProviderConfigurationInput => {
     if (!draft) throw new Error("服务商配置仍在加载。");
@@ -342,7 +434,11 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
         modelOverrides: parseJsonObject(overridesText, "模型覆盖 JSON") as ProviderDraft["modelOverrides"],
         models,
       },
-      apiKey: apiKey || undefined,
+      credential: credentialDirty && credentialMethod ? {
+        method: credentialMethod,
+        values: credentialValues,
+        preserveFields: credentialPreserveFields,
+      } : undefined,
       preserveApiKeyReference,
     };
   };
@@ -407,8 +503,29 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
       <section className="provider-editor">
         {!draft && !loading ? <div className="provider-editor-empty"><CircleDot size={22} /><strong>{error ? "无法读取 Pi 服务商配置" : "选择或添加一个服务商"}</strong>{error ? <div className="settings-error"><AlertCircle size={14} />{error}</div> : <p>所有配置都会写入 SuoCode 私有运行时的 Pi <code>models.json</code>，不会读取或修改用户的 <code>~/.pi</code>。</p>}</div> : null}
         {draft ? <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
-          <header className="provider-editor-heading"><div><span className="provider-source-tag">{selectedId ? sourceLabel(selectedSource) : "新的自定义服务商"}</span><strong>{draft.name || draft.id || "未命名服务商"}</strong><small>{isBuiltinProvider ? "Pi 管理服务商协议、端点与模型目录；SuoCode 只在私有 auth.json 保存你的凭据。" : <>使用 Pi 原生 <code>models.json</code> 格式；普通密钥保存在 SuoCode 私有 <code>auth.json</code>，不会回传到界面。</>}</small></div><div className="provider-editor-actions">{selectedSource !== "built-in" && selectedId ? <button className={removeArmed ? "danger-text-button armed" : "danger-text-button"} type="button" disabled={saving} onClick={() => removeArmed ? void remove() : setRemoveArmed(true)}>{removeArmed ? "再次点击确认移除" : <><Trash2 size={14} />移除</>}</button> : null}<button className="primary-button" type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{isBuiltinProvider ? "保存凭据" : "保存服务商"}</button></div></header>
-          {isBuiltinProvider ? <><div className="provider-native-summary"><strong>Pi 内置配置</strong><p>请求协议、Base URL 和模型目录由 Pi 自动继承。内置服务商只需要在这里配置凭据，不会被写成自定义 Provider。</p></div><div className="settings-grid provider-credential-grid"><label>API 密钥<span className="secret-input"><KeyRound size={14} /><input type="password" value={apiKey} autoComplete="off" placeholder="已配置时可留空；粘贴新密钥即可更新" onChange={(event) => setApiKey(event.target.value)} /></span></label><label>凭据状态<span className="provider-credential-status">{snapshot?.providers.find((provider) => provider.id === draft.id)?.apiKeyConfigured ? "已配置" : "尚未配置"}</span></label></div><details className="provider-advanced"><summary>使用环境变量或命令提供密钥 <ChevronRight size={14} /></summary><p>仅在需要 <code>$ENV_VAR</code> 或 <code>!command</code> 时使用。普通 API 密钥请填写上方输入框。</p><label>Pi 密钥引用<input value={draft.apiKeyReference ?? ""} placeholder="$PROVIDER_KEY 或 !op read …" onChange={(event) => setDraft((current) => current ? { ...current, apiKeyReference: event.target.value || undefined } : current)} /></label></details></> : <><div className="settings-grid"><label>服务商 ID<input value={draft.id} disabled={Boolean(selectedId)} placeholder="例如 dog-provider" onChange={(event) => setDraft((current) => current ? { ...current, id: event.target.value } : current)} /></label><label>显示名称<input value={draft.name ?? ""} placeholder="例如 DogProvider" onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label></div><div className="settings-grid"><label>Pi 请求协议<SettingsSelect value={draft.api ?? ""} options={protocolOptions.filter((option) => option.value)} ariaLabel="Pi 请求协议" placeholder="选择协议" onChange={(api) => setDraft((current) => current ? { ...current, api } : current)} searchable /></label><label>Base URL<input value={draft.baseUrl ?? ""} placeholder="https://api.example.com/v1" onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></label></div><div className="settings-grid"><label>私有 API 密钥<span className="secret-input"><KeyRound size={14} /><input type="password" value={apiKey} autoComplete="off" placeholder={preserveApiKeyReference || selectedId ? "已配置，留空即可保留" : "粘贴 API 密钥"} onChange={(event) => setApiKey(event.target.value)} /></span></label><label>Pi 密钥引用（可选）<input value={draft.apiKeyReference ?? ""} placeholder="$DOG_PROVIDER_KEY 或 !op read …" onChange={(event) => setDraft((current) => current ? { ...current, apiKeyReference: event.target.value || undefined } : current)} /></label></div><div className="provider-checkbox-row"><label className="checkbox-setting"><input type="checkbox" checked={Boolean(draft.authHeader)} onChange={(event) => setDraft((current) => current ? { ...current, authHeader: event.target.checked } : current)} />自动添加 Authorization: Bearer</label><label className="checkbox-setting"><input type="checkbox" checked={draft.oauth === "radius"} onChange={(event) => setDraft((current) => current ? { ...current, oauth: event.target.checked ? "radius" : undefined } : current)} />使用 Pi Radius OAuth</label><label className="checkbox-setting"><input type="checkbox" checked={preserveApiKeyReference} onChange={(event) => setPreserveApiKeyReference(event.target.checked)} />保留私有 models.json 密钥/引用</label></div><details className="provider-advanced"><summary>服务商高级 Pi 参数 <ChevronRight size={14} /></summary><p>支持 Pi 的请求头和 <code>compat</code> 字段。敏感请求头会以掩码显示，原值会在不改动时保留。</p><div className="settings-grid"><label>请求头 JSON<textarea value={providerHeadersText} placeholder={'{ "X-Gateway-Key": "$GATEWAY_KEY" }'} onChange={(event) => setProviderHeadersText(event.target.value)} /></label><label>兼容性 JSON<textarea value={providerCompatText} placeholder={'{ "supportsDeveloperRole": false }'} onChange={(event) => setProviderCompatText(event.target.value)} /></label></div></details></>}
+          <header className="provider-editor-heading"><div><span className="provider-source-tag">{selectedId ? sourceLabel(selectedSource) : "新的自定义服务商"}</span><strong>{draft.name || draft.id || "未命名服务商"}</strong><small>{isPiBuiltinProvider ? "请求协议与内置模型由 Pi Provider 决定；认证字段和运行参数按该 Provider 的真实实现配置。" : <>使用 Pi 原生 <code>models.json</code> 格式；凭据保存在 SuoCode 私有 <code>auth.json</code>，不会回传到界面。</>}</small></div><div className="provider-editor-actions">{selectedSource !== "built-in" && selectedId ? <button className={removeArmed ? "danger-text-button armed" : "danger-text-button"} type="button" disabled={saving} onClick={() => removeArmed ? void remove() : setRemoveArmed(true)}>{removeArmed ? "再次点击确认移除" : <><Trash2 size={14} />移除</>}</button> : null}<button className="primary-button" type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{isPiBuiltinProvider ? "保存设置" : "保存服务商"}</button></div></header>
+          {isPiBuiltinProvider ? <>
+            <div className="provider-native-summary"><strong>Pi 内置服务商</strong><p>“内置”只表示请求实现和模型目录由 Pi 提供，并不表示只填一把密钥。Azure、Vertex、Bedrock 和 Cloudflare 会在下方显示各自真实需要的参数。</p></div>
+            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(snapshot?.providers.find((provider) => provider.id === draft.id)?.apiKeyConfigured)} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} />
+            <details className="provider-advanced">
+              <summary>其他选项 <ChevronRight size={14} /></summary>
+              <p>这些选项直接对应 Pi <code>models.json</code> 的服务商覆盖。普通配置不需要填写；“Pi 密钥引用”用于通过环境变量或命令延迟取得密钥，不是另一把 API 密钥。</p>
+              <div className="settings-grid"><label>服务地址覆盖（Base URL）<input value={draft.baseUrl ?? ""} placeholder="仅代理或私有网关需要" onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></label><label>Pi 密钥引用<input value={draft.apiKeyReference ?? ""} placeholder="$PROVIDER_KEY 或 !op read …" onChange={(event) => setDraft((current) => current ? { ...current, apiKeyReference: event.target.value || undefined } : current)} /></label></div>
+              <div className="provider-checkbox-row"><label className="checkbox-setting"><input type="checkbox" checked={Boolean(draft.authHeader)} onChange={(event) => setDraft((current) => current ? { ...current, authHeader: event.target.checked } : current)} />自动添加 Authorization: Bearer</label><label className="checkbox-setting"><input type="checkbox" checked={preserveApiKeyReference} onChange={(event) => setPreserveApiKeyReference(event.target.checked)} />保留已有 models.json 密钥/引用</label></div>
+              <div className="settings-grid"><label>请求头 JSON<textarea value={providerHeadersText} placeholder={'{ "X-Gateway-Key": "$GATEWAY_KEY" }'} onChange={(event) => setProviderHeadersText(event.target.value)} /></label><label>兼容性 JSON<textarea value={providerCompatText} placeholder={'{ "supportsDeveloperRole": false }'} onChange={(event) => setProviderCompatText(event.target.value)} /></label></div>
+            </details>
+          </> : <>
+            <div className="settings-grid"><label>服务商 ID<input value={draft.id} disabled={Boolean(selectedId)} placeholder="例如 dog-provider" onChange={(event) => setDraft((current) => current ? { ...current, id: event.target.value } : current)} /></label><label>显示名称<input value={draft.name ?? ""} placeholder="例如 DogProvider" onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label></div>
+            <div className="settings-grid"><label>Pi 请求协议<SettingsSelect value={draft.api ?? ""} options={protocolOptions.filter((option) => option.value)} ariaLabel="Pi 请求协议" placeholder="选择协议" onChange={(api) => setDraft((current) => current ? { ...current, api } : current)} searchable /></label><label>Base URL<input value={draft.baseUrl ?? ""} placeholder="https://api.example.com/v1" onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></label></div>
+            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(snapshot?.providers.find((provider) => provider.id === draft.id)?.apiKeyConfigured)} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} />
+            <details className="provider-advanced">
+              <summary>其他选项 <ChevronRight size={14} /></summary>
+              <p>Pi 密钥引用、Radius OAuth、请求头与兼容性参数都属于高级配置。普通 API 密钥请填写上方“连接与认证”。</p>
+              <label>Pi 密钥引用<input value={draft.apiKeyReference ?? ""} placeholder="$DOG_PROVIDER_KEY 或 !op read …" onChange={(event) => setDraft((current) => current ? { ...current, apiKeyReference: event.target.value || undefined } : current)} /></label>
+              <div className="provider-checkbox-row"><label className="checkbox-setting"><input type="checkbox" checked={Boolean(draft.authHeader)} onChange={(event) => setDraft((current) => current ? { ...current, authHeader: event.target.checked } : current)} />自动添加 Authorization: Bearer</label><label className="checkbox-setting"><input type="checkbox" checked={draft.oauth === "radius"} onChange={(event) => setDraft((current) => current ? { ...current, oauth: event.target.checked ? "radius" : undefined } : current)} />使用 Pi Radius OAuth</label><label className="checkbox-setting"><input type="checkbox" checked={preserveApiKeyReference} onChange={(event) => setPreserveApiKeyReference(event.target.checked)} />保留已有 models.json 密钥/引用</label></div>
+              <div className="settings-grid"><label>请求头 JSON<textarea value={providerHeadersText} placeholder={'{ "X-Gateway-Key": "$GATEWAY_KEY" }'} onChange={(event) => setProviderHeadersText(event.target.value)} /></label><label>兼容性 JSON<textarea value={providerCompatText} placeholder={'{ "supportsDeveloperRole": false }'} onChange={(event) => setProviderCompatText(event.target.value)} /></label></div>
+            </details>
+          </>}
           <section className="provider-models-section">
             <header><div><strong>模型目录</strong><small>{draft.replaceModels ? "此目录会写入 Pi models.json，并替换该服务商的默认模型目录。" : "保留 Pi 内置模型目录；如需自定义模型，请启用自定义目录。"}</small></div><div className="provider-model-mode"><button className={!draft.replaceModels ? "active" : ""} type="button" onClick={() => setDraft((current) => current ? { ...current, replaceModels: false } : current)}>保留内置</button><button className={draft.replaceModels ? "active" : ""} type="button" onClick={() => setDraft((current) => {
               if (!current) return current;

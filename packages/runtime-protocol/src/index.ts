@@ -38,6 +38,37 @@ export interface ModelProviderApiOption {
   description: string;
 }
 
+export interface ModelProviderCredentialField {
+  /** `key` writes to the Pi credential key; environment names write to credential.env. */
+  id: string;
+  label: string;
+  input: "text" | "secret" | "textarea";
+  required: boolean;
+  placeholder?: string;
+  description?: string;
+  /** The value is returned only for non-secret fields. */
+  value?: string;
+  configured: boolean;
+}
+
+export interface ModelProviderCredentialMethod {
+  id: string;
+  label: string;
+  description?: string;
+  fields: ModelProviderCredentialField[];
+}
+
+/** Pi-native authentication capabilities projected into the desktop settings UI. */
+export interface ModelProviderCredentialConfiguration {
+  name?: string;
+  selectedMethod?: string;
+  methods: ModelProviderCredentialMethod[];
+  oauth?: {
+    name: string;
+    label: string;
+  };
+}
+
 export interface ModelCostConfiguration {
   input: number;
   output: number;
@@ -88,6 +119,7 @@ export interface ModelProviderConfiguration {
   /** A literal `models.json` API key exists but is intentionally redacted. */
   hasPrivateApiKeyReference: boolean;
   apiKeyConfigured: boolean;
+  credential: ModelProviderCredentialConfiguration;
   /** `models` exists in models.json and replaces Pi's catalog for this provider. */
   replaceModels: boolean;
   models: ModelProviderModelConfiguration[];
@@ -97,7 +129,14 @@ export interface ModelProviderConfiguration {
 
 /** Editable provider input. `apiKey` is write-only and never returned. */
 export interface ModelProviderConfigurationInput {
-  provider: Omit<ModelProviderConfiguration, "apiKeyConfigured" | "hasPrivateApiKeyReference" | "source">;
+  provider: Omit<ModelProviderConfiguration, "apiKeyConfigured" | "hasPrivateApiKeyReference" | "source" | "credential">;
+  credential?: {
+    method: string;
+    values: Record<string, string>;
+    /** Keep configured secret fields whose inputs were intentionally left blank. */
+    preserveFields: string[];
+  };
+  /** @deprecated Use `credential`; retained for older CLI/runtime clients. */
   apiKey?: string;
   /** Keep an existing redacted literal or expression from models.json. */
   preserveApiKeyReference?: boolean;
