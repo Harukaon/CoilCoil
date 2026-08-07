@@ -38,6 +38,17 @@ function descendantPids(rootPid) {
   return descendants;
 }
 
+function runtimeProcessPids(rootPid) {
+  return [...descendantPids(rootPid)].filter((pid) => {
+    try {
+      const command = execFileSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+      return /(?:app\.asar\/)?out\/main\/runtime\.js/.test(command);
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function freePort() {
   const server = createServer();
   await new Promise((resolveListen, reject) => {
@@ -684,6 +695,12 @@ async function main() {
     assert.ok(runtimeIsolation.first);
     assert.ok(runtimeIsolation.second);
     assert.notEqual(runtimeIsolation.first, runtimeIsolation.second);
+    await delay(150);
+    assert.equal(
+      runtimeProcessPids(child.pid).length,
+      1,
+      "Opening multiple conversations must keep exactly one desktop Runtime process.",
+    );
     const regularToggleSize = await client.evaluate(`(() => {
       const bounds = document.querySelector('button[aria-label="收起侧栏"]')?.getBoundingClientRect();
       return bounds ? { width: bounds.width, height: bounds.height } : null;

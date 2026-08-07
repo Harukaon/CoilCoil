@@ -26,6 +26,8 @@
     "package:desktop": "npm run build:pi && npm run package --workspace @suocode/desktop",
     "smoke": "npm run build && node scripts/runtime-smoke.mjs",
     "smoke:live": "npm run build && node scripts/runtime-smoke.mjs --live",
+    "smoke:concurrency": "npm run build --workspace @suocode/desktop && node scripts/runtime-concurrency-smoke.mjs",
+    "smoke:concurrency:live": "npm run build --workspace @suocode/desktop && node scripts/runtime-concurrency-smoke.mjs --live",
     "smoke:desktop": "node scripts/desktop-smoke.mjs",
     "smoke:desktop:terminal": "node scripts/terminal-desktop-smoke.mjs",
     "smoke:desktop:live": "node scripts/desktop-smoke.mjs --live"

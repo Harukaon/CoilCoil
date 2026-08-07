@@ -3,12 +3,22 @@ import {
   isRuntimeCommandEnvelope,
   type RuntimeCommand,
   type RuntimeCommandEnvelope,
+  type RuntimeEvent,
   type RuntimeResponseEnvelope,
+  type SessionSnapshot,
   type RuntimeWireMessage,
 } from "@suocode/runtime-protocol";
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 type WireSink = (message: RuntimeWireMessage) => void;
+type RuntimeFactory = (options: SuoCodeRuntimeOptions) => SuoCodeRuntime;
+
+export interface RuntimeServerDependencies {
+  createRuntime?: RuntimeFactory;
+  createRuntimeId?: () => string;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -17,82 +27,180 @@ function errorMessage(error: unknown): string {
 export class RuntimeServer {
   readonly runtime: SuoCodeRuntime;
   private readonly send: WireSink;
+  private readonly options: SuoCodeRuntimeOptions;
+  private readonly createRuntime: RuntimeFactory;
+  private readonly createRuntimeId: () => string;
+  private readonly runtimes = new Map<string, SuoCodeRuntime>();
+  private readonly sessionPaths = new Map<string, string>();
+  private defaultRuntimeId?: string;
 
-  constructor(options: SuoCodeRuntimeOptions, send: WireSink) {
+  constructor(options: SuoCodeRuntimeOptions, send: WireSink, dependencies: RuntimeServerDependencies = {}) {
     this.send = send;
-    this.runtime = new SuoCodeRuntime({
-      ...options,
-      onEvent: (event) => this.send({ event }),
-    });
+    this.options = options;
+    this.createRuntime = dependencies.createRuntime ?? ((runtimeOptions) => new SuoCodeRuntime(runtimeOptions));
+    this.createRuntimeId = dependencies.createRuntimeId ?? randomUUID;
+    this.runtime = this.createManagedRuntime();
   }
 
   async handle(envelope: RuntimeCommandEnvelope): Promise<RuntimeResponseEnvelope> {
     try {
-      const result = await this.dispatch(envelope.command);
+      const result = await this.dispatch(envelope.command, envelope.runtimeId);
       return { id: envelope.id, ok: true, result };
     } catch (error) {
       return { id: envelope.id, ok: false, error: errorMessage(error) };
     }
   }
 
-  private dispatch(command: RuntimeCommand): Promise<unknown> {
+  private createManagedRuntime(runtimeId?: string, modelRuntimePromise?: SuoCodeRuntimeOptions["modelRuntimePromise"]): SuoCodeRuntime {
+    return this.createRuntime({
+      ...this.options,
+      modelRuntimePromise,
+      onEvent: (event) => this.sendRuntimeEvent(runtimeId, event),
+    });
+  }
+
+  private sendRuntimeEvent(runtimeId: string | undefined, event: RuntimeEvent): void {
+    const scopedEvent = runtimeId && event.type === "session_snapshot"
+      ? { ...event, snapshot: this.decorateSnapshot(runtimeId, event.snapshot) }
+      : event;
+    this.send(runtimeId ? { runtimeId, event: scopedEvent } : { event: scopedEvent });
+  }
+
+  private decorateSnapshot(runtimeId: string, snapshot: SessionSnapshot): SessionSnapshot {
+    const decorated = { ...snapshot, runtimeId };
+    if (snapshot.session.path) this.sessionPaths.set(resolve(snapshot.session.path), runtimeId);
+    return decorated;
+  }
+
+  private runtimeById(runtimeId: string): SuoCodeRuntime {
+    const runtime = this.runtimes.get(runtimeId);
+    if (!runtime) throw new Error("所选会话运行时已失效，请重新打开会话。");
+    return runtime;
+  }
+
+  private selectedRuntime(runtimeId?: string): SuoCodeRuntime {
+    if (runtimeId) return this.runtimeById(runtimeId);
+    if (this.defaultRuntimeId) return this.runtimeById(this.defaultRuntimeId);
+    return this.runtime;
+  }
+
+  private async createSession(cwd: string): Promise<SessionSnapshot> {
+    const runtimeId = this.createRuntimeId();
+    const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
+    this.runtimes.set(runtimeId, runtime);
+    this.defaultRuntimeId = runtimeId;
+    try {
+      return this.decorateSnapshot(runtimeId, await runtime.createSession(cwd));
+    } catch (error) {
+      this.runtimes.delete(runtimeId);
+      if (this.defaultRuntimeId === runtimeId) this.defaultRuntimeId = undefined;
+      await runtime.dispose().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
+    const normalizedPath = resolve(sessionPath);
+    const existingId = this.sessionPaths.get(normalizedPath);
+    if (existingId && this.runtimes.has(existingId)) {
+      this.defaultRuntimeId = existingId;
+      return this.decorateSnapshot(existingId, await this.runtimeById(existingId).snapshot());
+    }
+
+    const runtimeId = this.createRuntimeId();
+    const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
+    this.runtimes.set(runtimeId, runtime);
+    this.defaultRuntimeId = runtimeId;
+    try {
+      return this.decorateSnapshot(runtimeId, await runtime.openSession(cwd, sessionPath));
+    } catch (error) {
+      this.runtimes.delete(runtimeId);
+      if (this.defaultRuntimeId === runtimeId) this.defaultRuntimeId = undefined;
+      await runtime.dispose().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async releaseSession(sessionPath: string): Promise<void> {
+    const normalizedPath = resolve(sessionPath);
+    const runtimeId = this.sessionPaths.get(normalizedPath);
+    if (!runtimeId) return;
+    this.sessionPaths.delete(normalizedPath);
+    const runtime = this.runtimes.get(runtimeId);
+    this.runtimes.delete(runtimeId);
+    if (this.defaultRuntimeId === runtimeId) this.defaultRuntimeId = this.runtimes.keys().next().value;
+    await runtime?.dispose();
+  }
+
+  private async dispatch(command: RuntimeCommand, runtimeId?: string): Promise<unknown> {
+    if (command.type === "create_session") return this.createSession(command.cwd);
+    if (command.type === "open_session") return this.openSession(command.cwd, command.sessionPath);
+
+    const alwaysControl = command.type === "bootstrap"
+      || command.type === "list_sessions"
+      || command.type === "list_archived_sessions"
+      || command.type === "archive_session"
+      || command.type === "restore_session";
+    const runtime = alwaysControl ? this.runtime : this.selectedRuntime(runtimeId);
+    const result = await this.dispatchTo(runtime, command);
+    if (command.type === "archive_session") await this.releaseSession(command.sessionPath);
+    return result;
+  }
+
+  private dispatchTo(runtime: SuoCodeRuntime, command: Exclude<RuntimeCommand, { type: "create_session" } | { type: "open_session" }>): Promise<unknown> {
     switch (command.type) {
       case "bootstrap":
-        return this.runtime.initialize();
+        return runtime.initialize();
       case "get_configuration":
-        return this.runtime.getConfiguration();
+        return runtime.getConfiguration();
       case "configure_model":
-        return this.runtime.configureModel(command);
+        return runtime.configureModel(command);
       case "remove_provider_auth":
-        return this.runtime.removeProviderAuth(command.provider);
+        return runtime.removeProviderAuth(command.provider);
       case "get_mcp_configuration":
-        return this.runtime.getMcpConfiguration(command.cwd);
+        return runtime.getMcpConfiguration(command.cwd);
       case "get_mcp_status":
-        return this.runtime.getMcpStatus();
+        return runtime.getMcpStatus();
       case "save_mcp_server":
-        return this.runtime.saveMcpServer(command.server, command.previousName, command.cwd);
+        return runtime.saveMcpServer(command.server, command.previousName, command.cwd);
       case "remove_mcp_server":
-        return this.runtime.removeMcpServer(command.name, command.scope, command.cwd);
+        return runtime.removeMcpServer(command.name, command.scope, command.cwd);
       case "set_mcp_server_enabled":
-        return this.runtime.setMcpServerEnabled(command.name, command.enabled, command.cwd);
+        return runtime.setMcpServerEnabled(command.name, command.enabled, command.cwd);
       case "enable_mcp_imports":
-        return this.runtime.enableMcpImports(command.imports, command.cwd);
+        return runtime.enableMcpImports(command.imports, command.cwd);
       case "connect_mcp_server":
-        return this.runtime.connectMcpServer(command.name);
+        return runtime.connectMcpServer(command.name);
       case "start_mcp_auth":
-        return this.runtime.startMcpAuth(command.name);
+        return runtime.startMcpAuth(command.name);
       case "complete_mcp_auth":
-        return this.runtime.completeMcpAuth(command.name, command.input);
+        return runtime.completeMcpAuth(command.name, command.input);
       case "logout_mcp_server":
-        return this.runtime.logoutMcpServer(command.name);
+        return runtime.logoutMcpServer(command.name);
       case "stop_subagent":
-        return this.runtime.stopSubagent(command.id, command.background);
+        return runtime.stopSubagent(command.id, command.background);
       case "list_sessions":
-        return this.runtime.listSessions(command.cwd);
+        return runtime.listSessions(command.cwd);
       case "list_archived_sessions":
-        return this.runtime.listArchivedSessions(command.cwd);
+        return runtime.listArchivedSessions(command.cwd);
       case "archive_session":
-        return this.runtime.archiveSession(command.cwd, command.sessionPath);
+        return runtime.archiveSession(command.cwd, command.sessionPath);
       case "restore_session":
-        return this.runtime.restoreSession(command.cwd, command.sessionPath);
-      case "create_session":
-        return this.runtime.createSession(command.cwd);
-      case "open_session":
-        return this.runtime.openSession(command.cwd, command.sessionPath);
+        return runtime.restoreSession(command.cwd, command.sessionPath);
       case "prompt":
-        return this.runtime.prompt(command.text, command.images);
+        return runtime.prompt(command.text, command.images);
       case "rewind_prompt":
-        return this.runtime.rewindPrompt(command.entryId, command.text, command.images);
+        return runtime.rewindPrompt(command.entryId, command.text, command.images);
       case "steer":
-        return this.runtime.steer(command.text, command.images);
+        return runtime.steer(command.text, command.images);
       case "abort":
-        return this.runtime.abort();
+        return runtime.abort();
       case "refresh_project":
-        return this.runtime.refreshProject();
+        return runtime.refreshProject();
       case "list_directory":
-        return this.runtime.listProjectDirectory(command.path);
+        return runtime.listProjectDirectory(command.path);
       case "read_file":
-        return this.runtime.readProjectFile(command.path, command.maxBytes);
+        return runtime.readProjectFile(command.path, command.maxBytes);
     }
   }
 
@@ -101,8 +209,18 @@ export class RuntimeServer {
     this.send(await this.handle(value));
   }
 
+  async warmup(): Promise<void> {
+    await this.runtime.initialize();
+  }
+
   async dispose(): Promise<void> {
-    await this.runtime.dispose();
+    await Promise.allSettled([
+      this.runtime.dispose(),
+      ...[...this.runtimes.values()].map((runtime) => runtime.dispose()),
+    ]);
+    this.runtimes.clear();
+    this.sessionPaths.clear();
+    this.defaultRuntimeId = undefined;
   }
 }
 
@@ -123,6 +241,9 @@ export function runtimeOptionsFromEnvironment(): SuoCodeRuntimeOptions {
 export function attachProcessIpc(options = runtimeOptionsFromEnvironment()): RuntimeServer {
   if (typeof process.send !== "function") throw new Error("The runtime process requires an IPC channel.");
   const server = new RuntimeServer(options, (message) => process.send?.(message));
+  void server.warmup().catch((error) => {
+    process.stderr.write(`[suocode-runtime] warmup failed: ${errorMessage(error)}\n`);
+  });
   process.on("message", (message) => {
     void server.receive(message);
   });

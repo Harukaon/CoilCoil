@@ -180,6 +180,8 @@ export interface SuoCodeRuntimeOptions {
   sessionDir: string;
   workflowDir?: string;
   legacyAgentDir?: string;
+  modelRuntime?: ModelRuntime;
+  modelRuntimePromise?: Promise<ModelRuntime>;
   onEvent?: EventSink;
 }
 
@@ -199,6 +201,17 @@ interface ActiveSession {
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   eventBus: EventBusController;
+}
+
+interface ReconstructedSessionState {
+  messages: ChatMessage[];
+  tools: Map<string, ToolRun>;
+  subagents: Map<string, SubagentActivity>;
+  terminals: Map<string, TerminalRun>;
+  plan: TodoItem[];
+  nextTimelineOrder: number;
+  responseMetrics?: ResponseMetrics;
+  responseMetricsHistory: ResponseMetrics[];
 }
 
 interface WorkflowManifest {
@@ -834,8 +847,8 @@ export class SuoCodeRuntime {
   private readonly skillPaths: string[];
   private readonly promptPaths: string[];
   private modelRuntime?: ModelRuntime;
+  private modelRuntimePromise?: Promise<ModelRuntime>;
   private active?: ActiveSession;
-  private initialized = false;
   private migratedLegacyCredentials = false;
   private projectRefreshTimer?: ReturnType<typeof setTimeout>;
   private subagentRefreshTimer?: ReturnType<typeof setTimeout>;
@@ -854,6 +867,13 @@ export class SuoCodeRuntime {
     this.skillPaths = resources.skills;
     this.promptPaths = resources.prompts;
     this.emitEvent = options.onEvent ?? (() => undefined);
+    this.modelRuntime = options.modelRuntime;
+    if (!this.modelRuntime && options.modelRuntimePromise) {
+      this.modelRuntimePromise = options.modelRuntimePromise.then((runtime) => {
+        this.modelRuntime = runtime;
+        return runtime;
+      });
+    }
     const codingAgentRoot = resolvePackageDirectory("@earendil-works/pi-coding-agent");
     process.env.PI_CODING_AGENT_DIR = this.agentDir;
     process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = codingAgentRoot;
@@ -865,23 +885,30 @@ export class SuoCodeRuntime {
   }
 
   async initialize(): Promise<RuntimeBootstrap> {
-    if (!this.initialized) {
-      this.modelRuntime = await ModelRuntime.create({
-        authPath: join(this.agentDir, "auth.json"),
-        modelsPath: join(this.agentDir, "models.json"),
-        allowModelNetwork: false,
-      });
-      this.initialized = true;
-    }
+    await this.ready();
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "runtime_ready", configuration });
     return { configuration, activeSession: this.active ? await this.snapshot() : undefined };
   }
 
   private async ready(): Promise<ModelRuntime> {
-    if (!this.initialized) await this.initialize();
-    if (!this.modelRuntime) throw new Error("SuoCode runtime failed to initialize.");
-    return this.modelRuntime;
+    if (this.modelRuntime) return this.modelRuntime;
+    this.modelRuntimePromise ??= ModelRuntime.create({
+      authPath: join(this.agentDir, "auth.json"),
+      modelsPath: join(this.agentDir, "models.json"),
+      allowModelNetwork: false,
+    }).then((runtime) => {
+      this.modelRuntime = runtime;
+      return runtime;
+    }).catch((error) => {
+      this.modelRuntimePromise = undefined;
+      throw error;
+    });
+    return this.modelRuntimePromise;
+  }
+
+  async sharedModelRuntime(): Promise<ModelRuntime> {
+    return this.ready();
   }
 
   async getConfiguration(): Promise<RuntimeConfiguration> {
@@ -1299,7 +1326,6 @@ export class SuoCodeRuntime {
   }
 
   async listSessions(cwd: string): Promise<SessionSummary[]> {
-    await this.ready();
     const resolvedCwd = safeRealPath(cwd);
     const sessions = await SessionManager.list(resolvedCwd, this.sessionDir);
     const archived = this.readArchivedSessions();
@@ -1355,7 +1381,21 @@ export class SuoCodeRuntime {
   }
 
   private async installSession(cwd: string, sessionManager: SessionManager): Promise<SessionSnapshot> {
-    const modelRuntime = await this.ready();
+    const timingEnabled = process.env.SUOCODE_RUNTIME_TIMING === "1";
+    const timingStartedAt = Date.now();
+    const timings: Record<string, number> = {};
+    let timingCheckpoint = timingStartedAt;
+    const markTiming = (name: string): void => {
+      if (!timingEnabled) return;
+      const now = Date.now();
+      timings[name] = now - timingCheckpoint;
+      timingCheckpoint = now;
+    };
+    const modelRuntimeStartedAt = Date.now();
+    const modelRuntimePromise = this.ready().then((runtime) => {
+      if (timingEnabled) timings.modelRuntime = Date.now() - modelRuntimeStartedAt;
+      return runtime;
+    });
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
     if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
     if (this.active) {
@@ -1379,7 +1419,12 @@ export class SuoCodeRuntime {
       noExtensions: true,
       noThemes: true,
     });
-    await loader.reload();
+    const resourceLoaderStartedAt = Date.now();
+    const resourceLoaderPromise = loader.reload().then(() => {
+      if (timingEnabled) timings.resourceLoader = Date.now() - resourceLoaderStartedAt;
+    });
+    const [modelRuntime] = await Promise.all([modelRuntimePromise, resourceLoaderPromise]);
+    timingCheckpoint = Date.now();
     const extensionErrors = loader.getExtensions().errors;
     if (extensionErrors.length > 0) {
       const message = extensionErrors.map((entry) => `${entry.path}: ${entry.error}`).join("\n");
@@ -1394,7 +1439,9 @@ export class SuoCodeRuntime {
       sessionManager,
       resourceLoader: loader,
     });
+    markTiming("createAgentSession");
     await created.session.bindExtensions({});
+    markTiming("bindExtensions");
     created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => name !== "find"));
     const activeToolNames = new Set(created.session.getActiveToolNames());
     const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp", "subagent"];
@@ -1405,9 +1452,11 @@ export class SuoCodeRuntime {
     }
 
     const reconstructed = this.reconstructState(created.session);
+    const files = await directoryNodes(cwd);
+    markTiming("restoreAndFiles");
     const project: ProjectSnapshot = {
       cwd,
-      files: [],
+      files,
       changes: [],
       terminals: [...reconstructed.terminals.values()],
       plan: reconstructed.plan,
@@ -1430,24 +1479,26 @@ export class SuoCodeRuntime {
     };
     this.active = active;
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
-    await this.refreshAsyncSubagents();
-    await this.refreshProject();
-    const snapshot = await this.snapshot();
+    const snapshot = await this.snapshot(reconstructed);
+    markTiming("snapshot");
     this.emitEvent({ type: "session_snapshot", snapshot });
-    await this.listSessions(cwd);
+    setTimeout(() => {
+      if (this.active !== active) return;
+      void this.refreshAsyncSubagents();
+      void this.refreshProject().catch((error) => {
+        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+      });
+      void this.listSessions(cwd).catch((error) => {
+        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+      });
+    }, 0);
+    if (timingEnabled) {
+      process.stderr.write(`[suocode-runtime-timing] ${JSON.stringify({ cwd, totalMs: Date.now() - timingStartedAt, ...timings })}\n`);
+    }
     return snapshot;
   }
 
-  private reconstructState(session: AgentSession): {
-    messages: ChatMessage[];
-    tools: Map<string, ToolRun>;
-    subagents: Map<string, SubagentActivity>;
-    terminals: Map<string, TerminalRun>;
-    plan: TodoItem[];
-    nextTimelineOrder: number;
-    responseMetrics?: ResponseMetrics;
-    responseMetricsHistory: ResponseMetrics[];
-  } {
+  private reconstructState(session: AgentSession): ReconstructedSessionState {
     const messages: ChatMessage[] = [];
     const tools = new Map<string, ToolRun>();
     const subagents = new Map<string, SubagentActivity>();
@@ -2046,24 +2097,30 @@ export class SuoCodeRuntime {
     return { path: relative(active.cwd, target), content, truncated };
   }
 
-  async snapshot(): Promise<SessionSnapshot> {
+  async snapshot(reconstructedState?: ReconstructedSessionState): Promise<SessionSnapshot> {
     const active = this.requireActive();
-    const sessions = await SessionManager.list(active.cwd, this.sessionDir);
-    const currentInfo = sessions.find((item) => item.id === active.session.sessionId);
+    const reconstructed = reconstructedState ?? this.reconstructState(active.session);
     const header = active.session.sessionManager.getHeader();
     const now = new Date();
-    const summary: SessionSummary = currentInfo
-      ? sessionSummary(currentInfo)
-      : {
-          id: active.session.sessionId,
-          path: active.session.sessionFile ?? "",
-          cwd: active.cwd,
-          title: active.session.sessionName || "新建对话",
-          createdAt: header?.timestamp ?? now.toISOString(),
-          updatedAt: now.toISOString(),
-          messageCount: active.session.messages.length,
-        };
-    const reconstructed = this.reconstructState(active.session);
+    const sessionFile = active.session.sessionFile ?? "";
+    let updatedAt = now.toISOString();
+    if (sessionFile && existsSync(sessionFile)) {
+      try {
+        updatedAt = statSync(sessionFile).mtime.toISOString();
+      } catch {
+        // The session may be between an atomic write and rename; the live timestamp is sufficient.
+      }
+    }
+    const firstUserMessage = reconstructed.messages.find((message) => message.role === "user");
+    const summary: SessionSummary = {
+      id: active.session.sessionId,
+      path: sessionFile,
+      cwd: active.cwd,
+      title: active.session.sessionName || titleFromText(firstUserMessage?.text ?? ""),
+      createdAt: header?.timestamp ?? now.toISOString(),
+      updatedAt,
+      messageCount: active.session.messages.length,
+    };
     const messages = reconstructed.messages;
     const model = active.session.model;
     const usage = sessionUsage(active.session);

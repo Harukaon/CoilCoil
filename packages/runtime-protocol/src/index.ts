@@ -337,6 +337,7 @@ export type RuntimeEvent =
 
 export interface RuntimeCommandEnvelope {
   id: string;
+  runtimeId?: string;
   command: RuntimeCommand;
 }
 
@@ -348,13 +349,11 @@ export interface RuntimeResponseEnvelope {
 }
 
 export interface RuntimeEventEnvelope {
-  event: RuntimeEvent;
-}
-
-export interface ScopedRuntimeEvent {
   runtimeId?: string;
   event: RuntimeEvent;
 }
+
+export type ScopedRuntimeEvent = RuntimeEventEnvelope;
 
 export type RuntimeWireMessage = RuntimeResponseEnvelope | RuntimeEventEnvelope;
 

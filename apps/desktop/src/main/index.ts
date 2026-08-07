@@ -2,7 +2,6 @@ import type {
   RuntimeCommand,
   RuntimeEventEnvelope,
   RuntimeResponseEnvelope,
-  SessionSnapshot,
   RuntimeWireMessage,
   FileNode,
 } from "@suocode/runtime-protocol";
@@ -232,9 +231,8 @@ class RuntimeHost {
   >();
 
   constructor(
-    readonly id: string,
-    private readonly onEvent: (runtimeId: string, event: RuntimeEventEnvelope["event"]) => void,
-    private readonly onExit: (runtimeId: string) => void,
+    private readonly onEvent: (runtimeId: string | undefined, event: RuntimeEventEnvelope["event"]) => void,
+    private readonly onExit: () => void,
   ) {}
 
   start(): void {
@@ -262,9 +260,9 @@ class RuntimeHost {
       const reason = `SuoCode runtime exited${code === null ? "" : ` with code ${code}`}${signal ? ` (${signal})` : ""}.`;
       for (const request of this.pending.values()) request.reject(new Error(reason));
       this.pending.clear();
-      this.onExit(this.id);
+      this.onExit();
       if (!isQuitting) {
-        this.onEvent(this.id, {
+        this.onEvent(undefined, {
             type: "runtime_error",
             message: reason,
         });
@@ -274,7 +272,7 @@ class RuntimeHost {
 
   private handleMessage(message: RuntimeWireMessage): void {
     if (isEventEnvelope(message)) {
-      this.onEvent(this.id, message.event);
+      this.onEvent(message.runtimeId, message.event);
       return;
     }
     const response = message as RuntimeResponseEnvelope;
@@ -285,7 +283,7 @@ class RuntimeHost {
     else pending.reject(new Error(response.error || "运行时请求失败。"));
   }
 
-  request<T>(command: RuntimeCommand): Promise<T> {
+  request<T>(command: RuntimeCommand, runtimeId?: string): Promise<T> {
     this.start();
     const child = this.child;
     if (!child?.connected) return Promise.reject(new Error("SuoCode 运行时不可用。"));
@@ -295,7 +293,7 @@ class RuntimeHost {
         resolve: (value) => resolve(value as T),
         reject,
       });
-      child.send({ id, command }, (error) => {
+      child.send({ id, runtimeId, command }, (error) => {
         if (!error) return;
         this.pending.delete(id);
         reject(error);
@@ -315,76 +313,39 @@ class RuntimeHost {
   }
 }
 
-class RuntimePool {
-  private readonly controlId = "control";
-  private readonly hosts = new Map<string, RuntimeHost>();
-  private readonly sessions = new Map<string, string>();
+class RuntimeBridge {
+  private host?: RuntimeHost;
 
-  private broadcast = (runtimeId: string, event: RuntimeEventEnvelope["event"]): void => {
-    const scopedId = runtimeId === this.controlId ? undefined : runtimeId;
-    const scopedEvent = event.type === "session_snapshot"
-      ? { ...event, snapshot: { ...event.snapshot, runtimeId: scopedId } }
-      : event;
+  private broadcast = (runtimeId: string | undefined, event: RuntimeEventEnvelope["event"]): void => {
     for (const window of BrowserWindow.getAllWindows()) {
-      window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId: scopedId, event: scopedEvent });
+      window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
     }
   };
 
-  private remove = (runtimeId: string): void => {
-    this.hosts.delete(runtimeId);
-    for (const [path, id] of this.sessions) if (id === runtimeId) this.sessions.delete(path);
-  };
-
-  private host(runtimeId: string = randomUUID()): RuntimeHost {
-    const existing = this.hosts.get(runtimeId);
-    if (existing) return existing;
-    const host = new RuntimeHost(runtimeId, this.broadcast, this.remove);
-    this.hosts.set(runtimeId, host);
-    host.start();
+  private runtimeHost(): RuntimeHost {
+    if (this.host) return this.host;
+    const host = new RuntimeHost(this.broadcast, () => {
+      if (this.host === host) this.host = undefined;
+    });
+    this.host = host;
     return host;
   }
 
   start(): void {
-    this.host(this.controlId);
+    this.runtimeHost().start();
   }
 
-  private decorate(runtimeId: string, snapshot: SessionSnapshot): SessionSnapshot {
-    const decorated = { ...snapshot, runtimeId };
-    if (snapshot.session.path) this.sessions.set(snapshot.session.path, runtimeId);
-    return decorated;
-  }
-
-  async request<T>(payload: RuntimeRequestPayload): Promise<T> {
-    const { command, runtimeId } = payload;
-    if (command.type === "create_session") {
-      const host = this.host();
-      return this.decorate(host.id, await host.request<SessionSnapshot>(command)) as T;
-    }
-    if (command.type === "open_session") {
-      const existingId = this.sessions.get(command.sessionPath);
-      if (existingId) {
-        const bootstrap = await this.host(existingId).request<{ activeSession?: SessionSnapshot }>({ type: "bootstrap" });
-        if (bootstrap.activeSession) return this.decorate(existingId, bootstrap.activeSession) as T;
-      }
-      const host = this.host();
-      return this.decorate(host.id, await host.request<SessionSnapshot>(command)) as T;
-    }
-    const sessionCommand = ["prompt", "rewind_prompt", "steer", "abort", "refresh_project", "list_directory", "read_file"].includes(command.type);
-    if (sessionCommand && !runtimeId) throw new Error("当前会话缺少运行时标识。");
-    const host = this.host(sessionCommand || runtimeId ? runtimeId ?? this.controlId : this.controlId);
-    const result = await host.request<T>(command);
-    if (result && typeof result === "object" && "session" in result) return this.decorate(host.id, result as unknown as SessionSnapshot) as T;
-    return result;
+  request<T>(payload: RuntimeRequestPayload): Promise<T> {
+    return this.runtimeHost().request<T>(payload.command, payload.runtimeId);
   }
 
   stop(): void {
-    for (const host of this.hosts.values()) host.stop();
-    this.hosts.clear();
-    this.sessions.clear();
+    this.host?.stop();
+    this.host = undefined;
   }
 }
 
-const runtime = new RuntimePool();
+const runtime = new RuntimeBridge();
 const terminals = new TerminalManager(
   app.getPath("userData"),
   backgroundNodeExecutable(),

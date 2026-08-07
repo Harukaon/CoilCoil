@@ -41,7 +41,7 @@
 | Workspace 行只展开/折叠，不自动切会话 | 已验证 | Desktop smoke。 |
 | 每组最多四条、临时新对话、更多展开 | 已验证 | Desktop smoke。 |
 | 会话右键归档、归档查看与恢复 | 已验证 | Runtime 与 Desktop smoke。 |
-| 多会话并行、运行中和未读完成状态 | 已验证 | 多 Runtime 隔离及 UI 状态 smoke。 |
+| 单 Runtime 进程内的多会话并行、运行中和未读完成状态 | 已验证 | Runtime Server 单元测试、真实 MiniMax M3 并发 smoke，以及打包应用进程树检查；切换会话不终止后台 Agent。 |
 | 左右栏 40px、中栏 315px，外窗按优先级压缩 | 已验证 | Desktop smoke 的 resize 断言。 |
 | macOS 红绿灯与窄栏按钮热区 | 已验证 | Desktop smoke 的按钮尺寸/命中区域断言。 |
 
@@ -104,6 +104,7 @@
 2. `待人工复核` 项已获得实际系统行为确认。
 3. `npm run check`、`npm test`、Runtime smoke、最新打包 Desktop smoke 全部通过。
 4. 至少一个可用 Provider 下完成真实新会话、工具、图片、MCP、子 Agent 与停止流程。
+5. `npm run smoke:concurrency` 验证单进程会话复用和打开耗时；`npm run smoke:concurrency:live` 使用 MiniMax M3 验证一个会话运行时切换并运行另一个会话，随后两个会话均独立完成。
 5. 最新 DMG/ZIP 从干净用户数据目录启动并完成首次配置验证。
 
 ## 最终验证记录

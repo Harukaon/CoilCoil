@@ -140,6 +140,7 @@ export default function App(): React.JSX.Element {
   const timelineRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
+  const snapshotCacheRef = useRef(new Map<string, SessionSnapshot>());
   const runtimeSessionRef = useRef(new Map<string, string>());
   const optimisticMessageIdRef = useRef<string | undefined>(undefined);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
@@ -149,6 +150,7 @@ export default function App(): React.JSX.Element {
 
   const applySnapshot = useCallback((next: SessionSnapshot): void => {
     snapshotRef.current = next;
+    if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
     if (next.runtimeId && next.session.path) runtimeSessionRef.current.set(next.runtimeId, next.session.path);
     setSnapshot(next);
     setMessages(next.messages);
@@ -186,6 +188,7 @@ export default function App(): React.JSX.Element {
   const handleRuntimeEvent = useCallback((event: RuntimeEvent, runtimeId?: string): void => {
     if (event.type === "session_snapshot") {
       const path = event.snapshot.session.path;
+      if (path) snapshotCacheRef.current.set(path, event.snapshot);
       if (runtimeId && path) runtimeSessionRef.current.set(runtimeId, path);
       if (path) {
         setSessionActivity((current) => {
@@ -314,18 +317,22 @@ export default function App(): React.JSX.Element {
     const unsubscribe = window.suocode.onRuntimeEvent(handleRuntimeEvent);
     void (async () => {
       try {
-        const bootstrap = await window.suocode.request<RuntimeBootstrap>({ type: "bootstrap" });
-        setConfiguration(bootstrap.configuration);
+        const bootstrapPromise = window.suocode.request<RuntimeBootstrap>({ type: "bootstrap" }).then((bootstrap) => {
+          setConfiguration(bootstrap.configuration);
+          return bootstrap;
+        });
         const home = await window.suocode.homeProject();
         const mounted = uniqueProjects([home, ...loadStoredProjects()]);
         setProjects(mounted);
         setExpandedProjects(new Set(mounted.map((item) => item.path)));
-        await Promise.all(mounted.map(async (item) => {
+        const activePath = window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+        const activeProject = mounted.find((item) => item.path === activePath) ?? home;
+        const backgroundProjects = mounted.filter((item) => item.path !== activeProject.path);
+        void Promise.allSettled(backgroundProjects.map(async (item) => {
           const listed = await window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: item.path });
           setSessionsByProject((current) => ({ ...current, [item.path]: listed }));
         }));
-        const activePath = window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
-        await activateProject(mounted.find((item) => item.path === activePath) ?? home);
+        const [bootstrap] = await Promise.all([bootstrapPromise, activateProject(activeProject)]);
         if (!bootstrap.configuration.configuredProviders.length) setSettingsOpen(true);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
@@ -392,7 +399,8 @@ export default function App(): React.JSX.Element {
   const openConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
     setWorkspaceMode("agent");
     if (owner.path === project?.path && session.id === activeConversation?.id) return;
-    setLoading(true);
+    const cached = snapshotCacheRef.current.get(session.path);
+    setLoading(!cached);
     setError(undefined);
     setPendingProjectPath(undefined);
     resetComposer();
@@ -401,6 +409,7 @@ export default function App(): React.JSX.Element {
       projectRef.current = owner;
       setProject(owner);
       window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, owner.path);
+      if (cached) applySnapshot(cached);
       applySnapshot(await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
