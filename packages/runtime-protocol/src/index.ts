@@ -77,6 +77,8 @@ export interface McpRuntimeStatus {
   servers: McpServerRuntimeStatus[];
   totalTools: number;
   connectedCount: number;
+  state?: "ready" | "initializing" | "unavailable";
+  diagnostic?: string;
 }
 
 export interface McpActionResult {

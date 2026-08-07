@@ -1,0 +1,41 @@
+.terminal-workspace { display: grid; min-width: 0; min-height: 0; grid-template-rows: 56px 35px minmax(0, 1fr); overflow: hidden; background: #171715; }
+.terminal-workspace-header { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 0 14px 0 20px; color: #30302d; background: #f8f8f6; }
+[data-platform="darwin"] .app-shell.left-collapsed .terminal-workspace-header { padding-left: 82px; }
+.terminal-workspace-title { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.terminal-workspace-title strong { font-size: 14px; font-weight: 600; }
+.terminal-workspace-title span { overflow: hidden; color: #898984; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-launch-actions { display: flex; min-width: 0; align-items: center; gap: 4px; margin-left: auto; }
+.terminal-launch-actions > button:not(.icon-button) { display: inline-flex; height: 28px; align-items: center; gap: 5px; padding: 0 8px; border-radius: 7px; color: #6b6b66; background: transparent; font-size: 10px; cursor: pointer; }
+.terminal-launch-actions > button:hover:not(:disabled) { color: #292927; background: #e9e9e5; }
+.terminal-launch-actions > button:disabled { opacity: .5; }
+.terminal-tabs { display: flex; min-width: 0; align-items: end; gap: 2px; padding: 3px 7px 0; overflow-x: auto; border-top: 1px solid #e4e4e0; background: #efefec; scrollbar-width: none; }
+.terminal-tabs::-webkit-scrollbar { display: none; }
+.terminal-tab { display: flex; min-width: 108px; max-width: 190px; height: 31px; align-items: center; border-radius: 7px 7px 0 0; color: #777772; background: transparent; font-size: 10px; }
+.terminal-tab.active { color: #d6d6d0; background: #171715; }
+.terminal-tab-select { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 6px; padding: 0 3px 0 9px; color: inherit; background: transparent; cursor: pointer; }
+.terminal-tab-select > i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: #777772; }
+.terminal-tab-select > i.running { background: #66a36a; }
+.terminal-tab-select > span { min-width: 0; flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-tab-select > small { color: #999994; font-size: 8px; white-space: nowrap; }
+.terminal-tab-close { display: grid; width: 18px; height: 18px; flex: 0 0 auto; padding: 0; place-items: center; border-radius: 5px; color: inherit; background: transparent; cursor: pointer; opacity: 0; }
+.terminal-tab:hover .terminal-tab-close, .terminal-tab.active .terminal-tab-close { opacity: .8; }
+.terminal-tab-close:hover { background: rgb(255 255 255 / 10%); opacity: 1; }
+.terminal-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #171715; }
+.terminal-surface { position: absolute; inset: 0; display: none; padding: 10px 8px 8px 12px; }
+.terminal-surface.active { display: block; }
+.terminal-surface .xterm { height: 100%; }
+.terminal-surface .xterm-viewport { scrollbar-width: thin; scrollbar-color: #4a4a45 transparent; }
+.terminal-surface .xterm-viewport::-webkit-scrollbar { width: 6px; }
+.terminal-surface .xterm-viewport::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 6px; background: #4a4a45; background-clip: padding-box; }
+.terminal-empty, .terminal-starting { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; color: #898984; }
+.terminal-empty strong { margin-top: 10px; color: #d2d2cc; font-size: 12px; }
+.terminal-empty p { margin: 5px 0 14px; font-size: 10px; }
+.terminal-empty button { height: 30px; padding: 0 12px; border-radius: 7px; color: #dadad4; background: #33332f; font-size: 10px; cursor: pointer; }
+.terminal-starting { font-size: 11px; }
+.terminal-error { position: absolute; right: 12px; bottom: 12px; display: flex; max-width: calc(100% - 24px); align-items: center; gap: 8px; padding: 8px 9px 8px 11px; border: 1px solid #65423f; border-radius: 8px; color: #e2b8b3; background: #382421; box-shadow: 0 8px 24px rgb(0 0 0 / 24%); font-size: 10px; }
+.terminal-error button { display: grid; width: 20px; height: 20px; padding: 0; place-items: center; border-radius: 5px; color: inherit; background: transparent; cursor: pointer; }
+.terminal-error button:hover { background: rgb(255 255 255 / 8%); }
+
+@media (max-width: 900px) {
+  .terminal-launch-actions > button:not(.icon-button) { width: 28px; padding: 0; justify-content: center; font-size: 0; }
+}

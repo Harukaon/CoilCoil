@@ -27,6 +27,7 @@
     "smoke": "npm run build && node scripts/runtime-smoke.mjs",
     "smoke:live": "npm run build && node scripts/runtime-smoke.mjs --live",
     "smoke:desktop": "node scripts/desktop-smoke.mjs",
+    "smoke:desktop:terminal": "node scripts/terminal-desktop-smoke.mjs",
     "smoke:desktop:live": "node scripts/desktop-smoke.mjs --live"
   },
   "engines": {

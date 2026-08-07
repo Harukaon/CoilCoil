@@ -74,11 +74,15 @@ export function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSna
   useEffect(() => {
     setTree(project.files);
     setError(undefined);
+    if (!project.cwd || project.files.length) return;
+    void window.suocode.listProjectDirectory(project.cwd).then(setTree).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
   }, [project.cwd, project.files]);
 
   const loadDirectory = async (path: string): Promise<void> => {
     try {
-      const children = await window.suocode.request<FileNode[]>({ type: "list_directory", path }, runtimeId);
+      const children = runtimeId
+        ? await window.suocode.request<FileNode[]>({ type: "list_directory", path }, runtimeId)
+        : await window.suocode.listProjectDirectory(project.cwd, path);
       setTree((current) => replaceDirectoryChildren(current, path, children));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));

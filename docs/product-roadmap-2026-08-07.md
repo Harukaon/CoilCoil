@@ -93,6 +93,8 @@ apps/desktop/src/renderer/src/
 
 将 `/Users/hao/Desktop/project/shelf` 中已经验证的终端渲染与扫描逻辑迁移到 SuoCode，但最终代码、依赖和运行时都归 SuoCode 所有。
 
+当前实现状态：首版已接入。PTY 由 Electron main 管理，桌面端使用 xterm/FitAddon；普通终端、Claude Code、Codex 和 SuoCode 内置 Pi 可以并行运行。内置 Pi 通过安装包路径启动并显式加载 SuoCode 自带扩展。完整应用退出后不恢复已经死亡的 PTY，后续若需要跨重启任务恢复，应采用可重连的后台会话服务，而不是伪造 PTY 重连。
+
 ### 产品形态
 
 ```text

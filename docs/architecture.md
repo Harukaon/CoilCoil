@@ -27,6 +27,10 @@ Bundled SuoCode runtime
 
 The renderer runs with `contextIsolation`, Chromium sandboxing, and Node integration disabled. It can select a project through Electron main and send only typed runtime commands through the preload bridge. The Agent loop and credentials never run in the renderer.
 
+Product Terminal sessions are also owned by Electron main. The renderer receives only typed create/write/resize/close events and renders the stream through xterm. PTYs remain alive while the user switches between Agent conversations, projects, and the Terminal workspace; closing a tab is the explicit process-termination action. A bounded main-process buffer restores terminal content after a renderer remount. Full application exit terminates PTYs and does not pretend they can be reattached after restart.
+
+The Terminal workspace reuses the proven xterm/FitAddon design from the user-owned `shelf` project, while replacing its Tauri invocation layer with SuoCode's Electron `node-pty` manager. Claude Code and Codex are launched through the user's login shell. The Pi button resolves the CLI shipped in the SuoCode package, passes SuoCode's private Agent directory, and explicitly loads the same bundled workflow, MCP, Todo, terminal, and subagent extensions as the GUI runtime.
+
 ## Runtime ownership
 
 Desktop starts the runtime with dedicated Agent and session directories inside the platform application-data location. CLI uses `~/.suocode` unless `SUOCODE_DATA_DIR` is set. The product does not implicitly read `~/.pi/agent`; credentials and model settings belong to SuoCode's own data directory. An explicit `SUOCODE_LEGACY_AGENT_DIR` is retained only for controlled development migration and tests.
@@ -53,6 +57,8 @@ Examples:
 - MCP reuses `pi-mcp-adapter`; SuoCode only adds configuration and status UI.
 - Subagents reuse `pi-subagents`; SuoCode adds activity cards, execution details, and stop controls by projecting the extension's lifecycle.
 - Todo and workflow tools remain Pi extensions; the activity panel visualizes their structured state.
+
+When `pi-mcp-adapter` is reloading, its native `not_initialized` or `init_failed` result is projected as “初始化中” or “暂不可用”. SuoCode does not mistake that lifecycle state for a new MCP schema and does not fall back to a second protocol implementation.
 
 This rule also applies to future capabilities: configuration screens, previews, dashboards, and controls are product UI, while the corresponding Agent behavior should remain an extension whenever a suitable extension exists. A Desktop-facing bridge may expose extension events and commands, but it must not duplicate the extension's protocol client, lifecycle manager, credential store, or tool implementation.
 

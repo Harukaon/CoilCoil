@@ -394,6 +394,7 @@ async function main() {
     })()`);
     assert.equal(openedMcpSettings, true);
     await client.waitFor(`Boolean(document.querySelector(".mcp-settings"))`, "The MCP settings view did not open.");
+    await client.waitFor(`!document.querySelector(".mcp-settings .settings-loading") && !document.querySelector(".mcp-add-button")?.disabled`, "The MCP settings did not finish loading.");
     const savedMcpServer = await client.evaluate(`(async () => {
       const setInput = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
@@ -480,7 +481,7 @@ async function main() {
       ui: document.querySelector(".mcp-runtime-card")?.textContent || ""
     })`);
     assert.ok(mcpConnectionState.diagnostics, "The MCP adapter connection failure did not surface diagnostics.");
-    assert.match(mcpConnectionState.ui, /连接失败|未连接|已缓存|已连接|需要认证|状态未知/);
+    assert.match(mcpConnectionState.ui, /连接失败|未连接|已缓存|已连接|需要认证|状态未知|初始化中|暂不可用/);
     const copiedProjectMcp = await client.evaluate(`(async () => {
       document.querySelector('button[aria-label="复制 MCP 服务器"]')?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
@@ -898,7 +899,7 @@ async function main() {
     const projectInteraction = await client.evaluate(`(async () => {
       const tree = [...document.querySelectorAll(".project-tree")].find((item) => item.querySelector(".project-name")?.textContent === ${JSON.stringify(basename(projectDirectory))});
       const toggle = tree?.querySelector(".project-toggle");
-      const add = tree?.querySelector(".project-add");
+      const add = tree?.querySelector('button[aria-label*="新建对话"]');
       const titleBefore = document.querySelector(".conversation-title strong")?.textContent || "";
       toggle?.click();
       await new Promise((resolveWait) => setTimeout(resolveWait, 220));
@@ -934,7 +935,7 @@ async function main() {
     await client.waitFor(`Boolean(document.querySelector(".composer-images img"))`, "Pasted images did not appear in the composer.");
     await client.evaluate(`(() => {
       const home = [...document.querySelectorAll(".project-tree")].find((item) => item.querySelector(".project-name")?.textContent === "Home");
-      home?.querySelector(".project-add")?.click();
+      home?.querySelector('button[aria-label*="新建对话"]')?.click();
     })()`);
     await client.waitFor(`(() => {
       const original = [...document.querySelectorAll(".project-tree")].find((item) => item.querySelector(".project-name")?.textContent === ${JSON.stringify(basename(projectDirectory))});
@@ -1062,6 +1063,7 @@ async function main() {
         const header = detail?.querySelector(":scope > header");
         const before = detail?.getBoundingClientRect();
         if (!detail || !header || !before) return null;
+        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
         header.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: before.left + 30, clientY: before.top + 20 }));
         window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: before.left + 70, clientY: before.top + 55 }));
         window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));

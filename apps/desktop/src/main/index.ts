@@ -4,14 +4,16 @@ import type {
   RuntimeResponseEnvelope,
   SessionSnapshot,
   RuntimeWireMessage,
+  FileNode,
 } from "@suocode/runtime-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile, realpath, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
-import type { FilePreviewDocument, OpenFilePreviewInput, ProjectSelection, RuntimeRequestPayload } from "../shared/desktop-api";
+import type { CreateTerminalInput, FilePreviewDocument, OpenFilePreviewInput, ProjectSelection, RuntimeRequestPayload } from "../shared/desktop-api";
+import { TerminalManager } from "./terminal-manager";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
@@ -22,7 +24,20 @@ const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_GET_CHANNEL = "preview:get";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
+const TERMINAL_LIST_CHANNEL = "terminal:list";
+const TERMINAL_CREATE_CHANNEL = "terminal:create";
+const TERMINAL_WRITE_CHANNEL = "terminal:write";
+const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
+const TERMINAL_CLOSE_CHANNEL = "terminal:close";
+const TERMINAL_EVENT_CHANNEL = "terminal:event";
+const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 let isQuitting = false;
+
+function backgroundNodeExecutable(): string {
+  const executableName = basename(process.execPath);
+  const macHelperExecutable = join(dirname(dirname(process.execPath)), "Frameworks", `${executableName} Helper.app`, "Contents", "MacOS", `${executableName} Helper`);
+  return process.platform === "darwin" && existsSync(macHelperExecutable) ? macHelperExecutable : process.execPath;
+}
 
 const TEXT_EXTENSIONS = new Set([
   "", ".txt", ".log", ".md", ".mdx", ".markdown", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv",
@@ -54,6 +69,25 @@ async function safePreviewPath(input: OpenFilePreviewInput): Promise<{ root: str
   }
   if (!(await stat(path)).isFile()) throw new Error("所选路径不是文件。");
   return { root, path };
+}
+
+async function listProjectDirectory(rootValue: string, relativePath = ""): Promise<FileNode[]> {
+  const root = await realpath(rootValue);
+  if (!(await stat(root)).isDirectory()) throw new Error("项目路径不是文件夹。");
+  const candidate = resolve(root, relativePath || ".");
+  const path = await realpath(candidate);
+  const rel = relative(root, path);
+  if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) throw new Error("目录不在当前项目中。");
+  if (!(await stat(path)).isDirectory()) throw new Error("所选路径不是文件夹。");
+  const entries = await readdir(path, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() || entry.isFile())
+    .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name, undefined, { numeric: true }))
+    .map((entry) => ({
+      name: entry.name,
+      path: relative(root, join(path, entry.name)) || entry.name,
+      kind: entry.isDirectory() ? "directory" : "file",
+    } satisfies FileNode));
 }
 
 function previewKind(path: string, forceText: boolean): FilePreviewDocument["kind"] | undefined {
@@ -162,11 +196,7 @@ class RuntimeHost {
   start(): void {
     if (this.child?.connected) return;
     const runtimeEntry = join(__dirname, "runtime.js");
-    const executableName = basename(process.execPath);
-    const macHelperExecutable = join(dirname(dirname(process.execPath)), "Frameworks", `${executableName} Helper.app`, "Contents", "MacOS", `${executableName} Helper`);
-    const nodeExecutable = process.platform === "darwin" && existsSync(macHelperExecutable)
-      ? macHelperExecutable
-      : process.execPath;
+    const nodeExecutable = backgroundNodeExecutable();
     const child = fork(runtimeEntry, [], {
       execPath: process.execPath,
       env: {
@@ -311,6 +341,13 @@ class RuntimePool {
 }
 
 const runtime = new RuntimePool();
+const terminals = new TerminalManager(
+  app.getPath("userData"),
+  backgroundNodeExecutable(),
+  (terminalEvent) => {
+    for (const window of BrowserWindow.getAllWindows()) window.webContents.send(TERMINAL_EVENT_CHANNEL, terminalEvent);
+  },
+);
 
 function createWindow(): void {
   const isMac = process.platform === "darwin";
@@ -379,6 +416,12 @@ app.whenReady().then(() => {
     record.document = await readPreview(record);
     return record.document;
   });
+  ipcMain.handle(TERMINAL_LIST_CHANNEL, () => terminals.list());
+  ipcMain.handle(TERMINAL_CREATE_CHANNEL, (_event, input: CreateTerminalInput) => terminals.create(input));
+  ipcMain.handle(TERMINAL_WRITE_CHANNEL, (_event, id: string, data: string): void => terminals.write(id, data));
+  ipcMain.handle(TERMINAL_RESIZE_CHANNEL, (_event, id: string, cols: number, rows: number): void => terminals.resize(id, cols, rows));
+  ipcMain.handle(TERMINAL_CLOSE_CHANNEL, (_event, id: string): void => terminals.close(id));
+  ipcMain.handle(PROJECT_DIRECTORY_LIST_CHANNEL, (_event, root: string, path?: string) => listProjectDirectory(root, path));
   ipcMain.handle(RUNTIME_REQUEST_CHANNEL, (_event, payload: RuntimeRequestPayload) => runtime.request(payload));
   createWindow();
   app.on("activate", () => {
@@ -390,6 +433,7 @@ app.on("before-quit", () => {
   isQuitting = true;
   for (const preview of previews.values()) preview.watcher?.close();
   previews.clear();
+  terminals.stop();
   runtime.stop();
 });
 

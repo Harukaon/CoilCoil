@@ -28,8 +28,10 @@ import { FilesPanel } from "./features/files/FilesPanel";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
+import { TerminalWorkspace } from "./features/terminal/TerminalWorkspace";
 
 type InspectorView = "files";
+type WorkspaceMode = "agent" | "terminal";
 
 const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
 const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
@@ -102,6 +104,9 @@ export default function App(): React.JSX.Element {
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
   const [configuration, setConfiguration] = useState<RuntimeConfiguration>();
   const [inspectorView, setInspectorView] = useState<InspectorView>("files");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("agent");
+  const [terminalProject, setTerminalProject] = useState<ProjectSelection>();
+  const [terminalFileRefresh, setTerminalFileRefresh] = useState(0);
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivityState>>({});
   const [pendingProjectPath, setPendingProjectPath] = useState<string>();
   const [expandedSessionLists, setExpandedSessionLists] = useState<Set<string>>(new Set());
@@ -159,6 +164,7 @@ export default function App(): React.JSX.Element {
   }, []);
 
   const startPendingConversation = useCallback((selection: ProjectSelection): void => {
+    setWorkspaceMode("agent");
     projectRef.current = selection;
     setProject(selection);
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
@@ -275,6 +281,7 @@ export default function App(): React.JSX.Element {
   }, [applySnapshot]);
 
   const activateProject = useCallback(async (selection: ProjectSelection): Promise<void> => {
+    setWorkspaceMode("agent");
     projectRef.current = selection;
     setProject(selection);
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
@@ -383,6 +390,7 @@ export default function App(): React.JSX.Element {
   };
 
   const openConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
+    setWorkspaceMode("agent");
     if (owner.path === project?.path && session.id === activeConversation?.id) return;
     setLoading(true);
     setError(undefined);
@@ -438,8 +446,9 @@ export default function App(): React.JSX.Element {
   };
 
   const openFilePreview = (node: FileNode): void => {
-    if (!projectState.cwd || node.kind !== "file") return;
-    void window.suocode.openFilePreview({ root: projectState.cwd, path: node.path }).catch((caught) => {
+    const previewRoot = workspaceMode === "terminal" ? terminalProject?.path : projectState.cwd;
+    if (!previewRoot || node.kind !== "file") return;
+    void window.suocode.openFilePreview({ root: previewRoot, path: node.path }).catch((caught) => {
       setError(caught instanceof Error ? caught.message : String(caught));
     });
   };
@@ -505,7 +514,7 @@ export default function App(): React.JSX.Element {
       <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "keep-tiled" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
         <WorkspaceSidebar
           projects={projects}
-          activeProject={project}
+          activeProject={workspaceMode === "terminal" ? terminalProject ?? null : project}
           activeSessionId={activeConversation?.id}
           pendingProjectPath={pendingProjectPath}
           sessionsByProject={sessionsByProject}
@@ -520,19 +529,24 @@ export default function App(): React.JSX.Element {
             if (next.has(path)) next.delete(path); else next.add(path);
             return next;
           })}
+          onOpenTerminal={(owner) => {
+            setTerminalProject(owner);
+            setWorkspaceMode("terminal");
+            setExpandedProjects((current) => new Set(current).add(owner.path));
+          }}
           onShowAllSessions={(path) => setExpandedSessionLists((current) => new Set(current).add(path))}
           onCollapseSessions={(path) => setExpandedSessionLists((current) => { const next = new Set(current); next.delete(path); return next; })}
           onOpenConversation={(owner, session) => { void openConversation(owner, session); }}
           onArchiveConversation={(owner, session) => { void archiveConversation(owner, session); }}
           onRestoreSessions={(owner, sessions) => setSessionsByProject((current) => ({ ...current, [owner.path]: sessions }))}
-          onFocusPending={() => inputRef.current?.focus()}
+          onFocusPending={() => { setWorkspaceMode("agent"); inputRef.current?.focus(); }}
           onOpenSettings={() => setSettingsOpen(true)}
           onError={setError}
         />
         {leftOpen ? <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><span><PanelLeft size={17} /></span></button> : null}
         {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
 
-        <ConversationPane
+        {workspaceMode === "agent" ? <ConversationPane
           fileDragActive={fileDragActive}
           leftOpen={leftOpen}
           rightOpen={rightOpen}
@@ -578,13 +592,13 @@ export default function App(): React.JSX.Element {
           onSelectModel={(model) => { void composer.selectModel(model); }}
           onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }}
           onAbort={() => { void window.suocode.request({ type: "abort" }, snapshot?.runtimeId); }}
-        />
+        /> : terminalProject ? <TerminalWorkspace project={terminalProject} leftOpen={leftOpen} rightOpen={rightOpen} onOpenLeft={() => setLeftOpen(true)} onOpenRight={() => setRightOpen(true)} /> : null}
 
         <aside className="inspector-pane">
-          <div className="inspector-header"><div className="inspector-drag-surface" aria-hidden="true" /><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
+          <div className="inspector-header"><div className="inspector-drag-surface" aria-hidden="true" /><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={workspaceMode === "agent" && !snapshot} onClick={() => workspaceMode === "agent" ? void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId) : setTerminalFileRefresh((current) => current + 1)}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
           <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span></button>; })}</nav>
           <section className="inspector-content">
-            {inspectorView === "files" ? <FilesPanel project={projectState} runtimeId={snapshot?.runtimeId} onOpen={openFilePreview} /> : null}
+            {inspectorView === "files" ? <FilesPanel key={workspaceMode === "terminal" ? `${terminalProject?.path ?? "terminal"}-${terminalFileRefresh}` : "agent-files"} project={workspaceMode === "terminal" && terminalProject ? { ...EMPTY_PROJECT, cwd: terminalProject.path } : projectState} runtimeId={workspaceMode === "agent" ? snapshot?.runtimeId : undefined} onOpen={openFilePreview} /> : null}
           </section>
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}

@@ -92,9 +92,9 @@
 
 | 需求 | 状态 | 当前证据 / 缺口 |
 | --- | --- | --- |
-| Project 下打开独立 Terminal 工作区 | 未完成 | 当前只有 Agent 工具使用的终端会话，没有产品级 Terminal 页面。 |
-| 多 Terminal、PTY 尺寸同步与恢复语义 | 未完成 | 需要迁移并审查 `shelf` 的已验证模块。 |
-| 一键启动 Claude Code、Codex、内置 Pi | 未完成 | 尚无 UI 与外部 CLI 探测。 |
+| Project 下打开独立 Terminal 工作区 | 已验证 | Workspace 行提供独立终端入口；打开后不创建 Agent 对话，右侧继续使用惰性目录树。 |
+| 多 Terminal、PTY 尺寸同步与恢复语义 | 已验证 | Electron main 持有多 PTY，xterm/FitAddon 同步尺寸；切换视图不杀进程，renderer 重挂载通过有界缓冲恢复。完整退出明确终止 PTY，不伪造跨进程重连。 |
+| 一键启动 Claude Code、Codex、内置 Pi | 已验证 | 打包 Terminal Desktop smoke 验证普通 shell、Claude Code、Codex 和安装包内置 Pi 均在项目 cwd 中启动；内置 Pi 显式加载 SuoCode 工作流扩展且不读取用户 PATH 中的 Pi。 |
 
 ## 最终完成门槛
 

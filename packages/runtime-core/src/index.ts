@@ -989,7 +989,11 @@ export class SuoCodeRuntime {
     const active = this.requireActive();
     const requestId = `suocode-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const replyChannel = `suocode:mcp:rpc:v1:reply:${requestId}`;
-    const timeoutMs = method === "status" ? 8_000 : 120_000;
+    // pi-mcp-adapter performs a first-run metadata bootstrap before its proxy
+    // tool becomes ready. That bootstrap can legitimately consume a server's
+    // configured request timeout, so the GUI bridge must not abandon the
+    // extension at the old eight-second boundary.
+    const timeoutMs = method === "status" ? 30_000 : 120_000;
     return new Promise((resolvePromise, rejectPromise) => {
       let settled = false;
       const finish = (callback: () => void): void => {
@@ -1020,9 +1024,13 @@ export class SuoCodeRuntime {
     });
   }
 
-  private mcpStatusFromDetails(details: unknown): McpRuntimeStatus {
+  private mcpStatusFromDetails(details: unknown): McpRuntimeStatus | undefined {
+    if (isRecord(details) && (details.error === "not_initialized" || details.error === "init_failed")) return undefined;
     if (!isRecord(details) || details.mode !== "status" || !Array.isArray(details.servers)) {
-      throw new Error("pi-mcp-adapter 返回了无效的状态数据。");
+      const shape = isRecord(details)
+        ? `{ mode: ${JSON.stringify(details.mode)}, servers: ${Array.isArray(details.servers) ? "array" : typeof details.servers} }`
+        : String(details);
+      throw new Error(`pi-mcp-adapter 返回了无效的状态数据：${shape}`);
     }
     const statuses = new Set<McpServerRuntimeStatus["status"]>(["connected", "needs-auth", "failed", "cached", "not connected"]);
     const servers = details.servers.map((raw) => {
@@ -1040,12 +1048,28 @@ export class SuoCodeRuntime {
       servers,
       totalTools: typeof details.totalTools === "number" && Number.isFinite(details.totalTools) ? details.totalTools : 0,
       connectedCount: typeof details.connectedCount === "number" && Number.isFinite(details.connectedCount) ? details.connectedCount : 0,
+      state: "ready",
     };
   }
 
   async getMcpStatus(): Promise<McpRuntimeStatus> {
     const result = await this.mcpRpc("status");
-    return this.mcpStatusFromDetails(result.details);
+    const status = this.mcpStatusFromDetails(result.details);
+    if (status) return status;
+    const details = isRecord(result.details) ? result.details : {};
+    const configuration = await this.getMcpConfiguration();
+    return {
+      servers: configuration.servers.map((server) => ({
+        name: server.name,
+        status: "not connected" as const,
+        toolCount: 0,
+        failedAgo: null,
+      })),
+      totalTools: 0,
+      connectedCount: 0,
+      state: details.error === "init_failed" ? "unavailable" : "initializing",
+      diagnostic: stringValue(details.message) || stringValue(result.text) || undefined,
+    };
   }
 
   private async mcpAction(method: "connect" | "auth-start" | "auth-complete", params: Record<string, unknown>): Promise<McpActionResult> {
