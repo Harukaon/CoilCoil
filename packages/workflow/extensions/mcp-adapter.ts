@@ -1,5 +1,6 @@
 import type {
   ExtensionAPI,
+  ExtensionCommandContext,
   ExtensionContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -12,7 +13,7 @@ export const MCP_RPC_PROTOCOL_VERSION = 1;
 export const MCP_RPC_REQUEST_EVENT = "suocode:mcp:rpc:v1:request";
 export const MCP_RPC_REPLY_EVENT_PREFIX = "suocode:mcp:rpc:v1:reply:";
 
-type McpRpcMethod = "status" | "connect" | "auth-start" | "auth-complete";
+type McpRpcMethod = "status" | "connect" | "auth-start" | "auth-complete" | "logout";
 
 interface McpRpcRequest {
   version: typeof MCP_RPC_PROTOCOL_VERSION;
@@ -43,7 +44,7 @@ function requestId(raw: unknown): string {
 function parseRequest(raw: unknown): McpRpcRequest {
   const id = requestId(raw);
   if (!isRecord(raw) || raw.version !== MCP_RPC_PROTOCOL_VERSION) throw new Error("MCP RPC 版本不受支持。");
-  if (raw.method !== "status" && raw.method !== "connect" && raw.method !== "auth-start" && raw.method !== "auth-complete") {
+  if (raw.method !== "status" && raw.method !== "connect" && raw.method !== "auth-start" && raw.method !== "auth-complete" && raw.method !== "logout") {
     throw new Error("MCP RPC 方法不受支持。");
   }
   return {
@@ -65,6 +66,7 @@ function proxyParams(request: McpRpcRequest): Record<string, unknown> {
   if (request.method === "status") return {};
   if (request.method === "connect") return { connect: serverName(params) };
   if (request.method === "auth-start") return { action: "auth-start", server: serverName(params) };
+  if (request.method === "logout") return { server: serverName(params) };
   const input = typeof params.input === "string" ? params.input.trim() : "";
   if (!input) throw new Error("缺少 OAuth 回调内容。");
   return { action: "auth-complete", server: serverName(params), args: JSON.stringify({ input }) };
@@ -76,15 +78,22 @@ function resultText(result: McpProxyResult): string {
 
 export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
   let proxyTool: McpProxyTool | undefined;
+  let mcpCommand: { handler: (args: string, context: ExtensionCommandContext) => Promise<void> } | undefined;
   let context: ExtensionContext | undefined;
   const registerTool = pi.registerTool.bind(pi);
+  const registerCommand = pi.registerCommand.bind(pi);
 
   pi.registerTool = ((tool: McpProxyTool) => {
     if (tool.name === "mcp") proxyTool = tool;
     registerTool(tool);
   }) as ExtensionAPI["registerTool"];
+  pi.registerCommand = ((name, command) => {
+    if (name === "mcp") mcpCommand = command;
+    registerCommand(name, command);
+  }) as ExtensionAPI["registerCommand"];
   mcpAdapter(pi);
   pi.registerTool = registerTool as ExtensionAPI["registerTool"];
+  pi.registerCommand = registerCommand as ExtensionAPI["registerCommand"];
 
   pi.on("session_start", async (_event, nextContext) => {
     context = nextContext;
@@ -94,6 +103,22 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
     try {
       id = requestId(raw);
       const request = parseRequest(raw);
+      if (request.method === "logout") {
+        if (!mcpCommand || !context) throw new Error("pi-mcp-adapter 的登出命令尚未就绪。");
+        const name = serverName(request.params ?? {});
+        await mcpCommand.handler(`logout ${name}`, context as ExtensionCommandContext);
+        pi.events.emit(`${MCP_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
+          version: MCP_RPC_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          method: request.method,
+          success: true,
+          data: {
+            text: `已通过 pi-mcp-adapter 清除 ${name} 的 OAuth 凭据。`,
+            details: { mode: "logout", server: name, loggedOut: true },
+          },
+        });
+        return;
+      }
       if (!proxyTool) throw new Error("pi-mcp-adapter 没有注册 MCP 代理工具。");
       const result = await proxyTool.execute(
         `suocode-mcp-rpc-${request.requestId}`,

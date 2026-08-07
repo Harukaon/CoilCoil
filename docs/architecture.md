@@ -60,6 +60,8 @@ Examples:
 
 When `pi-mcp-adapter` is reloading, its native `not_initialized` or `init_failed` result is projected as “初始化中” or “暂不可用”. SuoCode does not mistake that lifecycle state for a new MCP schema and does not fall back to a second protocol implementation.
 
+The Desktop logout control invokes the adapter's existing `/mcp logout <server>` command through the same event bridge. SuoCode does not delete or reinterpret the adapter's credential store itself.
+
 This rule also applies to future capabilities: configuration screens, previews, dashboards, and controls are product UI, while the corresponding Agent behavior should remain an extension whenever a suitable extension exists. A Desktop-facing bridge may expose extension events and commands, but it must not duplicate the extension's protocol client, lifecycle manager, credential store, or tool implementation.
 
 Bundled extensions are still part of the SuoCode runtime distribution. Extension-first does not mean loading packages from the user's local Pi installation.

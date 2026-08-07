@@ -288,6 +288,7 @@ export type RuntimeCommand =
   | { type: "connect_mcp_server"; name: string }
   | { type: "start_mcp_auth"; name: string }
   | { type: "complete_mcp_auth"; name: string; input: string }
+  | { type: "logout_mcp_server"; name: string }
   | { type: "stop_subagent"; id: string; background: boolean }
   | { type: "list_sessions"; cwd: string }
   | { type: "list_archived_sessions"; cwd: string }

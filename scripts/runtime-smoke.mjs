@@ -144,6 +144,10 @@ try {
   if (!failedMcpConnect.text || failedMcpConnect.details?.mode !== "connect" || !failedMcpConnect.details?.error) {
     throw new Error(`The extension-native MCP connect bridge did not return pi-mcp-adapter diagnostics: ${JSON.stringify(failedMcpConnect)}`);
   }
+  const loggedOutMcp = await request({ type: "logout_mcp_server", name: "smoke-server" });
+  if (!loggedOutMcp.text || loggedOutMcp.details?.mode !== "logout" || loggedOutMcp.details?.loggedOut !== true) {
+    throw new Error(`The extension-native MCP logout bridge did not invoke pi-mcp-adapter: ${JSON.stringify(loggedOutMcp)}`);
+  }
   const removedMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "smoke-server", scope: "global" });
   if (removedMcp.servers.some((server) => server.name === "smoke-server")) {
     throw new Error("The Pi MCP adapter configuration bridge did not remove a SuoCode-owned server.");

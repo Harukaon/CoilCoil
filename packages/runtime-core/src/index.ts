@@ -985,7 +985,7 @@ export class SuoCodeRuntime {
     }, 750);
   }
 
-  private mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  private mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete" | "logout", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const active = this.requireActive();
     const requestId = `suocode-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const replyChannel = `suocode:mcp:rpc:v1:reply:${requestId}`;
@@ -1072,7 +1072,7 @@ export class SuoCodeRuntime {
     };
   }
 
-  private async mcpAction(method: "connect" | "auth-start" | "auth-complete", params: Record<string, unknown>): Promise<McpActionResult> {
+  private async mcpAction(method: "connect" | "auth-start" | "auth-complete" | "logout", params: Record<string, unknown>): Promise<McpActionResult> {
     const result = await this.mcpRpc(method, params);
     let status: McpRuntimeStatus | undefined;
     try {
@@ -1101,6 +1101,11 @@ export class SuoCodeRuntime {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
     if (!input.trim()) throw new Error("缺少 OAuth 回调内容。");
     return this.mcpAction("auth-complete", { server: name.trim(), input: input.trim() });
+  }
+
+  async logoutMcpServer(name: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    return this.mcpAction("logout", { server: name.trim() });
   }
 
   async getMcpConfiguration(cwd?: string): Promise<McpConfigurationSnapshot> {

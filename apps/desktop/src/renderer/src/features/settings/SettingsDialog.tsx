@@ -1,4 +1,4 @@
-import { AlertCircle, Cable, Copy, ExternalLink, KeyRound, LoaderCircle, Network, Plus, RefreshCw, Search, Settings, Trash2, X } from "lucide-react";
+import { AlertCircle, Cable, Copy, ExternalLink, KeyRound, LoaderCircle, LogOut, Network, Plus, RefreshCw, Search, Settings, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type {
@@ -335,6 +335,20 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
     }
   };
 
+  const logout = async (): Promise<void> => {
+    if (!selectedName) return;
+    setActionBusy(true);
+    setError(undefined);
+    setActionMessage(undefined);
+    try {
+      applyActionResult(await window.suocode.request<McpActionResult>({ type: "logout_mcp_server", name: selectedName }, runtimeId));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const selectedStatus = runtimeStatus?.servers.find((server) => server.name === selectedName);
   const supportsAuth = draft.transport === "http" && draft.auth !== false;
 
@@ -349,7 +363,7 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
       <section className="mcp-editor">
         <form onSubmit={(event) => void save(event)}>
           <div className="mcp-editor-heading"><div><strong>{selectedName ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</strong><small>连接、认证与工具发现均由内置 pi-mcp-adapter 执行。</small></div><span className="mcp-editor-actions">{selectedName ? <button className="icon-button" type="button" aria-label="连接 MCP 服务器" disabled={actionBusy || !runtimeId} onClick={() => void connect()}>{actionBusy ? <LoaderCircle className="spin" size={14} /> : <Cable size={14} />}</button> : null}{supportsAuth && selectedName ? <button className="icon-button" type="button" aria-label="认证 MCP 服务器" disabled={actionBusy || !runtimeId} onClick={() => void startAuth()}><ExternalLink size={14} /></button> : null}{selectedName ? <button className="icon-button" type="button" aria-label="复制 MCP 服务器" onClick={() => { const copy = { ...draft, name: `${draft.name}-copy`, source: undefined, sourceKind: undefined }; setSelectedName(undefined); setDraft(copy); }}><Copy size={14} /></button> : null}{selectedName && ((draft.scope === "global" && draft.source === configuration?.configPath) || (draft.scope === "project" && draft.source === configuration?.projectConfigPath)) ? <button className="danger-icon-button" type="button" aria-label="移除 MCP 服务器" onClick={() => void remove()}><Trash2 size={14} /></button> : null}</span></div>
-          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpStatusClass(selectedStatus?.status)}`} /><strong>{runtimeStatus?.state === "initializing" ? "初始化中" : runtimeStatus?.state === "unavailable" ? "暂不可用" : selectedStatus ? mcpStatusLabel[selectedStatus.status] : runtimeId ? "状态未知" : "打开会话后可连接"}</strong>{selectedStatus?.toolCount ? <small>{selectedStatus.toolCount} 个工具</small> : null}</span><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void connect()}><Cable size={13} />{selectedStatus?.status === "connected" ? "重新连接" : "连接"}</button>{supportsAuth ? <button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void startAuth()}><ExternalLink size={13} />认证</button> : null}</div> : null}
+          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpStatusClass(selectedStatus?.status)}`} /><strong>{runtimeStatus?.state === "initializing" ? "初始化中" : runtimeStatus?.state === "unavailable" ? "暂不可用" : selectedStatus ? mcpStatusLabel[selectedStatus.status] : runtimeId ? "状态未知" : "打开会话后可连接"}</strong>{selectedStatus?.toolCount ? <small>{selectedStatus.toolCount} 个工具</small> : null}</span><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void connect()}><Cable size={13} />{selectedStatus?.status === "connected" ? "重新连接" : "连接"}</button>{supportsAuth ? <><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void startAuth()}><ExternalLink size={13} />认证</button><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void logout()}><LogOut size={13} />登出</button></> : null}</div> : null}
           {runtimeStatus?.diagnostic ? <p className="mcp-source-note">{runtimeStatus.diagnostic}</p> : null}
           <div className="settings-grid"><label>名称<input value={draft.name} placeholder="例如 github" onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label><label>作用域<select value={draft.scope} disabled={!cwd} onChange={(event) => setDraft((current) => ({ ...current, scope: event.target.value as McpServerConfiguration["scope"] }))}><option value="global">全局</option><option value="project">当前项目</option></select></label></div>
           <label>连接方式<select value={draft.transport} onChange={(event) => setDraft((current) => ({ ...current, transport: event.target.value as McpServerConfiguration["transport"] }))}><option value="stdio">stdio 命令</option><option value="http">HTTP</option></select></label>

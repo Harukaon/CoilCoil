@@ -61,6 +61,8 @@ export class RuntimeServer {
         return this.runtime.startMcpAuth(command.name);
       case "complete_mcp_auth":
         return this.runtime.completeMcpAuth(command.name, command.input);
+      case "logout_mcp_server":
+        return this.runtime.logoutMcpServer(command.name);
       case "stop_subagent":
         return this.runtime.stopSubagent(command.id, command.background);
       case "list_sessions":
