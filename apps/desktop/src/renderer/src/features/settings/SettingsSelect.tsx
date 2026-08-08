@@ -45,7 +45,7 @@ export function SettingsSelect({
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <button className={`settings-select ${className}`.trim()} type="button" aria-label={ariaLabel} disabled={disabled}>
+        <button className={`settings-select ${className}`.trim()} type="button" aria-label={ariaLabel} title={selected?.label ?? placeholder} disabled={disabled}>
           <span className={selected ? "" : "placeholder"}>{selected?.label ?? placeholder}</span>
           <ChevronDown size={14} />
         </button>
