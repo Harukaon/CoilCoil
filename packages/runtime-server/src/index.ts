@@ -163,6 +163,10 @@ export class RuntimeServer {
         return runtime.configureModel(command);
       case "remove_provider_auth":
         return runtime.removeProviderAuth(command.provider);
+      case "fetch_provider_models":
+        return runtime.fetchProviderModels(command.input);
+      case "test_provider_connection":
+        return runtime.testProviderConnection(command.input);
       case "get_mcp_configuration":
         return runtime.getMcpConfiguration(command.cwd);
       case "get_mcp_status":

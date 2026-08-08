@@ -41,6 +41,10 @@ import type {
   ModelProviderCredentialMethod,
   ModelProviderModelConfiguration,
   ModelProviderSaveResult,
+  FetchProviderModelsInput,
+  FetchProviderModelsResult,
+  TestProviderConnectionInput,
+  TestProviderConnectionResult,
   ModelOption,
   PromptImage,
   ProjectSnapshot,
@@ -203,7 +207,7 @@ const MODEL_PROVIDER_APIS: ModelProviderConfigurationSnapshot["supportedApis"] =
   { id: "google-vertex", label: "Google Vertex AI", description: "Google Vertex AI。" },
   { id: "mistral-conversations", label: "Mistral Conversations", description: "Mistral 原生 Conversations API。" },
   { id: "bedrock-converse-stream", label: "Amazon Bedrock Converse", description: "Amazon Bedrock Converse Stream API。" },
-  { id: "pi-messages", label: "Pi Messages", description: "Pi 原生 Messages 流协议，适用于实现该协议的私有服务。" },
+  { id: "pi-messages", label: "Messages", description: "原生 Messages 流协议，适用于实现该协议的私有服务。" },
 ];
 
 type CredentialFieldDefinition = Omit<ModelProviderCredentialField, "configured" | "value">;
@@ -227,16 +231,16 @@ const BUILTIN_CREDENTIAL_METHODS: Record<string, CredentialMethodDefinition[]> =
     description: "API 密钥负责认证；Azure 端点与资源名决定请求发送到哪里，两者至少填写一项。",
     fields: [
       credentialField("key", "API 密钥", "secret", true, "Azure OpenAI API Key"),
-      credentialField("AZURE_OPENAI_BASE_URL", "Azure 端点", "text", false, "https://your-resource.openai.azure.com", "支持 Azure OpenAI、Cognitive Services 与 Azure AI 根地址；Pi 会自动规范化为 /openai/v1。"),
-      credentialField("AZURE_OPENAI_RESOURCE_NAME", "Azure 资源名", "text", false, "your-resource", "不填写端点时，Pi 会由资源名生成 Azure OpenAI 地址。"),
+      credentialField("AZURE_OPENAI_BASE_URL", "Azure 端点", "text", false, "https://your-resource.openai.azure.com", "支持 Azure OpenAI、Cognitive Services 与 Azure AI 根地址；会自动规范化为 /openai/v1。"),
+      credentialField("AZURE_OPENAI_RESOURCE_NAME", "Azure 资源名", "text", false, "your-resource", "不填写端点时，会由资源名生成 Azure OpenAI 地址。"),
       credentialField("AZURE_OPENAI_API_VERSION", "API 版本", "text", false, "留空使用 v1", "对应 AZURE_OPENAI_API_VERSION。"),
-      credentialField("AZURE_OPENAI_DEPLOYMENT_NAME_MAP", "模型与部署名映射", "textarea", false, "gpt-4o=my-gpt4o,gpt-5=my-gpt5", "仅当 Azure Deployment 名称与 Pi 模型 ID 不一致时填写，多个映射使用逗号分隔。"),
+      credentialField("AZURE_OPENAI_DEPLOYMENT_NAME_MAP", "模型与部署名映射", "textarea", false, "gpt-4o=my-gpt4o,gpt-5=my-gpt5", "仅当 Azure Deployment 名称与模型 ID 不一致时填写，多个映射使用逗号分隔。"),
     ],
   }],
   "cloudflare-ai-gateway": [{
     id: "api-key",
     label: "Cloudflare AI Gateway",
-    description: "对应 Pi 的 Cloudflare AI Gateway 登录流程。三个字段都参与请求认证。",
+    description: "对应 Cloudflare AI Gateway 登录流程。三个字段都参与请求认证。",
     fields: [
       credentialField("key", "Cloudflare API Token", "secret", true, "Cloudflare API Token"),
       credentialField("CLOUDFLARE_ACCOUNT_ID", "Account ID", "text", true, "Cloudflare Account ID"),
@@ -246,7 +250,7 @@ const BUILTIN_CREDENTIAL_METHODS: Record<string, CredentialMethodDefinition[]> =
   "cloudflare-workers-ai": [{
     id: "api-key",
     label: "Cloudflare Workers AI",
-    description: "对应 Pi 的 Cloudflare Workers AI 登录流程。",
+    description: "对应 Cloudflare Workers AI 登录流程。",
     fields: [
       credentialField("key", "Cloudflare API Token", "secret", true, "Cloudflare API Token"),
       credentialField("CLOUDFLARE_ACCOUNT_ID", "Account ID", "text", true, "Cloudflare Account ID"),
@@ -283,7 +287,7 @@ const BUILTIN_CREDENTIAL_METHODS: Record<string, CredentialMethodDefinition[]> =
     {
       id: "bearer-token",
       label: "Bedrock Bearer Token",
-      description: "对应 Pi 的 Bearer token 登录方式。",
+      description: "对应 Bearer token 登录方式。",
       fields: [
         credentialField("key", "Bearer Token", "secret", true, "AWS Bedrock bearer token"),
         credentialField("AWS_REGION", "AWS Region", "text", false, "us-east-1"),
@@ -553,6 +557,48 @@ function assertOptionalUrl(value: string | undefined, label: string): string | u
     throw new Error(`${label}必须是完整的 http:// 或 https:// 地址。`);
   }
   return normalized;
+}
+
+function isOpenAiCompatibleProviderApi(api: string): boolean {
+  return api === "openai-completions" || api === "openai-responses";
+}
+
+function joinProviderUrl(baseUrl: string, path: string): string {
+  const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return new URL(path.replace(/^\//, ""), base).toString();
+}
+
+function truncateDetail(value: string, max = 280): string {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+}
+
+function parseUpstreamModelList(value: unknown): Array<{ id: string; name?: string }> {
+  const rows = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.data)
+      ? value.data
+      : isRecord(value) && Array.isArray(value.models)
+        ? value.models
+        : [];
+  const models: Array<{ id: string; name?: string }> = [];
+  const seen = new Set<string>();
+  for (const item of rows) {
+    if (typeof item === "string") {
+      const id = item.trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      models.push({ id });
+      continue;
+    }
+    if (!isRecord(item)) continue;
+    const id = optionalString(item, "id") ?? optionalString(item, "name");
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const name = optionalString(item, "name");
+    models.push({ id, name: name && name !== id ? name : undefined });
+  }
+  return models;
 }
 
 export interface SuoCodeRuntimeOptions {
@@ -1299,14 +1345,16 @@ export class SuoCodeRuntime {
     const cwd = this.active?.cwd ?? process.cwd();
     const settings = SettingsManager.create(cwd, this.agentDir);
     const providers = new Map(modelRuntime.getProviders().map((provider) => [provider.id, provider.name || provider.id]));
+    const disabledProviders = this.disabledProviderIds();
     const configuredProviders = modelRuntime
       .getProviders()
-      .filter((provider) => modelRuntime.hasConfiguredAuth(provider.id))
+      .filter((provider) => modelRuntime.hasConfiguredAuth(provider.id) && !disabledProviders.has(provider.id))
       .map((provider) => provider.id)
       .sort();
     const configuredSet = new Set(configuredProviders);
     const models: ModelOption[] = modelRuntime
       .getModels()
+      .filter((model) => !disabledProviders.has(model.provider))
       .map((model) => ({
         provider: model.provider,
         providerName: providers.get(model.provider) ?? model.provider,
@@ -1332,6 +1380,15 @@ export class SuoCodeRuntime {
       models,
       migratedLegacyCredentials: this.migratedLegacyCredentials,
     };
+  }
+
+  private disabledProviderIds(): Set<string> {
+    const privateConfiguration = this.readPrivateModelsConfiguration();
+    return new Set(
+      Object.entries(privateConfiguration.providers)
+        .filter(([, provider]) => provider.disabled === true)
+        .map(([id]) => id),
+    );
   }
 
   private modelsConfigurationPath(): string {
@@ -1422,6 +1479,7 @@ export class SuoCodeRuntime {
       apiKeyReference,
       hasPrivateApiKeyReference: Boolean(apiKey && !apiKeyReference),
       apiKeyConfigured: modelRuntime.hasConfiguredAuth(providerId) || Boolean(apiKey),
+      disabled: provider?.disabled === true,
       credential: credentialConfiguration(runtimeProvider, storedApiKeyCredential),
       replaceModels: Array.isArray(provider?.models),
       models: configuredModels,
@@ -1472,8 +1530,8 @@ export class SuoCodeRuntime {
     const baseUrl = assertOptionalUrl(draft.baseUrl, "Base URL");
     const api = draft.api?.trim() || undefined;
     const knownApis = new Set(MODEL_PROVIDER_APIS.map((option) => option.id));
-    if (api && !knownApis.has(api)) throw new Error(`“${api}”不是当前 Pi 支持的请求协议。`);
-    if (draft.oauth && draft.oauth !== "radius") throw new Error("Pi 当前仅支持 radius OAuth 服务商。");
+    if (api && !knownApis.has(api)) throw new Error(`“${api}”不是当前支持的请求协议。`);
+    if (draft.oauth && draft.oauth !== "radius") throw new Error("当前仅支持 radius OAuth 服务商。");
 
     const seenModelIds = new Set<string>();
     const models = draft.models.map((model) => {
@@ -1482,7 +1540,7 @@ export class SuoCodeRuntime {
       if (seenModelIds.has(modelId)) throw new Error(`模型 ID “${modelId}”重复。`);
       seenModelIds.add(modelId);
       const modelApi = model.api?.trim();
-      if (modelApi && !knownApis.has(modelApi)) throw new Error(`模型 ${modelId} 使用了 Pi 不支持的请求协议“${modelApi}”。`);
+      if (modelApi && !knownApis.has(modelApi)) throw new Error(`模型 ${modelId} 使用了不支持的请求协议“${modelApi}”。`);
       assertOptionalUrl(model.baseUrl, `模型 ${modelId} 的 Base URL`);
       if (model.input?.length && !model.input.includes("text")) throw new Error(`模型 ${modelId} 至少需要支持文本输入。`);
       for (const [label, value] of [["上下文窗口", model.contextWindow], ["最大输出", model.maxTokens]] as const) {
@@ -1499,17 +1557,18 @@ export class SuoCodeRuntime {
     const isCustom = !isBuiltin && (!existing || !builtinIds.has(id));
     if (isCustom) {
       if (!baseUrl) throw new Error("自定义服务商需要 Base URL。");
-      if (!api) throw new Error("自定义服务商需要选择 Pi 请求协议。");
-      if (!draft.replaceModels || !models.length) throw new Error("自定义服务商至少需要定义一个模型。`models` 是 Pi 识别新服务商的必填目录。");
+      if (!api) throw new Error("自定义服务商需要选择请求协议。");
+      if (!draft.replaceModels || !models.length) throw new Error("自定义服务商至少需要定义一个模型。`models` 是识别新服务商的必填目录。");
     }
     const apiKeyReference = draft.apiKeyReference?.trim();
     if (apiKeyReference && !apiKeyReference.startsWith("$") && !apiKeyReference.startsWith("!")) {
-      throw new Error("Pi API Key 引用应使用 $环境变量、${环境变量} 或 !命令。普通密钥请填写在私有 API 密钥输入框中。");
+      throw new Error("API Key 引用应使用 $环境变量、${环境变量} 或 !命令。普通密钥请填写在私有 API 密钥输入框中。");
     }
 
     const providerHeaders = mergeMaskedStringRecord(draft.headers, objectValue(existing?.headers));
     const providerCompat = draft.compat && Object.keys(draft.compat).length ? draft.compat : undefined;
     const modelOverrides = draft.modelOverrides && Object.keys(draft.modelOverrides).length ? draft.modelOverrides : undefined;
+    const disabled = draft.disabled === true;
     const hasBuiltinOverride = Boolean(
       baseUrl
       || api
@@ -1518,7 +1577,9 @@ export class SuoCodeRuntime {
       || providerCompat
       || draft.authHeader !== undefined
       || draft.replaceModels
-      || modelOverrides,
+      || modelOverrides
+      || disabled
+      || existing?.disabled === true,
     );
 
     // A native provider credential save must stay auth.json-only. Provider
@@ -1533,7 +1594,7 @@ export class SuoCodeRuntime {
     }
 
     const result: Record<string, unknown> = { ...cloneJson(existing ?? {}) };
-    for (const key of ["name", "baseUrl", "api", "oauth", "headers", "compat", "authHeader", "models", "modelOverrides"]) delete result[key];
+    for (const key of ["name", "baseUrl", "api", "oauth", "headers", "compat", "authHeader", "models", "modelOverrides", "disabled"]) delete result[key];
     const set = (key: string, value: unknown): void => {
       if (value !== undefined && value !== "") result[key] = value;
     };
@@ -1544,6 +1605,7 @@ export class SuoCodeRuntime {
     set("headers", Object.keys(providerHeaders).length ? providerHeaders : undefined);
     set("compat", providerCompat);
     set("authHeader", draft.authHeader);
+    if (disabled) result.disabled = true;
     if (apiKeyReference) result.apiKey = apiKeyReference;
     else if (!input.preserveApiKeyReference) delete result.apiKey;
     if (draft.replaceModels) {
@@ -1567,7 +1629,7 @@ export class SuoCodeRuntime {
     if (!input.credential && !legacyKey) return;
 
     const runtimeProvider = modelRuntime.getProviders().find((provider) => provider.id === providerId);
-    if (!runtimeProvider?.auth.apiKey) throw new Error(`服务商 ${providerId} 不支持 API Key 或 Pi 凭据配置。`);
+    if (!runtimeProvider?.auth.apiKey) throw new Error(`服务商 ${providerId} 不支持 API Key 或凭据配置。`);
     const methods = credentialMethodsForProvider(runtimeProvider);
     if (!methods.length) throw new Error(`服务商 ${providerId} 没有可用的 API Key 配置方式。`);
 
@@ -1620,7 +1682,10 @@ export class SuoCodeRuntime {
     const next = this.validateModelProviderConfiguration(input, existing, builtinIds);
     if (next.writeModelsConfig) {
       const previous = cloneJson(privateConfiguration);
-      privateConfiguration.providers[next.id] = next.provider;
+      const keys = Object.keys(next.provider).filter((key) => key !== "disabled" || next.provider.disabled === true);
+      const emptyDisableOnly = builtinIds.has(next.id) && keys.length === 0 && next.provider.disabled !== true;
+      if (emptyDisableOnly) delete privateConfiguration.providers[next.id];
+      else privateConfiguration.providers[next.id] = next.provider;
       this.writePrivateModelsConfiguration(privateConfiguration);
       try {
         await modelRuntime.refresh({ allowNetwork: false });
@@ -1629,21 +1694,21 @@ export class SuoCodeRuntime {
       } catch (error) {
         this.writePrivateModelsConfiguration(previous);
         await modelRuntime.refresh({ allowNetwork: false });
-        throw new Error(`Pi 拒绝此服务商配置：${errorMessage(error)}`);
+        throw new Error(`无法应用此服务商配置：${errorMessage(error)}`);
       }
     }
 
     try {
       await this.saveProviderCredential(next.id, input, modelRuntime);
     } catch (error) {
-      throw new Error(`服务商配置已保存，但无法保存 Pi 凭据：${errorMessage(error)}`);
+      throw new Error(`服务商配置已保存，但无法保存凭据：${errorMessage(error)}`);
     }
 
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
     const saved = await this.getModelProviderConfiguration();
     const provider = saved.providers.find((item) => item.id === next.id);
-    if (!provider) throw new Error("Pi 已刷新，但未能读取刚保存的服务商。");
+    if (!provider) throw new Error("配置已刷新，但未能读取刚保存的服务商。");
     return { provider, configuration };
   }
 
@@ -1651,21 +1716,21 @@ export class SuoCodeRuntime {
     const id = assertProviderId(providerId);
     const privateConfiguration = this.readPrivateModelsConfiguration();
     const existing = privateConfiguration.providers[id];
-    if (!existing) throw new Error("此服务商没有可移除的 SuoCode 私有配置。");
-    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius"]);
     const modelRuntime = await this.ready();
-    if (!builtinIds.has(id)) {
-      try {
-        await modelRuntime.logout(id);
-      } catch {
-        // A malformed/removed provider may not expose a logout handler; config removal still proceeds.
-      }
+    try {
+      await modelRuntime.logout(id);
+    } catch {
+      // A malformed/removed provider may not expose a logout handler; config removal still proceeds.
     }
-    delete privateConfiguration.providers[id];
-    this.writePrivateModelsConfiguration(privateConfiguration);
-    await modelRuntime.refresh({ allowNetwork: false });
-    const runtimeError = modelRuntime.getError();
-    if (runtimeError?.includes("models.json")) throw new Error(`Pi 无法重新加载服务商目录：${runtimeError}`);
+    if (existing) {
+      delete privateConfiguration.providers[id];
+      this.writePrivateModelsConfiguration(privateConfiguration);
+      await modelRuntime.refresh({ allowNetwork: false });
+      const runtimeError = modelRuntime.getError();
+      if (runtimeError?.includes("models.json")) throw new Error(`无法重新加载服务商目录：${runtimeError}`);
+    } else if (!modelRuntime.hasConfiguredAuth(id)) {
+      throw new Error("此服务商没有可移除的配置。");
+    }
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
     return configuration;
@@ -1715,6 +1780,94 @@ export class SuoCodeRuntime {
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
     return configuration;
+  }
+
+  async fetchProviderModels(input: FetchProviderModelsInput): Promise<FetchProviderModelsResult> {
+    const baseUrl = assertOptionalUrl(input.baseUrl, "Base URL");
+    if (!baseUrl) throw new Error("拉取模型列表需要 Base URL。");
+    const api = input.api?.trim() || "openai-completions";
+    if (!isOpenAiCompatibleProviderApi(api)) {
+      throw new Error("当前协议暂不支持自动拉取模型列表。请改用 OpenAI Chat Completions 或 OpenAI Responses。");
+    }
+    const apiKey = await this.resolveProviderApiKey(input.provider, input.apiKey);
+    const headers = {
+      Accept: "application/json",
+      ...(input.headers ?? {}),
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    };
+    const url = joinProviderUrl(baseUrl, "models");
+    const response = await fetch(url, { method: "GET", headers });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`拉取模型失败（HTTP ${response.status}）：${truncateDetail(text)}`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`上游返回的不是 JSON：${truncateDetail(text)}`);
+    }
+    const models = parseUpstreamModelList(parsed);
+    if (!models.length) throw new Error("上游未返回可用模型。");
+    return { models };
+  }
+
+  async testProviderConnection(input: TestProviderConnectionInput): Promise<TestProviderConnectionResult> {
+    const baseUrl = assertOptionalUrl(input.baseUrl, "Base URL");
+    if (!baseUrl) throw new Error("测试连接需要 Base URL。");
+    const api = input.api.trim();
+    if (!isOpenAiCompatibleProviderApi(api)) {
+      return { ok: false, message: "当前协议暂不支持一键测试。", detail: "请改用 OpenAI Chat Completions 或 OpenAI Responses。" };
+    }
+    const apiKey = await this.resolveProviderApiKey(input.provider, input.apiKey);
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(input.headers ?? {}),
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    };
+    const modelId = input.modelId?.trim() || "gpt-4o-mini";
+    try {
+      if (api === "openai-responses") {
+        const url = joinProviderUrl(baseUrl, "responses");
+        const response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: modelId,
+            input: "Hello",
+            max_output_tokens: 16,
+          }),
+        });
+        const text = await response.text();
+        if (!response.ok) return { ok: false, message: `测试失败（HTTP ${response.status}）`, detail: truncateDetail(text) };
+        return { ok: true, message: "连接成功，已收到 Responses 回复。" };
+      }
+      const url = joinProviderUrl(baseUrl, "chat/completions");
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: modelId,
+          messages: [{ role: "user", content: "Hello" }],
+          max_tokens: 16,
+        }),
+      });
+      const text = await response.text();
+      if (!response.ok) return { ok: false, message: `测试失败（HTTP ${response.status}）`, detail: truncateDetail(text) };
+      return { ok: true, message: "连接成功，已收到 Chat Completions 回复。" };
+    } catch (error) {
+      return { ok: false, message: "测试请求失败", detail: errorMessage(error) };
+    }
+  }
+
+  private async resolveProviderApiKey(providerId: string | undefined, submitted?: string): Promise<string | undefined> {
+    const trimmed = submitted?.trim();
+    if (trimmed) return trimmed;
+    if (!providerId?.trim()) return undefined;
+    const stored = readStoredCredential(providerId.trim(), join(this.agentDir, "auth.json"));
+    if (stored?.type === "api_key" && stored.key) return stored.key;
+    return undefined;
   }
 
   private mcpCwd(cwd?: string): string {

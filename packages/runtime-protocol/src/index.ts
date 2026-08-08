@@ -119,6 +119,8 @@ export interface ModelProviderConfiguration {
   /** A literal `models.json` API key exists but is intentionally redacted. */
   hasPrivateApiKeyReference: boolean;
   apiKeyConfigured: boolean;
+  /** Soft-disable: keep config but hide models from the picker. */
+  disabled: boolean;
   credential: ModelProviderCredentialConfiguration;
   /** `models` exists in models.json and replaces Pi's catalog for this provider. */
   replaceModels: boolean;
@@ -151,6 +153,35 @@ export interface ModelProviderConfigurationSnapshot {
 export interface ModelProviderSaveResult {
   provider: ModelProviderConfiguration;
   configuration: RuntimeConfiguration;
+}
+
+export interface FetchProviderModelsInput {
+  baseUrl: string;
+  api?: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  /** Use stored auth.json credentials for this provider when apiKey is omitted. */
+  provider?: string;
+}
+
+export interface FetchProviderModelsResult {
+  models: Array<{ id: string; name?: string }>;
+}
+
+export interface TestProviderConnectionInput {
+  baseUrl: string;
+  api: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  modelId?: string;
+  /** Use stored auth.json credentials for this provider when apiKey is omitted. */
+  provider?: string;
+}
+
+export interface TestProviderConnectionResult {
+  ok: boolean;
+  message: string;
+  detail?: string;
 }
 
 export type McpTransport = "stdio" | "http";
@@ -416,6 +447,8 @@ export type RuntimeCommand =
       apiKey?: string;
     }
   | { type: "remove_provider_auth"; provider: string }
+  | { type: "fetch_provider_models"; input: FetchProviderModelsInput }
+  | { type: "test_provider_connection"; input: TestProviderConnectionInput }
   | { type: "get_mcp_configuration"; cwd?: string }
   | { type: "get_mcp_status" }
   | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
