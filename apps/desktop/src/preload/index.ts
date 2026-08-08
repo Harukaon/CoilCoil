@@ -15,6 +15,7 @@ import type {
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
+const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const EXTERNAL_OPEN_CHANNEL = "external:open";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
@@ -38,6 +39,8 @@ const api: SuoCodeDesktopApi = {
     ipcRenderer.invoke(PROJECT_HOME_CHANNEL) as Promise<ProjectSelection>,
   selectProject: () =>
     ipcRenderer.invoke(PROJECT_SELECT_CHANNEL) as Promise<ProjectSelection | null>,
+  pickDirectory: (options?: { title?: string }) =>
+    ipcRenderer.invoke(PICK_DIRECTORY_CHANNEL, options) as Promise<string | null>,
   setWindowMinimumWidth: (width: number) =>
     ipcRenderer.invoke(WINDOW_MINIMUM_WIDTH_CHANNEL, width) as Promise<void>,
   openExternal: (url: string) =>

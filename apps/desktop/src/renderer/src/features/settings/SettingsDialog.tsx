@@ -1,4 +1,4 @@
-import { ArrowLeft, Cable, ExternalLink, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { ArrowLeft, Cable, ExternalLink, FileJson, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
@@ -11,9 +11,11 @@ import type {
 } from "@suocode/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { ModelSettings } from "./ModelSettings";
+import { McpJsonEditor } from "./McpJsonEditor";
+import { SkillSettings } from "./SkillSettings";
 import "./settings.css";
 
-type SettingsSection = "models" | "mcp";
+type SettingsSection = "models" | "mcp" | "skills";
 const MASKED_SECRET_VALUE = "••••••";
 const SETTINGS_SIDEBAR_WIDTH_KEY = "suocode.settings-sidebar-width";
 const DEFAULT_SETTINGS_SIDEBAR_WIDTH = 220;
@@ -78,7 +80,7 @@ function parseStringMap(value: string, label: string, original: Record<string, s
   ]));
 }
 
-function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): React.JSX.Element {
+function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cwd?: string; reloadKey?: number }): React.JSX.Element {
   const [configuration, setConfiguration] = useState<McpConfigurationSnapshot>();
   const [selectedName, setSelectedName] = useState<string>();
   const [draft, setDraft] = useState<McpServerConfiguration>(blankMcpServer);
@@ -159,7 +161,7 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   useEffect(() => {
     void load();
     void loadStatus();
-  }, [cwd, runtimeId]);
+  }, [cwd, runtimeId, reloadKey]);
 
   const save = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -389,17 +391,26 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   );
 }
 
-export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeId, cwd }: {
+export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeId, cwd, initialSection = "models" }: {
   configuration?: RuntimeConfiguration;
   open: boolean;
   onClose: () => void;
   onSaved: (configuration: RuntimeConfiguration) => void;
   runtimeId?: string;
   cwd?: string;
+  initialSection?: SettingsSection;
 }): React.JSX.Element | null {
-  const [section, setSection] = useState<SettingsSection>("models");
+  const [section, setSection] = useState<SettingsSection>(initialSection);
   const [sidebarWidth, setSidebarWidth] = useState(storedSettingsSidebarWidth);
-  useEffect(() => { if (!open) setSection("models"); }, [open]);
+  const [mcpJsonOpen, setMcpJsonOpen] = useState(false);
+  const [mcpReloadKey, setMcpReloadKey] = useState(0);
+  useEffect(() => {
+    if (open) setSection(initialSection);
+    else {
+      setSection("models");
+      setMcpJsonOpen(false);
+    }
+  }, [initialSection, open]);
 
   const beginSidebarResize = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     event.preventDefault();
@@ -434,16 +445,53 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
         <nav className="settings-tabs" aria-label="设置栏目">
           <button className={section === "models" ? "active" : ""} type="button" onClick={() => setSection("models")}><Settings size={15} />模型与服务商</button>
           <button className={section === "mcp" ? "active" : ""} type="button" onClick={() => setSection("mcp")}><Network size={15} />MCP</button>
+          <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />Skills</button>
         </nav>
         <button className="settings-back" type="button" aria-label="关闭设置" onClick={onClose}><ArrowLeft size={15} />返回工作区</button>
       </aside>
       <div className="settings-sidebar-resizer" role="separator" aria-label="调整设置侧栏宽度" aria-orientation="vertical" onPointerDown={beginSidebarResize} />
       <section className="settings-page" role="region">
-        <header className="settings-page-header window-drag"><div><span className="settings-icon">{section === "models" ? <Settings size={17} /> : <Network size={17} />}</span><div><h1 id="settings-title">{section === "models" ? "模型与服务商" : "MCP"}</h1><p>模型凭据和 MCP 配置均保存在 SuoCode 的私有运行时中。</p></div></div></header>
+        <header className="settings-page-header window-drag">
+          <div>
+            <span className="settings-icon">
+              {section === "models" ? <Settings size={17} /> : section === "mcp" ? <Network size={17} /> : <Sparkles size={17} />}
+            </span>
+            <div>
+              <h1 id="settings-title">{section === "models" ? "模型与服务商" : section === "mcp" ? "MCP" : "Skills"}</h1>
+              <p>
+                {section === "skills"
+                  ? "按需加载的专业技能包。"
+                  : "模型凭据和 MCP 配置均保存在 SuoCode 的私有运行时中。"}
+              </p>
+            </div>
+          </div>
+          {section === "mcp" ? (
+            <button
+              className="settings-header-action no-window-drag"
+              type="button"
+              onClick={() => setMcpJsonOpen(true)}
+            >
+              <FileJson size={14} />打开 JSON 配置
+            </button>
+          ) : null}
+        </header>
         <div className="settings-page-content">
-          {section === "models" ? <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} /> : <McpSettings runtimeId={runtimeId} cwd={cwd} />}
+          {section === "models" ? (
+            <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} />
+          ) : section === "mcp" ? (
+            <McpSettings runtimeId={runtimeId} cwd={cwd} reloadKey={mcpReloadKey} />
+          ) : (
+            <SkillSettings runtimeId={runtimeId} cwd={cwd} />
+          )}
         </div>
       </section>
+      <McpJsonEditor
+        open={mcpJsonOpen}
+        cwd={cwd}
+        runtimeId={runtimeId}
+        onClose={() => setMcpJsonOpen(false)}
+        onSaved={() => setMcpReloadKey((value) => value + 1)}
+      />
     </main>
   );
 }

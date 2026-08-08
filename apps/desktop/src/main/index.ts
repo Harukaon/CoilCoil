@@ -15,6 +15,7 @@ import type { FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput,
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
+const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const EXTERNAL_OPEN_CHANNEL = "external:open";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
@@ -399,6 +400,15 @@ app.whenReady().then(() => {
     const path = result.filePaths[0];
     if (result.canceled || !path) return null;
     return { name: basename(path), path, kind: "workspace" };
+  });
+  ipcMain.handle(PICK_DIRECTORY_CHANNEL, async (_event, options?: { title?: string }): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      title: typeof options?.title === "string" && options.title.trim() ? options.title.trim() : "选择目录",
+      properties: ["openDirectory"],
+    });
+    const path = result.filePaths[0];
+    if (result.canceled || !path) return null;
+    return path;
   });
   ipcMain.handle(WINDOW_MINIMUM_WIDTH_CHANNEL, (event, requestedWidth: number): void => {
     const window = BrowserWindow.fromWebContents(event.sender);

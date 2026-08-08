@@ -19,6 +19,7 @@ import type {
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
 import { ActivityPanel } from "../activity/ActivityPanel";
 import { ConversationComposer } from "../composer/ConversationComposer";
+import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
@@ -126,12 +127,20 @@ export function ConversationPane({
   onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (section?: SettingsSection) => void;
   onAbort: () => void;
 }): React.JSX.Element {
   const { chatContentWidth, beginChatWidthResize } = useChatContentWidth();
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const slashMenu = useSlashMenu({
+    draft,
+    inputRef,
+    project,
+    runtimeId: snapshot?.runtimeId,
+    onDraftChange,
+    onOpenSettings,
+  });
 
   useEffect(() => {
     setEditingMessageId(undefined);
@@ -174,52 +183,62 @@ export function ConversationPane({
         <div className="header-actions no-drag">{!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={onOpenRight}><PanelRight size={17} /></button> : null}</div>
       </header>
 
-      <div className="conversation-body" ref={timelineRef} onScroll={handleBodyScroll}>
-        {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? (
-          <div className="timeline">
-            {timeline.map((item) => item.kind === "user" ? (
-              <MessageView
-                key={`user-${item.message.id}`}
-                message={item.message}
-                disabled={running}
-                editing={editingMessageId === item.message.id}
-                project={project}
-                configuration={configuration}
-                selectedModel={selectedModel}
-                modelChanging={modelChanging}
-                onEditingChange={(next) => setEditingMessageId(next ? item.message.id : undefined)}
-                onRewind={onRewind}
-                onError={reportError}
-                onSelectModel={onSelectModel}
-                onOpenSettings={onOpenSettings}
-              />
-            ) : (
-              <AgentTurnView
-                key={`agent-${item.order}`}
-                items={item.items}
-                modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")}
-                onStopSubagent={onStopSubagent}
-              />
-            ))}
-            {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}
-          </div>
-        ) : (
-          <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
-        )}
+      <div className="conversation-scroll">
+        <div className="conversation-body" ref={timelineRef} onScroll={handleBodyScroll}>
+          {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? (
+            <div className="timeline">
+              {timeline.map((item, index) => item.kind === "user" ? (
+                <MessageView
+                  key={`user-${item.message.id}`}
+                  message={item.message}
+                  disabled={running}
+                  editing={editingMessageId === item.message.id}
+                  project={project}
+                  configuration={configuration}
+                  selectedModel={selectedModel}
+                  modelChanging={modelChanging}
+                  runtimeId={snapshot?.runtimeId}
+                  onEditingChange={(next) => setEditingMessageId(next ? item.message.id : undefined)}
+                  onRewind={onRewind}
+                  onError={reportError}
+                  onSelectModel={onSelectModel}
+                  onOpenSettings={onOpenSettings}
+                />
+              ) : (
+                <AgentTurnView
+                  key={`agent-${item.order}`}
+                  items={item.items}
+                  running={running && index === timeline.length - 1}
+                  modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")}
+                  onStopSubagent={onStopSubagent}
+                />
+              ))}
+              {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}
+            </div>
+          ) : (
+            <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
+          )}
+        </div>
+        {showScrollDown ? (
+          <button className="scroll-to-bottom" type="button" aria-label="滚动到最新消息" onClick={scrollToBottom}>
+            <ArrowDown size={14} strokeWidth={2.2} />
+          </button>
+        ) : null}
       </div>
-
-      {showScrollDown ? (
-        <button className="scroll-to-bottom" type="button" aria-label="滚动到最新消息" onClick={scrollToBottom}>
-          <ArrowDown size={14} strokeWidth={2.2} />
-        </button>
-      ) : null}
 
       <div className="composer-wrap">
         <div className="composer-width-resizer left" role="separator" aria-label="调整对话宽度" aria-orientation="vertical" onPointerDown={(event) => beginChatWidthResize("left", event)} />
         <div className="composer-width-resizer right" role="separator" aria-label="调整对话宽度" aria-orientation="vertical" onPointerDown={(event) => beginChatWidthResize("right", event)} />
         <div className="composer-stack">
           <div className="composer-overlays">
-            <ActivityPanel todo={projectState.plan} subagents={subagents} onStopSubagent={onStopSubagent} />
+            <ActivityPanel
+              todo={projectState.plan}
+              subagents={subagents}
+              commands={slashMenu.slashActive ? slashMenu.filteredItems : undefined}
+              commandIndex={slashMenu.itemIndex}
+              onSelectCommand={slashMenu.selectItem}
+              onStopSubagent={onStopSubagent}
+            />
           </div>
           <ConversationComposer
             variant="footer"
@@ -241,9 +260,10 @@ export function ConversationPane({
             onCompositionStart={onCompositionStart}
             onCompositionEnd={onCompositionEnd}
             onKeyDown={onKeyDown}
+            onSlashKeyDown={slashMenu.handleSlashKeyDown}
             onModelMenuOpenChange={onModelMenuOpenChange}
             onSelectModel={onSelectModel}
-            onOpenSettings={onOpenSettings}
+            onOpenSettings={() => onOpenSettings()}
             onAbort={onAbort}
           />
         </div>

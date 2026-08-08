@@ -1,4 +1,5 @@
 import {
+  DefaultPackageManager,
   DefaultResourceLoader,
   AuthStorage,
   ModelRuntime,
@@ -7,6 +8,7 @@ import {
   configureHttpDispatcher,
   createEventBus,
   createAgentSession,
+  loadSkills,
   processImage,
   readStoredCredential,
   type AgentSession,
@@ -30,6 +32,7 @@ import type {
   McpConfigurationSnapshot,
   McpActionResult,
   McpImportConfiguration,
+  McpJsonDocument,
   McpRuntimeStatus,
   McpServerConfiguration,
   McpServerRuntimeStatus,
@@ -54,6 +57,10 @@ import type {
   ResponseMetrics,
   SessionSnapshot,
   SessionSummary,
+  SkillConfigurationSnapshot,
+  SkillDiagnostic,
+  SkillEntry,
+  SkillSource,
   SubagentActivity,
   TerminalRun,
   ThinkingLevel,
@@ -61,6 +68,7 @@ import type {
   TodoItem,
   ToolRun,
 } from "@suocode/runtime-protocol";
+import { validateMcpJsonText } from "@suocode/runtime-protocol";
 import { execFile } from "node:child_process";
 import {
   chmodSync,
@@ -74,7 +82,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -1312,6 +1321,7 @@ export class SuoCodeRuntime {
   private projectRefreshTimer?: ReturnType<typeof setTimeout>;
   private subagentRefreshTimer?: ReturnType<typeof setTimeout>;
   private mcpReloadTimer?: ReturnType<typeof setTimeout>;
+  private resourceReloadTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: SuoCodeRuntimeOptions) {
     // The Pi CLI configures its Undici dispatcher before provider SDKs run.
@@ -1974,11 +1984,17 @@ export class SuoCodeRuntime {
   }
 
   private reloadMcpExtension(): void {
+    this.reloadActiveSessionResources("MCP 扩展重新加载失败");
+  }
+
+  private reloadActiveSessionResources(errorLabel = "资源重新加载失败"): void {
+    if (this.resourceReloadTimer) clearTimeout(this.resourceReloadTimer);
     if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
+    this.mcpReloadTimer = undefined;
     const active = this.active;
     if (!active) return;
-    this.mcpReloadTimer = setTimeout(() => {
-      this.mcpReloadTimer = undefined;
+    this.resourceReloadTimer = setTimeout(() => {
+      this.resourceReloadTimer = undefined;
       if (this.active !== active || active.session.isStreaming) return;
       void active.session.reload()
         .then(async () => {
@@ -1986,9 +2002,205 @@ export class SuoCodeRuntime {
           this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
         })
         .catch((error) => {
-          this.emitEvent({ type: "runtime_error", message: `MCP 扩展重新加载失败：${errorMessage(error)}`, detail: errorDetail(error) });
+          this.emitEvent({ type: "runtime_error", message: `${errorLabel}：${errorMessage(error)}`, detail: errorDetail(error) });
         });
     }, 750);
+  }
+
+  private skillSettingsManager(cwd?: string): SettingsManager {
+    return SettingsManager.create(this.mcpCwd(cwd), this.agentDir, { projectTrusted: true });
+  }
+
+  private classifySkillSource(
+    filePath: string,
+    scope: "user" | "project" | "temporary",
+    origin: "package" | "top-level",
+    source: string,
+  ): SkillSource {
+    if (origin === "package" || this.skillPaths.some((path) => filePath === path || filePath.startsWith(`${path}${sep}`))) {
+      return "bundled";
+    }
+    if (source === "auto" && filePath.split(sep).includes(".agents")) return "agents";
+    if (scope === "project") return "project";
+    return "user";
+  }
+
+  private plainSkillPathEntries(paths: string[]): string[] {
+    return paths.filter((entry) => !entry.startsWith("+") && !entry.startsWith("-") && !entry.startsWith("!"));
+  }
+
+  private expandSkillPath(path: string): string {
+    const trimmed = path.trim();
+    if (!trimmed) throw new Error("技能路径不能为空。");
+    if (trimmed === "~") return homedir();
+    if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
+    return isAbsolute(trimmed) ? resolve(trimmed) : resolve(trimmed);
+  }
+
+  private skillOverridePattern(filePath: string, baseDir: string): string {
+    const pattern = relative(baseDir, filePath).split(sep).join("/");
+    if (!pattern || pattern.startsWith("..")) return filePath;
+    return pattern;
+  }
+
+  private rewriteSkillOverridePaths(paths: string[], pattern: string, enabled: boolean): string[] {
+    const disablePattern = `-${pattern}`;
+    const enablePattern = `+${pattern}`;
+    const updated = paths.filter((entry) => {
+      const stripped = entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-") ? entry.slice(1) : entry;
+      return stripped !== pattern;
+    });
+    updated.push(enabled ? enablePattern : disablePattern);
+    return updated;
+  }
+
+  async getSkillConfiguration(cwd?: string): Promise<SkillConfigurationSnapshot> {
+    const resolvedCwd = this.mcpCwd(cwd);
+    const settingsManager = this.skillSettingsManager(resolvedCwd);
+    const packageManager = new DefaultPackageManager({
+      cwd: resolvedCwd,
+      agentDir: this.agentDir,
+      settingsManager,
+    });
+    const resolved = await packageManager.resolve(async () => "skip");
+    const diagnostics: SkillDiagnostic[] = [];
+    const skills: SkillEntry[] = [];
+    const seen = new Set<string>();
+
+    for (const entry of resolved.skills) {
+      const loaded = loadSkills({
+        cwd: resolvedCwd,
+        agentDir: this.agentDir,
+        skillPaths: [entry.path],
+        includeDefaults: false,
+      });
+      for (const diagnostic of loaded.diagnostics) {
+        diagnostics.push({ type: diagnostic.type, message: diagnostic.message, path: diagnostic.path });
+      }
+      for (const skill of loaded.skills) {
+        if (seen.has(skill.filePath)) continue;
+        seen.add(skill.filePath);
+        const scope = entry.metadata.scope === "project" ? "project" : "user";
+        skills.push({
+          name: skill.name,
+          description: skill.description,
+          filePath: skill.filePath,
+          baseDir: skill.baseDir,
+          source: this.classifySkillSource(skill.filePath, entry.metadata.scope, entry.metadata.origin, entry.metadata.source),
+          enabled: entry.enabled,
+          disableModelInvocation: skill.disableModelInvocation,
+          scope,
+        });
+      }
+    }
+
+    if (this.skillPaths.length > 0) {
+      const bundled = loadSkills({
+        cwd: resolvedCwd,
+        agentDir: this.agentDir,
+        skillPaths: this.skillPaths,
+        includeDefaults: false,
+      });
+      for (const diagnostic of bundled.diagnostics) {
+        diagnostics.push({ type: diagnostic.type, message: diagnostic.message, path: diagnostic.path });
+      }
+      for (const skill of bundled.skills) {
+        if (seen.has(skill.filePath)) continue;
+        seen.add(skill.filePath);
+        skills.push({
+          name: skill.name,
+          description: skill.description,
+          filePath: skill.filePath,
+          baseDir: skill.baseDir,
+          source: "bundled",
+          enabled: true,
+          disableModelInvocation: skill.disableModelInvocation,
+          scope: "user",
+        });
+      }
+    }
+
+    skills.sort((left, right) => left.name.localeCompare(right.name) || left.filePath.localeCompare(right.filePath));
+    const skillPaths = settingsManager.getSkillPaths();
+    const projectSkillPaths = [...(settingsManager.getProjectSettings().skills ?? [])];
+    return {
+      agentDir: this.agentDir,
+      userSkillsDir: join(this.agentDir, "skills"),
+      projectSkillsDir: join(resolvedCwd, ".pi", "skills"),
+      agentsSkillsDir: join(homedir(), ".agents", "skills"),
+      skillPaths,
+      projectSkillPaths,
+      customSkillPaths: this.plainSkillPathEntries(skillPaths).map((path) => this.expandSkillPath(path)),
+      enableSkillCommands: settingsManager.getEnableSkillCommands(),
+      skills,
+      diagnostics,
+    };
+  }
+
+  async setSkillEnabled(filePath: string, enabled: boolean, cwd?: string): Promise<SkillConfigurationSnapshot> {
+    const resolvedCwd = this.mcpCwd(cwd);
+    const snapshot = await this.getSkillConfiguration(resolvedCwd);
+    const skill = snapshot.skills.find((entry) => entry.filePath === filePath);
+    if (!skill) throw new Error(`未找到技能：${filePath}`);
+    if (skill.source === "bundled") throw new Error("内置技能不能在此开关。");
+
+    const settingsManager = this.skillSettingsManager(resolvedCwd);
+    const patternBaseDir = skill.source === "agents"
+      ? join(skill.scope === "project" ? resolvedCwd : homedir(), ".agents")
+      : skill.scope === "project"
+        ? join(resolvedCwd, ".pi")
+        : this.agentDir;
+    const pattern = this.skillOverridePattern(skill.filePath, patternBaseDir);
+
+    if (skill.scope === "project") {
+      const current = [...(settingsManager.getProjectSettings().skills ?? [])];
+      settingsManager.setProjectSkillPaths(this.rewriteSkillOverridePaths(current, pattern, enabled));
+    } else {
+      settingsManager.setSkillPaths(this.rewriteSkillOverridePaths(settingsManager.getSkillPaths(), pattern, enabled));
+    }
+    this.reloadActiveSessionResources("Skills 重新加载失败");
+    return this.getSkillConfiguration(resolvedCwd);
+  }
+
+  async addSkillPath(path: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
+    const resolvedCwd = this.mcpCwd(cwd);
+    const resolvedPath = this.expandSkillPath(path);
+    if (!existsSync(resolvedPath) || !statSync(resolvedPath).isDirectory()) {
+      throw new Error(`技能目录不存在：${resolvedPath}`);
+    }
+    const settingsManager = this.skillSettingsManager(resolvedCwd);
+    const current = settingsManager.getSkillPaths();
+    const already = this.plainSkillPathEntries(current).some((entry) => this.expandSkillPath(entry) === resolvedPath);
+    if (!already) {
+      settingsManager.setSkillPaths([...current, resolvedPath]);
+      this.reloadActiveSessionResources("Skills 重新加载失败");
+    }
+    return this.getSkillConfiguration(resolvedCwd);
+  }
+
+  async removeSkillPath(path: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
+    const resolvedCwd = this.mcpCwd(cwd);
+    const resolvedPath = this.expandSkillPath(path);
+    const settingsManager = this.skillSettingsManager(resolvedCwd);
+    const next = settingsManager.getSkillPaths().filter((entry) => {
+      if (entry.startsWith("+") || entry.startsWith("-") || entry.startsWith("!")) return true;
+      try {
+        return this.expandSkillPath(entry) !== resolvedPath;
+      } catch {
+        return entry !== path;
+      }
+    });
+    settingsManager.setSkillPaths(next);
+    this.reloadActiveSessionResources("Skills 重新加载失败");
+    return this.getSkillConfiguration(resolvedCwd);
+  }
+
+  async setEnableSkillCommands(enabled: boolean, cwd?: string): Promise<SkillConfigurationSnapshot> {
+    const resolvedCwd = this.mcpCwd(cwd);
+    const settingsManager = this.skillSettingsManager(resolvedCwd);
+    settingsManager.setEnableSkillCommands(enabled);
+    this.reloadActiveSessionResources("Skills 重新加载失败");
+    return this.getSkillConfiguration(resolvedCwd);
   }
 
   private mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete" | "logout", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
@@ -2294,6 +2506,32 @@ export class SuoCodeRuntime {
     };
   }
 
+  private async mcpJsonPath(): Promise<string> {
+    const adapter = await loadMcpAdapterConfigModule();
+    return adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+  }
+
+  async getMcpJson(): Promise<McpJsonDocument> {
+    const path = await this.mcpJsonPath();
+    if (!existsSync(path)) {
+      return { path, content: `${JSON.stringify({ mcpServers: {} }, null, 2)}\n` };
+    }
+    return { path, content: readFileSync(path, "utf8") };
+  }
+
+  async saveMcpJson(content: string, cwd?: string): Promise<McpConfigurationSnapshot> {
+    const validated = validateMcpJsonText(content);
+    if (!validated.ok) throw new Error(validated.error);
+    const path = await this.mcpJsonPath();
+    mkdirSync(dirname(path), { recursive: true });
+    const normalized = `${JSON.stringify(validated.value, null, 2)}\n`;
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, normalized, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
+    this.reloadMcpExtension();
+    return this.getMcpConfiguration(cwd);
+  }
+
   async saveMcpServer(server: McpServerConfiguration, previousName?: string, cwd?: string): Promise<McpConfigurationSnapshot> {
     const name = server.name.trim();
     if (!name || !/^[A-Za-z0-9._-]+$/.test(name)) throw new Error("MCP 名称只能包含字母、数字、点、下划线和连字符。");
@@ -2515,6 +2753,14 @@ export class SuoCodeRuntime {
     const session = sessions.find((item) => safeRealPath(item.path) === safeRealPath(forkedPath));
     if (!session) throw new Error("分叉会话已创建，但未能出现在列表中。");
     return { sessions, session };
+  }
+
+  async openWorkspace(cwd: string): Promise<{ sessions: SessionSummary[]; snapshot: SessionSnapshot }> {
+    const sessions = await this.listSessions(cwd);
+    const snapshot = sessions[0]
+      ? await this.openSession(cwd, sessions[0].path)
+      : await this.createSession(cwd);
+    return { sessions, snapshot };
   }
 
   async createSession(cwd: string): Promise<SessionSnapshot> {

@@ -224,6 +224,104 @@ export interface McpConfigurationSnapshot {
   imports: McpImportConfiguration[];
 }
 
+export interface McpJsonDocument {
+  path: string;
+  content: string;
+}
+
+export type McpJsonValidationResult =
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; error: string };
+
+const MCP_SERVER_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+const MCP_IMPORT_KINDS = new Set([
+  "cursor",
+  "claude-code",
+  "claude-desktop",
+  "codex",
+  "opencode",
+  "windsurf",
+  "vscode",
+]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown, label: string): string | undefined {
+  if (!isPlainObject(value)) return `${label} 必须是对象。`;
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== "string") return `${label}.${key} 必须是字符串。`;
+  }
+  return undefined;
+}
+
+/** Validate Cursor-compatible mcp.json text before writing. Rejects invalid JSON to keep MCP usable. */
+export function validateMcpJsonText(text: string): McpJsonValidationResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return { ok: false, error: `JSON 语法错误：${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!isPlainObject(parsed)) return { ok: false, error: "根节点必须是 JSON 对象，例如 { \"mcpServers\": {} }。" };
+  if (!("mcpServers" in parsed)) return { ok: false, error: "缺少 mcpServers 字段。" };
+  if (!isPlainObject(parsed.mcpServers)) return { ok: false, error: "mcpServers 必须是对象。" };
+
+  for (const [name, entry] of Object.entries(parsed.mcpServers)) {
+    if (!name.trim()) return { ok: false, error: "存在空的 MCP 服务器名称。" };
+    if (!MCP_SERVER_NAME_PATTERN.test(name)) {
+      return { ok: false, error: `MCP 名称「${name}」只能包含字母、数字、点、下划线和连字符。` };
+    }
+    if (!isPlainObject(entry)) return { ok: false, error: `mcpServers.${name} 必须是对象。` };
+    const hasCommand = typeof entry.command === "string" && entry.command.trim().length > 0;
+    const hasUrl = typeof entry.url === "string" && entry.url.trim().length > 0;
+    if (!hasCommand && !hasUrl) {
+      return { ok: false, error: `mcpServers.${name} 需要提供 command（stdio）或 url（HTTP）。` };
+    }
+    if (hasCommand && hasUrl) {
+      return { ok: false, error: `mcpServers.${name} 不能同时设置 command 与 url。` };
+    }
+    if (entry.args !== undefined) {
+      if (!Array.isArray(entry.args) || entry.args.some((item) => typeof item !== "string")) {
+        return { ok: false, error: `mcpServers.${name}.args 必须是字符串数组。` };
+      }
+    }
+    if (entry.env !== undefined) {
+      const error = isStringRecord(entry.env, `mcpServers.${name}.env`);
+      if (error) return { ok: false, error };
+    }
+    if (entry.headers !== undefined) {
+      const error = isStringRecord(entry.headers, `mcpServers.${name}.headers`);
+      if (error) return { ok: false, error };
+    }
+    if (entry.cwd !== undefined && typeof entry.cwd !== "string") {
+      return { ok: false, error: `mcpServers.${name}.cwd 必须是字符串。` };
+    }
+    if (entry.auth !== undefined && entry.auth !== "oauth" && entry.auth !== "bearer" && entry.auth !== false) {
+      return { ok: false, error: `mcpServers.${name}.auth 只能是 oauth、bearer 或 false。` };
+    }
+    if (entry.disabled !== undefined && typeof entry.disabled !== "boolean") {
+      return { ok: false, error: `mcpServers.${name}.disabled 必须是布尔值。` };
+    }
+    if (entry.lifecycle !== undefined && entry.lifecycle !== "lazy" && entry.lifecycle !== "keep-alive" && entry.lifecycle !== "eager") {
+      return { ok: false, error: `mcpServers.${name}.lifecycle 只能是 lazy、keep-alive 或 eager。` };
+    }
+  }
+
+  if (parsed.imports !== undefined) {
+    if (!Array.isArray(parsed.imports) || parsed.imports.some((item) => typeof item !== "string" || !MCP_IMPORT_KINDS.has(item))) {
+      return { ok: false, error: "imports 必须是受支持的导入源字符串数组。" };
+    }
+  }
+
+  if (parsed.settings !== undefined && !isPlainObject(parsed.settings)) {
+    return { ok: false, error: "settings 必须是对象。" };
+  }
+
+  return { ok: true, value: parsed };
+}
+
 export interface McpServerRuntimeStatus {
   name: string;
   status: "connected" | "needs-auth" | "failed" | "cached" | "not connected" | "disabled";
@@ -247,6 +345,38 @@ export interface McpActionResult {
   text: string;
   details?: Record<string, unknown>;
   status?: McpRuntimeStatus;
+}
+
+export type SkillSource = "user" | "project" | "agents" | "bundled";
+
+export interface SkillEntry {
+  name: string;
+  description: string;
+  filePath: string;
+  baseDir: string;
+  source: SkillSource;
+  enabled: boolean;
+  disableModelInvocation: boolean;
+  scope: "user" | "project";
+}
+
+export interface SkillDiagnostic {
+  type: "warning" | "error" | "collision";
+  message: string;
+  path?: string;
+}
+
+export interface SkillConfigurationSnapshot {
+  agentDir: string;
+  userSkillsDir: string;
+  projectSkillsDir?: string;
+  agentsSkillsDir: string;
+  skillPaths: string[];
+  projectSkillPaths: string[];
+  customSkillPaths: string[];
+  enableSkillCommands: boolean;
+  skills: SkillEntry[];
+  diagnostics: SkillDiagnostic[];
 }
 
 export interface SessionSummary {
@@ -435,6 +565,12 @@ export interface RuntimeBootstrap {
   activeSession?: SessionSnapshot;
 }
 
+/** Returned by `open_workspace`: the session list and the opened/created snapshot in one round trip. */
+export interface WorkspaceSnapshot {
+  sessions: SessionSummary[];
+  snapshot: SessionSnapshot;
+}
+
 export type RuntimeCommand =
   | { type: "bootstrap" }
   | { type: "get_configuration" }
@@ -452,6 +588,8 @@ export type RuntimeCommand =
   | { type: "fetch_provider_models"; input: FetchProviderModelsInput }
   | { type: "test_provider_connection"; input: TestProviderConnectionInput }
   | { type: "get_mcp_configuration"; cwd?: string }
+  | { type: "get_mcp_json" }
+  | { type: "save_mcp_json"; content: string; cwd?: string }
   | { type: "get_mcp_status" }
   | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
   | { type: "remove_mcp_server"; name: string; scope?: "global" | "project"; cwd?: string }
@@ -461,6 +599,11 @@ export type RuntimeCommand =
   | { type: "start_mcp_auth"; name: string }
   | { type: "complete_mcp_auth"; name: string; input: string }
   | { type: "logout_mcp_server"; name: string }
+  | { type: "get_skill_configuration"; cwd?: string }
+  | { type: "set_skill_enabled"; filePath: string; enabled: boolean; cwd?: string }
+  | { type: "add_skill_path"; path: string; cwd?: string }
+  | { type: "remove_skill_path"; path: string; cwd?: string }
+  | { type: "set_enable_skill_commands"; enabled: boolean; cwd?: string }
   | { type: "stop_subagent"; id: string; background: boolean }
   | { type: "list_sessions"; cwd: string }
   | { type: "list_archived_sessions"; cwd: string }
@@ -471,6 +614,7 @@ export type RuntimeCommand =
   | { type: "fork_session"; cwd: string; sessionPath: string }
   | { type: "create_session"; cwd: string }
   | { type: "open_session"; cwd: string; sessionPath: string }
+  | { type: "open_workspace"; cwd: string }
   | { type: "prompt"; text: string; images?: PromptImage[] }
   | { type: "rewind_prompt"; entryId: string; text: string; images?: PromptImage[] }
   | { type: "steer"; text: string; images?: PromptImage[] }

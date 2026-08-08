@@ -1,6 +1,6 @@
 import { ArrowUp, Square, X } from "lucide-react";
 import { useEffect, useRef } from "react";
-import type { DragEvent as ReactDragEvent, FormEvent, RefObject } from "react";
+import type { DragEvent as ReactDragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import type {
   ModelOption,
   PromptImage,
@@ -35,6 +35,7 @@ export function ConversationComposer({
   onCompositionStart,
   onCompositionEnd,
   onKeyDown,
+  onSlashKeyDown,
   onModelMenuOpenChange,
   onSelectModel,
   onOpenSettings,
@@ -62,6 +63,7 @@ export function ConversationComposer({
   onCompositionStart: () => void;
   onCompositionEnd: () => void;
   onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  onSlashKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean;
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
   onOpenSettings: () => void;
@@ -72,10 +74,30 @@ export function ConversationComposer({
   const inline = variant === "inline";
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  const composingRef = useRef(false);
 
   useEffect(() => {
     const input = inputRef.current;
     if (!input) return;
+    const onStart = (): void => {
+      composingRef.current = true;
+    };
+    const onEnd = (): void => {
+      composingRef.current = false;
+      input.style.height = "auto";
+      input.style.height = `${Math.max(42, Math.min(input.scrollHeight, 160))}px`;
+    };
+    input.addEventListener("compositionstart", onStart);
+    input.addEventListener("compositionend", onEnd);
+    return () => {
+      input.removeEventListener("compositionstart", onStart);
+      input.removeEventListener("compositionend", onEnd);
+    };
+  }, [inputRef]);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input || composingRef.current) return;
     input.style.height = "auto";
     input.style.height = `${Math.max(42, Math.min(input.scrollHeight, 160))}px`;
   }, [draft, inputRef]);
@@ -117,6 +139,7 @@ export function ConversationComposer({
   };
 
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+    if (onSlashKeyDown?.(event)) return;
     if (event.key === "Escape" && onEscape) {
       event.preventDefault();
       onEscape();

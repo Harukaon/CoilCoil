@@ -1,5 +1,6 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import {
+  Archive,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -61,6 +62,7 @@ export function WorkspaceSidebar({
   onRestoreSessions,
   onFocusPending,
   onOpenSettings,
+  onRemoveProject,
   onError,
 }: {
   projects: ProjectSelection[];
@@ -85,6 +87,7 @@ export function WorkspaceSidebar({
   onRestoreSessions: (project: ProjectSelection, sessions: SessionSummary[]) => void;
   onFocusPending: () => void;
   onOpenSettings: () => void;
+  onRemoveProject: (project: ProjectSelection) => void;
   onError: (message: string) => void;
 }): React.JSX.Element {
   const [renamingPath, setRenamingPath] = useState<string>();
@@ -121,19 +124,34 @@ export function WorkspaceSidebar({
           const sessions = sessionsByProject[project.path] ?? [];
           const hasPending = pendingProjectPath === project.path;
           const showAll = expandedSessionLists.has(project.path);
-          const visibleSessions = showAll ? sessions : sessions.slice(0, hasPending ? 3 : 4);
+          const visibleSessions = showAll ? sessions : sessions.slice(0, hasPending ? 2 : 3);
           const hiddenCount = sessions.length - visibleSessions.length;
           return (
             <div className={`project-tree ${project.path === activeProject?.path ? "active" : ""}`} key={project.path}>
-              <div className="project-row">
-                <button className="project-toggle" type="button" aria-expanded={expanded} onClick={() => onToggleProject(project.path)}>
-                  <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
-                  <span className="project-name">{project.name}</span>
-                </button>
-                <span className="project-row-actions">
-                  <button className="project-action" type="button" aria-label={`在 ${project.name} 中新建对话`} onClick={() => onNewConversation(project)}><Plus size={14} /></button>
-                </span>
-              </div>
+              <ContextMenu.Root>
+                <ContextMenu.Trigger asChild>
+                  <div className="project-row">
+                    <button className="project-toggle" type="button" aria-expanded={expanded} onClick={() => onToggleProject(project.path)}>
+                      <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
+                      <span className="project-name">{project.name}</span>
+                    </button>
+                    <span className="project-row-actions">
+                      <button className="project-action" type="button" aria-label={`在 ${project.name} 中新建对话`} onClick={() => onNewConversation(project)}><Plus size={14} /></button>
+                    </span>
+                  </div>
+                </ContextMenu.Trigger>
+                <ContextMenu.Portal>
+                  <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
+                    <ContextMenu.Item
+                      className="conversation-context-item"
+                      disabled={project.kind === "home"}
+                      onSelect={() => onRemoveProject(project)}
+                    >
+                      <span>卸载工作区</span>
+                    </ContextMenu.Item>
+                  </ContextMenu.Content>
+                </ContextMenu.Portal>
+              </ContextMenu.Root>
               <div className={`conversation-list-shell ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
                 <div className="conversation-list">
                   {hasPending ? <button className="conversation-row active pending" type="button" onClick={onFocusPending}><span className="conversation-status"><Circle size={11} strokeWidth={1.7} /></span><span className="conversation-title-text">新对话</span><time>刚刚</time></button> : null}
@@ -142,40 +160,52 @@ export function WorkspaceSidebar({
                     const renaming = renamingPath === session.path;
                     return <ContextMenu.Root key={session.id}>
                       <ContextMenu.Trigger asChild>
-                        {renaming ? (
-                          <div className={`conversation-row renaming ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}>
-                            <span className="conversation-status">{session.pinned ? <Pin size={11} strokeWidth={2} /> : <CircleDot size={11} strokeWidth={2} />}</span>
-                            <input
-                              ref={renameRef}
-                              className="conversation-rename-input"
-                              value={renameDraft}
-                              aria-label="重命名对话"
-                              onChange={(event) => setRenameDraft(event.target.value)}
-                              onBlur={() => { void commitRename(project, session); }}
-                              onKeyDown={(event) => {
-                                if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  setRenamingPath(undefined);
-                                } else if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  void commitRename(project, session);
-                                }
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <button
-                            className={`conversation-row ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}
-                            type="button"
-                            onClick={() => onOpenConversation(project, session)}
-                          >
-                            <span className="conversation-status">
-                              {activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <i className="conversation-unread" /> : session.pinned ? <Pin size={11} strokeWidth={2} /> : <CircleDot size={11} strokeWidth={2} />}
-                            </span>
-                            <span className="conversation-title-text">{session.title}</span>
-                            <time>{relativeTime(session.updatedAt)}</time>
-                          </button>
-                        )}
+                        <div className="conversation-row-wrap">
+                          {renaming ? (
+                            <div className={`conversation-row renaming ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}>
+                              <span className="conversation-status">{session.pinned ? <Pin size={11} strokeWidth={2} /> : <CircleDot size={11} strokeWidth={2} />}</span>
+                              <input
+                                ref={renameRef}
+                                className="conversation-rename-input"
+                                value={renameDraft}
+                                aria-label="重命名对话"
+                                onChange={(event) => setRenameDraft(event.target.value)}
+                                onBlur={() => { void commitRename(project, session); }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Escape") {
+                                    event.preventDefault();
+                                    setRenamingPath(undefined);
+                                  } else if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    void commitRename(project, session);
+                                  }
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              className={`conversation-row ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}
+                              type="button"
+                              onClick={() => onOpenConversation(project, session)}
+                            >
+                              <span className="conversation-status">
+                                {activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <i className="conversation-unread" /> : session.pinned ? <Pin size={11} strokeWidth={2} /> : <CircleDot size={11} strokeWidth={2} />}
+                              </span>
+                              <span className="conversation-title-text">{session.title}</span>
+                              <time>{relativeTime(session.updatedAt)}</time>
+                            </button>
+                          )}
+                          {!renaming ? (
+                            <button
+                              className="conversation-archive-btn"
+                              type="button"
+                              title="归档"
+                              onClick={(e) => { e.stopPropagation(); onArchiveConversation(project, session); }}
+                            >
+                              <Archive size={12} />
+                            </button>
+                          ) : null}
+                        </div>
                       </ContextMenu.Trigger>
                       <ContextMenu.Portal>
                         <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
@@ -203,7 +233,7 @@ export function WorkspaceSidebar({
                             disabled={activity?.running}
                             onSelect={() => onForkConversation(project, session)}
                           >
-                            <GitFork size={13} /><span>Fork 对话</span>
+                            <GitFork size={13} /><span>复制对话</span>
                           </ContextMenu.Item>
                           <ContextMenu.Separator className="conversation-context-separator" />
                           <ContextMenu.Item className="conversation-context-item" disabled={activity?.running} onSelect={() => onArchiveConversation(project, session)}>归档对话</ContextMenu.Item>
@@ -212,7 +242,7 @@ export function WorkspaceSidebar({
                     </ContextMenu.Root>;
                   })}
                   {hiddenCount > 0 ? <button className="more-conversations" type="button" aria-label={`显示另外 ${hiddenCount} 个对话`} onClick={() => onShowAllSessions(project.path)}><MoreHorizontal size={15} /></button> : null}
-                  {showAll && sessions.length > 4 ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => onCollapseSessions(project.path)}><ChevronUp size={14} /></button> : null}
+                  {showAll && sessions.length > 3 ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => onCollapseSessions(project.path)}><ChevronUp size={14} /></button> : null}
                   {!sessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
                 </div>
               </div>

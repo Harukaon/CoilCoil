@@ -16,6 +16,7 @@ import type {
 } from "@suocode/runtime-protocol";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { clipboardImage, imageDataUrl } from "../composer/promptImages";
+import { ConfirmDialog } from "../../ui/dialog";
 import { SubagentTimelineCard } from "./SubagentTimelineCard";
 
 export type TimelineItem =
@@ -68,7 +69,7 @@ function isInsideComposerChrome(target: EventTarget | null, shell: HTMLElement |
   if (!(target instanceof Element)) return false;
   // Keep editing when interacting with model menu / rewind dialog / files inspector / sidebar
   // so users can drag paths from the right panel into the inline composer.
-  return Boolean(target.closest(".model-popover, .rewind-dialog, .rewind-backdrop, .inspector-pane, .sidebar, .settings-dialog, .toast-host"));
+  return Boolean(target.closest(".model-popover, .suo-modal-backdrop, .suo-modal, .inspector-pane, .sidebar, .settings-dialog, .toast-host"));
 }
 
 function shouldDismissHistoryEdit(target: EventTarget | null, shell: HTMLElement | null): boolean {
@@ -88,6 +89,7 @@ export function MessageView({
   configuration,
   selectedModel,
   modelChanging,
+  runtimeId,
   onEditingChange,
   onRewind,
   onError,
@@ -101,6 +103,7 @@ export function MessageView({
   configuration?: RuntimeConfiguration;
   selectedModel?: SessionSnapshot["model"];
   modelChanging: boolean;
+  runtimeId?: string;
   onEditingChange: (editing: boolean) => void;
   onRewind: (message: ChatMessage, text: string, images: PromptImage[]) => Promise<void>;
   onError: (message: string) => void;
@@ -220,19 +223,17 @@ export function MessageView({
             <ImageStrip images={images} />
           </button>
         )}
-        {confirmOpen ? (
-          <div className="modal-backdrop rewind-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmOpen(false); }}>
-            <section className="rewind-dialog" role="dialog" aria-modal="true" aria-labelledby={`rewind-title-${message.id}`}>
-              <h2 id={`rewind-title-${message.id}`}>从这里重新开始？</h2>
-              <p>对话将从这条消息重新开始。当前工作区中已经产生的文件修改不会被恢复。</p>
-              <footer>
-                <button type="button" onClick={() => setConfirmOpen(false)}>取消</button>
-                <button type="button" onClick={() => proceed(true)}>不再提醒</button>
-                <button className="primary-button" type="button" onClick={() => proceed(false)}>继续</button>
-              </footer>
-            </section>
-          </div>
-        ) : null}
+        <ConfirmDialog
+          open={confirmOpen}
+          title="从这里重新开始？"
+          description="对话将从这条消息重新开始。当前工作区中已经产生的文件修改不会被恢复。"
+          onClose={() => setConfirmOpen(false)}
+          actions={[
+            { label: "取消", onClick: () => setConfirmOpen(false) },
+            { label: "不再提醒", onClick: () => proceed(true) },
+            { label: "继续", variant: "primary", autoFocus: true, onClick: () => proceed(false) },
+          ]}
+        />
       </article>
     );
   }
@@ -241,36 +242,12 @@ export function MessageView({
 }
 
 function AssistantSegment({ message }: { message: ChatMessage }): React.JSX.Element {
-  const [copied, setCopied] = useState(false);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => () => {
-    if (copiedTimer.current) clearTimeout(copiedTimer.current);
-  }, []);
-
-  const copyText = async (): Promise<void> => {
-    const text = message.text.trim();
-    if (!text) return;
-    try {
-      await window.suocode.copyText(text);
-      setCopied(true);
-      if (copiedTimer.current) clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard failures are non-fatal; leave UI unchanged.
-    }
-  };
-
   return (
     <div className={`assistant-segment assistant-message ${message.isError ? "error" : ""}`}>
       {message.thinking?.trim() ? <details className="thinking-block"><summary>Reasoning</summary><div>{message.thinking}</div></details> : null}
       {message.text ? (
         <div className="assistant-message-body">
           <Markdown>{message.text}</Markdown>
-          <button className="assistant-copy-button" type="button" aria-label={copied ? "已复制" : "复制回复"} onClick={() => { void copyText(); }}>
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-            <span>{copied ? "已复制" : "复制"}</span>
-          </button>
         </div>
       ) : null}
     </div>
@@ -375,7 +352,31 @@ function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX
   );
 }
 
-export function AgentTurnView({ items, modelName, onStopSubagent }: { items: TimelineItem[]; modelName: string; onStopSubagent: (activity: SubagentActivity) => void }): React.JSX.Element {
+export function AgentTurnView({ items, modelName, running, onStopSubagent }: { items: TimelineItem[]; modelName: string; running: boolean; onStopSubagent: (activity: SubagentActivity) => void }): React.JSX.Element {
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
+
+  const copyTurn = async (): Promise<void> => {
+    const text = items
+      .filter((item): item is Extract<TimelineItem, { kind: "message" }> => item.kind === "message")
+      .map((item) => item.message.text?.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    if (!text) return;
+    try {
+      await window.suocode.copyText(text);
+      setCopied(true);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard failures are non-fatal; leave UI unchanged.
+    }
+  };
+
   const rendered: React.JSX.Element[] = [];
   let activity: ActivityEntry[] = [];
   const flushActivity = (): void => {
@@ -405,6 +406,12 @@ export function AgentTurnView({ items, modelName, onStopSubagent }: { items: Tim
     <article className="agent-turn">
       <div className="message-label">{modelName}</div>
       <div className="agent-turn-content">{rendered}</div>
+      {!running ? (
+        <button className="assistant-copy-button" type="button" aria-label={copied ? "已复制" : "复制回复"} onClick={() => { void copyTurn(); }}>
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+          <span>{copied ? "已复制" : "复制"}</span>
+        </button>
+      ) : null}
     </article>
   );
 }

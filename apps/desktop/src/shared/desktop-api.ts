@@ -52,6 +52,7 @@ export interface SuoCodeDesktopApi {
   platform: DesktopPlatform;
   homeProject(): Promise<ProjectSelection>;
   selectProject(): Promise<ProjectSelection | null>;
+  pickDirectory(options?: { title?: string }): Promise<string | null>;
   setWindowMinimumWidth(width: number): Promise<void>;
   openExternal(url: string): Promise<void>;
   copyText(text: string): Promise<void>;

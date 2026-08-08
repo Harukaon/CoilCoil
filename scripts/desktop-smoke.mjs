@@ -176,16 +176,21 @@ async function dismissFirstRunSettings(client, required) {
   await client.waitFor(`Boolean(document.querySelector('.conversation-pane'))`, "The workspace did not return after closing first-run settings.", 10_000);
 }
 
-async function fillAndSubmitComposer(client, prompt) {
+async function fillComposer(client, prompt) {
   const filled = await client.evaluate(`(() => {
     const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
     if (!input) return false;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, ${JSON.stringify(prompt)});
     input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("keyup", { bubbles: true }));
     return true;
   })()`);
   assert.equal(filled, true);
   await delay(75);
+}
+
+async function fillAndSubmitComposer(client, prompt) {
+  await fillComposer(client, prompt);
   return client.evaluate(`(() => {
     const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
     const form = input?.closest("form");
@@ -439,6 +444,32 @@ async function main() {
       }
       await Promise.all(dockProbes.map((dockProbe) => stopProcess(dockProbe)));
     }
+
+    const skillSnapshot = await client.evaluate(`(async () => {
+      const home = await window.suocode.homeProject();
+      return window.suocode.request({ type: "get_skill_configuration", cwd: home.path });
+    })()`);
+    assert.equal(skillSnapshot.enableSkillCommands, true, "Skill commands should be enabled by default.");
+    assert.ok(Array.isArray(skillSnapshot.skills), "get_skill_configuration did not return skills.");
+    await fillComposer(client, "/");
+    await client.waitFor(
+      `Boolean(document.querySelector('.composer-activity [role="tab"][aria-selected="true"]')) || document.querySelector(".composer-activity-header strong")?.textContent === "命令" || Boolean(document.querySelector(".composer-command-list, .composer-command-empty"))`,
+      "Typing / did not open the Activity command layer.",
+      10_000,
+    );
+    const slashUi = await client.evaluate(`(() => ({
+      draft: document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.value || "",
+      commandsHeader: document.querySelector(".composer-activity-header strong")?.textContent || "",
+      commandsTab: [...document.querySelectorAll('.composer-activity [role="tab"]')].some((tab) => tab.textContent.includes("命令") && tab.getAttribute("aria-selected") === "true"),
+      commandRows: document.querySelectorAll(".composer-command-list button").length,
+      empty: document.querySelector(".composer-command-empty")?.textContent || "",
+    }))()`);
+    assert.equal(slashUi.draft, "/", `Composer draft should stay at / after opening commands, got ${JSON.stringify(slashUi.draft)}`);
+    assert.ok(
+      slashUi.commandsTab || slashUi.commandsHeader === "命令" || slashUi.commandRows > 0 || slashUi.empty,
+      `Activity command layer did not activate: ${JSON.stringify(slashUi)}`,
+    );
+    await fillComposer(client, "");
 
     const openedSettings = await client.evaluate(`(() => {
       const settings = document.querySelector('button[aria-label="设置"]');

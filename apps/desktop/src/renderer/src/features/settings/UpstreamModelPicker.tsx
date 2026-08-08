@@ -1,5 +1,6 @@
 import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Modal } from "../../ui/dialog";
 import { catalogSourceLabel, loadModelCatalog, lookupModelMeta, type ModelCatalogMeta } from "./modelCatalog";
 
 export interface UpstreamModelOption {
@@ -69,7 +70,7 @@ export function UpstreamModelPicker({
   };
 
   return (
-    <div className="upstream-model-picker-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+    <Modal open bare onClose={onCancel}>
       <div className="upstream-model-picker" role="dialog" aria-modal="true" aria-labelledby="upstream-model-picker-title">
         <header>
           <div>
@@ -110,6 +111,6 @@ export function UpstreamModelPicker({
           </div>
         </footer>
       </div>
-    </div>
+    </Modal>
   );
 }

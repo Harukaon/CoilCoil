@@ -6,6 +6,7 @@ import {
   type RuntimeEvent,
   type RuntimeResponseEnvelope,
   type SessionSnapshot,
+  type SessionSummary,
   type RuntimeWireMessage,
 } from "@suocode/runtime-protocol";
 import { randomUUID } from "node:crypto";
@@ -84,6 +85,14 @@ export class RuntimeServer {
     return this.runtime;
   }
 
+  private async openWorkspace(cwd: string): Promise<{ sessions: SessionSummary[]; snapshot: SessionSnapshot }> {
+    const sessions = await this.runtime.listSessions(cwd);
+    const snapshot = sessions[0]
+      ? await this.openSession(cwd, sessions[0].path)
+      : await this.createSession(cwd);
+    return { sessions, snapshot };
+  }
+
   private async createSession(cwd: string): Promise<SessionSnapshot> {
     const runtimeId = this.createRuntimeId();
     const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
@@ -135,6 +144,7 @@ export class RuntimeServer {
   private async dispatch(command: RuntimeCommand, runtimeId?: string): Promise<unknown> {
     if (command.type === "create_session") return this.createSession(command.cwd);
     if (command.type === "open_session") return this.openSession(command.cwd, command.sessionPath);
+    if (command.type === "open_workspace") return this.openWorkspace(command.cwd);
 
     const alwaysControl = command.type === "bootstrap"
       || command.type === "list_sessions"
@@ -185,6 +195,10 @@ export class RuntimeServer {
         return runtime.testProviderConnection(command.input);
       case "get_mcp_configuration":
         return runtime.getMcpConfiguration(command.cwd);
+      case "get_mcp_json":
+        return runtime.getMcpJson();
+      case "save_mcp_json":
+        return runtime.saveMcpJson(command.content, command.cwd);
       case "get_mcp_status":
         return runtime.getMcpStatus();
       case "save_mcp_server":
@@ -203,6 +217,16 @@ export class RuntimeServer {
         return runtime.completeMcpAuth(command.name, command.input);
       case "logout_mcp_server":
         return runtime.logoutMcpServer(command.name);
+      case "get_skill_configuration":
+        return runtime.getSkillConfiguration(command.cwd);
+      case "set_skill_enabled":
+        return runtime.setSkillEnabled(command.filePath, command.enabled, command.cwd);
+      case "add_skill_path":
+        return runtime.addSkillPath(command.path, command.cwd);
+      case "remove_skill_path":
+        return runtime.removeSkillPath(command.path, command.cwd);
+      case "set_enable_skill_commands":
+        return runtime.setEnableSkillCommands(command.enabled, command.cwd);
       case "stop_subagent":
         return runtime.stopSubagent(command.id, command.background);
       case "list_sessions":
@@ -233,6 +257,10 @@ export class RuntimeServer {
         return runtime.listProjectDirectory(command.path);
       case "read_file":
         return runtime.readProjectFile(command.path, command.maxBytes);
+      default: {
+        const exhaustive: never = command;
+        throw new Error(`未知运行时命令：${(exhaustive as { type?: string }).type ?? "unknown"}`);
+      }
     }
   }
 

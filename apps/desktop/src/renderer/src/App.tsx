@@ -17,6 +17,7 @@ import type {
   PromptImage,
   SessionSnapshot,
   SessionSummary,
+  WorkspaceSnapshot,
   SubagentActivity,
   ToolRun,
 } from "@suocode/runtime-protocol";
@@ -112,6 +113,7 @@ export default function App(): React.JSX.Element {
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
   const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<"models" | "mcp" | "skills">("models");
   const [loading, setLoading] = useState(true);
   const composer = useComposerController({
     configuration,
@@ -289,12 +291,9 @@ export default function App(): React.JSX.Element {
     setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
     try {
-      const existing = await window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: selection.path });
-      setSessionsByProject((current) => ({ ...current, [selection.path]: existing }));
-      const next = existing[0]
-        ? await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: selection.path, sessionPath: existing[0].path })
-        : await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: selection.path });
-      applySnapshot(next);
+      const { sessions, snapshot } = await window.suocode.request<WorkspaceSnapshot>({ type: "open_workspace", cwd: selection.path });
+      setSessionsByProject((current) => ({ ...current, [selection.path]: sessions }));
+      applySnapshot(snapshot);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -315,9 +314,9 @@ export default function App(): React.JSX.Element {
         const home = await window.suocode.homeProject();
         const mounted = uniqueProjects([home, ...loadStoredProjects()]);
         setProjects(mounted);
-        setExpandedProjects(new Set(mounted.map((item) => item.path)));
         const activePath = window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
         const activeProject = mounted.find((item) => item.path === activePath) ?? home;
+        setExpandedProjects(new Set([activeProject.path]));
         const backgroundProjects = mounted.filter((item) => item.path !== activeProject.path);
         void Promise.allSettled(backgroundProjects.map(async (item) => {
           const listed = await window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: item.path });
@@ -380,6 +379,16 @@ export default function App(): React.JSX.Element {
     void window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: selection.path })
       .then((sessions) => setSessionsByProject((current) => ({ ...current, [selection.path]: sessions })))
       .catch((caught) => toastError(caught instanceof Error ? caught.message : String(caught)));
+  };
+
+  const removeProject = (target: ProjectSelection): void => {
+    if (target.kind === "home") return;
+    setProjects((current) => {
+      const next = current.filter((item) => item.path !== target.path);
+      window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next.filter((item) => item.kind === "workspace")));
+      return next;
+    });
+    setExpandedProjects((current) => { const next = new Set(current); next.delete(target.path); return next; });
   };
 
   const startNewConversation = (owner = projectRef.current): void => {
@@ -537,7 +546,7 @@ export default function App(): React.JSX.Element {
   ];
 
   if (settingsOpen) {
-    return <SettingsDialog configuration={configuration} open onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} />;
+    return <SettingsDialog configuration={configuration} open onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} initialSection={settingsSection} />;
   }
 
   return (
@@ -569,7 +578,11 @@ export default function App(): React.JSX.Element {
           onForkConversation={(owner, session) => { void forkConversation(owner, session); }}
           onRestoreSessions={(owner, sessions) => setSessionsByProject((current) => ({ ...current, [owner.path]: sessions }))}
           onFocusPending={() => { inputRef.current?.focus(); }}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => {
+            setSettingsSection("models");
+            setSettingsOpen(true);
+          }}
+          onRemoveProject={(owner) => removeProject(owner)}
           onError={(message) => { if (message) toastError(message); }}
         />
         {leftOpen ? <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><span><PanelLeft size={17} /></span></button> : null}
@@ -618,7 +631,11 @@ export default function App(): React.JSX.Element {
           onKeyDown={composer.handleKeyDown}
           onModelMenuOpenChange={setModelMenuOpen}
           onSelectModel={(model) => { void composer.selectModel(model); }}
-          onOpenSettings={() => { setModelMenuOpen(false); setSettingsOpen(true); }}
+          onOpenSettings={(section) => {
+            setModelMenuOpen(false);
+            setSettingsSection(section ?? "models");
+            setSettingsOpen(true);
+          }}
           onAbort={() => { void window.suocode.request({ type: "abort" }, snapshot?.runtimeId); }}
         />
 
