@@ -1,6 +1,7 @@
 import { SuoCodeRuntime, type SuoCodeRuntimeOptions } from "@suocode/runtime-core";
 import {
   isRuntimeCommandEnvelope,
+  SESSION_OPEN_SUPERSEDED_ERROR,
   type RuntimeCommand,
   type RuntimeCommandEnvelope,
   type RuntimeEvent,
@@ -10,11 +11,14 @@ import {
   type RuntimeWireMessage,
 } from "@suocode/runtime-protocol";
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 type WireSink = (message: RuntimeWireMessage) => void;
 type RuntimeFactory = (options: SuoCodeRuntimeOptions) => SuoCodeRuntime;
+
+const MAX_RETAINED_IDLE_SESSION_RUNTIMES = 6;
 
 export interface RuntimeServerDependencies {
   createRuntime?: RuntimeFactory;
@@ -25,6 +29,37 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function normalizeSessionPath(path: string): string {
+  const absolute = resolve(path);
+  let existing = absolute;
+  const missingSegments: string[] = [];
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) return absolute;
+    missingSegments.unshift(basename(existing));
+    existing = parent;
+  }
+  try {
+    return resolve(realpathSync(existing), ...missingSegments);
+  } catch {
+    return absolute;
+  }
+}
+
+function eventChangesSnapshot(event: RuntimeEvent): boolean {
+  return event.type === "message_started"
+    || event.type === "message_delta"
+    || event.type === "message_finished"
+    || event.type === "tool_started"
+    || event.type === "tool_updated"
+    || event.type === "tool_finished"
+    || event.type === "plan_updated"
+    || event.type === "subagents_updated"
+    || event.type === "project_updated"
+    || event.type === "metrics_updated"
+    || event.type === "run_state";
+}
+
 export class RuntimeServer {
   readonly runtime: SuoCodeRuntime;
   private readonly send: WireSink;
@@ -33,7 +68,16 @@ export class RuntimeServer {
   private readonly createRuntimeId: () => string;
   private readonly runtimes = new Map<string, SuoCodeRuntime>();
   private readonly sessionPaths = new Map<string, string>();
+  private readonly runtimePaths = new Map<string, string>();
+  private readonly runtimeAccess = new Map<string, number>();
+  private readonly runningRuntimes = new Set<string>();
+  private readonly dirtyRuntimes = new Set<string>();
+  private readonly runtimeSnapshots = new Map<string, SessionSnapshot>();
+  private readonly openingSessions = new Map<string, Promise<SessionSnapshot>>();
+  private sessionOpenTail: Promise<void> = Promise.resolve();
+  private desiredSessionPath?: string;
   private defaultRuntimeId?: string;
+  private disposed = false;
 
   constructor(options: SuoCodeRuntimeOptions, send: WireSink, dependencies: RuntimeServerDependencies = {}) {
     this.send = send;
@@ -61,6 +105,15 @@ export class RuntimeServer {
   }
 
   private sendRuntimeEvent(runtimeId: string | undefined, event: RuntimeEvent): void {
+    if (runtimeId && !this.runtimes.has(runtimeId)) return;
+    if (runtimeId && eventChangesSnapshot(event)) this.dirtyRuntimes.add(runtimeId);
+    if (runtimeId && event.type === "run_state") {
+      if (event.running) this.runningRuntimes.add(runtimeId);
+      else {
+        this.runningRuntimes.delete(runtimeId);
+        this.retireExcessIdleRuntimes(runtimeId);
+      }
+    }
     const scopedEvent = runtimeId && event.type === "session_snapshot"
       ? { ...event, snapshot: this.decorateSnapshot(runtimeId, event.snapshot) }
       : event;
@@ -69,8 +122,53 @@ export class RuntimeServer {
 
   private decorateSnapshot(runtimeId: string, snapshot: SessionSnapshot): SessionSnapshot {
     const decorated = { ...snapshot, runtimeId };
-    if (snapshot.session.path) this.sessionPaths.set(resolve(snapshot.session.path), runtimeId);
+    this.runtimeSnapshots.set(runtimeId, decorated);
+    this.dirtyRuntimes.delete(runtimeId);
+    if (snapshot.running) this.runningRuntimes.add(runtimeId);
+    else this.runningRuntimes.delete(runtimeId);
+    this.runtimeAccess.set(runtimeId, Date.now());
+    if (snapshot.session.path) {
+      const normalizedPath = normalizeSessionPath(snapshot.session.path);
+      this.sessionPaths.set(normalizedPath, runtimeId);
+      this.runtimePaths.set(runtimeId, normalizedPath);
+    }
     return decorated;
+  }
+
+  private touchRuntime(runtimeId: string): void {
+    this.runtimeAccess.set(runtimeId, Date.now());
+  }
+
+  private removeRuntimeReferences(runtimeId: string): SuoCodeRuntime | undefined {
+    const runtime = this.runtimes.get(runtimeId);
+    this.runtimes.delete(runtimeId);
+    this.runtimeAccess.delete(runtimeId);
+    this.runningRuntimes.delete(runtimeId);
+    this.dirtyRuntimes.delete(runtimeId);
+    this.runtimeSnapshots.delete(runtimeId);
+    const sessionPath = this.runtimePaths.get(runtimeId);
+    this.runtimePaths.delete(runtimeId);
+    if (sessionPath && this.sessionPaths.get(sessionPath) === runtimeId) this.sessionPaths.delete(sessionPath);
+    if (this.defaultRuntimeId === runtimeId) this.defaultRuntimeId = undefined;
+    return runtime;
+  }
+
+  private retireExcessIdleRuntimes(protectedRuntimeId: string): void {
+    const idleRuntimeIds = [...this.runtimes.keys()]
+      .filter((runtimeId) => !this.runningRuntimes.has(runtimeId))
+      .sort((left, right) => (this.runtimeAccess.get(left) ?? 0) - (this.runtimeAccess.get(right) ?? 0));
+    let excess = idleRuntimeIds.length - MAX_RETAINED_IDLE_SESSION_RUNTIMES;
+    if (excess <= 0) return;
+    for (const runtimeId of idleRuntimeIds) {
+      if (excess <= 0) break;
+      if (runtimeId === protectedRuntimeId || runtimeId === this.defaultRuntimeId) continue;
+      const runtime = this.removeRuntimeReferences(runtimeId);
+      if (!runtime) continue;
+      excess -= 1;
+      void runtime.dispose().catch((error) => {
+        this.send({ event: { type: "runtime_error", message: `旧会话运行时清理失败：${errorMessage(error)}` } });
+      });
+    }
   }
 
   private runtimeById(runtimeId: string): SuoCodeRuntime {
@@ -94,50 +192,82 @@ export class RuntimeServer {
   }
 
   private async createSession(cwd: string): Promise<SessionSnapshot> {
+    // Creating a blank conversation is a newer navigation intent than any
+    // historical restore that may still be queued or running.
+    this.desiredSessionPath = undefined;
     const runtimeId = this.createRuntimeId();
     const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
     this.runtimes.set(runtimeId, runtime);
-    this.defaultRuntimeId = runtimeId;
     try {
-      return this.decorateSnapshot(runtimeId, await runtime.createSession(cwd));
+      const snapshot = this.decorateSnapshot(runtimeId, await runtime.createSession(cwd));
+      this.defaultRuntimeId = runtimeId;
+      this.retireExcessIdleRuntimes(runtimeId);
+      return snapshot;
     } catch (error) {
-      this.runtimes.delete(runtimeId);
-      if (this.defaultRuntimeId === runtimeId) this.defaultRuntimeId = undefined;
+      this.removeRuntimeReferences(runtimeId);
       await runtime.dispose().catch(() => undefined);
       throw error;
     }
   }
 
   private async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
-    const normalizedPath = resolve(sessionPath);
+    const normalizedPath = normalizeSessionPath(sessionPath);
+    this.desiredSessionPath = normalizedPath;
     const existingId = this.sessionPaths.get(normalizedPath);
     if (existingId && this.runtimes.has(existingId)) {
       this.defaultRuntimeId = existingId;
+      this.touchRuntime(existingId);
+      const cached = this.runtimeSnapshots.get(existingId);
+      if (cached && !this.dirtyRuntimes.has(existingId)) return cached;
       return this.decorateSnapshot(existingId, await this.runtimeById(existingId).snapshot());
     }
+    const opening = this.openingSessions.get(normalizedPath);
+    if (opening) return opening;
 
-    const runtimeId = this.createRuntimeId();
-    const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
-    this.runtimes.set(runtimeId, runtime);
-    this.defaultRuntimeId = runtimeId;
-    try {
-      return this.decorateSnapshot(runtimeId, await runtime.openSession(cwd, sessionPath));
-    } catch (error) {
-      this.runtimes.delete(runtimeId);
-      if (this.defaultRuntimeId === runtimeId) this.defaultRuntimeId = undefined;
-      await runtime.dispose().catch(() => undefined);
-      throw error;
-    }
+    let releaseSlot = (): void => undefined;
+    const slot = new Promise<void>((resolveSlot) => { releaseSlot = resolveSlot; });
+    const predecessor = this.sessionOpenTail.catch(() => undefined);
+    this.sessionOpenTail = predecessor.then(() => slot);
+
+    let task!: Promise<SessionSnapshot>;
+    task = (async () => {
+      await predecessor;
+      if (this.disposed || this.desiredSessionPath !== normalizedPath) {
+        throw new Error(SESSION_OPEN_SUPERSEDED_ERROR);
+      }
+
+      const runtimeId = this.createRuntimeId();
+      const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
+      this.runtimes.set(runtimeId, runtime);
+      this.touchRuntime(runtimeId);
+      try {
+        const snapshot = this.decorateSnapshot(runtimeId, await runtime.openSession(cwd, sessionPath));
+        if (this.disposed) {
+          throw new Error(SESSION_OPEN_SUPERSEDED_ERROR);
+        }
+        if (this.desiredSessionPath === normalizedPath) this.defaultRuntimeId = runtimeId;
+        this.retireExcessIdleRuntimes(runtimeId);
+        return snapshot;
+      } catch (error) {
+        this.removeRuntimeReferences(runtimeId);
+        await runtime.dispose().catch(() => undefined);
+        throw error;
+      }
+    })().finally(() => {
+      if (this.openingSessions.get(normalizedPath) === task) this.openingSessions.delete(normalizedPath);
+      releaseSlot();
+    });
+    this.openingSessions.set(normalizedPath, task);
+    return task;
   }
 
   private async releaseSession(sessionPath: string): Promise<void> {
-    const normalizedPath = resolve(sessionPath);
+    const normalizedPath = normalizeSessionPath(sessionPath);
     const runtimeId = this.sessionPaths.get(normalizedPath);
     if (!runtimeId) return;
-    this.sessionPaths.delete(normalizedPath);
-    const runtime = this.runtimes.get(runtimeId);
-    this.runtimes.delete(runtimeId);
-    if (this.defaultRuntimeId === runtimeId) this.defaultRuntimeId = this.runtimes.keys().next().value;
+    const wasDefault = this.defaultRuntimeId === runtimeId;
+    const runtime = this.removeRuntimeReferences(runtimeId);
+    if (wasDefault) this.defaultRuntimeId = this.runtimes.keys().next().value;
     await runtime?.dispose();
   }
 
@@ -173,7 +303,7 @@ export class RuntimeServer {
     }
   }
 
-  private dispatchTo(runtime: SuoCodeRuntime, command: Exclude<RuntimeCommand, { type: "create_session" } | { type: "open_session" }>): Promise<unknown> {
+  private dispatchTo(runtime: SuoCodeRuntime, command: Exclude<RuntimeCommand, { type: "create_session" } | { type: "open_session" } | { type: "open_workspace" }>): Promise<unknown> {
     switch (command.type) {
       case "bootstrap":
         return runtime.initialize();
@@ -274,12 +404,20 @@ export class RuntimeServer {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
+    this.desiredSessionPath = undefined;
     await Promise.allSettled([
       this.runtime.dispose(),
       ...[...this.runtimes.values()].map((runtime) => runtime.dispose()),
     ]);
     this.runtimes.clear();
     this.sessionPaths.clear();
+    this.runtimePaths.clear();
+    this.runtimeAccess.clear();
+    this.runningRuntimes.clear();
+    this.dirtyRuntimes.clear();
+    this.runtimeSnapshots.clear();
+    this.openingSessions.clear();
     this.defaultRuntimeId = undefined;
   }
 }

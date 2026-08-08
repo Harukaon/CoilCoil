@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, fork } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,8 @@ const live = process.argv.includes("--live");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "suocode-concurrency-"));
 const projectA = join(temporaryRoot, "project-a");
 const projectB = join(temporaryRoot, "project-b");
-await Promise.all([mkdir(projectA), mkdir(projectB)]);
+const projectRestore = join(temporaryRoot, "project-restore");
+await Promise.all([mkdir(projectA), mkdir(projectB), mkdir(projectRestore)]);
 
 const child = fork(join(root, "apps/desktop/out/main/runtime.js"), [], {
   env: {
@@ -22,6 +23,17 @@ const child = fork(join(root, "apps/desktop/out/main/runtime.js"), [], {
   },
   stdio: ["ignore", "pipe", "pipe", "ipc"],
 });
+
+function waitForChildExit(process, timeoutMs = 10_000) {
+  if (process.exitCode !== null || process.signalCode !== null) return Promise.resolve();
+  return new Promise((resolveExit) => {
+    const forceTimer = setTimeout(() => process.kill("SIGKILL"), timeoutMs);
+    process.once("exit", () => {
+      clearTimeout(forceTimer);
+      resolveExit();
+    });
+  });
+}
 
 const pending = new Map();
 const events = [];
@@ -37,13 +49,13 @@ child.on("message", (message) => {
   if (!waiter) return;
   pending.delete(message.id);
   if (message.ok) waiter.resolve(message.result);
-  else waiter.reject(new Error(message.error || "Runtime command failed"));
+  else waiter.reject(new Error(`${waiter.command.type} ${JSON.stringify(waiter.command)}: ${message.error || "Runtime command failed"}`));
 });
 
 function request(command, runtimeId) {
   const id = `concurrency-${++sequence}`;
   return new Promise((resolveRequest, rejectRequest) => {
-    pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
+    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, command });
     child.send({ id, runtimeId, command });
   });
 }
@@ -141,6 +153,45 @@ try {
     "the Runtime process must not fork another Runtime per conversation",
   );
 
+  const restoreFixture = await request({ type: "create_session", cwd: projectRestore });
+  await writeFile(restoreFixture.session.path, `${JSON.stringify({
+    type: "session",
+    version: 3,
+    id: restoreFixture.session.id,
+    timestamp: restoreFixture.session.createdAt,
+    cwd: restoreFixture.session.cwd,
+  })}\n`, "utf8");
+  await request({
+    type: "archive_session",
+    cwd: projectRestore,
+    sessionPath: restoreFixture.session.path,
+  });
+  const restoreStartedAt = performance.now();
+  const repeatedRestores = await Promise.all(Array.from({ length: 30 }, () => request({
+    type: "open_session",
+    cwd: projectRestore,
+    sessionPath: restoreFixture.session.path,
+  })));
+  const repeatedRestoreMs = performance.now() - restoreStartedAt;
+  assert.equal(
+    new Set(repeatedRestores.map((snapshot) => snapshot.runtimeId)).size,
+    1,
+    "concurrent clicks on one historical conversation must share one Pi restore",
+  );
+  assert.ok(repeatedRestoreMs < 5_000, `30 repeated historical opens took ${repeatedRestoreMs.toFixed(1)}ms`);
+
+  const cachedStartedAt = performance.now();
+  for (let index = 0; index < 100; index += 1) {
+    const cached = await request({
+      type: "open_session",
+      cwd: projectRestore,
+      sessionPath: restoreFixture.session.path,
+    });
+    assert.equal(cached.runtimeId, repeatedRestores[0].runtimeId);
+  }
+  const cachedSwitchMs = performance.now() - cachedStartedAt;
+  assert.ok(cachedSwitchMs < 2_000, `100 cached historical opens took ${cachedSwitchMs.toFixed(1)}ms`);
+
   const scopedSnapshots = events.filter((message) => message.event.type === "session_snapshot");
   assert.ok(scopedSnapshots.some((message) => message.runtimeId === first.runtimeId));
   assert.ok(scopedSnapshots.some((message) => message.runtimeId === second.runtimeId));
@@ -186,10 +237,12 @@ try {
     assert.ok(completedB.messages.some((message) => message.role === "assistant" && message.text.includes(tokenB)));
   }
 
-  process.stdout.write(`SuoCode concurrency smoke passed (cold ${coldOpenMs.toFixed(1)}ms, warm ${warmOpenMs.toFixed(1)}ms, switch ${switchMs.toFixed(1)}ms).\n`);
+  process.stdout.write(`SuoCode concurrency smoke passed (cold ${coldOpenMs.toFixed(1)}ms, warm ${warmOpenMs.toFixed(1)}ms, switch ${switchMs.toFixed(1)}ms, 30x restore ${repeatedRestoreMs.toFixed(1)}ms, 100x cached ${cachedSwitchMs.toFixed(1)}ms).\n`);
   if (process.env.SUOCODE_RUNTIME_TIMING === "1" && stderr) process.stdout.write(stderr);
 } finally {
-  child.disconnect();
-  child.kill("SIGTERM");
+  const runtimeExit = waitForChildExit(child);
+  if (child.connected) child.disconnect();
+  else if (child.exitCode === null) child.kill("SIGTERM");
+  await runtimeExit;
   await rm(temporaryRoot, { recursive: true, force: true });
 }

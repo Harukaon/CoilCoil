@@ -14,6 +14,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type EventBusController,
+  type SessionShutdownEvent,
   type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -701,6 +702,20 @@ function errorDetail(error: unknown): string | undefined {
   return error instanceof Error ? error.stack : undefined;
 }
 
+async function shutdownAgentSession(
+  session: AgentSession,
+  reason: SessionShutdownEvent["reason"] = "quit",
+): Promise<void> {
+  try {
+    await session.abort().catch(() => undefined);
+    if (session.extensionRunner.hasHandlers("session_shutdown")) {
+      await session.extensionRunner.emit({ type: "session_shutdown", reason });
+    }
+  } finally {
+    session.dispose();
+  }
+}
+
 function clampText(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}\n… output truncated …`;
 }
@@ -717,6 +732,25 @@ function stringValue(value: unknown): string {
 
 function sensitiveConfigurationKey(key: string): boolean {
   return /(?:authorization|api[-_]?key|token|secret|password|cookie|credential)/i.test(key);
+}
+
+function mcpServerDefinitions(path: string | undefined): Set<string> {
+  if (!path || !existsSync(path)) return new Set();
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (!isRecord(parsed)) return new Set();
+    const rawServers = isRecord(parsed.mcpServers)
+      ? parsed.mcpServers
+      : isRecord(parsed["mcp-servers"])
+        ? parsed["mcp-servers"]
+        : {};
+    return new Set(Object.entries(rawServers).flatMap(([name, value]) => {
+      if (!isRecord(value)) return [];
+      return Object.keys(value).some((key) => key !== "disabled") ? [name] : [];
+    }));
+  } catch {
+    return new Set();
+  }
 }
 
 function redactSensitiveText(value: string, secrets: readonly string[]): string {
@@ -1100,17 +1134,26 @@ function statusFromPorcelain(code: string): ChangeStatus {
 }
 
 function safeRealPath(path: string): string {
+  const absolute = resolve(path);
+  let existing = absolute;
+  const missingSegments: string[] = [];
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) return absolute;
+    missingSegments.unshift(basename(existing));
+    existing = parent;
+  }
   try {
-    return realpathSync(path);
+    return resolve(realpathSync(existing), ...missingSegments);
   } catch {
-    return resolve(path);
+    return absolute;
   }
 }
 
 function ensureInside(root: string, path: string): string {
   const resolvedRoot = safeRealPath(root);
   const candidate = isAbsolute(path) ? resolve(path) : resolve(resolvedRoot, path);
-  const target = existsSync(candidate) ? safeRealPath(candidate) : candidate;
+  const target = safeRealPath(candidate);
   const rel = relative(resolvedRoot, target);
   if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
     throw new Error("请求的文件不在当前项目中。");
@@ -2470,6 +2513,7 @@ export class SuoCodeRuntime {
     const config = adapter.loadMcpConfig(configPath, resolvedCwd);
     const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
     const provenance = adapter.getServerProvenance(configPath, resolvedCwd);
+    const projectDefinitions = mcpServerDefinitions(projectConfigPath);
     const enabledImports = new Set(config.imports ?? []);
     const removed = this.readRemovedMcpServers();
     const enabled = this.readEnabledMcpServers();
@@ -2481,7 +2525,9 @@ export class SuoCodeRuntime {
         const source = provenance.get(name);
         return {
           name,
-          scope: source?.kind === "project" ? "project" : "global",
+          // A project file may contain only { disabled: true } for a global or
+          // imported server. That override changes enablement, not ownership.
+          scope: source?.kind === "project" && projectDefinitions.has(name) ? "project" : "global",
           transport: typeof raw.url === "string" ? "http" : "stdio",
           command: typeof raw.command === "string" ? raw.command : undefined,
           args: stringArray(raw.args),
@@ -2797,10 +2843,11 @@ export class SuoCodeRuntime {
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
     if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
     if (this.active) {
-      this.active.unsubscribe();
-      this.active.session.dispose();
-      this.active.eventBus.clear();
+      const previous = this.active;
       this.active = undefined;
+      previous.unsubscribe();
+      await shutdownAgentSession(previous.session, "quit").catch(() => undefined);
+      previous.eventBus.clear();
     }
 
     const settingsManager = SettingsManager.create(cwd, this.agentDir, { projectTrusted: true });
@@ -2845,7 +2892,7 @@ export class SuoCodeRuntime {
     const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp", "subagent"];
     const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
     if (missingTools.length > 0) {
-      created.session.dispose();
+      await shutdownAgentSession(created.session, "quit").catch(() => undefined);
       throw new Error(`SuoCode workflow did not activate required tools: ${missingTools.join(", ")}`);
     }
 
@@ -3549,12 +3596,16 @@ export class SuoCodeRuntime {
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
     if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
     if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
+    if (this.resourceReloadTimer) clearTimeout(this.resourceReloadTimer);
     if (this.active) {
-      this.active.unsubscribe();
-      await this.active.session.abort().catch(() => undefined);
-      this.active.session.dispose();
-      this.active.eventBus.clear();
+      const active = this.active;
       this.active = undefined;
+      active.unsubscribe();
+      try {
+        await shutdownAgentSession(active.session, "quit");
+      } finally {
+        active.eventBus.clear();
+      }
     }
   }
 }

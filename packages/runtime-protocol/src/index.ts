@@ -688,3 +688,5 @@ export function isRuntimeEventEnvelope(value: unknown): value is RuntimeEventEnv
     typeof (value as RuntimeEventEnvelope).event?.type === "string"
   );
 }
+
+export const SESSION_OPEN_SUPERSEDED_ERROR = "SUOCODE_SESSION_OPEN_SUPERSEDED";

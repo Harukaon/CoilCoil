@@ -50,6 +50,17 @@ const child = fork(join(root, "apps/desktop/out/main/runtime.js"), [], {
   stdio: ["ignore", "pipe", "pipe", "ipc"],
 });
 
+function waitForChildExit(process, timeoutMs = 10_000) {
+  if (process.exitCode !== null || process.signalCode !== null) return Promise.resolve();
+  return new Promise((resolveExit) => {
+    const forceTimer = setTimeout(() => process.kill("SIGKILL"), timeoutMs);
+    process.once("exit", () => {
+      clearTimeout(forceTimer);
+      resolveExit();
+    });
+  });
+}
+
 const pending = new Map();
 const events = [];
 let nextId = 0;
@@ -355,7 +366,7 @@ try {
   if (!connectedMcp.text || connectedMcp.details?.error || connectedMcp.status?.servers?.find((server) => server.name === "smoke-server")?.status !== "connected") {
     throw new Error(`The bundled pi-mcp-adapter did not connect to the real stdio MCP fixture: ${JSON.stringify(connectedMcp)}`);
   }
-  const connectedMcpStatus = await waitForMcpStatus((status) => status.servers.some((server) => server.name === "smoke-server" && server.status === "connected" && server.toolCount >= 1 && server.resourceCount >= 1));
+  const connectedMcpStatus = await waitForMcpStatus((status) => status.totalResources >= 1 && status.servers.some((server) => server.name === "smoke-server" && server.status === "connected" && server.toolCount >= 1));
   if (connectedMcpStatus.totalTools < 1 || connectedMcpStatus.totalResources < 1) {
     throw new Error(`The real MCP tool/resource discovery was not projected: ${JSON.stringify(connectedMcpStatus)}`);
   }
@@ -653,9 +664,12 @@ try {
 
   process.stdout.write(`SuoCode runtime smoke passed${live ? " (live model + tool execution)" : ""}.\n`);
 } finally {
+  const runtimeExit = waitForChildExit(child);
+  const oauthExit = waitForChildExit(oauthFixture);
   if (child.connected) child.disconnect();
-  child.kill("SIGTERM");
+  else if (child.exitCode === null) child.kill("SIGTERM");
   if (oauthFixture.connected) oauthFixture.send({ type: "shutdown" });
-  oauthFixture.kill("SIGTERM");
-  rmSync(temporaryRoot, { recursive: true, force: true });
+  else if (oauthFixture.exitCode === null) oauthFixture.kill("SIGTERM");
+  await Promise.all([runtimeExit, oauthExit]);
+  rmSync(temporaryRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

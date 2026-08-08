@@ -21,6 +21,7 @@ import type {
   SubagentActivity,
   ToolRun,
 } from "@suocode/runtime-protocol";
+import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
 import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
 import { ConversationPane } from "./features/conversation/ConversationPane";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
@@ -139,6 +140,7 @@ export default function App(): React.JSX.Element {
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const snapshotCacheRef = useRef(new Map<string, SessionSnapshot>());
   const runtimeSessionRef = useRef(new Map<string, string>());
+  const selectionRequestRef = useRef(0);
   const optimisticMessageIdRef = useRef<string | undefined>(undefined);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
     onInsertPath: insertComposerPath,
@@ -163,6 +165,7 @@ export default function App(): React.JSX.Element {
   }, []);
 
   const startPendingConversation = useCallback((selection: ProjectSelection): void => {
+    selectionRequestRef.current += 1;
     projectRef.current = selection;
     setProject(selection);
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
@@ -279,6 +282,7 @@ export default function App(): React.JSX.Element {
   }, [applySnapshot]);
 
   const activateProject = useCallback(async (selection: ProjectSelection): Promise<void> => {
+    const requestId = ++selectionRequestRef.current;
     projectRef.current = selection;
     setProject(selection);
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
@@ -292,13 +296,17 @@ export default function App(): React.JSX.Element {
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
     try {
       const { sessions, snapshot } = await window.suocode.request<WorkspaceSnapshot>({ type: "open_workspace", cwd: selection.path });
+      if (requestId !== selectionRequestRef.current) return;
       setSessionsByProject((current) => ({ ...current, [selection.path]: sessions }));
       applySnapshot(snapshot);
     } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
+      const message = caught instanceof Error ? caught.message : String(caught);
+      if (requestId === selectionRequestRef.current && message !== SESSION_OPEN_SUPERSEDED_ERROR) toastError(message);
     } finally {
-      setLoading(false);
-      focusComposer();
+      if (requestId === selectionRequestRef.current) {
+        setLoading(false);
+        focusComposer();
+      }
     }
   }, [applySnapshot, focusComposer, setDraftImages]);
 
@@ -398,6 +406,7 @@ export default function App(): React.JSX.Element {
 
   const openConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
     if (owner.path === project?.path && session.id === activeConversation?.id) return;
+    const requestId = ++selectionRequestRef.current;
     const cached = snapshotCacheRef.current.get(session.path);
     setLoading(!cached);
     setPendingProjectPath(undefined);
@@ -408,11 +417,13 @@ export default function App(): React.JSX.Element {
       setProject(owner);
       window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, owner.path);
       if (cached) applySnapshot(cached);
-      applySnapshot(await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path }));
+      const opened = await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path });
+      if (requestId === selectionRequestRef.current) applySnapshot(opened);
     } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
+      const message = caught instanceof Error ? caught.message : String(caught);
+      if (requestId === selectionRequestRef.current && message !== SESSION_OPEN_SUPERSEDED_ERROR) toastError(message);
     } finally {
-      setLoading(false);
+      if (requestId === selectionRequestRef.current) setLoading(false);
     }
   };
 

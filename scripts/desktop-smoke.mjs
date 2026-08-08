@@ -679,6 +679,14 @@ async function main() {
     assert.equal(configuredMcp?.exposeResources, false);
     assert.equal(configuredMcp?.debug, true);
     assert.equal(configuredMcp?.env?.PRIVATE_TOKEN, "desktop-mcp-secret-do-not-display");
+    const newlySavedMcpNeedsEnable = await client.evaluate(`Boolean(document.querySelector('button[aria-label="启用 MCP 服务器"]'))`);
+    if (newlySavedMcpNeedsEnable) {
+      await client.evaluate(`document.querySelector('button[aria-label="启用 MCP 服务器"]')?.click()`);
+      await client.waitFor(
+        `Boolean(document.querySelector('button[aria-label="停用 MCP 服务器"]'))`,
+        "The newly saved MCP server did not become enabled.",
+      );
+    }
     const disabledMcpServer = await client.evaluate(`(() => {
       const button = document.querySelector('button[aria-label="停用 MCP 服务器"]');
       if (!button || button.disabled) return false;
@@ -716,11 +724,11 @@ async function main() {
     })()`);
     assert.equal(connectedMcpServer, true, "The MCP extension connection action was not exposed in settings.");
     await client.waitFor(
-      `Boolean(document.querySelector(".mcp-action-message")) || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
+      `Boolean(document.querySelector(".mcp-action-message")) || Boolean(document.querySelector(".mcp-editor .settings-error")) || Boolean(document.querySelector(".toast-error .toast-message"))`,
       "The MCP extension connection action did not return diagnostics.",
     );
     const mcpConnectionState = await client.evaluate(`({
-      diagnostics: document.querySelector(".mcp-action-message")?.textContent || document.querySelector(".mcp-editor .settings-error")?.textContent || "",
+      diagnostics: document.querySelector(".mcp-action-message")?.textContent || document.querySelector(".mcp-editor .settings-error")?.textContent || document.querySelector(".toast-error .toast-message")?.textContent || "",
       ui: document.querySelector(".mcp-runtime-card")?.textContent || ""
     })`);
     assert.ok(mcpConnectionState.diagnostics, "The MCP adapter connection failure did not surface diagnostics.");
@@ -752,6 +760,7 @@ async function main() {
     const projectMcp = projectMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp-project");
     assert.equal(projectMcp?.scope, "project");
     assert.equal(projectMcp?.source, projectMcpSnapshot.projectConfigPath);
+    await client.evaluate(`document.querySelectorAll(".toast-dismiss").forEach((button) => button.click())`);
     await client.evaluate(`(async () => {
       await window.suocode.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp-project", scope: "project", cwd: ${JSON.stringify(homeState.home.path)} });
       await window.suocode.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp", scope: "global", cwd: ${JSON.stringify(homeState.home.path)} });
@@ -870,6 +879,7 @@ async function main() {
       `window.innerWidth <= 395`,
       "The packaged desktop window could not shrink to 395px.",
     );
+    await client.evaluate(`document.querySelectorAll(".toast-dismiss").forEach((button) => button.click())`);
     await client.evaluate(`(async () => {
       if (!document.querySelector(".app-shell")?.classList.contains("left-collapsed")) return true;
       document.querySelector('button[aria-label="展开侧栏"]')?.click();
@@ -1322,7 +1332,7 @@ async function main() {
       await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="编辑历史消息"]'))`, "The historical message did not enter edit mode.");
       const historicalImageBeforePaste = await client.evaluate(`(() => {
         const editor = document.querySelector('textarea[aria-label="编辑历史消息"]');
-        const before = document.querySelectorAll(".user-message-editor-shell .message-image img").length;
+        const before = document.querySelectorAll(".user-message-editor-shell .composer-images img").length;
         const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (value) => value.charCodeAt(0));
         const transfer = new DataTransfer();
         transfer.items.add(new File([bytes], "history-paste.png", { type: "image/png" }));
@@ -1330,9 +1340,9 @@ async function main() {
         return { before, files: transfer.files.length, dispatched };
       })()`);
       assert.deepEqual(historicalImageBeforePaste, { before: 1, files: 1, dispatched: false });
-      await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .message-image img").length === 2`, "The pasted historical image did not appear in the editor.");
-      await client.evaluate(`document.querySelector('button[aria-label="移除历史图片"]')?.click()`);
-      await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .message-image img").length === 1`, "The historical image was not removed from the editor.");
+      await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .composer-images img").length === 2`, "The pasted historical image did not appear in the editor.");
+      await client.evaluate(`document.querySelector('.user-message-editor-shell button[aria-label="移除图片"]')?.click()`);
+      await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .composer-images img").length === 1`, "The historical image was not removed from the editor.");
       await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
       await client.waitFor(`!document.querySelector('textarea[aria-label="编辑历史消息"]') && document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The edited historical image state did not return to the message bubble.");
       await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The packaged renderer did not restore the pi-subagents timeline card.", 60_000);

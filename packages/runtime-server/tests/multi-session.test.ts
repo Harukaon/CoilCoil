@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type { SuoCodeRuntime, SuoCodeRuntimeOptions } from "@suocode/runtime-core";
 import type {
@@ -7,6 +10,7 @@ import type {
   RuntimeWireMessage,
   SessionSnapshot,
 } from "@suocode/runtime-protocol";
+import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
 import { RuntimeServer } from "../src/index.js";
 
 const EMPTY_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
@@ -25,7 +29,15 @@ class FakeRuntime {
   readonly promptGate = deferred();
   disposed = false;
 
-  constructor(private readonly ordinal: number, options: SuoCodeRuntimeOptions) {
+  constructor(
+    private readonly ordinal: number,
+    options: SuoCodeRuntimeOptions,
+    private readonly controls: {
+      openGates?: Map<string, ReturnType<typeof deferred>>;
+      openCalls?: Map<string, number>;
+      snapshotCalls?: Map<string, number>;
+    } = {},
+  ) {
     this.emit = options.onEvent ?? (() => undefined);
   }
 
@@ -51,6 +63,8 @@ class FakeRuntime {
   }
 
   async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
+    this.controls.openCalls?.set(sessionPath, (this.controls.openCalls.get(sessionPath) ?? 0) + 1);
+    await this.controls.openGates?.get(sessionPath)?.promise;
     return this.install(cwd, sessionPath);
   }
 
@@ -101,6 +115,8 @@ class FakeRuntime {
 
   async snapshot(): Promise<SessionSnapshot> {
     if (!this.snapshotValue) throw new Error("No active session");
+    const path = this.snapshotValue.session.path;
+    this.controls.snapshotCalls?.set(path, (this.controls.snapshotCalls.get(path) ?? 0) + 1);
     return this.snapshotValue;
   }
 
@@ -167,4 +183,185 @@ test("one runtime server keeps multiple Agent sessions alive and independently s
 
   await server.dispose();
   assert.ok(runtimes.every((runtime) => runtime.disposed));
+});
+
+test("repeated clicks share one in-flight historical session restore", async () => {
+  const runtimes: FakeRuntime[] = [];
+  const openGates = new Map([["/sessions/slow.jsonl", deferred()]]);
+  const openCalls = new Map<string, number>();
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options, { openGates, openCalls });
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  const requests = Array.from({ length: 30 }, (_, index) => server.handle({
+    id: `open-${index}`,
+    command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/slow.jsonl" },
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimes.length, 2, "one control runtime and one restoring session runtime should exist");
+  assert.equal(openCalls.get("/sessions/slow.jsonl"), 1);
+
+  openGates.get("/sessions/slow.jsonl")?.resolve();
+  const responses = await Promise.all(requests);
+  assert.ok(responses.every((response) => response.ok));
+  assert.deepEqual(
+    [...new Set(responses.map((response) => (response.result as SessionSnapshot).runtimeId))],
+    ["runtime-1"],
+  );
+  await server.dispose();
+});
+
+test("settled session reopens reuse the latest immutable snapshot", async () => {
+  const runtimes: FakeRuntime[] = [];
+  const snapshotCalls = new Map<string, number>();
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options, { snapshotCalls });
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  const command = { type: "open_session" as const, cwd: "/project", sessionPath: "/sessions/cached.jsonl" };
+  assert.equal((await server.handle({ id: "first", command })).ok, true);
+  for (let index = 0; index < 100; index += 1) {
+    assert.equal((await server.handle({ id: `cached-${index}`, command })).ok, true);
+  }
+  assert.equal(snapshotCalls.get(command.sessionPath) ?? 0, 0, "clean session switching must not reconstruct history again");
+  assert.equal(runtimes.length, 2);
+  await server.dispose();
+});
+
+test("canonical and symlinked session paths reuse the same runtime", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-session-alias-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const realSessions = join(root, "sessions");
+  const aliasSessions = join(root, "session-alias");
+  mkdirSync(realSessions);
+  symlinkSync(realSessions, aliasSessions, "dir");
+  const aliasSessionPath = join(aliasSessions, "history.jsonl");
+  const canonicalSessionPath = join(realpathSync(realSessions), "history.jsonl");
+
+  const runtimes: FakeRuntime[] = [];
+  const openCalls = new Map<string, number>();
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: join(root, "agent"), sessionDir: realSessions },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options, { openCalls });
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  const first = await server.handle({
+    id: "open-alias",
+    command: { type: "open_session", cwd: root, sessionPath: aliasSessionPath },
+  });
+  const second = await server.handle({
+    id: "open-canonical",
+    command: { type: "open_session", cwd: root, sessionPath: canonicalSessionPath },
+  });
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal((first.result as SessionSnapshot).runtimeId, (second.result as SessionSnapshot).runtimeId);
+  assert.equal(runtimes.length, 2, "path aliases must not construct a duplicate Pi runtime");
+  assert.equal(openCalls.get(aliasSessionPath), 1);
+  assert.equal(openCalls.get(canonicalSessionPath) ?? 0, 0);
+  await server.dispose();
+});
+
+test("rapid navigation serializes restores and skips queued intermediate sessions", async () => {
+  const runtimes: FakeRuntime[] = [];
+  const firstGate = deferred();
+  const openGates = new Map([["/sessions/a.jsonl", firstGate]]);
+  const openCalls = new Map<string, number>();
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options, { openGates, openCalls });
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  const first = server.handle({ id: "open-a", command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/a.jsonl" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  const intermediate = server.handle({ id: "open-b", command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/b.jsonl" } });
+  const latest = server.handle({ id: "open-c", command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/c.jsonl" } });
+  firstGate.resolve();
+
+  const [firstResponse, intermediateResponse, latestResponse] = await Promise.all([first, intermediate, latest]);
+  assert.equal(firstResponse.ok, true, "an already-running restore may finish and be cached");
+  assert.equal(intermediateResponse.ok, false);
+  assert.equal(intermediateResponse.error, SESSION_OPEN_SUPERSEDED_ERROR);
+  assert.equal(latestResponse.ok, true);
+  assert.equal(openCalls.get("/sessions/a.jsonl"), 1);
+  assert.equal(openCalls.get("/sessions/b.jsonl") ?? 0, 0, "a queued stale restore must never allocate a Pi session");
+  assert.equal(openCalls.get("/sessions/c.jsonl"), 1);
+  assert.equal(runtimes.length, 3, "only control, first, and latest runtimes should be constructed");
+  await server.dispose();
+});
+
+test("idle historical runtimes are bounded while recent sessions remain reopenable", async () => {
+  const runtimes: FakeRuntime[] = [];
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options);
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  for (let index = 0; index < 10; index += 1) {
+    const response = await server.handle({
+      id: `open-${index}`,
+      command: { type: "open_session", cwd: "/project", sessionPath: `/sessions/${index}.jsonl` },
+    });
+    assert.equal(response.ok, true);
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimes.filter((runtime) => !runtime.disposed).length, 7, "control plus six idle session runtimes should remain");
+  assert.ok(runtimes.slice(1, 5).every((runtime) => runtime.disposed), "the least recently used idle sessions should be retired");
+
+  const reopened = await server.handle({
+    id: "reopen-0",
+    command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/0.jsonl" },
+  });
+  assert.equal(reopened.ok, true, "an evicted idle session must transparently restore from disk");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimes.filter((runtime) => !runtime.disposed).length, 7);
+  await server.dispose();
 });
