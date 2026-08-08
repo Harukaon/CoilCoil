@@ -3,9 +3,6 @@ import type { RuntimeCommand, RuntimeEvent } from "@suocode/runtime-protocol";
 import type { FileNode } from "@suocode/runtime-protocol";
 import type {
   DesktopPlatform,
-  DesktopTerminalEvent,
-  DesktopTerminalSession,
-  CreateTerminalInput,
   FilePreviewDocument,
   OpenFilePreviewInput,
   ProjectFileActionInput,
@@ -27,12 +24,6 @@ const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_GET_CHANNEL = "preview:get";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
-const TERMINAL_LIST_CHANNEL = "terminal:list";
-const TERMINAL_CREATE_CHANNEL = "terminal:create";
-const TERMINAL_WRITE_CHANNEL = "terminal:write";
-const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
-const TERMINAL_CLOSE_CHANNEL = "terminal:close";
-const TERMINAL_EVENT_CHANNEL = "terminal:event";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 
 const platform = ((): DesktopPlatform => {
@@ -63,16 +54,6 @@ const api: SuoCodeDesktopApi = {
     const handler = (_event: Electron.IpcRendererEvent, document: FilePreviewDocument): void => listener(document);
     ipcRenderer.on(PREVIEW_UPDATED_CHANNEL, handler);
     return () => ipcRenderer.removeListener(PREVIEW_UPDATED_CHANNEL, handler);
-  },
-  listTerminals: () => ipcRenderer.invoke(TERMINAL_LIST_CHANNEL) as Promise<DesktopTerminalSession[]>,
-  createTerminal: (input: CreateTerminalInput) => ipcRenderer.invoke(TERMINAL_CREATE_CHANNEL, input) as Promise<DesktopTerminalSession>,
-  writeTerminal: (id: string, data: string) => ipcRenderer.invoke(TERMINAL_WRITE_CHANNEL, id, data) as Promise<void>,
-  resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke(TERMINAL_RESIZE_CHANNEL, id, cols, rows) as Promise<void>,
-  closeTerminal: (id: string) => ipcRenderer.invoke(TERMINAL_CLOSE_CHANNEL, id) as Promise<void>,
-  onTerminalEvent: (listener: (event: DesktopTerminalEvent) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, value: DesktopTerminalEvent): void => listener(value);
-    ipcRenderer.on(TERMINAL_EVENT_CHANNEL, handler);
-    return () => ipcRenderer.removeListener(TERMINAL_EVENT_CHANNEL, handler);
   },
   listProjectDirectory: (root: string, path?: string) => ipcRenderer.invoke(PROJECT_DIRECTORY_LIST_CHANNEL, root, path) as Promise<FileNode[]>,
   request: <T>(command: RuntimeCommand, runtimeId?: string) =>

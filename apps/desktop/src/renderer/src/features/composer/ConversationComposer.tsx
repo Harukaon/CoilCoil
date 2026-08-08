@@ -62,6 +62,7 @@ export function ConversationComposer({
       {images.length ? <div className="composer-images">{images.map((image) => <figure key={image.id ?? image.data.slice(0, 24)}><img src={imageDataUrl(image)} alt={image.name ?? "粘贴的图片"} /><button type="button" aria-label="移除图片" onClick={() => onImagesChange((current) => current.filter((item) => item !== image))}><X size={11} /></button></figure>)}</div> : null}
       <textarea
         ref={inputRef}
+        rows={1}
         value={draft}
         aria-label="发送消息给 SuoCode"
         placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"}

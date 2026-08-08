@@ -144,7 +144,23 @@ export class RuntimeServer {
     const runtime = alwaysControl ? this.runtime : this.selectedRuntime(runtimeId);
     const result = await this.dispatchTo(runtime, command);
     if (command.type === "archive_session") await this.releaseSession(command.sessionPath);
+    if (
+      command.type === "save_model_provider_configuration"
+      || command.type === "remove_model_provider_configuration"
+      || command.type === "configure_model"
+      || command.type === "remove_provider_auth"
+    ) {
+      this.refreshAllSessionModels(runtime);
+    }
     return result;
+  }
+
+  private refreshAllSessionModels(except?: SuoCodeRuntime): void {
+    if (except !== this.runtime) this.runtime.refreshSessionModelFromRegistry();
+    for (const sessionRuntime of this.runtimes.values()) {
+      if (sessionRuntime === except) continue;
+      sessionRuntime.refreshSessionModelFromRegistry();
+    }
   }
 
   private dispatchTo(runtime: SuoCodeRuntime, command: Exclude<RuntimeCommand, { type: "create_session" } | { type: "open_session" }>): Promise<unknown> {

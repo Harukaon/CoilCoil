@@ -1,6 +1,6 @@
-import { AlertCircle, ArrowLeft, Cable, ExternalLink, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Settings } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import { ArrowLeft, Cable, ExternalLink, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
   McpConfigurationSnapshot,
   McpActionResult,
@@ -9,11 +9,23 @@ import type {
   McpServerRuntimeStatus,
   RuntimeConfiguration,
 } from "@suocode/runtime-protocol";
+import { toastError, toastSuccess } from "../../ui/toast";
 import { ModelSettings } from "./ModelSettings";
 import "./settings.css";
 
 type SettingsSection = "models" | "mcp";
 const MASKED_SECRET_VALUE = "••••••";
+const SETTINGS_SIDEBAR_WIDTH_KEY = "suocode.settings-sidebar-width";
+const DEFAULT_SETTINGS_SIDEBAR_WIDTH = 220;
+const MINIMUM_SETTINGS_SIDEBAR_WIDTH = 160;
+const MAXIMUM_SETTINGS_SIDEBAR_WIDTH = 360;
+
+function storedSettingsSidebarWidth(): number {
+  const value = Number(window.localStorage.getItem(SETTINGS_SIDEBAR_WIDTH_KEY));
+  return Number.isFinite(value) && value >= MINIMUM_SETTINGS_SIDEBAR_WIDTH
+    ? Math.min(MAXIMUM_SETTINGS_SIDEBAR_WIDTH, value)
+    : DEFAULT_SETTINGS_SIDEBAR_WIDTH;
+}
 
 const mcpStatusLabel: Record<McpServerRuntimeStatus["status"], string> = {
   connected: "已连接",
@@ -41,7 +53,7 @@ function blankMcpServer(): McpServerConfiguration {
     directTools: false,
     excludeTools: [],
     debug: false,
-    disabled: false,
+    disabled: true,
   };
 }
 
@@ -81,11 +93,11 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   const [statusLoading, setStatusLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [removeArmed, setRemoveArmed] = useState(false);
+  const [listRemoveArmed, setListRemoveArmed] = useState<string>();
   const [runtimeStatus, setRuntimeStatus] = useState<McpRuntimeStatus>();
-  const [actionMessage, setActionMessage] = useState<string>();
   const [authorizationUrl, setAuthorizationUrl] = useState<string>();
   const [authInput, setAuthInput] = useState("");
-  const [error, setError] = useState<string>();
   const editVersionRef = useRef(0);
   const loadVersionRef = useRef(0);
 
@@ -101,25 +113,24 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
     setHeadersText(JSON.stringify(maskedStringMap(next.headers), null, 2));
     setDirectToolsText(Array.isArray(next.directTools) ? next.directTools.join("\n") : "");
     setExcludeToolsText(next.excludeTools.join("\n"));
-    setActionMessage(undefined);
     setAuthorizationUrl(undefined);
     setAuthInput("");
-    setError(undefined);
+    setRemoveArmed(false);
+    setListRemoveArmed(undefined);
   };
 
   const loadStatus = async (surfaceError = false): Promise<void> => {
     if (!runtimeId) {
       setRuntimeStatus(undefined);
-      if (surfaceError) setError("打开一个会话后即可查看 MCP 连接状态。");
+      if (surfaceError) toastError("打开一个会话后即可查看 MCP 连接状态。");
       return;
     }
     setStatusLoading(true);
-    if (surfaceError) setError(undefined);
     try {
       setRuntimeStatus(await window.suocode.request<McpRuntimeStatus>({ type: "get_mcp_status" }, runtimeId));
     } catch (caught) {
       setRuntimeStatus(undefined);
-      if (surfaceError) setError(caught instanceof Error ? caught.message : String(caught));
+      if (surfaceError) toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setStatusLoading(false);
     }
@@ -129,7 +140,6 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
     const loadVersion = ++loadVersionRef.current;
     const editVersion = editVersionRef.current;
     setLoading(true);
-    setError(undefined);
     try {
       const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "get_mcp_configuration", cwd }, runtimeId);
       if (loadVersion !== loadVersionRef.current) return;
@@ -140,7 +150,7 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
       }
     } catch (caught) {
       if (loadVersion !== loadVersionRef.current) return;
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       if (loadVersion === loadVersionRef.current) setLoading(false);
     }
@@ -154,7 +164,6 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   const save = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     setSaving(true);
-    setError(undefined);
     try {
       const server: McpServerConfiguration = {
         ...draft,
@@ -175,8 +184,9 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
       setConfiguration(next);
       selectServer(next.servers.find((item) => item.name === server.name));
       void loadStatus();
+      toastSuccess("已保存 MCP 服务器。");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setSaving(false);
     }
@@ -186,11 +196,11 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
     const imports = configuration?.imports.filter((item) => !item.enabled).map((item) => item.kind) ?? [];
     if (!imports.length) return;
     setSaving(true);
-    setError(undefined);
     try {
       setConfiguration(await window.suocode.request<McpConfigurationSnapshot>({ type: "enable_mcp_imports", imports, cwd }, runtimeId));
+      toastSuccess("已导入检测到的兼容配置。");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setSaving(false);
     }
@@ -198,20 +208,21 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
 
   const applyActionResult = (result: McpActionResult): void => {
     if (result.status) setRuntimeStatus(result.status);
-    setActionMessage(result.text || "MCP 扩展已完成操作。");
     const detailsError = typeof result.details?.error === "string" ? result.details.error : undefined;
-    if (detailsError) setError(typeof result.details?.message === "string" ? result.details.message : detailsError);
+    if (detailsError) {
+      toastError(typeof result.details?.message === "string" ? result.details.message : detailsError);
+      return;
+    }
+    toastSuccess(result.text || "MCP 扩展已完成操作。");
   };
 
   const connect = async (): Promise<void> => {
     if (!selectedName) return;
     setActionBusy(true);
-    setError(undefined);
-    setActionMessage(undefined);
     try {
       applyActionResult(await window.suocode.request<McpActionResult>({ type: "connect_mcp_server", name: selectedName }, runtimeId));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setActionBusy(false);
     }
@@ -220,8 +231,6 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   const startAuth = async (): Promise<void> => {
     if (!selectedName) return;
     setActionBusy(true);
-    setError(undefined);
-    setActionMessage(undefined);
     try {
       const result = await window.suocode.request<McpActionResult>({ type: "start_mcp_auth", name: selectedName }, runtimeId);
       applyActionResult(result);
@@ -229,7 +238,7 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
       setAuthorizationUrl(url);
       if (url) await window.suocode.openExternal(url);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setActionBusy(false);
     }
@@ -238,8 +247,6 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   const completeAuth = async (): Promise<void> => {
     if (!selectedName || !authInput.trim()) return;
     setActionBusy(true);
-    setError(undefined);
-    setActionMessage(undefined);
     try {
       const result = await window.suocode.request<McpActionResult>({ type: "complete_mcp_auth", name: selectedName, input: authInput }, runtimeId);
       applyActionResult(result);
@@ -248,7 +255,7 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
         setAuthInput("");
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setActionBusy(false);
     }
@@ -257,12 +264,10 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   const logout = async (): Promise<void> => {
     if (!selectedName) return;
     setActionBusy(true);
-    setError(undefined);
-    setActionMessage(undefined);
     try {
       applyActionResult(await window.suocode.request<McpActionResult>({ type: "logout_mcp_server", name: selectedName }, runtimeId));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setActionBusy(false);
     }
@@ -271,18 +276,47 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
   const setEnabled = async (): Promise<void> => {
     if (!selectedName || !cwd) return;
     setActionBusy(true);
-    setError(undefined);
-    setActionMessage(undefined);
     try {
       const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "set_mcp_server_enabled", name: selectedName, enabled: draft.disabled, cwd }, runtimeId);
       setConfiguration(next);
       selectServer(next.servers.find((server) => server.name === selectedName));
-      setActionMessage(draft.disabled ? "已通过 pi-mcp-adapter 在当前项目启用此服务器。" : "已通过 pi-mcp-adapter 在当前项目停用此服务器。");
+      toastSuccess(draft.disabled ? "已启用此 MCP 服务器。" : "已停用此 MCP 服务器（取消使用）。");
       void loadStatus();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setActionBusy(false);
+    }
+  };
+
+  const remove = async (name = selectedName, scope = draft.scope): Promise<void> => {
+    if (!name) return;
+    const removing = name;
+    setSaving(true);
+    try {
+      const next = await window.suocode.request<McpConfigurationSnapshot>({
+        type: "remove_mcp_server",
+        name: removing,
+        scope,
+        cwd,
+      }, runtimeId);
+      setConfiguration(next);
+      if (selectedName === removing) {
+        const fallback = next.servers.find((server) => server.name !== removing);
+        selectServer(fallback, true);
+      } else {
+        setListRemoveArmed(undefined);
+      }
+      void loadStatus();
+      toastSuccess(`已删除 MCP 服务器 ${removing}。`);
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+      void load();
+      void loadStatus();
+    } finally {
+      setSaving(false);
+      setRemoveArmed(false);
+      setListRemoveArmed(undefined);
     }
   };
 
@@ -294,13 +328,43 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
       <aside className="mcp-server-list">
         <div className="mcp-list-toolbar"><button className="mcp-add-button" type="button" disabled={loading} onClick={() => selectServer(undefined, true)}><Plus size={13} />添加服务器</button><button className="mcp-refresh-button" type="button" aria-label="刷新 MCP 状态" disabled={statusLoading || !runtimeId} onClick={() => void loadStatus(true)}>{statusLoading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button></div>
         {runtimeStatus ? <p className="mcp-status-summary">{runtimeStatus.state === "initializing" ? "MCP 扩展初始化中" : runtimeStatus.state === "unavailable" ? "MCP 扩展暂不可用" : `${runtimeStatus.connectedCount} 个已连接 · ${runtimeStatus.totalTools} 个工具 · ${runtimeStatus.totalResources} 个资源${runtimeStatus.disabledCount ? ` · ${runtimeStatus.disabledCount} 个已停用` : ""}`}</p> : null}
-        {loading ? <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载 MCP 配置…</div> : configuration?.servers.map((server) => { const status = runtimeStatus?.servers.find((item) => item.name === server.name); return <button className={server.name === selectedName ? "active" : ""} type="button" key={server.name} onClick={() => selectServer(server, true)}><span className="mcp-server-title"><i className={`mcp-status-dot ${mcpStatusClass(status?.status ?? (server.disabled ? "disabled" : undefined))}`} /><strong>{server.name}</strong>{status && (status.toolCount || status.resourceCount) ? <em>{status.toolCount} 工具 · {status.resourceCount} 资源</em> : null}</span><small>{status ? mcpStatusLabel[status.status] : server.disabled ? "已停用" : server.scope === "project" ? "当前项目" : "全局"} · {server.transport === "http" ? server.url : server.command}</small></button>; })}
+        {loading ? <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载 MCP 配置…</div> : configuration?.servers.map((server) => {
+          const status = runtimeStatus?.servers.find((item) => item.name === server.name);
+          const armed = listRemoveArmed === server.name;
+          return (
+            <div className={`mcp-server-row${server.name === selectedName ? " active" : ""}`} key={server.name}>
+              <button className="mcp-server-select" type="button" onClick={() => selectServer(server, true)}>
+                <span className="mcp-server-title">
+                  <i className={`mcp-status-dot ${mcpStatusClass(status?.status ?? (server.disabled ? "disabled" : undefined))}`} />
+                  <strong>{server.name}</strong>
+                  {status && (status.toolCount || status.resourceCount) ? <em>{status.toolCount} 工具 · {status.resourceCount} 资源</em> : null}
+                </span>
+                <small>{status ? (mcpStatusLabel[status.status] ?? status.status) : server.disabled ? "已停用" : server.scope === "project" ? "当前项目" : "全局"} · {server.transport === "http" ? server.url : server.command}</small>
+              </button>
+              <button
+                className={`mcp-server-remove${armed ? " armed" : ""}`}
+                type="button"
+                aria-label={armed ? `再次点击确认删除 ${server.name}` : `删除 ${server.name}`}
+                title={armed ? "再次点击确认删除" : "删除"}
+                disabled={saving || actionBusy}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (armed) void remove(server.name, server.scope);
+                  else setListRemoveArmed(server.name);
+                }}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          );
+        })}
         {!loading && !configuration?.servers.length ? <p>尚未配置 MCP 服务器。</p> : null}
+        {!loading ? <p className="mcp-list-hint">默认全部停用：列表里的 MCP 不会自动参与会话。停用 = 取消使用；只有你手动启用后，模型或你连接时才会使用。</p> : null}
       </aside>
       <section className="mcp-editor">
         <form onSubmit={(event) => void save(event)}>
           <div className="mcp-editor-heading"><div><strong>{selectedName ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</strong><small>连接、认证与工具发现均由内置 pi-mcp-adapter 执行。</small></div></div>
-          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpStatusClass(selectedStatus?.status ?? (draft.disabled ? "disabled" : undefined))}`} /><strong>{runtimeStatus?.state === "initializing" ? "初始化中" : runtimeStatus?.state === "unavailable" ? "暂不可用" : selectedStatus ? mcpStatusLabel[selectedStatus.status] : draft.disabled ? "已停用" : runtimeId ? "状态未知" : "打开会话后可连接"}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={actionBusy || !cwd} onClick={() => void setEnabled()}><Power size={13} />{draft.disabled ? "启用" : "停用"}</button><button type="button" aria-label="连接 MCP 服务器" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void connect()}><Cable size={13} />{selectedStatus?.status === "connected" ? "重新连接" : "连接"}</button>{supportsAuth ? <><button type="button" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void startAuth()}><ExternalLink size={13} />认证</button><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void logout()}><LogOut size={13} />登出</button></> : null}</div> : null}
+          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpStatusClass(selectedStatus?.status ?? (draft.disabled ? "disabled" : undefined))}`} /><strong>{runtimeStatus?.state === "initializing" ? "初始化中" : runtimeStatus?.state === "unavailable" ? "暂不可用" : selectedStatus ? (mcpStatusLabel[selectedStatus.status] ?? selectedStatus.status) : draft.disabled ? "已停用" : runtimeId ? "状态未知" : "打开会话后可连接"}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={actionBusy || !cwd} onClick={() => void setEnabled()}><Power size={13} />{draft.disabled ? "启用" : "停用"}</button><button type="button" aria-label="连接 MCP 服务器" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void connect()}><Cable size={13} />{selectedStatus?.status === "connected" ? "重新连接" : "连接"}</button>{supportsAuth ? <><button type="button" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void startAuth()}><ExternalLink size={13} />认证</button><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void logout()}><LogOut size={13} />登出</button></> : null}</div> : null}
           {runtimeStatus?.diagnostic ? <p className="mcp-source-note">{runtimeStatus.diagnostic}</p> : null}
           <div className="settings-grid"><label>名称<input value={draft.name} placeholder="例如 github" onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label><label>作用域<select value={draft.scope} disabled={!cwd} onChange={(event) => setDraft((current) => ({ ...current, scope: event.target.value as McpServerConfiguration["scope"] }))}><option value="global">全局</option><option value="project">当前项目</option></select></label></div>
           <label>连接方式<select value={draft.transport} onChange={(event) => setDraft((current) => ({ ...current, transport: event.target.value as McpServerConfiguration["transport"] }))}><option value="stdio">stdio 命令</option><option value="http">HTTP</option></select></label>
@@ -309,11 +373,15 @@ function McpSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): 
           <div className="settings-grid"><label>请求超时（毫秒）<input type="number" min="0" value={draft.requestTimeoutMs ?? ""} placeholder="使用扩展默认值" onChange={(event) => setDraft((current) => ({ ...current, requestTimeoutMs: event.target.value ? Number(event.target.value) : undefined }))} /></label><label className="checkbox-setting"><input type="checkbox" checked={draft.debug} onChange={(event) => setDraft((current) => ({ ...current, debug: event.target.checked }))} />显示服务器调试输出</label></div>
           <div className="settings-grid"><label>直接注册的工具（每行一个）<textarea value={directToolsText} placeholder="留空时使用下面的全部开关" onChange={(event) => setDirectToolsText(event.target.value)} /></label><label>排除工具（每行一个）<textarea value={excludeToolsText} onChange={(event) => setExcludeToolsText(event.target.value)} /></label></div>
           <div className="settings-grid"><label className="checkbox-setting"><input type="checkbox" checked={draft.directTools === true} disabled={Boolean(directToolsText.trim())} onChange={(event) => setDraft((current) => ({ ...current, directTools: event.target.checked }))} />直接注册全部服务器工具</label><label className="checkbox-setting"><input type="checkbox" checked={draft.exposeResources} onChange={(event) => setDraft((current) => ({ ...current, exposeResources: event.target.checked }))} />向 Agent 暴露资源</label></div>
-          {draft.source && draft.source !== configuration?.configPath ? <p className="mcp-source-note">当前配置来自 {draft.source}。保存后会在 SuoCode 私有配置中创建同名覆盖，不会修改外部应用。</p> : null}
+          {draft.sourceKind === "import" || (draft.source && draft.source !== configuration?.configPath) ? <p className="mcp-source-note">{draft.sourceKind === "import" ? <>当前条目来自外部导入{draft.source ? `（${draft.source}）` : ""}。删除只会从 SuoCode 列表中移除并本地停用，不会修改外部应用配置。保存会写入 SuoCode 私有覆盖。</> : <>当前配置来自 {draft.source}。保存后会在 SuoCode 私有配置中创建同名覆盖，不会修改外部应用。</>}</p> : null}
           {authorizationUrl ? <div className="mcp-auth-panel"><strong>完成 OAuth 认证</strong><p>浏览器已打开扩展生成的授权地址。完成授权后，粘贴回调地址或授权码。</p><button type="button" onClick={() => void window.suocode.openExternal(authorizationUrl)}><ExternalLink size={13} />重新打开授权页</button><textarea value={authInput} placeholder="粘贴回调地址或授权码" onChange={(event) => setAuthInput(event.target.value)} /><button className="primary-button" type="button" disabled={actionBusy || !authInput.trim()} onClick={() => void completeAuth()}>完成认证</button></div> : null}
-          {actionMessage ? <div className="mcp-action-message">{actionMessage}</div> : null}
-          {error ? <div className="settings-error"><AlertCircle size={14} />{error}</div> : null}
-          <footer><span>{configuration?.configPath}</span><button className="primary-button" type="submit" disabled={saving || !draft.name.trim()}>{saving ? <LoaderCircle className="spin" size={15} /> : null}保存 MCP</button></footer>
+          <footer>
+            <span>{configuration?.configPath}</span>
+            <div className="mcp-editor-footer-actions">
+              {selectedName ? <button className={removeArmed ? "danger-text-button armed" : "danger-text-button"} type="button" disabled={saving || actionBusy} onClick={() => removeArmed ? void remove() : setRemoveArmed(true)}>{removeArmed ? "再次点击确认删除" : <><Trash2 size={14} />删除</>}</button> : null}
+              <button className="primary-button" type="submit" disabled={saving || !draft.name.trim()}>{saving ? <LoaderCircle className="spin" size={15} /> : null}保存 MCP</button>
+            </div>
+          </footer>
         </form>
         {configuration?.imports.length ? <div className="mcp-imports"><div><strong>检测到的兼容配置</strong><small>由 pi-mcp-adapter 负责解析 Cursor、Claude、Codex 等现有配置。</small></div><div className="mcp-import-list">{configuration.imports.map((item) => <span className={item.enabled ? "enabled" : ""} key={`${item.kind}-${item.path}`}><b>{item.kind}</b><small>{item.serverCount} 个服务器</small></span>)}</div>{configuration.imports.some((item) => !item.enabled) ? <button type="button" disabled={saving} onClick={() => void enableDetectedImports()}>导入检测到的配置</button> : null}</div> : null}
       </section>
@@ -330,10 +398,36 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
   cwd?: string;
 }): React.JSX.Element | null {
   const [section, setSection] = useState<SettingsSection>("models");
+  const [sidebarWidth, setSidebarWidth] = useState(storedSettingsSidebarWidth);
   useEffect(() => { if (!open) setSection("models"); }, [open]);
+
+  const beginSidebarResize = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    let finalWidth = startWidth;
+    const screen = event.currentTarget.closest(".settings-screen") as HTMLElement | null;
+    document.body.classList.add("resizing-panels");
+    const move = (pointer: PointerEvent): void => {
+      finalWidth = Math.round(Math.max(
+        MINIMUM_SETTINGS_SIDEBAR_WIDTH,
+        Math.min(MAXIMUM_SETTINGS_SIDEBAR_WIDTH, startWidth + pointer.clientX - startX),
+      ));
+      screen?.style.setProperty("--settings-sidebar-width", `${finalWidth}px`);
+    };
+    const stop = (): void => {
+      document.body.classList.remove("resizing-panels");
+      window.removeEventListener("pointermove", move);
+      setSidebarWidth(finalWidth);
+      window.localStorage.setItem(SETTINGS_SIDEBAR_WIDTH_KEY, String(finalWidth));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  }, [sidebarWidth]);
+
   if (!open) return null;
   return (
-    <main className="settings-screen" aria-labelledby="settings-title">
+    <main className="settings-screen" aria-labelledby="settings-title" style={{ "--settings-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
       <aside className="settings-sidebar">
         <div className="settings-window-drag window-drag" />
         <div className="settings-sidebar-brand"><span className="brand-mark">S</span><strong>SuoCode</strong></div>
@@ -343,6 +437,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
         </nav>
         <button className="settings-back" type="button" aria-label="关闭设置" onClick={onClose}><ArrowLeft size={15} />返回工作区</button>
       </aside>
+      <div className="settings-sidebar-resizer" role="separator" aria-label="调整设置侧栏宽度" aria-orientation="vertical" onPointerDown={beginSidebarResize} />
       <section className="settings-page" role="region">
         <header className="settings-page-header window-drag"><div><span className="settings-icon">{section === "models" ? <Settings size={17} /> : <Network size={17} />}</span><div><h1 id="settings-title">{section === "models" ? "模型与服务商" : "MCP"}</h1><p>模型凭据和 MCP 配置均保存在 SuoCode 的私有运行时中。</p></div></div></header>
         <div className="settings-page-content">

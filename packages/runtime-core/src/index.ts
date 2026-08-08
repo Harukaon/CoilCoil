@@ -1340,6 +1340,14 @@ export class SuoCodeRuntime {
     return this.ready();
   }
 
+  /**
+   * After models.json / auth changes, rebind the open session's Model snapshot
+   * so endpoint and provider metadata match the shared registry (new chats already do).
+   */
+  refreshSessionModelFromRegistry(): void {
+    this.active?.session.refreshModelFromRegistry();
+  }
+
   async getConfiguration(): Promise<RuntimeConfiguration> {
     const modelRuntime = await this.ready();
     const cwd = this.active?.cwd ?? process.cwd();
@@ -1706,6 +1714,7 @@ export class SuoCodeRuntime {
 
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
+    this.refreshSessionModelFromRegistry();
     const saved = await this.getModelProviderConfiguration();
     const provider = saved.providers.find((item) => item.id === next.id);
     if (!provider) throw new Error("配置已刷新，但未能读取刚保存的服务商。");
@@ -1733,6 +1742,7 @@ export class SuoCodeRuntime {
     }
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
+    this.refreshSessionModelFromRegistry();
     return configuration;
   }
 
@@ -1779,6 +1789,7 @@ export class SuoCodeRuntime {
     await modelRuntime.logout(provider);
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
+    this.refreshSessionModelFromRegistry();
     return configuration;
   }
 
@@ -1826,7 +1837,8 @@ export class SuoCodeRuntime {
       ...(input.headers ?? {}),
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     };
-    const modelId = input.modelId?.trim() || "gpt-4o-mini";
+    const modelId = input.modelId?.trim();
+    if (!modelId) return { ok: false, message: "请先选择要测试的模型。" };
     try {
       if (api === "openai-responses") {
         const url = joinProviderUrl(baseUrl, "responses");
@@ -1841,7 +1853,7 @@ export class SuoCodeRuntime {
         });
         const text = await response.text();
         if (!response.ok) return { ok: false, message: `测试失败（HTTP ${response.status}）`, detail: truncateDetail(text) };
-        return { ok: true, message: "连接成功，已收到 Responses 回复。" };
+        return { ok: true, message: "已收到 Responses 回复。" };
       }
       const url = joinProviderUrl(baseUrl, "chat/completions");
       const response = await fetch(url, {
@@ -1855,7 +1867,7 @@ export class SuoCodeRuntime {
       });
       const text = await response.text();
       if (!response.ok) return { ok: false, message: `测试失败（HTTP ${response.status}）`, detail: truncateDetail(text) };
-      return { ok: true, message: "连接成功，已收到 Chat Completions 回复。" };
+      return { ok: true, message: "已收到 Chat Completions 回复。" };
     } catch (error) {
       return { ok: false, message: "测试请求失败", detail: errorMessage(error) };
     }
@@ -2017,7 +2029,19 @@ export class SuoCodeRuntime {
       throw new Error(redactSensitiveText(errorMessage(error), secrets));
     }
     const status = this.mcpStatusFromDetails(result.details);
-    if (status) return status;
+    if (status) {
+      const removed = this.readRemovedMcpServers();
+      if (!removed.size) return status;
+      const servers = status.servers.filter((server) => server && !removed.has(server.name));
+      return {
+        ...status,
+        servers,
+        disabledCount: servers.filter((server) => server?.disabled).length,
+        connectedCount: servers.filter((server) => server?.status === "connected").length,
+        totalTools: servers.reduce((sum, server) => sum + (server?.toolCount ?? 0), 0),
+        totalResources: servers.reduce((sum, server) => sum + (server?.resourceCount ?? 0), 0),
+      };
+    }
     const details = isRecord(result.details) ? result.details : {};
     const configuration = await this.getMcpConfiguration();
     return {
@@ -2080,20 +2104,104 @@ export class SuoCodeRuntime {
     return this.mcpAction("logout", { server: name.trim() });
   }
 
+  private removedMcpServersPath(): string {
+    return join(this.agentDir, "mcp-removed-servers.json");
+  }
+
+  private enabledMcpServersPath(): string {
+    return join(this.agentDir, "mcp-enabled-servers.json");
+  }
+
+  private readNamedMcpServerSet(path: string): Set<string> {
+    if (!existsSync(path)) return new Set();
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      const list = isRecord(parsed) && Array.isArray(parsed.servers)
+        ? parsed.servers
+        : Array.isArray(parsed) ? parsed : [];
+      return new Set(list.filter((name): name is string => typeof name === "string" && Boolean(name.trim())).map((name) => name.trim()));
+    } catch {
+      return new Set();
+    }
+  }
+
+  private writeNamedMcpServerSet(path: string, names: Set<string>): void {
+    mkdirSync(this.agentDir, { recursive: true });
+    const servers = [...names].sort((left, right) => left.localeCompare(right));
+    writeFileSync(path, `${JSON.stringify({ servers }, null, 2)}\n`, "utf8");
+  }
+
+  private readRemovedMcpServers(): Set<string> {
+    return this.readNamedMcpServerSet(this.removedMcpServersPath());
+  }
+
+  private writeRemovedMcpServers(names: Set<string>): void {
+    this.writeNamedMcpServerSet(this.removedMcpServersPath(), names);
+  }
+
+  private readEnabledMcpServers(): Set<string> {
+    return this.readNamedMcpServerSet(this.enabledMcpServersPath());
+  }
+
+  private writeEnabledMcpServers(names: Set<string>): void {
+    this.writeNamedMcpServerSet(this.enabledMcpServersPath(), names);
+  }
+
+  private markMcpServerRemovedLocally(name: string): void {
+    const removed = this.readRemovedMcpServers();
+    removed.add(name);
+    this.writeRemovedMcpServers(removed);
+    this.setMcpServerOptIn(name, false);
+  }
+
+  private clearMcpServerRemovedLocally(name: string): void {
+    const removed = this.readRemovedMcpServers();
+    if (!removed.delete(name)) return;
+    this.writeRemovedMcpServers(removed);
+  }
+
+  private setMcpServerOptIn(name: string, enabled: boolean): void {
+    const optIn = this.readEnabledMcpServers();
+    if (enabled) optIn.add(name);
+    else optIn.delete(name);
+    this.writeEnabledMcpServers(optIn);
+  }
+
+  /** Default all MCP servers to disabled unless the user has explicitly opted in. */
+  private async syncMcpOptInDisabledState(cwd?: string): Promise<boolean> {
+    if (!cwd) return false;
+    const adapter = await loadMcpAdapterConfigModule();
+    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    const resolvedCwd = this.mcpCwd(cwd);
+    const config = adapter.loadMcpConfig(globalConfigPath, resolvedCwd);
+    const enabled = this.readEnabledMcpServers();
+    const removed = this.readRemovedMcpServers();
+    let changed = false;
+    for (const name of Object.keys(config.mcpServers)) {
+      if (removed.has(name)) continue;
+      const result = adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, name, !enabled.has(name));
+      if (result.changed) changed = true;
+    }
+    return changed;
+  }
+
   async getMcpConfiguration(cwd?: string): Promise<McpConfigurationSnapshot> {
     const adapter = await loadMcpAdapterConfigModule();
     const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     const resolvedCwd = this.mcpCwd(cwd);
+    if (await this.syncMcpOptInDisabledState(cwd)) this.reloadMcpExtension();
     const projectConfigPath = cwd ? adapter.getProjectPiConfigPath(resolvedCwd) : undefined;
     const config = adapter.loadMcpConfig(configPath, resolvedCwd);
     const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
     const provenance = adapter.getServerProvenance(configPath, resolvedCwd);
     const enabledImports = new Set(config.imports ?? []);
+    const removed = this.readRemovedMcpServers();
+    const enabled = this.readEnabledMcpServers();
     return {
       configPath,
       projectConfigPath,
       imports: discovery.imports.map((entry) => ({ ...entry, enabled: enabledImports.has(entry.kind) })),
-      servers: Object.entries(config.mcpServers).map(([name, raw]) => {
+      servers: Object.entries(config.mcpServers).filter(([name]) => !removed.has(name)).map(([name, raw]) => {
         const source = provenance.get(name);
         return {
           name,
@@ -2114,7 +2222,7 @@ export class SuoCodeRuntime {
           directTools: raw.directTools === true ? true : stringArray(raw.directTools),
           excludeTools: stringArray(raw.excludeTools),
           debug: raw.debug === true,
-          disabled: raw.disabled === true,
+          disabled: raw.disabled === true || !enabled.has(name),
           source: source?.path,
           sourceKind: source?.kind,
         } satisfies McpServerConfiguration;
@@ -2152,28 +2260,70 @@ export class SuoCodeRuntime {
     if (server.debug) definition.debug = true;
     if (server.disabled) definition.disabled = true;
     adapter.writeSharedServerEntry(configPath, name, definition);
+    this.clearMcpServerRemovedLocally(name);
+    if (previousName && previousName !== name) {
+      this.clearMcpServerRemovedLocally(previousName);
+      this.setMcpServerOptIn(previousName, false);
+    }
+    // Saving keeps the current opt-in state: new drafts default to disabled until 启用.
+    this.setMcpServerOptIn(name, server.disabled !== true);
+    if (cwd) {
+      adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, name, server.disabled === true);
+    }
     this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);
   }
 
-  private removeMcpServerFromFile(configPath: string, name: string): void {
-    if (!existsSync(configPath)) return;
+  private removeMcpServerFromFile(configPath: string, name: string): boolean {
+    if (!existsSync(configPath)) return false;
     const parsed = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
     const servers = parsed.mcpServers;
-    if (!servers || typeof servers !== "object" || Array.isArray(servers) || !(name in servers)) return;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers) || !(name in servers)) return false;
     delete (servers as Record<string, unknown>)[name];
     const temporaryPath = `${configPath}.${process.pid}.tmp`;
     writeFileSync(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
     renameSync(temporaryPath, configPath);
+    return true;
   }
 
   async removeMcpServer(name: string, scope: "global" | "project" = "global", cwd?: string): Promise<McpConfigurationSnapshot> {
+    const normalizedName = name.trim();
+    if (!normalizedName) throw new Error("缺少 MCP Server 名称。");
     const adapter = await loadMcpAdapterConfigModule();
-    if (scope === "project" && !cwd) throw new Error("项目级 MCP 需要当前工作区。");
-    const configPath = scope === "project"
-      ? adapter.getProjectPiConfigPath(this.mcpCwd(cwd))
-      : adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    this.removeMcpServerFromFile(configPath, name);
+    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    const resolvedCwd = cwd ? this.mcpCwd(cwd) : undefined;
+    if (scope === "project" && !resolvedCwd) throw new Error("项目级 MCP 需要当前工作区。");
+    const projectConfigPath = resolvedCwd ? adapter.getProjectPiConfigPath(resolvedCwd) : undefined;
+    const before = await this.getMcpConfiguration(cwd);
+    if (!before.servers.some((server) => server.name === normalizedName)) {
+      throw new Error(`MCP Server 不存在：${normalizedName}`);
+    }
+
+    const tryRemove = (configPath?: string): void => {
+      if (!configPath) return;
+      this.removeMcpServerFromFile(configPath, normalizedName);
+    };
+
+    // Only mutate SuoCode-owned files. Never delete Cursor/Claude/Codex imports or shared `.mcp.json`.
+    tryRemove(globalConfigPath);
+    tryRemove(projectConfigPath);
+    const provenance = adapter.getServerProvenance(globalConfigPath, resolvedCwd ?? process.cwd());
+    const source = provenance.get(normalizedName);
+    if (source?.path && (source.kind === "user" || source.kind === "project") && (source.path === globalConfigPath || source.path === projectConfigPath)) {
+      tryRemove(source.path);
+    }
+
+    // If the server still comes from an external/shared layer, hide it inside SuoCode only:
+    // disable in our private config (so runtime won't connect) and tombstone it out of the UI list.
+    const stillPresent = Boolean(adapter.loadMcpConfig(globalConfigPath, resolvedCwd ?? process.cwd()).mcpServers[normalizedName]);
+    if (stillPresent) {
+      adapter.writeSharedServerEntry(globalConfigPath, normalizedName, { disabled: true });
+      this.markMcpServerRemovedLocally(normalizedName);
+    } else {
+      this.clearMcpServerRemovedLocally(normalizedName);
+      this.setMcpServerOptIn(normalizedName, false);
+    }
+
     this.reloadMcpExtension();
     return this.getMcpConfiguration(cwd);
   }
@@ -2186,6 +2336,7 @@ export class SuoCodeRuntime {
     const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     const effective = adapter.loadMcpConfig(globalConfigPath, resolvedCwd);
     if (!effective.mcpServers[normalizedName]) throw new Error(`MCP Server 不存在：${normalizedName}`);
+    this.setMcpServerOptIn(normalizedName, enabled);
     adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, normalizedName, !enabled);
     this.reloadMcpExtension();
     return this.getMcpConfiguration(resolvedCwd);
@@ -2854,6 +3005,7 @@ export class SuoCodeRuntime {
 
   async prompt(text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
     const active = this.requireActive();
+    this.refreshSessionModelFromRegistry();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) return this.steer(prompt, images);
@@ -2872,6 +3024,7 @@ export class SuoCodeRuntime {
 
   async rewindPrompt(entryId: string, text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
     const active = this.requireActive();
+    this.refreshSessionModelFromRegistry();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");
@@ -2893,6 +3046,7 @@ export class SuoCodeRuntime {
 
   async steer(text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
     const active = this.requireActive();
+    this.refreshSessionModelFromRegistry();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     const prepared = await preparePromptImages(images);

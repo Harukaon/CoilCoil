@@ -11,8 +11,7 @@ import { existsSync, watch, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
-import type { CreateTerminalInput, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload } from "../shared/desktop-api";
-import { TerminalManager } from "./terminal-manager";
+import type { FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload } from "../shared/desktop-api";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
@@ -25,12 +24,6 @@ const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_GET_CHANNEL = "preview:get";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
-const TERMINAL_LIST_CHANNEL = "terminal:list";
-const TERMINAL_CREATE_CHANNEL = "terminal:create";
-const TERMINAL_WRITE_CHANNEL = "terminal:write";
-const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
-const TERMINAL_CLOSE_CHANNEL = "terminal:close";
-const TERMINAL_EVENT_CHANNEL = "terminal:event";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 let isQuitting = false;
 
@@ -347,13 +340,6 @@ class RuntimeBridge {
 }
 
 const runtime = new RuntimeBridge();
-const terminals = new TerminalManager(
-  app.getPath("userData"),
-  backgroundNodeExecutable(),
-  (terminalEvent) => {
-    for (const window of BrowserWindow.getAllWindows()) window.webContents.send(TERMINAL_EVENT_CHANNEL, terminalEvent);
-  },
-);
 
 function createWindow(): void {
   const isMac = process.platform === "darwin";
@@ -427,11 +413,6 @@ app.whenReady().then(() => {
     record.document = await readPreview(record);
     return record.document;
   });
-  ipcMain.handle(TERMINAL_LIST_CHANNEL, () => terminals.list());
-  ipcMain.handle(TERMINAL_CREATE_CHANNEL, (_event, input: CreateTerminalInput) => terminals.create(input));
-  ipcMain.handle(TERMINAL_WRITE_CHANNEL, (_event, id: string, data: string): void => terminals.write(id, data));
-  ipcMain.handle(TERMINAL_RESIZE_CHANNEL, (_event, id: string, cols: number, rows: number): void => terminals.resize(id, cols, rows));
-  ipcMain.handle(TERMINAL_CLOSE_CHANNEL, (_event, id: string): void => terminals.close(id));
   ipcMain.handle(PROJECT_DIRECTORY_LIST_CHANNEL, (_event, root: string, path?: string) => listProjectDirectory(root, path));
   ipcMain.handle(RUNTIME_REQUEST_CHANNEL, (_event, payload: RuntimeRequestPayload) => runtime.request(payload));
   createWindow();
@@ -444,7 +425,6 @@ app.on("before-quit", () => {
   isQuitting = true;
   for (const preview of previews.values()) preview.watcher?.close();
   previews.clear();
-  terminals.stop();
   runtime.stop();
 });
 

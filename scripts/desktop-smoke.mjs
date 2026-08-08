@@ -1141,7 +1141,6 @@ async function main() {
         loading: Boolean(document.querySelector(".loading-state")),
         textareaDisabled: document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.disabled ?? true,
         conversationPane: Boolean(document.querySelector(".conversation-pane")),
-        terminalPane: Boolean(document.querySelector(".terminal-workspace")),
         activeProjects: [...document.querySelectorAll(".project-tree.active .project-name")].map((item) => item.textContent),
       };
     })()`);

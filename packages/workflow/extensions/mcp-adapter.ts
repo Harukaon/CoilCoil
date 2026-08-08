@@ -152,7 +152,7 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
       ) as McpProxyResult;
       if (result.isError) throw new Error(resultText(result) || "MCP 扩展请求失败。");
       const details = request.method === "status" && statusSnapshot
-        ? { ...(isRecord(result.details) ? result.details : {}), ...statusSnapshot, mode: "status" }
+        ? { ...statusSnapshot, ...(isRecord(result.details) ? result.details : {}), mode: "status" }
         : result.details;
       pi.events.emit(`${MCP_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
         version: MCP_RPC_PROTOCOL_VERSION,

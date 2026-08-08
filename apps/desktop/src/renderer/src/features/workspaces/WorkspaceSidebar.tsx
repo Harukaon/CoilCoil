@@ -11,7 +11,6 @@ import {
   MoreHorizontal,
   Plus,
   Settings,
-  SquareTerminal,
 } from "lucide-react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 import { SuoLoader } from "../../ui/SuoLoader";
@@ -47,7 +46,6 @@ export function WorkspaceSidebar({
   onNewConversation,
   onOpenProject,
   onToggleProject,
-  onOpenTerminal,
   onShowAllSessions,
   onCollapseSessions,
   onOpenConversation,
@@ -69,7 +67,6 @@ export function WorkspaceSidebar({
   onNewConversation: (project?: ProjectSelection) => void;
   onOpenProject: () => void;
   onToggleProject: (path: string) => void;
-  onOpenTerminal: (project: ProjectSelection) => void;
   onShowAllSessions: (path: string) => void;
   onCollapseSessions: (path: string) => void;
   onOpenConversation: (project: ProjectSelection, session: SessionSummary) => void;
@@ -100,7 +97,6 @@ export function WorkspaceSidebar({
                   <span className="project-name">{project.name}</span>
                 </button>
                 <span className="project-row-actions">
-                  <button className="project-action" type="button" aria-label={`在 ${project.name} 中打开终端`} onClick={() => onOpenTerminal(project)}><SquareTerminal size={13} /></button>
                   <button className="project-action" type="button" aria-label={`在 ${project.name} 中新建对话`} onClick={() => onNewConversation(project)}><Plus size={14} /></button>
                 </span>
               </div>

@@ -1,5 +1,6 @@
-import { AlertCircle, PanelLeft, PanelRight, X } from "lucide-react";
+import { PanelLeft, PanelRight } from "lucide-react";
 import type {
+  CSSProperties,
   DragEvent as ReactDragEvent,
   FormEvent,
   RefObject,
@@ -14,6 +15,7 @@ import type {
   SessionSnapshot,
   SubagentActivity,
 } from "@suocode/runtime-protocol";
+import { useChatContentWidth } from "../../hooks/useChatContentWidth";
 import { ActivityPanel } from "../activity/ActivityPanel";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
@@ -48,7 +50,6 @@ export function ConversationPane({
   timelineRef,
   agentPhase,
   activityPhrase,
-  error,
   projectState,
   subagents,
   snapshot,
@@ -94,7 +95,6 @@ export function ConversationPane({
   timelineRef: RefObject<HTMLDivElement | null>;
   agentPhase?: "思考" | "回复" | "工具";
   activityPhrase: string;
-  error?: string;
   projectState: ProjectSnapshot;
   subagents: SubagentActivity[];
   snapshot?: SessionSnapshot;
@@ -128,8 +128,9 @@ export function ConversationPane({
   onOpenSettings: () => void;
   onAbort: () => void;
 }): React.JSX.Element {
+  const { chatContentWidth, beginChatWidthResize } = useChatContentWidth();
   return (
-    <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+    <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <header className="conversation-header window-drag">
         {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
         <div className="conversation-title"><strong title={pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话"}>{truncateTitle(pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
@@ -141,9 +142,10 @@ export function ConversationPane({
       </div>
 
       <div className="composer-wrap">
+        <div className="composer-width-resizer left" role="separator" aria-label="调整对话宽度" aria-orientation="vertical" onPointerDown={(event) => beginChatWidthResize("left", event)} />
+        <div className="composer-width-resizer right" role="separator" aria-label="调整对话宽度" aria-orientation="vertical" onPointerDown={(event) => beginChatWidthResize("right", event)} />
         <div className="composer-stack">
           <div className="composer-overlays">
-            {error ? <div className="error-banner"><AlertCircle size={14} /><span>{error}</span><button type="button" onClick={() => onError(undefined)}><X size={13} /></button></div> : null}
             <ActivityPanel todo={projectState.plan} subagents={subagents} onStopSubagent={onStopSubagent} />
           </div>
           <ConversationComposer project={project} running={running} loading={loading} startingSession={startingSession} draft={draft} images={draftImages} inputRef={inputRef} configuration={configuration} selectedModel={selectedModel} modelMenuOpen={modelMenuOpen} modelChanging={modelChanging} onSubmit={onSubmit} onDraftChange={onDraftChange} onImagesChange={onImagesChange} onPaste={onPaste} onCompositionStart={onCompositionStart} onCompositionEnd={onCompositionEnd} onKeyDown={onKeyDown} onModelMenuOpenChange={onModelMenuOpenChange} onSelectModel={onSelectModel} onOpenSettings={onOpenSettings} onAbort={onAbort} />

@@ -1,7 +1,8 @@
 import { AlertCircle, ChevronRight, LoaderCircle, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from "react";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, PromptImage, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
 import { SubagentTimelineCard } from "./SubagentTimelineCard";
@@ -20,6 +21,10 @@ type ActivityEntry =
   | { kind: "tool"; id: string; tool: ToolRun };
 
 const REWIND_WARNING_DISMISSED_KEY = "suocode.rewind-warning-dismissed";
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
+const MARKDOWN_COMPONENTS: Components = {
+  table: ({ node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props} /></div>,
+};
 
 export function imageDataUrl(image: PromptImage): string {
   return `data:${image.mimeType};base64,${image.data}`;
@@ -53,20 +58,15 @@ function insertPath(value: string, path: string, start: number, end: number): { 
   return { value: `${before}${insertion}${after}`, caret: start + insertion.length };
 }
 
-function Markdown({ children }: { children: string }): React.JSX.Element {
+const Markdown = memo(function Markdown({ children }: { children: string }): React.JSX.Element {
   return (
     <div className="markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          table: ({ node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props} /></div>,
-        }}
-      >
+      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
         {children}
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 function ImageStrip({ images, editable, onRemove }: {
   images: PromptImage[];

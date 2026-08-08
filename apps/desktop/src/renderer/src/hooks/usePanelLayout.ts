@@ -70,6 +70,8 @@ export function usePanelLayout(): {
     const startX = event.clientX;
     const startWidth = side === "left" ? leftWidth : rightWidth;
     let finalWidth = startWidth;
+    const shell = event.currentTarget.closest(".app-shell") as HTMLElement | null;
+    const cssVar = side === "left" ? "--sidebar-width" : "--inspector-width";
     document.body.classList.add("resizing-panels");
     const move = (pointer: PointerEvent): void => {
       const raw = side === "left" ? startWidth + pointer.clientX - startX : startWidth + startX - pointer.clientX;
@@ -79,13 +81,19 @@ export function usePanelLayout(): {
       const maximum = Math.max(MINIMUM_PANEL_WIDTH, window.innerWidth - oppositeWidth - MINIMUM_CONVERSATION_WIDTH);
       const width = Math.round(Math.max(MINIMUM_PANEL_WIDTH, Math.min(maximum, raw)));
       finalWidth = width;
-      if (side === "left") setLeftWidth(width); else setRightWidth(width);
+      // Update layout via CSS only — avoid React re-rendering the chat tree every frame.
+      shell?.style.setProperty(cssVar, `${width}px`);
     };
     const stop = (): void => {
       document.body.classList.remove("resizing-panels");
       window.removeEventListener("pointermove", move);
-      if (side === "left") preferredLeftWidthRef.current = finalWidth;
-      else preferredRightWidthRef.current = finalWidth;
+      if (side === "left") {
+        preferredLeftWidthRef.current = finalWidth;
+        setLeftWidth(finalWidth);
+      } else {
+        preferredRightWidthRef.current = finalWidth;
+        setRightWidth(finalWidth);
+      }
       window.localStorage.setItem(side === "left" ? LEFT_WIDTH_KEY : RIGHT_WIDTH_KEY, String(finalWidth));
     };
     window.addEventListener("pointermove", move);

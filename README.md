@@ -6,7 +6,7 @@ SuoCode Desktop does not require a user-installed Pi. The application starts its
 
 ## Products
 
-- **SuoCode Desktop** — a three-pane Agent workspace with projects and sessions on the left, the live Agent conversation in the center, and Plan, Changes, Terminal, and Files on the right.
+- **SuoCode Desktop** — a three-pane Agent workspace with projects and sessions on the left, the live Agent conversation in the center, and project files on the right.
 - **SuoCode CLI** — a terminal Agent using the same model configuration, session system, tools, and workflow.
 
 ## Included capabilities

@@ -44,6 +44,8 @@ class FakeRuntime {
     return {};
   }
 
+  refreshSessionModelFromRegistry(): void {}
+
   async createSession(cwd: string): Promise<SessionSnapshot> {
     return this.install(cwd, `${cwd}/session-${this.ordinal}.jsonl`);
   }

@@ -27,7 +27,15 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   overflow: hidden;
   position: relative;
 }
-.resizing-panels, .resizing-panels * { cursor: col-resize !important; user-select: none !important; }
+.resizing-panels {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+.resizing-panels iframe,
+.resizing-panels textarea,
+.resizing-panels input {
+  pointer-events: none;
+}
 .panel-resizer { position: absolute; z-index: 20; top: 0; bottom: 0; width: 7px; cursor: col-resize; touch-action: none; }
 .panel-resizer::after { position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; content: ""; background: transparent; transition: background 120ms ease; }
 .panel-resizer:hover::after, .panel-resizer:active::after { background: #aaa9a3; }
@@ -271,6 +279,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 @keyframes loader-wave { 0%, 70%, 100% { height: 30%; opacity: .48; } 35% { height: 88%; opacity: 1; } }
 
 .composer-wrap { position: relative; z-index: 2; width: min(var(--chat-content-width), calc(100% - 48px)); min-width: 0; margin: 0 auto; padding-bottom: 12px; }
+.composer-width-resizer { position: absolute; z-index: 3; top: 8px; bottom: 20px; width: 7px; cursor: ew-resize; touch-action: none; }
+.composer-width-resizer.left { left: -4px; }
+.composer-width-resizer.right { right: -4px; }
+.composer-width-resizer::after { position: absolute; top: 18%; bottom: 18%; left: 3px; width: 1px; content: ""; background: transparent; transition: background 120ms ease; }
+.composer-width-resizer:hover::after, .composer-width-resizer:active::after { background: #aaa9a3; }
 .composer-stack { position: relative; isolation: isolate; display: flex; align-items: center; flex-direction: column; }
 .composer-overlays { position: absolute; z-index: 0; bottom: calc(100% - 10px); left: 0; display: flex; width: 100%; min-width: 0; align-items: center; flex-direction: column; gap: 8px; pointer-events: none; }
 .composer-overlays > * { pointer-events: auto; }
@@ -313,16 +326,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .subagent-stop { display: inline-flex; height: 24px; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid #deded9; border-radius: 7px; color: #777772; background: #fafaf8; font-size: 9px; cursor: pointer; }
 .subagent-stop:hover { color: #a43b35; border-color: #dfb7b3; background: #fff8f7; }
 .subagent-status { align-self: center; color: #9a9a95; white-space: nowrap; }
-.error-banner { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; margin: 0; padding: 8px 10px; border: 1px solid #e6c9c5; border-radius: 9px; color: #9a413a; background: #fff7f5; font-size: 11px; }
-.error-banner span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.error-banner button { display: grid; padding: 2px; place-items: center; color: inherit; background: transparent; cursor: pointer; }
 .composer { position: relative; z-index: 2; width: 100%; overflow: hidden; border: 1px solid #d9d9d5; border-radius: 18px; background: #fff; box-shadow: 0 1px 2px rgb(23 23 20 / 4%), 0 8px 24px rgb(23 23 20 / 4%); }
 .composer:focus-within { border-color: #bdbdb7; box-shadow: 0 0 0 3px rgb(70 70 64 / 5%), 0 8px 24px rgb(23 23 20 / 4%); }
 .composer-images { display: flex; gap: 8px; padding: 10px 14px 0; overflow-x: auto; }
 .composer-images figure { position: relative; width: 58px; height: 58px; flex: 0 0 auto; margin: 0; }
 .composer-images img { display: block; width: 100%; height: 100%; object-fit: cover; border: 1px solid #d9d9d5; border-radius: 9px; }
 .composer-images button { position: absolute; top: -5px; right: -5px; display: grid; width: 18px; height: 18px; padding: 0; place-items: center; border: 1px solid #d2d2ce; border-radius: 50%; color: #595954; background: #fff; box-shadow: 0 2px 7px rgb(23 23 20 / 12%); cursor: pointer; }
-.composer textarea { display: block; width: 100%; height: 86px; min-height: 86px; max-height: 128px; overflow-x: hidden; overflow-y: auto; padding: 14px 18px 6px; resize: none; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 1.5; }
+.composer textarea { display: block; width: 100%; height: 42px; min-height: 42px; max-height: 160px; overflow-x: hidden; overflow-y: auto; padding: 11px 18px 0; resize: none; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 1.45; }
 .composer textarea::placeholder { color: #a1a19c; }
 .composer textarea:disabled { cursor: default; }
 .composer textarea::-webkit-scrollbar { width: 5px; }
@@ -431,14 +441,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .preview-heading span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preview-heading button { display: grid; padding: 3px; place-items: center; color: #777772; background: transparent; cursor: pointer; }
 .diff-preview pre { height: calc(100% - 32px); min-height: 180px; margin: 0; overflow: auto; padding: 10px; color: #50504c; background: #f3f3f0; font: 9px/1.55 "SFMono-Regular", Consolas, monospace; white-space: pre; }
-.terminal-list { display: grid; gap: 8px; padding: 10px; }
-.terminal-card { overflow: hidden; border: 1px solid #deded9; border-radius: 8px; background: #252523; color: #e8e8e3; }
-.terminal-card summary { display: flex; min-height: 36px; align-items: center; gap: 7px; padding: 7px 9px; cursor: pointer; list-style: none; }
-.terminal-card summary::-webkit-details-marker { display: none; }
-.terminal-card summary code { min-width: 0; flex: 1; overflow: hidden; font: 10px/1.4 "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.terminal-light { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #72846f; }.terminal-card.running .terminal-light { background: #c19b50; }.terminal-card.failed .terminal-light { background: #b85c54; }
-.terminal-meta { padding: 0 9px 7px; overflow: hidden; color: #8e8e88; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.terminal-card pre { max-height: 320px; margin: 0; overflow: auto; padding: 9px; border-top: 1px solid #3a3a37; color: #d9d9d4; background: #1f1f1d; font: 9px/1.5 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; }
 .file-tree { min-height: 0; overflow: auto; padding: 7px 5px; }
 .file-tree-node > button, .file-leaf { display: flex; width: 100%; height: 27px; align-items: center; gap: 5px; padding-right: 7px; border-radius: 5px; color: #5b5b57; text-align: left; background: transparent; }
 .file-leaf[draggable="true"], .file-tree-node > button[draggable="true"] { cursor: grab; }
@@ -446,7 +448,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .file-tree-node > button { cursor: pointer; }
 .file-tree-node > button:hover, .file-leaf:hover { background: #ecece9; }
 .file-tree-node span, .file-leaf span { min-width: 0; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.file-tree-error { margin: 8px; color: #a45149; font-size: 10px; line-height: 1.4; }
 .conversation-pane.file-drag-active::after { position: absolute; z-index: 30; inset: 10px; display: grid; content: "拖放到此处引用文件"; place-items: center; border: 1px dashed #8c9b88; border-radius: 14px; color: #657261; background: rgb(247 249 245 / 84%); backdrop-filter: blur(3px); font-size: 12px; font-weight: 600; pointer-events: none; }
 
 

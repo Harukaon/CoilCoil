@@ -1,4 +1,5 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
+import { toastError } from "../../ui/toast";
 import { ChevronDown, ChevronRight, File, Files, Folder, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
@@ -34,17 +35,16 @@ function removeTreeNode(nodes: FileNode[], path: string): FileNode[] {
     .map((node) => node.children ? { ...node, children: removeTreeNode(node.children, path) } : node);
 }
 
-function FileContextMenu({ node, root, onTrashed, onError }: {
+function FileContextMenu({ node, root, onTrashed }: {
   node: FileNode;
   root: string;
   onTrashed: (path: string) => void;
-  onError: (message: string) => void;
 }): React.JSX.Element {
   const copy = async (value: string): Promise<void> => {
     try {
       await window.suocode.copyText(value);
     } catch (caught) {
-      onError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     }
   };
   const run = async (action: "reveal" | "trash"): Promise<void> => {
@@ -52,7 +52,7 @@ function FileContextMenu({ node, root, onTrashed, onError }: {
       const result = await window.suocode.performProjectFileAction({ root, path: node.path, action });
       if (result.trashed) onTrashed(node.path);
     } catch (caught) {
-      onError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     }
   };
   return (
@@ -69,14 +69,13 @@ function FileContextMenu({ node, root, onTrashed, onError }: {
   );
 }
 
-function FileTreeNode({ node, root, depth, onLoad, onOpen, onTrashed, onError }: {
+function FileTreeNode({ node, root, depth, onLoad, onOpen, onTrashed }: {
   node: FileNode;
   root: string;
   depth: number;
   onLoad: (path: string) => Promise<void>;
   onOpen: (node: FileNode) => void;
   onTrashed: (path: string) => void;
-  onError: (message: string) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -110,9 +109,9 @@ function FileTreeNode({ node, root, depth, onLoad, onOpen, onTrashed, onError }:
               <span>{node.name}</span>
             </button>
           </ContextMenu.Trigger>
-          <FileContextMenu node={node} root={root} onTrashed={onTrashed} onError={onError} />
+          <FileContextMenu node={node} root={root} onTrashed={onTrashed} />
         </ContextMenu.Root>
-        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} root={root} depth={depth + 1} onLoad={onLoad} onOpen={onOpen} onTrashed={onTrashed} onError={onError} />) : null}
+        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} root={root} depth={depth + 1} onLoad={onLoad} onOpen={onOpen} onTrashed={onTrashed} />) : null}
       </div>
     );
   }
@@ -123,19 +122,17 @@ function FileTreeNode({ node, root, depth, onLoad, onOpen, onTrashed, onError }:
           <File size={13} /><span>{node.name}</span>
         </button>
       </ContextMenu.Trigger>
-      <FileContextMenu node={node} root={root} onTrashed={onTrashed} onError={onError} />
+      <FileContextMenu node={node} root={root} onTrashed={onTrashed} />
     </ContextMenu.Root>
   );
 }
 
 export function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSnapshot; runtimeId?: string; onOpen: (node: FileNode) => void }): React.JSX.Element {
   const [tree, setTree] = useState<FileNode[]>(project.files);
-  const [error, setError] = useState<string>();
   useEffect(() => {
     setTree(project.files);
-    setError(undefined);
     if (!project.cwd || project.files.length) return;
-    void window.suocode.listProjectDirectory(project.cwd).then(setTree).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
+    void window.suocode.listProjectDirectory(project.cwd).then(setTree).catch((caught) => toastError(caught instanceof Error ? caught.message : String(caught)));
   }, [project.cwd, project.files]);
 
   const loadDirectory = async (path: string): Promise<void> => {
@@ -145,7 +142,7 @@ export function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSna
         : await window.suocode.listProjectDirectory(project.cwd, path);
       setTree((current) => replaceDirectoryChildren(current, path, children));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     }
   };
   const removeNode = (path: string): void => setTree((current) => removeTreeNode(current, path));
@@ -156,8 +153,7 @@ export function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSna
   return (
     <div className="files-panel">
       <div className="file-tree">
-        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} root={project.cwd} depth={0} onLoad={loadDirectory} onOpen={onOpen} onTrashed={removeNode} onError={setError} />) : <p className="panel-note">此文件夹为空。</p>}
-        {error ? <p className="file-tree-error">{error}</p> : null}
+        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} root={project.cwd} depth={0} onLoad={loadDirectory} onOpen={onOpen} onTrashed={removeNode} />) : <p className="panel-note">此文件夹为空。</p>}
       </div>
     </div>
   );

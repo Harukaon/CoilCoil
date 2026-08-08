@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, Plus, RefreshCw, Search, Trash2, Zap } from "lucide-react";
+import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, Plus, RefreshCw, Search, Trash2, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   FetchProviderModelsResult,
@@ -13,7 +13,10 @@ import type {
   TestProviderConnectionResult,
   ThinkingLevel,
 } from "@suocode/runtime-protocol";
+import { toastError, toastSuccess } from "../../ui/toast";
+import { loadModelCatalog, mergeSelectedUpstreamModels, type ModelCatalogMeta } from "./modelCatalog";
 import { SettingsSelect } from "./SettingsSelect";
+import { UpstreamModelPicker, type UpstreamModelOption } from "./UpstreamModelPicker";
 
 type EditableModel = ModelProviderModelConfiguration & { uid: string };
 type ProviderDraft = Omit<ModelProviderConfigurationInput["provider"], "models"> & { models: EditableModel[] };
@@ -114,6 +117,19 @@ function blankModel(): EditableModel {
   };
 }
 
+function modelFromUpstream(option: UpstreamModelOption, meta: ModelCatalogMeta): EditableModel {
+  const base = blankModel();
+  return {
+    ...base,
+    id: option.id,
+    name: meta.name || option.name || option.id,
+    reasoning: meta.reasoning ?? base.reasoning,
+    input: meta.input ?? base.input,
+    contextWindow: meta.contextWindow ?? base.contextWindow,
+    maxTokens: meta.maxTokens ?? base.maxTokens,
+  };
+}
+
 function toEditableModel(model: ModelProviderModelConfiguration): EditableModel {
   return { ...clone(model), uid: uid() };
 }
@@ -182,7 +198,7 @@ function customCredentialConfiguration(): ModelProviderCredentialConfiguration {
         label: "API 密钥",
         input: "secret",
         required: false,
-        placeholder: "粘贴 API 密钥；本地服务可留空",
+        placeholder: "粘贴 API 密钥（没有密钥要求时可留空）",
         configured: false,
       }],
     }],
@@ -216,18 +232,43 @@ function ProviderCredentialEditor({
   onValueChange: (field: string, value: string) => void;
 }): React.JSX.Element {
   const active = configuration.methods.find((item) => item.id === method) ?? configuration.methods[0];
+  const simpleKeyOnly = configuration.methods.length === 1
+    && (active?.fields.length ?? 0) === 1
+    && active?.fields[0]?.input === "secret"
+    && !configuration.oauth;
+  if (simpleKeyOnly && active) {
+    const field = active.fields[0]!;
+    return (
+      <label className="provider-credential-compact">
+        <span>
+          {field.label || "API 密钥"}
+          <em className={configured ? "configured" : ""}>{configured ? "已配置" : field.required ? "必填" : "可选"}</em>
+        </span>
+        <span className="secret-input">
+          <KeyRound size={13} />
+          <input
+            type="password"
+            value={values[field.id] ?? ""}
+            autoComplete="off"
+            placeholder={field.configured ? "已配置；留空即可保留" : field.placeholder}
+            onChange={(event) => onValueChange(field.id, event.target.value)}
+          />
+        </span>
+      </label>
+    );
+  }
   return (
     <section className="provider-credential-editor">
       <header>
-        <div><strong>连接与认证</strong><small>这里展示当前服务商真正需要的认证方式和运行参数，配置保存在 SuoCode 私有运行时中。</small></div>
+        <strong>连接与认证</strong>
         <span className={configured ? "configured" : ""}>{configured ? "已配置" : "未配置"}</span>
       </header>
       {configuration.methods.length > 1 ? <label>认证方式<SettingsSelect value={active?.id ?? ""} options={configuration.methods.map((item) => ({ value: item.id, label: item.label, detail: item.description }))} ariaLabel="服务商认证方式" onChange={onMethodChange} /></label> : null}
       {active ? <>
-        {configuration.methods.length === 1 ? <div className="provider-credential-method"><strong>{active.label}</strong>{active.description ? <p>{active.description}</p> : null}</div> : active.description ? <p className="provider-credential-description">{active.description}</p> : null}
+        {active.description && configuration.methods.length > 1 ? <p className="provider-credential-description">{active.description}</p> : null}
         {active.fields.length ? <div className="provider-credential-fields">{active.fields.map((field) => <label className={field.input === "textarea" ? "wide" : ""} key={field.id}>
           <span>{field.label}<em className={field.required ? "required" : ""}>{field.required ? "必填" : "可选"}</em></span>
-          {field.input === "textarea" ? <textarea value={values[field.id] ?? ""} placeholder={field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} /> : field.input === "secret" ? <span className="secret-input"><KeyRound size={14} /><input type="password" value={values[field.id] ?? ""} autoComplete="off" placeholder={field.configured ? "已配置；留空即可保留" : field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} /></span> : <input value={values[field.id] ?? ""} placeholder={field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} />}
+          {field.input === "textarea" ? <textarea value={values[field.id] ?? ""} placeholder={field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} /> : field.input === "secret" ? <span className="secret-input"><KeyRound size={13} /><input type="password" value={values[field.id] ?? ""} autoComplete="off" placeholder={field.configured ? "已配置；留空即可保留" : field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} /></span> : <input value={values[field.id] ?? ""} placeholder={field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} />}
           {field.description ? <small>{field.description}</small> : null}
         </label>)}</div> : <p className="provider-credential-description">此方式使用应用运行环境中已经存在的凭据，不需要在这里填写密钥。</p>}
       </> : <div className="provider-oauth-only"><strong>{configuration.oauth?.label ?? "订阅登录"}</strong><p>此服务商由 OAuth 登录流程认证，不使用 API Key。</p></div>}
@@ -305,8 +346,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const [fetchingModels, setFetchingModels] = useState(false);
   const [testing, setTesting] = useState(false);
   const [removeArmed, setRemoveArmed] = useState(false);
-  const [error, setError] = useState<string>();
-  const [actionMessage, setActionMessage] = useState<{ kind: "ok" | "error"; text: string }>();
+  const [upstreamPickerModels, setUpstreamPickerModels] = useState<UpstreamModelOption[]>();
 
   const selectedProvider = snapshot?.providers.find((provider) => provider.id === selectedId);
   const canRemove = Boolean(selectedId && (selectedSource !== "built-in" || selectedProvider?.apiKeyConfigured));
@@ -334,8 +374,6 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setDefaultModelId(current && available.some((model) => model.id === current) ? current : nextDraft.models[0]?.id ?? available[0]?.id ?? "");
     setThinkingLevel(nextConfiguration?.provider === provider.id ? nextConfiguration.thinkingLevel : "medium");
     setRemoveArmed(false);
-    setError(undefined);
-    setActionMessage(undefined);
   };
 
   const load = async (preferredId?: string, nextConfiguration = configuration): Promise<void> => {
@@ -349,7 +387,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
         ?? next.providers[0];
       if (selected) applyProvider(selected, nextConfiguration);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setLoading(false);
     }
@@ -398,8 +436,6 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setDefaultModelId(next.models[0]?.id ?? "");
     setThinkingLevel("medium");
     setRemoveArmed(false);
-    setError(undefined);
-    setActionMessage(undefined);
   };
 
   const updateModel = (uidValue: string, next: EditableModel): void => setDraft((current) => current ? {
@@ -457,7 +493,6 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
 
   const save = async (applyDefault = false): Promise<ModelProviderSaveResult | undefined> => {
     setSaving(true);
-    setError(undefined);
     try {
       const result = await window.suocode.request<ModelProviderSaveResult>({ type: "save_model_provider_configuration", input: buildInput() }, runtimeId);
       onSaved(result.configuration);
@@ -468,10 +503,13 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
         const next = await window.suocode.request<RuntimeConfiguration>({ type: "configure_model", provider: result.provider.id, modelId, thinkingLevel }, runtimeId);
         onSaved(next);
         await load(result.provider.id, next);
+        toastSuccess("已保存并设为当前模型。");
+      } else {
+        toastSuccess(isBuiltinProvider ? "已保存设置。" : "已保存服务商。");
       }
       return result;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
       return undefined;
     } finally {
       setSaving(false);
@@ -481,17 +519,15 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const remove = async (): Promise<void> => {
     if (!selectedId || !canRemove) return;
     setSaving(true);
-    setError(undefined);
-    setActionMessage(undefined);
     try {
       const next = selectedSource === "built-in"
         ? await window.suocode.request<RuntimeConfiguration>({ type: "remove_provider_auth", provider: selectedId }, runtimeId)
         : await window.suocode.request<RuntimeConfiguration>({ type: "remove_model_provider_configuration", provider: selectedId }, runtimeId);
       onSaved(next);
       await load(undefined, next);
-      setActionMessage({ kind: "ok", text: selectedSource === "built-in" ? "已清除该服务商的凭据。" : "已移除该服务商配置。" });
+      toastSuccess(selectedSource === "built-in" ? "已清除该服务商的凭据。" : "已移除该服务商配置。");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setSaving(false);
       setRemoveArmed(false);
@@ -505,13 +541,12 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
 
   const fetchUpstreamModels = async (): Promise<void> => {
     if (!draft?.baseUrl?.trim()) {
-      setError("请先填写 Base URL，再拉取上游模型。");
+      toastError("请先填写 Base URL，再拉取上游模型。");
       return;
     }
     setFetchingModels(true);
-    setError(undefined);
-    setActionMessage(undefined);
     try {
+      void loadModelCatalog();
       const headers = parseStringMap(providerHeadersText, "服务商请求头");
       const result = await window.suocode.request<FetchProviderModelsResult>({
         type: "fetch_provider_models",
@@ -523,33 +558,49 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           provider: selectedId,
         },
       }, runtimeId);
-      const existingById = new Map(draft.models.map((model) => [model.id, model]));
-      const nextModels = result.models.map((item) => {
-        const existing = existingById.get(item.id);
-        if (existing) return existing;
-        return { ...blankModel(), id: item.id, name: item.name ?? item.id };
-      });
-      setDraft((current) => current ? { ...current, replaceModels: true, models: nextModels } : current);
-      setModelAdvanced((current) => ({ ...current, ...initialAdvancedText(nextModels.filter((model) => !current[model.uid])) }));
-      if (!defaultModelId || !nextModels.some((model) => model.id === defaultModelId)) {
-        setDefaultModelId(nextModels[0]?.id ?? "");
+      if (!result.models.length) {
+        toastError("上游未返回可用模型。");
+        return;
       }
-      setActionMessage({ kind: "ok", text: `已拉取 ${nextModels.length} 个上游模型，可继续编辑后保存。` });
+      setUpstreamPickerModels(result.models);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setFetchingModels(false);
     }
   };
 
+  const applyUpstreamSelection = (selected: Array<UpstreamModelOption & { meta: ModelCatalogMeta }>): void => {
+    if (!draft) return;
+    const metaById = new Map(selected.map((item) => [item.id, item]));
+    const { next: compact, added } = mergeSelectedUpstreamModels(
+      draft.models,
+      selected.map((item) => item.id),
+      (id) => {
+        const item = metaById.get(id)!;
+        return modelFromUpstream(item, item.meta);
+      },
+    );
+    setDraft((current) => current ? { ...current, replaceModels: true, models: compact.length ? compact : [blankModel()] } : current);
+    setModelAdvanced((current) => ({ ...current, ...initialAdvancedText(added.filter((model) => !current[model.uid])) }));
+    if (!defaultModelId || !compact.some((model) => model.id === defaultModelId)) {
+      setDefaultModelId(compact.find((model) => model.id.trim())?.id ?? "");
+    }
+    setUpstreamPickerModels(undefined);
+    toastSuccess(added.length ? `已添加 ${added.length} 个上游模型。` : "所选模型均已在本地目录中。");
+  };
+
   const testConnection = async (): Promise<void> => {
     if (!draft?.baseUrl?.trim() || !draft.api?.trim()) {
-      setError("测试连接需要 Base URL 和请求协议。");
+      toastError("测试需要 Base URL 和请求协议。");
+      return;
+    }
+    const modelId = defaultModelId.trim() || draft.models.find((model) => model.id.trim())?.id.trim() || "";
+    if (!modelId) {
+      toastError("请先选择要测试的模型。");
       return;
     }
     setTesting(true);
-    setError(undefined);
-    setActionMessage(undefined);
     try {
       const headers = parseStringMap(providerHeadersText, "服务商请求头");
       const result = await window.suocode.request<TestProviderConnectionResult>({
@@ -559,16 +610,15 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           api: draft.api,
           apiKey: draftApiKey(),
           headers,
-          modelId: defaultModelId || draft.models[0]?.id,
+          modelId,
           provider: selectedId,
         },
       }, runtimeId);
-      setActionMessage({
-        kind: result.ok ? "ok" : "error",
-        text: result.detail ? `${result.message}：${result.detail}` : result.message,
-      });
+      const summary = result.detail ? `${result.message}：${result.detail}` : result.message;
+      if (result.ok) toastSuccess(`模型 ${modelId}：${summary}`);
+      else toastError(`模型 ${modelId} 测试失败 — ${summary}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setTesting(false);
     }
@@ -576,6 +626,12 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
 
   return (
     <div className="model-provider-settings">
+      {upstreamPickerModels && draft ? <UpstreamModelPicker
+        models={upstreamPickerModels}
+        configuredIds={new Set(draft.models.map((model) => model.id).filter(Boolean))}
+        onCancel={() => setUpstreamPickerModels(undefined)}
+        onConfirm={applyUpstreamSelection}
+      /> : null}
       <aside className="provider-catalog">
         <div className="provider-catalog-toolbar"><strong>服务商</strong><button type="button" aria-label="添加自定义服务商" onClick={addProvider}><Plus size={14} />添加</button></div>
         <div className="provider-catalog-search"><Search size={14} /><input value={query} placeholder="搜索服务商" onChange={(event) => setQuery(event.target.value)} /></div>
@@ -593,15 +649,13 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
         </section> : null)}
       </aside>
       <section className="provider-editor">
-        {!draft && !loading ? <div className="provider-editor-empty"><CircleDot size={22} /><strong>{error ? "无法读取服务商配置" : "选择或添加一个服务商"}</strong>{error ? <div className="settings-error"><AlertCircle size={14} />{error}</div> : <p>所有配置都会写入 SuoCode 私有运行时的 <code>models.json</code>，不会读取或修改用户的本地 Agent 目录。</p>}</div> : null}
+        {!draft && !loading ? <div className="provider-editor-empty"><CircleDot size={22} /><strong>选择或添加一个服务商</strong><p>所有配置都会写入 SuoCode 私有运行时的 <code>models.json</code>，不会读取或修改用户的本地 Agent 目录。</p></div> : null}
         {draft ? <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
           <header className="provider-editor-heading">
             <div>
               <span className="provider-source-tag">{selectedId ? sourceLabel(selectedSource) : "新的自定义服务商"}</span>
               <strong>{draft.name || draft.id || "未命名服务商"}</strong>
-              <small>{isBuiltinProvider
-                ? "请求协议与内置模型由内置服务商决定；认证字段和运行参数按该服务商的真实实现配置。"
-                : <>使用原生 <code>models.json</code> 格式；凭据保存在 SuoCode 私有 <code>auth.json</code>，不会回传到界面。</>}</small>
+              {isBuiltinProvider ? <small>请求协议与内置模型由内置服务商决定；认证字段和运行参数按该服务商的真实实现配置。</small> : null}
             </div>
             <div className="provider-editor-actions">
               <label className="provider-enable-toggle">
@@ -613,7 +667,6 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
                 启用此服务商
               </label>
               {canRemove ? <button className={removeArmed ? "danger-text-button armed" : "danger-text-button"} type="button" disabled={saving} onClick={() => removeArmed ? void remove() : setRemoveArmed(true)}>{removeArmed ? "再次点击确认" : <><Trash2 size={14} />{removeLabel}</>}</button> : null}
-              {!isBuiltinProvider ? <button className="secondary-button" type="button" disabled={saving || testing} onClick={() => void testConnection()}>{testing ? <LoaderCircle className="spin" size={15} /> : <Zap size={15} />}测试</button> : null}
               <button className="primary-button" type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{isBuiltinProvider ? "保存设置" : "保存服务商"}</button>
             </div>
           </header>
@@ -624,17 +677,17 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
               <p>这些选项直接对应 <code>models.json</code> 的服务商覆盖。普通配置不需要填写；“密钥引用”用于通过环境变量或命令延迟取得密钥，不是另一把 API 密钥。</p>
-              <div className="settings-grid"><label>服务地址覆盖（Base URL）<input value={draft.baseUrl ?? ""} placeholder="仅代理或私有网关需要" onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /><p className="provider-baseurl-hint">按上游要求填写完整地址；OpenAI 兼容接口通常需带 /v1，Anthropic 一般不带。填什么就用什么，不会改写。</p></label><label>密钥引用<input value={draft.apiKeyReference ?? ""} placeholder="$PROVIDER_KEY 或 !op read …" onChange={(event) => setDraft((current) => current ? { ...current, apiKeyReference: event.target.value || undefined } : current)} /></label></div>
+              <div className="settings-grid"><label>服务地址覆盖（Base URL）<input value={draft.baseUrl ?? ""} placeholder="仅代理或私有网关需要" onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></label><label>密钥引用<input value={draft.apiKeyReference ?? ""} placeholder="$PROVIDER_KEY 或 !op read …" onChange={(event) => setDraft((current) => current ? { ...current, apiKeyReference: event.target.value || undefined } : current)} /></label></div>
               <div className="provider-checkbox-row"><label className="checkbox-setting"><input type="checkbox" checked={Boolean(draft.authHeader)} onChange={(event) => setDraft((current) => current ? { ...current, authHeader: event.target.checked } : current)} />自动添加 Authorization: Bearer</label><label className="checkbox-setting"><input type="checkbox" checked={preserveApiKeyReference} onChange={(event) => setPreserveApiKeyReference(event.target.checked)} />保留已有 models.json 密钥/引用</label></div>
               <div className="settings-grid"><label>请求头 JSON<textarea value={providerHeadersText} placeholder={'{ "X-Gateway-Key": "$GATEWAY_KEY" }'} onChange={(event) => setProviderHeadersText(event.target.value)} /></label><label>兼容性 JSON<textarea value={providerCompatText} placeholder={'{ "supportsDeveloperRole": false }'} onChange={(event) => setProviderCompatText(event.target.value)} /></label></div>
             </details>
           </> : <>
             <div className="settings-grid"><label>服务商 ID<input value={draft.id} disabled={Boolean(selectedId)} placeholder="例如 dog-provider" onChange={(event) => setDraft((current) => current ? { ...current, id: event.target.value } : current)} /></label><label>显示名称<input value={draft.name ?? ""} placeholder="例如 DogProvider" onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label></div>
-            <div className="settings-grid"><label>请求协议<SettingsSelect value={draft.api ?? ""} options={protocolOptions.filter((option) => option.value)} ariaLabel="请求协议" placeholder="选择协议" onChange={(api) => setDraft((current) => current ? { ...current, api } : current)} searchable /></label><label>Base URL<input value={draft.baseUrl ?? ""} placeholder={draft.api === "anthropic-messages" ? "https://api.anthropic.com" : "https://api.example.com/v1"} onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /><p className="provider-baseurl-hint">OpenAI 兼容协议（Chat Completions / Responses）通常需要以 /v1 结尾；Anthropic Messages 一般不带 /v1。填什么就用什么，不会自动改写。</p></label></div>
+            <div className="settings-grid"><label>请求协议<SettingsSelect value={draft.api ?? ""} options={protocolOptions.filter((option) => option.value)} ariaLabel="请求协议" placeholder="选择协议" onChange={(api) => setDraft((current) => current ? { ...current, api } : current)} searchable /></label><label>Base URL<input value={draft.baseUrl ?? ""} placeholder={draft.api === "anthropic-messages" ? "https://api.anthropic.com" : "https://api.example.com/v1"} onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></label></div>
             <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(snapshot?.providers.find((provider) => provider.id === draft.id)?.apiKeyConfigured)} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
-              <p>密钥引用、Radius OAuth、请求头与兼容性参数都属于高级配置。普通 API 密钥请填写上方“连接与认证”。</p>
+              <p>密钥引用、Radius OAuth、请求头与兼容性参数都属于高级配置。普通 API 密钥请填写上方输入框。</p>
               <label>密钥引用<input value={draft.apiKeyReference ?? ""} placeholder="$DOG_PROVIDER_KEY 或 !op read …" onChange={(event) => setDraft((current) => current ? { ...current, apiKeyReference: event.target.value || undefined } : current)} /></label>
               <div className="provider-checkbox-row"><label className="checkbox-setting"><input type="checkbox" checked={Boolean(draft.authHeader)} onChange={(event) => setDraft((current) => current ? { ...current, authHeader: event.target.checked } : current)} />自动添加 Authorization: Bearer</label><label className="checkbox-setting"><input type="checkbox" checked={draft.oauth === "radius"} onChange={(event) => setDraft((current) => current ? { ...current, oauth: event.target.checked ? "radius" : undefined } : current)} />使用 Radius OAuth</label><label className="checkbox-setting"><input type="checkbox" checked={preserveApiKeyReference} onChange={(event) => setPreserveApiKeyReference(event.target.checked)} />保留已有 models.json 密钥/引用</label></div>
               <div className="settings-grid"><label>请求头 JSON<textarea value={providerHeadersText} placeholder={'{ "X-Gateway-Key": "$GATEWAY_KEY" }'} onChange={(event) => setProviderHeadersText(event.target.value)} /></label><label>兼容性 JSON<textarea value={providerCompatText} placeholder={'{ "supportsDeveloperRole": false }'} onChange={(event) => setProviderCompatText(event.target.value)} /></label></div>
@@ -645,21 +698,25 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
               if (!current) return current;
               return { ...current, replaceModels: true, models: current.models.length ? current.models : [blankModel()] };
             })}>自定义目录</button></div></header>
+            {!isBuiltinProvider ? <div className="provider-model-toolbar provider-model-toolbar-top">
+              <button className="secondary-button" type="button" disabled={fetchingModels || saving} onClick={() => void fetchUpstreamModels()}>{fetchingModels ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{fetchingModels ? "正在拉取…" : "拉取上游模型列表"}</button>
+              <small>请求上游 <code>/models</code> 后弹出勾选列表；仅写入你选中的模型，并用 models.dev / LiteLLM 尽量补全参数。</small>
+            </div> : null}
             {draft.replaceModels ? <>
               <div className="provider-model-list">{draft.models.map((model, index) => <ProviderModelCard key={model.uid} model={model} index={index} apiOptions={protocolOptions} advanced={modelAdvanced[model.uid] ?? { thinkingLevelMap: "{}", samplingParams: "{}", headers: "{}", compat: "{}", costTiers: "[]" }} onChange={(next) => updateModel(model.uid, next)} onAdvancedChange={(next) => setModelAdvanced((current) => ({ ...current, [model.uid]: next }))} onRemove={() => { setDraft((current) => current ? { ...current, models: current.models.filter((item) => item.uid !== model.uid) } : current); setModelAdvanced((current) => { const { [model.uid]: _removed, ...rest } = current; return rest; }); }} />)}</div>
               <div className="provider-model-toolbar">
                 <button className="add-model-button" type="button" onClick={() => { const next = blankModel(); setDraft((current) => current ? { ...current, models: [...current.models, next] } : current); setModelAdvanced((current) => ({ ...current, ...initialAdvancedText([next]) })); }}><Plus size={14} />添加模型</button>
-                {!isBuiltinProvider ? <button className="secondary-button" type="button" disabled={fetchingModels || saving} onClick={() => void fetchUpstreamModels()}>{fetchingModels ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}拉取上游模型</button> : null}
               </div>
             </> : <><div className="provider-builtins-summary">当前内置目录包含 {defaultModels.length} 个模型。启用“自定义目录”后，你可以只保留需要展示的模型。</div><details className="provider-advanced"><summary>按模型覆盖参数 <ChevronRight size={14} /></summary><p>保留内置目录时，使用 <code>modelOverrides</code> 为任意内置模型配置上下文、输出上限、图片能力、采样或兼容性参数。</p><label>modelOverrides JSON<textarea value={overridesText} placeholder={'{\n  "gpt-5.6": { "contextWindow": 128000, "maxTokens": 16384 }\n}'} onChange={(event) => setOverridesText(event.target.value)} /></label></details></>}
           </section>
           <section className="provider-default-model">
-            <div><strong>当前使用的模型</strong><small>保存配置后可直接将一个模型设为 SuoCode 当前默认模型。</small></div>
+            <div><strong>当前使用的模型</strong><small>{isBuiltinProvider ? "保存配置后可直接将一个模型设为 SuoCode 当前默认模型。" : "先选择模型，再保存为默认或发送测试请求。"}</small></div>
             <div className="settings-grid"><label>模型<SettingsSelect value={defaultModelId} options={defaultModels.map((model) => ({ value: model.id, label: model.name || model.id, detail: model.id }))} ariaLabel="当前默认模型" placeholder="请选择模型" onChange={(modelId) => { setDefaultModelId(modelId); const selected = defaultModels.find((model) => model.id === modelId); const levels: ThinkingLevel[] = selected ? modelThinkingLevels(selected, configuration, draft.id) : ["off"]; setThinkingLevel((current) => levels.includes(current) ? current : levels[0]); }} searchable /></label><label>Thinking<SettingsSelect value={thinkingLevel} options={thinkingOptions} ariaLabel="Thinking 强度" onChange={(value) => setThinkingLevel(value as ThinkingLevel)} disabled={thinkingOptions.length <= 1} /></label></div>
-            <button className="secondary-button" type="button" disabled={saving || !defaultModelId} onClick={() => void save(true)}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存并设为当前模型</button>
+            <div className="provider-default-actions">
+              {!isBuiltinProvider ? <button className="secondary-button" type="button" disabled={saving || testing || !defaultModelId} onClick={() => void testConnection()}>{testing ? <LoaderCircle className="spin" size={15} /> : <Zap size={15} />}{testing ? "测试中…" : "测试此模型"}</button> : null}
+              <button className="secondary-button" type="button" disabled={saving || !defaultModelId} onClick={() => void save(true)}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存并设为当前模型</button>
+            </div>
           </section>
-          {actionMessage ? <div className={actionMessage.kind === "error" ? "provider-action-message error" : "provider-action-message"}>{actionMessage.text}</div> : null}
-          {error ? <div className="settings-error"><AlertCircle size={14} />{error}</div> : null}
           <footer><span>{snapshot?.configPath}</span><span className="provider-runtime-note">内置协议、模型覆盖和凭据都在 SuoCode 私有运行时中处理。</span></footer>
         </form> : null}
       </section>

@@ -57,7 +57,7 @@ export function useComposerController({
     const input = inputRef.current;
     if (!input) return;
     input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
+    input.style.height = `${Math.max(42, Math.min(input.scrollHeight, 160))}px`;
   }, [draft]);
 
   const reset = useCallback((): void => {

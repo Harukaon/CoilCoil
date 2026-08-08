@@ -2320,6 +2320,14 @@ export class AgentSession {
 	}
 
 	private _refreshCurrentModelFromRegistry(): void {
+		this.refreshModelFromRegistry();
+	}
+
+	/**
+	 * Re-resolve the current model from ModelRuntime after models.json / auth refresh.
+	 * Does not append a session model_change entry — use setModel when the user picks a different model.
+	 */
+	refreshModelFromRegistry(): void {
 		const currentModel = this.model;
 		if (!currentModel) {
 			return;
