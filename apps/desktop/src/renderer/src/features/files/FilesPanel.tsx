@@ -4,15 +4,12 @@ import { ChevronDown, ChevronRight, File, Files, Folder, LoaderCircle } from "lu
 import { useEffect, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import type { FileNode, ProjectSnapshot } from "@suocode/runtime-protocol";
+import { quotePath, SUOCODE_PATH_TYPE } from "../composer/pathInsert";
 
 function absoluteProjectPath(root: string, value: string): string {
   if (/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value)) return value;
   const separator = root.includes("\\") ? "\\" : "/";
   return `${root.replace(/[\\/]+$/, "")}${separator}${value.replace(/^[\\/]+/, "")}`;
-}
-
-function quotePath(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function relativeProjectPath(root: string, value: string): string {
@@ -82,7 +79,7 @@ function FileTreeNode({ node, root, depth, onLoad, onOpen, onTrashed }: {
   const startPathDrag = (event: ReactDragEvent<HTMLButtonElement>): void => {
     const absolutePath = absoluteProjectPath(root, node.path);
     event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData("application/x-suocode-path", JSON.stringify({ path: absolutePath }));
+    event.dataTransfer.setData(SUOCODE_PATH_TYPE, JSON.stringify({ path: absolutePath }));
     event.dataTransfer.setData("text/plain", quotePath(absolutePath));
   };
 

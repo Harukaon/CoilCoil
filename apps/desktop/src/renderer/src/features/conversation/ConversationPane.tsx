@@ -1,4 +1,5 @@
-import { PanelLeft, PanelRight } from "lucide-react";
+import { ArrowDown, PanelLeft, PanelRight } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
@@ -129,6 +130,42 @@ export function ConversationPane({
   onAbort: () => void;
 }): React.JSX.Element {
   const { chatContentWidth, beginChatWidthResize } = useChatContentWidth();
+  const [editingMessageId, setEditingMessageId] = useState<string>();
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
+  useEffect(() => {
+    setEditingMessageId(undefined);
+  }, [activeConversation?.id, pendingProjectPath]);
+
+  const updateScrollDownVisibility = useCallback((): void => {
+    const viewport = timelineRef.current;
+    if (!viewport) {
+      setShowScrollDown(false);
+      return;
+    }
+    const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    setShowScrollDown(distance > 48);
+  }, [timelineRef]);
+
+  useEffect(() => {
+    updateScrollDownVisibility();
+  }, [timeline, running, loading, updateScrollDownVisibility]);
+
+  const handleBodyScroll = useCallback((): void => {
+    onTimelineScroll();
+    updateScrollDownVisibility();
+  }, [onTimelineScroll, updateScrollDownVisibility]);
+
+  const scrollToBottom = useCallback((): void => {
+    const viewport = timelineRef.current;
+    if (!viewport) return;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+  }, [timelineRef]);
+
+  const reportError = useCallback((message?: string): void => {
+    if (message) onError(message);
+  }, [onError]);
+
   return (
     <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <header className="conversation-header window-drag">
@@ -137,9 +174,45 @@ export function ConversationPane({
         <div className="header-actions no-drag">{!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={onOpenRight}><PanelRight size={17} /></button> : null}</div>
       </header>
 
-      <div className="conversation-body" ref={timelineRef} onScroll={onTimelineScroll}>
-        {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? <div className="timeline">{timeline.map((item) => item.kind === "user" ? <MessageView key={`user-${item.message.id}`} message={item.message} disabled={running} onRewind={onRewind} onError={onError} /> : <AgentTurnView key={`agent-${item.order}`} items={item.items} modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")} onStopSubagent={onStopSubagent} />)}{running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}</div> : <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>}
+      <div className="conversation-body" ref={timelineRef} onScroll={handleBodyScroll}>
+        {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? (
+          <div className="timeline">
+            {timeline.map((item) => item.kind === "user" ? (
+              <MessageView
+                key={`user-${item.message.id}`}
+                message={item.message}
+                disabled={running}
+                editing={editingMessageId === item.message.id}
+                project={project}
+                configuration={configuration}
+                selectedModel={selectedModel}
+                modelChanging={modelChanging}
+                onEditingChange={(next) => setEditingMessageId(next ? item.message.id : undefined)}
+                onRewind={onRewind}
+                onError={reportError}
+                onSelectModel={onSelectModel}
+                onOpenSettings={onOpenSettings}
+              />
+            ) : (
+              <AgentTurnView
+                key={`agent-${item.order}`}
+                items={item.items}
+                modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")}
+                onStopSubagent={onStopSubagent}
+              />
+            ))}
+            {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}
+          </div>
+        ) : (
+          <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
+        )}
       </div>
+
+      {showScrollDown ? (
+        <button className="scroll-to-bottom" type="button" aria-label="滚动到最新消息" onClick={scrollToBottom}>
+          <ArrowDown size={14} strokeWidth={2.2} />
+        </button>
+      ) : null}
 
       <div className="composer-wrap">
         <div className="composer-width-resizer left" role="separator" aria-label="调整对话宽度" aria-orientation="vertical" onPointerDown={(event) => beginChatWidthResize("left", event)} />
@@ -148,7 +221,31 @@ export function ConversationPane({
           <div className="composer-overlays">
             <ActivityPanel todo={projectState.plan} subagents={subagents} onStopSubagent={onStopSubagent} />
           </div>
-          <ConversationComposer project={project} running={running} loading={loading} startingSession={startingSession} draft={draft} images={draftImages} inputRef={inputRef} configuration={configuration} selectedModel={selectedModel} modelMenuOpen={modelMenuOpen} modelChanging={modelChanging} onSubmit={onSubmit} onDraftChange={onDraftChange} onImagesChange={onImagesChange} onPaste={onPaste} onCompositionStart={onCompositionStart} onCompositionEnd={onCompositionEnd} onKeyDown={onKeyDown} onModelMenuOpenChange={onModelMenuOpenChange} onSelectModel={onSelectModel} onOpenSettings={onOpenSettings} onAbort={onAbort} />
+          <ConversationComposer
+            variant="footer"
+            project={project}
+            running={running}
+            loading={loading}
+            startingSession={startingSession}
+            draft={draft}
+            images={draftImages}
+            inputRef={inputRef}
+            configuration={configuration}
+            selectedModel={selectedModel}
+            modelMenuOpen={modelMenuOpen}
+            modelChanging={modelChanging}
+            onSubmit={onSubmit}
+            onDraftChange={onDraftChange}
+            onImagesChange={onImagesChange}
+            onPaste={onPaste}
+            onCompositionStart={onCompositionStart}
+            onCompositionEnd={onCompositionEnd}
+            onKeyDown={onKeyDown}
+            onModelMenuOpenChange={onModelMenuOpenChange}
+            onSelectModel={onSelectModel}
+            onOpenSettings={onOpenSettings}
+            onAbort={onAbort}
+          />
         </div>
         <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} />
       </div>

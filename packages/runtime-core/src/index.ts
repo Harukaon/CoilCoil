@@ -568,6 +568,36 @@ function joinProviderUrl(baseUrl: string, path: string): string {
   return new URL(path.replace(/^\//, ""), base).toString();
 }
 
+/** OpenAI-compatible /models endpoints often live at base or base/v1 regardless of chat protocol. */
+function modelListUrlCandidates(baseUrl: string): string[] {
+  const normalized = baseUrl.replace(/\/+$/, "");
+  const withoutV1 = normalized.replace(/\/v1$/i, "");
+  const withV1 = /\/v1$/i.test(normalized) ? normalized : `${withoutV1}/v1`;
+  const bases = [...new Set([normalized, withoutV1, withV1].filter(Boolean))];
+  return [...new Set(bases.map((base) => joinProviderUrl(base, "models")))];
+}
+
+function modelListAuthHeaderVariants(
+  baseHeaders: Record<string, string>,
+  apiKey: string | undefined,
+  api: string | undefined,
+): Record<string, string>[] {
+  const hasAuth = Object.keys(baseHeaders).some((key) => {
+    const lower = key.toLowerCase();
+    return lower === "authorization" || lower === "x-api-key";
+  });
+  if (hasAuth || !apiKey) return [baseHeaders];
+
+  const bearer = { ...baseHeaders, Authorization: `Bearer ${apiKey}` };
+  const anthropic = {
+    ...baseHeaders,
+    "x-api-key": apiKey,
+    "anthropic-version": baseHeaders["anthropic-version"] ?? baseHeaders["Anthropic-Version"] ?? "2023-06-01",
+  };
+  if ((api ?? "").includes("anthropic")) return [anthropic, bearer];
+  return [bearer, anthropic];
+}
+
 function truncateDetail(value: string, max = 280): string {
   const trimmed = value.trim().replace(/\s+/g, " ");
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
@@ -1796,31 +1826,47 @@ export class SuoCodeRuntime {
   async fetchProviderModels(input: FetchProviderModelsInput): Promise<FetchProviderModelsResult> {
     const baseUrl = assertOptionalUrl(input.baseUrl, "Base URL");
     if (!baseUrl) throw new Error("拉取模型列表需要 Base URL。");
-    const api = input.api?.trim() || "openai-completions";
-    if (!isOpenAiCompatibleProviderApi(api)) {
-      throw new Error("当前协议暂不支持自动拉取模型列表。请改用 OpenAI Chat Completions 或 OpenAI Responses。");
-    }
+    // Model list is almost always OpenAI-compatible `/models`, independent of the chat protocol
+    // (Anthropic / Gemini / etc.). Try with and without `/v1` so users do not need to flip API + URL.
     const apiKey = await this.resolveProviderApiKey(input.provider, input.apiKey);
-    const headers = {
+    const baseHeaders: Record<string, string> = {
       Accept: "application/json",
       ...(input.headers ?? {}),
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     };
-    const url = joinProviderUrl(baseUrl, "models");
-    const response = await fetch(url, { method: "GET", headers });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`拉取模型失败（HTTP ${response.status}）：${truncateDetail(text)}`);
+    const headerVariants = modelListAuthHeaderVariants(baseHeaders, apiKey, input.api);
+    const urls = modelListUrlCandidates(baseUrl);
+    const errors: string[] = [];
+
+    for (const url of urls) {
+      for (const headers of headerVariants) {
+        try {
+          const response = await fetch(url, { method: "GET", headers });
+          const text = await response.text();
+          if (!response.ok) {
+            errors.push(`${url} → HTTP ${response.status}: ${truncateDetail(text)}`);
+            continue;
+          }
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            errors.push(`${url} → 返回的不是 JSON：${truncateDetail(text)}`);
+            continue;
+          }
+          const models = parseUpstreamModelList(parsed);
+          if (!models.length) {
+            errors.push(`${url} → 未返回可用模型`);
+            continue;
+          }
+          return { models };
+        } catch (error) {
+          errors.push(`${url} → ${errorMessage(error)}`);
+        }
+      }
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new Error(`上游返回的不是 JSON：${truncateDetail(text)}`);
-    }
-    const models = parseUpstreamModelList(parsed);
-    if (!models.length) throw new Error("上游未返回可用模型。");
-    return { models };
+
+    const detail = errors.at(-1) ?? "未知错误";
+    throw new Error(`拉取模型失败：已自动尝试有/无 /v1 的地址。最后一次：${detail}`);
   }
 
   async testProviderConnection(input: TestProviderConnectionInput): Promise<TestProviderConnectionResult> {
@@ -1890,8 +1936,27 @@ export class SuoCodeRuntime {
     return join(this.agentDir, "archived-sessions.json");
   }
 
+  private pinnedSessionsPath(): string {
+    return join(this.agentDir, "pinned-sessions.json");
+  }
+
   private readArchivedSessions(): Record<string, string> {
-    const path = this.archivedSessionsPath();
+    return this.readPathTimestampMap(this.archivedSessionsPath());
+  }
+
+  private writeArchivedSessions(value: Record<string, string>): void {
+    this.writePathTimestampMap(this.archivedSessionsPath(), value);
+  }
+
+  private readPinnedSessions(): Record<string, string> {
+    return this.readPathTimestampMap(this.pinnedSessionsPath());
+  }
+
+  private writePinnedSessions(value: Record<string, string>): void {
+    this.writePathTimestampMap(this.pinnedSessionsPath(), value);
+  }
+
+  private readPathTimestampMap(path: string): Record<string, string> {
     if (!existsSync(path)) return {};
     try {
       const parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -1901,9 +1966,8 @@ export class SuoCodeRuntime {
     }
   }
 
-  private writeArchivedSessions(value: Record<string, string>): void {
+  private writePathTimestampMap(path: string, value: Record<string, string>): void {
     mkdirSync(this.agentDir, { recursive: true });
-    const path = this.archivedSessionsPath();
     const temporaryPath = `${path}.${process.pid}.tmp`;
     writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     renameSync(temporaryPath, path);
@@ -2353,7 +2417,21 @@ export class SuoCodeRuntime {
     const resolvedCwd = safeRealPath(cwd);
     const sessions = await SessionManager.list(resolvedCwd, this.sessionDir);
     const archived = this.readArchivedSessions();
-    const mapped = sessions.filter((session) => !archived[safeRealPath(session.path)]).map(sessionSummary);
+    const pinned = this.readPinnedSessions();
+    const mapped = sessions
+      .filter((session) => !archived[safeRealPath(session.path)])
+      .map((session) => {
+        const path = safeRealPath(session.path);
+        const pinnedAt = pinned[path];
+        return {
+          ...sessionSummary(session),
+          ...(pinnedAt ? { pinned: true as const, pinnedAt } : {}),
+        };
+      })
+      .sort((a, b) => {
+        if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+        return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+      });
     this.emitEvent({ type: "sessions_updated", cwd: resolvedCwd, sessions: mapped });
     return mapped;
   }
@@ -2368,15 +2446,25 @@ export class SuoCodeRuntime {
     });
   }
 
-  async archiveSession(cwd: string, sessionPath: string): Promise<SessionSummary[]> {
+  private async requireProjectSession(cwd: string, sessionPath: string): Promise<{ resolvedCwd: string; resolvedSession: string }> {
     const resolvedCwd = safeRealPath(cwd);
     const resolvedSession = ensureInside(this.sessionDir, sessionPath);
     const belongsToProject = (await SessionManager.list(resolvedCwd, this.sessionDir))
       .some((session) => safeRealPath(session.path) === safeRealPath(resolvedSession));
     if (!belongsToProject) throw new Error("所选会话不属于当前工作区。");
+    return { resolvedCwd, resolvedSession };
+  }
+
+  async archiveSession(cwd: string, sessionPath: string): Promise<SessionSummary[]> {
+    const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
     const archived = this.readArchivedSessions();
     archived[safeRealPath(resolvedSession)] = new Date().toISOString();
     this.writeArchivedSessions(archived);
+    const pinned = this.readPinnedSessions();
+    if (pinned[safeRealPath(resolvedSession)]) {
+      delete pinned[safeRealPath(resolvedSession)];
+      this.writePinnedSessions(pinned);
+    }
     return this.listSessions(resolvedCwd);
   }
 
@@ -2387,6 +2475,46 @@ export class SuoCodeRuntime {
     delete archived[safeRealPath(resolvedSession)];
     this.writeArchivedSessions(archived);
     return this.listSessions(resolvedCwd);
+  }
+
+  async renameSession(cwd: string, sessionPath: string, name: string): Promise<SessionSummary[]> {
+    const nextName = name.replace(/[\r\n]+/g, " ").trim();
+    if (!nextName) throw new Error("会话名称不能为空。");
+    const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
+    const activeFile = this.active?.session.sessionFile ? safeRealPath(this.active.session.sessionFile) : undefined;
+    if (activeFile && activeFile === safeRealPath(resolvedSession)) {
+      this.active!.session.setSessionName(nextName);
+      this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+    } else {
+      SessionManager.open(resolvedSession, this.sessionDir).appendSessionInfo(nextName);
+    }
+    return this.listSessions(resolvedCwd);
+  }
+
+  async pinSession(cwd: string, sessionPath: string, pinned: boolean): Promise<SessionSummary[]> {
+    const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
+    const map = this.readPinnedSessions();
+    const key = safeRealPath(resolvedSession);
+    if (pinned) map[key] = new Date().toISOString();
+    else delete map[key];
+    this.writePinnedSessions(map);
+    return this.listSessions(resolvedCwd);
+  }
+
+  async forkSession(cwd: string, sessionPath: string): Promise<{ sessions: SessionSummary[]; session: SessionSummary }> {
+    const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
+    const source = (await SessionManager.list(resolvedCwd, this.sessionDir))
+      .find((session) => safeRealPath(session.path) === safeRealPath(resolvedSession));
+    if (!source) throw new Error("所选会话不属于当前工作区。");
+    const forked = SessionManager.forkFrom(resolvedSession, resolvedCwd, this.sessionDir);
+    const title = (source.name || titleFromText(source.firstMessage) || "对话").trim();
+    forked.appendSessionInfo(`${title} (副本)`);
+    const forkedPath = forked.getSessionFile();
+    if (!forkedPath) throw new Error("分叉会话失败：未能创建会话文件。");
+    const sessions = await this.listSessions(resolvedCwd);
+    const session = sessions.find((item) => safeRealPath(item.path) === safeRealPath(forkedPath));
+    if (!session) throw new Error("分叉会话已创建，但未能出现在列表中。");
+    return { sessions, session };
   }
 
   async createSession(cwd: string): Promise<SessionSnapshot> {

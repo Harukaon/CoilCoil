@@ -7,11 +7,16 @@ import {
   CircleDot,
   Folder,
   FolderOpen,
+  GitFork,
   MessageSquarePlus,
   MoreHorizontal,
+  Pencil,
+  Pin,
+  PinOff,
   Plus,
   Settings,
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { ArchivedSessionsPopover } from "./ArchivedSessionsPopover";
@@ -50,6 +55,9 @@ export function WorkspaceSidebar({
   onCollapseSessions,
   onOpenConversation,
   onArchiveConversation,
+  onRenameConversation,
+  onPinConversation,
+  onForkConversation,
   onRestoreSessions,
   onFocusPending,
   onOpenSettings,
@@ -71,11 +79,37 @@ export function WorkspaceSidebar({
   onCollapseSessions: (path: string) => void;
   onOpenConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onArchiveConversation: (project: ProjectSelection, session: SessionSummary) => void;
+  onRenameConversation: (project: ProjectSelection, session: SessionSummary, name: string) => Promise<void> | void;
+  onPinConversation: (project: ProjectSelection, session: SessionSummary, pinned: boolean) => void;
+  onForkConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onRestoreSessions: (project: ProjectSelection, sessions: SessionSummary[]) => void;
   onFocusPending: () => void;
   onOpenSettings: () => void;
   onError: (message: string) => void;
 }): React.JSX.Element {
+  const [renamingPath, setRenamingPath] = useState<string>();
+  const [renameDraft, setRenameDraft] = useState("");
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!renamingPath) return;
+    requestAnimationFrame(() => {
+      renameRef.current?.focus();
+      renameRef.current?.select();
+    });
+  }, [renamingPath]);
+
+  const commitRename = async (project: ProjectSelection, session: SessionSummary): Promise<void> => {
+    const next = renameDraft.trim();
+    setRenamingPath(undefined);
+    if (!next || next === session.title) return;
+    try {
+      await onRenameConversation(project, session, next);
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
   return (
     <aside className="sidebar">
       <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
@@ -105,12 +139,73 @@ export function WorkspaceSidebar({
                   {hasPending ? <button className="conversation-row active pending" type="button" onClick={onFocusPending}><span className="conversation-status"><Circle size={11} strokeWidth={1.7} /></span><span className="conversation-title-text">新对话</span><time>刚刚</time></button> : null}
                   {visibleSessions.map((session) => {
                     const activity = sessionActivity[session.path];
+                    const renaming = renamingPath === session.path;
                     return <ContextMenu.Root key={session.id}>
                       <ContextMenu.Trigger asChild>
-                        <button className={`conversation-row ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`} type="button" onClick={() => onOpenConversation(project, session)}><span className="conversation-status">{activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <i className="conversation-unread" /> : <CircleDot size={11} strokeWidth={2} />}</span><span className="conversation-title-text">{session.title}</span><time>{relativeTime(session.updatedAt)}</time></button>
+                        {renaming ? (
+                          <div className={`conversation-row renaming ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}>
+                            <span className="conversation-status">{session.pinned ? <Pin size={11} strokeWidth={2} /> : <CircleDot size={11} strokeWidth={2} />}</span>
+                            <input
+                              ref={renameRef}
+                              className="conversation-rename-input"
+                              value={renameDraft}
+                              aria-label="重命名对话"
+                              onChange={(event) => setRenameDraft(event.target.value)}
+                              onBlur={() => { void commitRename(project, session); }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  setRenamingPath(undefined);
+                                } else if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void commitRename(project, session);
+                                }
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            className={`conversation-row ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}
+                            type="button"
+                            onClick={() => onOpenConversation(project, session)}
+                          >
+                            <span className="conversation-status">
+                              {activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <i className="conversation-unread" /> : session.pinned ? <Pin size={11} strokeWidth={2} /> : <CircleDot size={11} strokeWidth={2} />}
+                            </span>
+                            <span className="conversation-title-text">{session.title}</span>
+                            <time>{relativeTime(session.updatedAt)}</time>
+                          </button>
+                        )}
                       </ContextMenu.Trigger>
                       <ContextMenu.Portal>
                         <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
+                          <ContextMenu.Item
+                            className="conversation-context-item"
+                            disabled={activity?.running}
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              setRenameDraft(session.title);
+                              setRenamingPath(session.path);
+                            }}
+                          >
+                            <Pencil size={13} /><span>重命名</span>
+                          </ContextMenu.Item>
+                          <ContextMenu.Item
+                            className="conversation-context-item"
+                            disabled={activity?.running}
+                            onSelect={() => onPinConversation(project, session, !session.pinned)}
+                          >
+                            {session.pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                            <span>{session.pinned ? "取消置顶" : "置顶"}</span>
+                          </ContextMenu.Item>
+                          <ContextMenu.Item
+                            className="conversation-context-item"
+                            disabled={activity?.running}
+                            onSelect={() => onForkConversation(project, session)}
+                          >
+                            <GitFork size={13} /><span>Fork 对话</span>
+                          </ContextMenu.Item>
+                          <ContextMenu.Separator className="conversation-context-separator" />
                           <ContextMenu.Item className="conversation-context-item" disabled={activity?.running} onSelect={() => onArchiveConversation(project, session)}>归档对话</ContextMenu.Item>
                         </ContextMenu.Content>
                       </ContextMenu.Portal>

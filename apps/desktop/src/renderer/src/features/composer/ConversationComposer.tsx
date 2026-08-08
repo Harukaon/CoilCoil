@@ -1,5 +1,6 @@
 import { ArrowUp, Square, X } from "lucide-react";
-import type { FormEvent, RefObject } from "react";
+import { useEffect, useRef } from "react";
+import type { DragEvent as ReactDragEvent, FormEvent, RefObject } from "react";
 import type {
   ModelOption,
   PromptImage,
@@ -7,10 +8,14 @@ import type {
   RuntimeConfiguration,
   SessionSnapshot,
 } from "@suocode/runtime-protocol";
-import { imageDataUrl } from "../conversation/ConversationTimeline";
+import { insertPathAtCaret, SUOCODE_PATH_TYPE } from "./pathInsert";
+import { imageDataUrl } from "./promptImages";
 import { ModelPicker } from "./ModelPicker";
 
+export type ComposerVariant = "footer" | "inline";
+
 export function ConversationComposer({
+  variant = "footer",
   project,
   running,
   loading,
@@ -22,6 +27,7 @@ export function ConversationComposer({
   selectedModel,
   modelMenuOpen,
   modelChanging,
+  autoFocus,
   onSubmit,
   onDraftChange,
   onImagesChange,
@@ -33,7 +39,10 @@ export function ConversationComposer({
   onSelectModel,
   onOpenSettings,
   onAbort,
+  onEscape,
+  onPathDropError,
 }: {
+  variant?: ComposerVariant;
   project: ProjectSelection | null;
   running: boolean;
   loading: boolean;
@@ -45,6 +54,7 @@ export function ConversationComposer({
   selectedModel?: SessionSnapshot["model"];
   modelMenuOpen: boolean;
   modelChanging: boolean;
+  autoFocus?: boolean;
   onSubmit: (event: FormEvent) => void;
   onDraftChange: (value: string) => void;
   onImagesChange: React.Dispatch<React.SetStateAction<PromptImage[]>>;
@@ -55,28 +65,132 @@ export function ConversationComposer({
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
   onOpenSettings: () => void;
-  onAbort: () => void;
+  onAbort?: () => void;
+  onEscape?: () => void;
+  onPathDropError?: (message: string) => void;
 }): React.JSX.Element {
+  const inline = variant === "inline";
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.max(42, Math.min(input.scrollHeight, 160))}px`;
+  }, [draft, inputRef]);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [autoFocus, inputRef]);
+
+  const handlePathDragOver = (event: ReactDragEvent<HTMLElement>): void => {
+    if (!event.dataTransfer.types.includes(SUOCODE_PATH_TYPE)) return;
+    event.preventDefault();
+    // Do not stopPropagation on enter/over — that made the pane think the drag left,
+    // flashing the drop mask off while hovering an inline composer / user message.
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handlePathDrop = (event: ReactDragEvent<HTMLElement>): void => {
+    const serialized = event.dataTransfer.getData(SUOCODE_PATH_TYPE);
+    if (!serialized) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      const dropped = JSON.parse(serialized) as { path?: string };
+      if (!dropped.path) return;
+      const textarea = inputRef.current;
+      const value = draftRef.current;
+      const start = textarea?.selectionStart ?? value.length;
+      const end = textarea?.selectionEnd ?? start;
+      const result = insertPathAtCaret(value, dropped.path, start, end);
+      onDraftChange(result.value);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(result.caret, result.caret);
+      });
+    } catch {
+      onPathDropError?.("无法插入拖入的路径。请重新拖动一次。");
+    }
+  };
+
+  const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+    if (event.key === "Escape" && onEscape) {
+      event.preventDefault();
+      onEscape();
+      return;
+    }
+    onKeyDown(event);
+  };
+
   return (
-    <form className="composer" onSubmit={onSubmit}>
-      {images.length ? <div className="composer-images">{images.map((image) => <figure key={image.id ?? image.data.slice(0, 24)}><img src={imageDataUrl(image)} alt={image.name ?? "粘贴的图片"} /><button type="button" aria-label="移除图片" onClick={() => onImagesChange((current) => current.filter((item) => item !== image))}><X size={11} /></button></figure>)}</div> : null}
+    <form
+      className={`composer ${inline ? "composer-inline" : ""}`}
+      data-composer-variant={variant}
+      onSubmit={onSubmit}
+      onDragEnter={handlePathDragOver}
+      onDragOver={handlePathDragOver}
+      onDrop={handlePathDrop}
+    >
+      {images.length ? (
+        <div className="composer-images">
+          {images.map((image) => (
+            <figure key={image.id ?? image.data.slice(0, 24)}>
+              <img src={imageDataUrl(image)} alt={image.name ?? "粘贴的图片"} />
+              <button type="button" aria-label="移除图片" onClick={() => onImagesChange((current) => current.filter((item) => item !== image))}>
+                <X size={11} />
+              </button>
+            </figure>
+          ))}
+        </div>
+      ) : null}
       <textarea
         ref={inputRef}
         rows={1}
         value={draft}
-        aria-label="发送消息给 SuoCode"
-        placeholder={project ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…") : "请先打开项目"}
+        aria-label={inline ? "编辑历史消息" : "发送消息给 SuoCode"}
+        placeholder={
+          inline
+            ? "编辑历史消息…"
+            : project
+              ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…")
+              : "请先打开项目"
+        }
         disabled={!project || loading || startingSession}
         onChange={(event) => onDraftChange(event.target.value)}
         onPaste={onPaste}
         onCompositionStart={onCompositionStart}
         onCompositionEnd={onCompositionEnd}
-        onKeyDown={onKeyDown}
+        onKeyDown={handleKeyDown}
+        onDragOver={handlePathDragOver}
+        onDrop={handlePathDrop}
       />
       <div className="composer-toolbar">
-        <ModelPicker configuration={configuration} currentModel={selectedModel} open={modelMenuOpen} busy={modelChanging} onOpenChange={onModelMenuOpenChange} onSelect={onSelectModel} onOpenSettings={onOpenSettings} />
-        {running ? <button className="stop-button" type="button" aria-label="停止 Agent" onClick={onAbort}><Square size={12} fill="currentColor" /></button> : null}
-        <button className="send-button" type="submit" aria-label={running ? "补充指令" : "发送消息"} disabled={!project || startingSession || (!draft.trim() && !images.length)}><ArrowUp size={17} strokeWidth={2.2} /></button>
+        <ModelPicker
+          configuration={configuration}
+          currentModel={selectedModel}
+          open={modelMenuOpen}
+          busy={modelChanging}
+          side={inline ? "bottom" : "top"}
+          onOpenChange={onModelMenuOpenChange}
+          onSelect={onSelectModel}
+          onOpenSettings={onOpenSettings}
+        />
+        {!inline && running && onAbort ? (
+          <button className="stop-button" type="button" aria-label="停止 Agent" onClick={onAbort}>
+            <Square size={12} fill="currentColor" />
+          </button>
+        ) : null}
+        <button
+          className="send-button"
+          type="submit"
+          aria-label={inline ? "从这里重新开始" : running ? "补充指令" : "发送消息"}
+          disabled={!project || startingSession || (!draft.trim() && !images.length)}
+        >
+          <ArrowUp size={17} strokeWidth={2.2} />
+        </button>
       </div>
     </form>
   );

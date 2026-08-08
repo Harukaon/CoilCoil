@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type {
   ClipboardEvent as ReactClipboardEvent,
   KeyboardEvent,
@@ -10,11 +10,8 @@ import type {
   RuntimeConfiguration,
   SessionSnapshot,
 } from "@suocode/runtime-protocol";
-import { clipboardImage } from "../conversation/ConversationTimeline";
-
-function quotePath(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
+import { insertPathAtCaret } from "./pathInsert";
+import { clipboardImage } from "./promptImages";
 
 export interface ComposerController {
   draft: string;
@@ -53,13 +50,6 @@ export function useComposerController({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
 
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${Math.max(42, Math.min(input.scrollHeight, 160))}px`;
-  }, [draft]);
-
   const reset = useCallback((): void => {
     setDraft("");
     setImages([]);
@@ -73,16 +63,11 @@ export function useComposerController({
     const input = inputRef.current;
     const start = input?.selectionStart ?? draft.length;
     const end = input?.selectionEnd ?? start;
-    const before = draft.slice(0, start);
-    const after = draft.slice(end);
-    const leadingSpace = before.length && !/\s$/.test(before) ? " " : "";
-    const trailingSpace = after.length && !/^\s/.test(after) ? " " : "";
-    const insertion = `${leadingSpace}${quotePath(path)}${trailingSpace}`;
-    const caret = start + insertion.length;
-    setDraft(`${before}${insertion}${after}`);
+    const result = insertPathAtCaret(draft, path, start, end);
+    setDraft(result.value);
     requestAnimationFrame(() => {
       inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(caret, caret);
+      inputRef.current?.setSelectionRange(result.caret, result.caret);
     });
   }, [draft]);
 

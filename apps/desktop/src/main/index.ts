@@ -344,17 +344,22 @@ const runtime = new RuntimeBridge();
 function createWindow(): void {
   const isMac = process.platform === "darwin";
   const mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    width: 1180,
+    height: 760,
     minWidth: 395,
     minHeight: 500,
     show: false,
-    backgroundColor: "#f7f7f5",
+    backgroundColor: isMac ? "#00000000" : "#f7f7f5",
     title: "SuoCode",
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,
           trafficLightPosition: { x: 18, y: 18 },
+          // Frosted glass over desktop wallpaper (macOS).
+          vibrancy: "under-window" as const,
+          visualEffectState: "active" as const,
+          transparent: true,
+          hasShadow: true,
         }
       : {}),
     webPreferences: {
@@ -362,8 +367,14 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   });
+
+  if (isMac) {
+    mainWindow.setBackgroundColor("#00000000");
+    mainWindow.setVibrancy("under-window");
+  }
 
   mainWindow.on("ready-to-show", () => mainWindow.show());
   if (process.env.ELECTRON_RENDERER_URL) {

@@ -6,8 +6,11 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0"
     />
-    <meta name="color-scheme" content="light" />
+    <!-- Do not set color-scheme: Chromium paints an opaque canvas and kills window translucency. -->
     <title>SuoCode</title>
+    <style>
+      html, body, #root { background: transparent !important; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

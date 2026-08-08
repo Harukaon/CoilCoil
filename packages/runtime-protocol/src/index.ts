@@ -258,6 +258,8 @@ export interface SessionSummary {
   updatedAt: string;
   messageCount: number;
   archivedAt?: string;
+  pinned?: boolean;
+  pinnedAt?: string;
 }
 
 export type ChatRole = "user" | "assistant" | "tool" | "system";
@@ -464,6 +466,9 @@ export type RuntimeCommand =
   | { type: "list_archived_sessions"; cwd: string }
   | { type: "archive_session"; cwd: string; sessionPath: string }
   | { type: "restore_session"; cwd: string; sessionPath: string }
+  | { type: "rename_session"; cwd: string; sessionPath: string; name: string }
+  | { type: "pin_session"; cwd: string; sessionPath: string; pinned: boolean }
+  | { type: "fork_session"; cwd: string; sessionPath: string }
   | { type: "create_session"; cwd: string }
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "prompt"; text: string; images?: PromptImage[] }

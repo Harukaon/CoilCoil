@@ -426,6 +426,38 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  const renameConversation = async (owner: ProjectSelection, session: SessionSummary, name: string): Promise<void> => {
+    const next = await window.suocode.request<SessionSummary[]>({ type: "rename_session", cwd: owner.path, sessionPath: session.path, name });
+    setSessionsByProject((current) => ({ ...current, [owner.path]: next }));
+  };
+
+  const pinConversation = async (owner: ProjectSelection, session: SessionSummary, pinned: boolean): Promise<void> => {
+    try {
+      const next = await window.suocode.request<SessionSummary[]>({ type: "pin_session", cwd: owner.path, sessionPath: session.path, pinned });
+      setSessionsByProject((current) => ({ ...current, [owner.path]: next }));
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const forkConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
+    if (sessionActivity[session.path]?.running) {
+      toastError("请先停止正在运行的会话，再进行 Fork。");
+      return;
+    }
+    try {
+      const result = await window.suocode.request<{ sessions: SessionSummary[]; session: SessionSummary }>({
+        type: "fork_session",
+        cwd: owner.path,
+        sessionPath: session.path,
+      });
+      setSessionsByProject((current) => ({ ...current, [owner.path]: result.sessions }));
+      await openConversation(owner, result.session);
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
   const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[]): Promise<void> => {
     if (!message.entryId || !snapshot?.runtimeId) return;
     const previousMessages = messages;
@@ -532,6 +564,9 @@ export default function App(): React.JSX.Element {
           onCollapseSessions={(path) => setExpandedSessionLists((current) => { const next = new Set(current); next.delete(path); return next; })}
           onOpenConversation={(owner, session) => { void openConversation(owner, session); }}
           onArchiveConversation={(owner, session) => { void archiveConversation(owner, session); }}
+          onRenameConversation={(owner, session, name) => renameConversation(owner, session, name)}
+          onPinConversation={(owner, session, pinned) => { void pinConversation(owner, session, pinned); }}
+          onForkConversation={(owner, session) => { void forkConversation(owner, session); }}
           onRestoreSessions={(owner, sessions) => setSessionsByProject((current) => ({ ...current, [owner.path]: sessions }))}
           onFocusPending={() => { inputRef.current?.focus(); }}
           onOpenSettings={() => setSettingsOpen(true)}

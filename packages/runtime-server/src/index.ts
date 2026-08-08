@@ -213,6 +213,12 @@ export class RuntimeServer {
         return runtime.archiveSession(command.cwd, command.sessionPath);
       case "restore_session":
         return runtime.restoreSession(command.cwd, command.sessionPath);
+      case "rename_session":
+        return runtime.renameSession(command.cwd, command.sessionPath, command.name);
+      case "pin_session":
+        return runtime.pinSession(command.cwd, command.sessionPath, command.pinned);
+      case "fork_session":
+        return runtime.forkSession(command.cwd, command.sessionPath);
       case "prompt":
         return runtime.prompt(command.text, command.images);
       case "rewind_prompt":

@@ -1,10 +1,21 @@
-import { AlertCircle, ChevronRight, LoaderCircle, X } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Copy, LoaderCircle } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
-import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from "react";
+import type { ClipboardEvent as ReactClipboardEvent, FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage, PromptImage, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
+import type {
+  ChatMessage,
+  ModelOption,
+  ProjectSelection,
+  PromptImage,
+  RuntimeConfiguration,
+  SessionSnapshot,
+  SubagentActivity,
+  ToolRun,
+} from "@suocode/runtime-protocol";
+import { ConversationComposer } from "../composer/ConversationComposer";
+import { clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { SubagentTimelineCard } from "./SubagentTimelineCard";
 
 export type TimelineItem =
@@ -26,37 +37,7 @@ const MARKDOWN_COMPONENTS: Components = {
   table: ({ node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props} /></div>,
 };
 
-export function imageDataUrl(image: PromptImage): string {
-  return `data:${image.mimeType};base64,${image.data}`;
-}
-
-export async function clipboardImage(file: globalThis.File): Promise<PromptImage> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("无法读取粘贴的图片。"));
-    reader.readAsDataURL(file);
-  });
-  return {
-    id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
-    name: file.name || "粘贴的图片",
-    mimeType: file.type || "image/png",
-    data: dataUrl.slice(dataUrl.indexOf(",") + 1),
-  };
-}
-
-function quotePath(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function insertPath(value: string, path: string, start: number, end: number): { value: string; caret: number } {
-  const before = value.slice(0, start);
-  const after = value.slice(end);
-  const leadingSpace = before.length && !/\s$/.test(before) ? " " : "";
-  const trailingSpace = after.length && !/^\s/.test(after) ? " " : "";
-  const insertion = `${leadingSpace}${quotePath(path)}${trailingSpace}`;
-  return { value: `${before}${insertion}${after}`, caret: start + insertion.length };
-}
+export { imageDataUrl, clipboardImage };
 
 const Markdown = memo(function Markdown({ children }: { children: string }): React.JSX.Element {
   return (
@@ -68,59 +49,98 @@ const Markdown = memo(function Markdown({ children }: { children: string }): Rea
   );
 });
 
-function ImageStrip({ images, editable, onRemove }: {
-  images: PromptImage[];
-  editable?: boolean;
-  onRemove?: (image: PromptImage) => void;
-}): React.JSX.Element | null {
+function ImageStrip({ images }: { images: PromptImage[] }): React.JSX.Element | null {
   if (!images.length) return null;
   return (
-    <span className={`message-images ${editable ? "editable" : ""}`}>
+    <span className="message-images">
       {images.map((image) => (
         <span className="message-image" key={image.id ?? image.data.slice(0, 24)}>
           <img src={imageDataUrl(image)} alt={image.name ?? "附加图片"} />
-          {editable ? <button type="button" aria-label="移除历史图片" onClick={() => onRemove?.(image)}><X size={11} /></button> : null}
         </span>
       ))}
     </span>
   );
 }
 
-export function MessageView({ message, disabled, onRewind, onError }: {
+function isInsideComposerChrome(target: EventTarget | null, shell: HTMLElement | null): boolean {
+  if (!(target instanceof Node)) return false;
+  if (shell?.contains(target)) return true;
+  if (!(target instanceof Element)) return false;
+  // Keep editing when interacting with model menu / rewind dialog / files inspector / sidebar
+  // so users can drag paths from the right panel into the inline composer.
+  return Boolean(target.closest(".model-popover, .rewind-dialog, .rewind-backdrop, .inspector-pane, .sidebar, .settings-dialog, .toast-host"));
+}
+
+function shouldDismissHistoryEdit(target: EventTarget | null, shell: HTMLElement | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (isInsideComposerChrome(target, shell)) return false;
+  // Only dismiss when the click lands elsewhere inside the conversation pane.
+  const pane = target.closest(".conversation-pane");
+  if (!pane) return false;
+  return !shell || !shell.contains(target);
+}
+
+export function MessageView({
+  message,
+  disabled,
+  editing,
+  project,
+  configuration,
+  selectedModel,
+  modelChanging,
+  onEditingChange,
+  onRewind,
+  onError,
+  onSelectModel,
+  onOpenSettings,
+}: {
   message: ChatMessage;
   disabled: boolean;
+  editing: boolean;
+  project: ProjectSelection | null;
+  configuration?: RuntimeConfiguration;
+  selectedModel?: SessionSnapshot["model"];
+  modelChanging: boolean;
+  onEditingChange: (editing: boolean) => void;
   onRewind: (message: ChatMessage, text: string, images: PromptImage[]) => Promise<void>;
   onError: (message: string) => void;
+  onSelectModel: (model: ModelOption) => void;
+  onOpenSettings: () => void;
 }): React.JSX.Element {
-  const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(message.text);
   const [images, setImages] = useState<PromptImage[]>(message.images ?? []);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
 
   useEffect(() => {
+    if (editing) return;
     setValue(message.text);
     setImages(message.images ?? []);
-  }, [message.images, message.text]);
+  }, [editing, message.images, message.text]);
 
   useEffect(() => {
-    if (!editing) return;
+    if (!editing) {
+      setModelMenuOpen(false);
+      return;
+    }
     const closeOnOutsidePointer = (event: PointerEvent): void => {
-      if (confirmOpen || editorRef.current?.contains(event.target as Node)) return;
-      setEditing(false);
+      if (confirmOpen || modelMenuOpen) return;
+      if (!shouldDismissHistoryEdit(event.target, editorRef.current)) return;
+      onEditingChange(false);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-  }, [confirmOpen, editing]);
+  }, [confirmOpen, editing, modelMenuOpen, onEditingChange]);
 
   const proceed = (remember: boolean): void => {
     const prompt = value.trim();
     if ((!prompt && !images.length) || !message.entryId) return;
     if (remember) window.localStorage.setItem(REWIND_WARNING_DISMISSED_KEY, "true");
     setConfirmOpen(false);
-    setEditing(false);
+    onEditingChange(false);
     void onRewind(message, prompt, images);
   };
 
@@ -139,67 +159,53 @@ export function MessageView({ message, disabled, onRewind, onError }: {
       .catch((caught) => onError(caught instanceof Error ? caught.message : String(caught)));
   };
 
-  const dropPath = (event: ReactDragEvent<HTMLTextAreaElement>): void => {
-    const serialized = event.dataTransfer.getData("application/x-suocode-path");
-    if (!serialized) return;
-    event.preventDefault();
-    event.stopPropagation();
-    try {
-      const dropped = JSON.parse(serialized) as { path?: string };
-      if (!dropped.path) return;
-      const textarea = textareaRef.current;
-      const start = textarea?.selectionStart ?? value.length;
-      const end = textarea?.selectionEnd ?? start;
-      const result = insertPath(value, dropped.path, start, end);
-      setValue(result.value);
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus();
-        textareaRef.current?.setSelectionRange(result.caret, result.caret);
-      });
-    } catch {
-      onError("无法插入拖入的路径。请重新拖动一次。");
-    }
-  };
-
   if (message.role === "user") {
-    const changed = value !== message.text || images.length !== (message.images?.length ?? 0)
-      || images.some((image, index) => image.data !== message.images?.[index]?.data);
     return (
       <article className="timeline-message user-message">
-        <div className="message-label">你</div>
         {editing ? (
           <div className="user-message-editor-shell" ref={editorRef}>
-            <ImageStrip images={images} editable onRemove={(image) => setImages((current) => current.filter((item) => item !== image))} />
-            <textarea
-              ref={textareaRef}
-              className="user-bubble user-message-editor"
+            <ConversationComposer
+              variant="inline"
+              project={project}
+              running={false}
+              loading={false}
+              startingSession={false}
+              draft={value}
+              images={images}
+              inputRef={textareaRef}
+              configuration={configuration}
+              selectedModel={selectedModel}
+              modelMenuOpen={modelMenuOpen}
+              modelChanging={modelChanging}
               autoFocus
-              value={value}
-              aria-label="编辑历史消息"
-              placeholder="编辑历史消息"
-              onChange={(event) => setValue(event.target.value)}
-              onPaste={pasteImages}
-              onDragOver={(event) => {
-                if (!event.dataTransfer.types.includes("application/x-suocode-path")) return;
+              onSubmit={(event: FormEvent) => {
                 event.preventDefault();
-                event.stopPropagation();
-                event.dataTransfer.dropEffect = "copy";
+                requestRewind();
               }}
-              onDrop={dropPath}
+              onDraftChange={setValue}
+              onImagesChange={setImages}
+              onPaste={pasteImages}
               onCompositionStart={() => { composingRef.current = true; }}
               onCompositionEnd={() => { composingRef.current = false; }}
               onKeyDown={(event) => {
                 if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-                if (event.key === "Escape") {
+                if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  setEditing(false);
-                } else if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  requestRewind();
+                  event.currentTarget.form?.requestSubmit();
                 }
               }}
+              onModelMenuOpenChange={setModelMenuOpen}
+              onSelectModel={(model) => {
+                setModelMenuOpen(false);
+                onSelectModel(model);
+              }}
+              onOpenSettings={() => {
+                setModelMenuOpen(false);
+                onOpenSettings();
+              }}
+              onEscape={() => onEditingChange(false)}
+              onPathDropError={onError}
             />
-            {changed ? <small className="history-edit-warning">修改历史消息会改变后续上下文，可能降低本次请求的提示缓存命中率。</small> : null}
           </div>
         ) : (
           <button
@@ -208,7 +214,7 @@ export function MessageView({ message, disabled, onRewind, onError }: {
             title={message.entryId ? "点击编辑并从这里重新开始" : undefined}
             data-prompt-value={value}
             disabled={disabled || !message.entryId}
-            onClick={() => setEditing(true)}
+            onClick={() => onEditingChange(true)}
           >
             {value ? <span>{value}</span> : null}
             <ImageStrip images={images} />
@@ -235,10 +241,38 @@ export function MessageView({ message, disabled, onRewind, onError }: {
 }
 
 function AssistantSegment({ message }: { message: ChatMessage }): React.JSX.Element {
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
+
+  const copyText = async (): Promise<void> => {
+    const text = message.text.trim();
+    if (!text) return;
+    try {
+      await window.suocode.copyText(text);
+      setCopied(true);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard failures are non-fatal; leave UI unchanged.
+    }
+  };
+
   return (
     <div className={`assistant-segment assistant-message ${message.isError ? "error" : ""}`}>
       {message.thinking?.trim() ? <details className="thinking-block"><summary>Reasoning</summary><div>{message.thinking}</div></details> : null}
-      {message.text ? <Markdown>{message.text}</Markdown> : null}
+      {message.text ? (
+        <div className="assistant-message-body">
+          <Markdown>{message.text}</Markdown>
+          <button className="assistant-copy-button" type="button" aria-label={copied ? "已复制" : "复制回复"} onClick={() => { void copyText(); }}>
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+            <span>{copied ? "已复制" : "复制"}</span>
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

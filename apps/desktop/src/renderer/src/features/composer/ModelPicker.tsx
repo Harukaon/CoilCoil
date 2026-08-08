@@ -3,11 +3,12 @@ import { Check, ChevronDown, CircleDot, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ModelOption, RuntimeConfiguration, SessionSnapshot } from "@suocode/runtime-protocol";
 
-export function ModelPicker({ configuration, currentModel, open, busy, onOpenChange, onSelect, onOpenSettings }: {
+export function ModelPicker({ configuration, currentModel, open, busy, side = "top", onOpenChange, onSelect, onOpenSettings }: {
   configuration?: RuntimeConfiguration;
   currentModel?: SessionSnapshot["model"];
   open: boolean;
   busy: boolean;
+  side?: "top" | "bottom";
   onOpenChange: (open: boolean) => void;
   onSelect: (model: ModelOption) => void;
   onOpenSettings: () => void;
@@ -37,7 +38,7 @@ export function ModelPicker({ configuration, currentModel, open, busy, onOpenCha
         <button className="agent-mode" type="button"><CircleDot size={13} /><span>{currentModel?.name ?? "选择模型"}</span><ChevronDown size={12} /></button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content className="model-popover" side="top" align="start" sideOffset={8} collisionPadding={12} avoidCollisions>
+        <Popover.Content className="model-popover" side={side} align="start" sideOffset={8} collisionPadding={12} avoidCollisions>
           <div className="model-popover-search"><Search size={14} /><input autoFocus value={search} placeholder="搜索模型" onChange={(event) => setSearch(event.target.value)} /></div>
           <div className="model-popover-list">
             {groups.map(([provider, group]) => <section className="model-provider-group" key={provider}>

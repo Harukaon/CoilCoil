@@ -700,7 +700,6 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
             })}>自定义目录</button></div></header>
             {!isBuiltinProvider ? <div className="provider-model-toolbar provider-model-toolbar-top">
               <button className="secondary-button" type="button" disabled={fetchingModels || saving} onClick={() => void fetchUpstreamModels()}>{fetchingModels ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{fetchingModels ? "正在拉取…" : "拉取上游模型列表"}</button>
-              <small>请求上游 <code>/models</code> 后弹出勾选列表；仅写入你选中的模型，并用 models.dev / LiteLLM 尽量补全参数。</small>
             </div> : null}
             {draft.replaceModels ? <>
               <div className="provider-model-list">{draft.models.map((model, index) => <ProviderModelCard key={model.uid} model={model} index={index} apiOptions={protocolOptions} advanced={modelAdvanced[model.uid] ?? { thinkingLevelMap: "{}", samplingParams: "{}", headers: "{}", compat: "{}", costTiers: "[]" }} onChange={(next) => updateModel(model.uid, next)} onAdvancedChange={(next) => setModelAdvanced((current) => ({ ...current, [model.uid]: next }))} onRemove={() => { setDraft((current) => current ? { ...current, models: current.models.filter((item) => item.uid !== model.uid) } : current); setModelAdvanced((current) => { const { [model.uid]: _removed, ...rest } = current; return rest; }); }} />)}</div>
