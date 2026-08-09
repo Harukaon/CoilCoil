@@ -1344,7 +1344,7 @@ async function main() {
       await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .composer-images img").length === 1`, "The historical image was not removed from the editor.");
       await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
       await client.waitFor(`!document.querySelector('textarea[aria-label="编辑历史消息"]') && document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The edited historical image state did not return to the message bubble.");
-      await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The packaged renderer did not restore the pi-subagents timeline card.", 60_000);
+      await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The packaged renderer did not restore the subagent timeline card.", 60_000);
       const preservedProviderFailure = await client.evaluate(`({
         tool: Boolean(document.querySelector(".subagent-timeline-card")),
         error: [...document.querySelectorAll(".assistant-message.error")].some((item) => item.textContent.includes(${JSON.stringify(fixtureToken)}))
