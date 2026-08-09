@@ -3258,6 +3258,7 @@ export class SuoCodeRuntime {
           }
           const mapped = mapMessage(raw, id, order);
           if (mapped && mapped.role !== "tool") this.emitEvent({ type: "message_started", message: mapped });
+          if (role === "user") void this.listSessions(active.cwd);
           break;
         }
         case "message_update": {

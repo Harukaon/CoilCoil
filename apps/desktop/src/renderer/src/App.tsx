@@ -26,6 +26,7 @@ import { buildConversationTimeline } from "./features/conversation/buildConversa
 import { ConversationPane } from "./features/conversation/ConversationPane";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { WorkspaceSidebar, type SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
+import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
 import { FilesPanel } from "./features/files/FilesPanel";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
@@ -140,6 +141,7 @@ export default function App(): React.JSX.Element {
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const snapshotCacheRef = useRef(new Map<string, SessionSnapshot>());
   const runtimeSessionRef = useRef(new Map<string, string>());
+  const optimisticSessionsRef = useRef(new Map<string, SessionSummary>());
   const selectionRequestRef = useRef(0);
   const optimisticMessageIdRef = useRef<string | undefined>(undefined);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
@@ -213,7 +215,18 @@ export default function App(): React.JSX.Element {
         setConfiguration(event.configuration);
         break;
       case "sessions_updated":
-        setSessionsByProject((current) => ({ ...current, [event.cwd]: event.sessions }));
+        setSessionsByProject((current) => {
+          let sessions = event.sessions;
+          const confirmedPaths = new Set(event.sessions.map((session) => session.path));
+          for (const [path, optimistic] of optimisticSessionsRef.current) {
+            if (confirmedPaths.has(path)) {
+              optimisticSessionsRef.current.delete(path);
+            } else if (optimistic.cwd === event.cwd) {
+              sessions = upsertSessionSummary(sessions, optimistic);
+            }
+          }
+          return { ...current, [event.cwd]: sessions };
+        });
         break;
       case "session_snapshot":
         applySnapshot(event.snapshot);
@@ -434,6 +447,7 @@ export default function App(): React.JSX.Element {
     }
     try {
       const next = await window.suocode.request<SessionSummary[]>({ type: "archive_session", cwd: owner.path, sessionPath: session.path });
+      optimisticSessionsRef.current.delete(session.path);
       setSessionsByProject((current) => ({ ...current, [owner.path]: next }));
       setSessionActivity((current) => {
         const updated = { ...current };
@@ -519,6 +533,7 @@ export default function App(): React.JSX.Element {
     setDraftImages([]);
     shouldAutoScrollRef.current = true;
     const optimisticId = `local-${Date.now()}-${Math.random()}`;
+    let createdSessionPath: string | undefined;
     try {
       let target = snapshotRef.current;
       if (!target || pendingProjectPath === project.path) {
@@ -526,13 +541,33 @@ export default function App(): React.JSX.Element {
         optimisticMessageIdRef.current = optimisticId;
         setMessages([{ id: optimisticId, order: Date.now(), role: "user", text: prompt, images, timestamp: Date.now(), status: "succeeded" }]);
         const created = await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: project.path });
-        snapshotRef.current = created;
+        const now = new Date().toISOString();
+        const optimisticSession: SessionSummary = {
+          ...created.session,
+          title: titleFromPrompt(prompt, images.length > 0),
+          updatedAt: now,
+          messageCount: Math.max(1, created.session.messageCount),
+        };
+        const activeSnapshot = { ...created, session: optimisticSession };
+        createdSessionPath = optimisticSession.path;
+        if (optimisticSession.path) optimisticSessionsRef.current.set(optimisticSession.path, optimisticSession);
+        snapshotRef.current = activeSnapshot;
         if (created.runtimeId && created.session.path) runtimeSessionRef.current.set(created.runtimeId, created.session.path);
-        setSnapshot(created);
+        setSnapshot(activeSnapshot);
+        setSessionsByProject((current) => ({
+          ...current,
+          [project.path]: upsertSessionSummary(current[project.path] ?? [], optimisticSession),
+        }));
+        if (optimisticSession.path) {
+          setSessionActivity((current) => ({
+            ...current,
+            [optimisticSession.path]: { runtimeId: created.runtimeId, running: true, unread: false },
+          }));
+        }
         setTools(created.tools);
         setProjectState(created.project);
         setPendingProjectPath(undefined);
-        target = created;
+        target = activeSnapshot;
       }
       await window.suocode.request({ type: target.running ? "steer" : "prompt", text: prompt, images }, target.runtimeId);
     } catch (caught) {
@@ -540,6 +575,13 @@ export default function App(): React.JSX.Element {
       setDraft(prompt);
       setDraftImages(images);
       setMessages((current) => current.filter((message) => message.id !== optimisticId));
+      if (createdSessionPath) {
+        const failedSessionPath = createdSessionPath;
+        setSessionActivity((current) => ({
+          ...current,
+          [failedSessionPath]: { ...current[failedSessionPath], running: false, unread: false },
+        }));
+      }
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setStartingSession(false);
