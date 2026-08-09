@@ -29,6 +29,7 @@ export interface ChildRun {
   dispose?: () => Promise<void>;
   sessionFile?: string;
   worktreePath?: string;
+  worktreeRepoRoot?: string;
   startedAt: number;
   finishedAt?: number;
   currentTool?: string;

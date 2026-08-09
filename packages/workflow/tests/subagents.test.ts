@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import subagentsExtension from "../extensions/subagents.ts";
 import { readChildMeta, scanResumableChildren } from "../extensions/subagents/child.ts";
 import { loadProfiles, parseProfileFile } from "../extensions/subagents/profiles.ts";
@@ -14,6 +16,14 @@ import {
   SubagentRegistry,
 } from "../extensions/subagents/registry.ts";
 import { SUBAGENT_RPC_REQUEST_CHANNEL, subagentRpcReplyChannel } from "../extensions/subagents/types.ts";
+import {
+  createSubagentWorktree,
+  findGitRepoRoot,
+  isWorktreeClean,
+  removeSubagentWorktreeIfClean,
+  subagentWorktreeBranch,
+  subagentWorktreePath,
+} from "../extensions/subagents/worktree.ts";
 
 interface Emission {
   channel: string;
@@ -353,4 +363,83 @@ test("clampText truncates long values", () => {
   const clamped = clampText("a".repeat(100), 10);
   assert.ok(clamped.startsWith("aaaaaaaaaa"));
   assert.match(clamped, /已截断/);
+});
+
+const execFileAsync = promisify(execFile);
+
+async function gitIn(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", args, { cwd });
+  return stdout.trim();
+}
+
+async function createTempRepo(): Promise<string> {
+  const root = mkdtempSync(join(tmpdir(), "suocode-worktree-repo-"));
+  await gitIn(root, ["init", "-b", "main"]);
+  writeFileSync(join(root, "README.md"), "# test\n", "utf8");
+  await gitIn(root, ["add", "README.md"]);
+  await gitIn(root, ["-c", "user.email=test@suocode", "-c", "user.name=test", "commit", "-m", "init"]);
+  return root;
+}
+
+test("findGitRepoRoot resolves the repo root and rejects non-repos", async () => {
+  const root = await createTempRepo();
+  const sub = join(root, "a", "b");
+  mkdirSync(sub, { recursive: true });
+  assert.equal(await findGitRepoRoot(sub), await gitIn(root, ["rev-parse", "--show-toplevel"]));
+  const bare = mkdtempSync(join(tmpdir(), "suocode-worktree-none-"));
+  assert.equal(await findGitRepoRoot(bare), undefined);
+});
+
+test("worktree lifecycle: create, cleanliness check, removal gated on cleanliness", async () => {
+  const root = await createTempRepo();
+  const runId = "sa-wt-test";
+  const created = await createSubagentWorktree(root, runId);
+  assert.equal(created.worktreePath, subagentWorktreePath(root, runId));
+  assert.equal(created.branch, subagentWorktreeBranch(runId));
+  assert.ok(existsSync(join(created.worktreePath, "README.md")));
+  assert.match(await gitIn(root, ["branch", "--list", created.branch]), /suocode\/subagent\/sa-wt-test/);
+  assert.equal(await isWorktreeClean(created.worktreePath), true);
+
+  writeFileSync(join(created.worktreePath, "new.txt"), "dirty\n", "utf8");
+  assert.equal(await isWorktreeClean(created.worktreePath), false);
+  assert.equal(await removeSubagentWorktreeIfClean(root, created.worktreePath), false, "dirty worktree must be kept");
+  assert.ok(existsSync(created.worktreePath));
+
+  rmSync(join(created.worktreePath, "new.txt"));
+  assert.equal(await isWorktreeClean(created.worktreePath), true);
+  assert.equal(await removeSubagentWorktreeIfClean(root, created.worktreePath), true);
+  assert.ok(!existsSync(created.worktreePath));
+});
+
+test("parallel worktrees yield independent checkouts on separate branches", async () => {
+  const root = await createTempRepo();
+  const [first, second] = await Promise.all([
+    createSubagentWorktree(root, "sa-par-a"),
+    createSubagentWorktree(root, "sa-par-b"),
+  ]);
+  writeFileSync(join(first.worktreePath, "a.txt"), "a\n", "utf8");
+  writeFileSync(join(second.worktreePath, "b.txt"), "b\n", "utf8");
+  assert.ok(!existsSync(join(first.worktreePath, "b.txt")), "worktrees must not share files");
+  assert.ok(!existsSync(join(second.worktreePath, "a.txt")), "worktrees must not share files");
+  assert.equal(await gitIn(first.worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]), "suocode/subagent/sa-par-a");
+  assert.equal(await gitIn(second.worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]), "suocode/subagent/sa-par-b");
+});
+
+test("run rejects worktree isolation outside a git repository", async () => {
+  const { execute } = createHarness();
+  const dir = mkdtempSync(join(tmpdir(), "suocode-no-repo-"));
+  await assert.rejects(
+    execute("call-wt-1", { task: "写点东西", worktree: true }, undefined, undefined, createContext({ cwd: dir })),
+    /不是 git 仓库/,
+  );
+});
+
+test("worker profile defaults to worktree isolation", async () => {
+  const { handlers, execute } = createHarness();
+  const dir = mkdtempSync(join(tmpdir(), "suocode-no-repo-worker-"));
+  await handlers.get("session_start")?.[0]({}, createContext({ cwd: dir }));
+  await assert.rejects(
+    execute("call-wt-2", { task: "写点东西", agent: "worker" }, undefined, undefined, createContext({ cwd: dir })),
+    /不是 git 仓库/,
+  );
 });

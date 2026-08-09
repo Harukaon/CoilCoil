@@ -39,6 +39,12 @@ import {
   SUBAGENT_RUN_ENTRY_TYPE,
   subagentRpcReplyChannel,
 } from "./subagents/types.ts";
+import {
+  createSubagentWorktree,
+  findGitRepoRoot,
+  removeSubagentWorktreeIfClean,
+  subagentWorktreeBranch,
+} from "./subagents/worktree.ts";
 import { join } from "node:path";
 
 const MAX_CONCURRENT_CHILDREN = 8;
@@ -60,6 +66,7 @@ const SubagentParams = Type.Object({
   task: Type.Optional(Type.String({ description: "action=run 时必填；action=resume 时作为追加指示，省略则继续原任务。" })),
   model: Type.Optional(Type.String({ description: '模型覆盖，格式 "provider/model-id"。省略则继承当前会话模型。' })),
   background: Type.Optional(Type.Boolean({ description: "true 时立即返回 runId，子 Agent 在后台运行，完成后会自动汇报。" })),
+  worktree: Type.Optional(Type.Boolean({ description: "true 时子 Agent 在独立的 git worktree 分支上工作，适合并行写入；省略则跟随 profile 设置（worker 默认开启）。" })),
   runId: Type.Optional(Type.String({ description: "action=status/stop/resume 时指定目标运行；status 省略则列出全部。" })),
 });
 
@@ -149,6 +156,12 @@ function formatCompletionText(run: ChildRun): string {
     `模型：${run.model ?? "继承"} · 耗时 ${duration} · ${run.turnCount} 轮 · ${run.toolCount} 次工具调用 · ${run.tokens} tokens`,
   ];
   if (run.sessionFile) lines.push(`会话文件：${run.sessionFile}`);
+  if (run.worktreePath) {
+    lines.push(`Worktree：${run.worktreePath}（分支 ${subagentWorktreeBranch(run.runId)}）`);
+    if (run.status === "completed") {
+      lines.push("改动保留在该 worktree 中，请检查后自行合并回主工作区（如合并分支或直接拷贝改动），确认无误后可清理。");
+    }
+  }
   if (run.finalOutput) lines.push("", "最终输出：", truncate(run.finalOutput, FINAL_OUTPUT_PREVIEW_CHARS));
   else lines.push("", "最终输出：（无文本输出）");
   return lines.join("\n");
@@ -176,6 +189,7 @@ function formatStatusText(run: ChildRun): string {
   }
   if (run.error) lines.push(`错误：${run.error}`);
   if (run.sessionFile) lines.push(`会话文件：${run.sessionFile}`);
+  if (run.worktreePath) lines.push(`Worktree：${run.worktreePath}（分支 ${subagentWorktreeBranch(run.runId)}）`);
   return lines.join("\n");
 }
 
@@ -418,6 +432,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       background: meta.background,
       status: "stopped",
       sessionFile,
+      worktreePath: meta.worktreePath,
       startedAt: meta.startedAt,
       finishedAt: meta.startedAt,
       recentTools: [],
@@ -443,13 +458,22 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     await run.session?.abort().catch(() => undefined);
     await sleep(STOP_SETTLE_WAIT_MS);
     if (runIsLive(run)) failRun(run, "stopped");
+    if (run.status === "stopped" && run.worktreePath && run.worktreeRepoRoot) {
+      const removed = await removeSubagentWorktreeIfClean(run.worktreeRepoRoot, run.worktreePath).catch(() => false);
+      if (removed) {
+        run.worktreePath = undefined;
+        run.worktreeRepoRoot = undefined;
+        markDirty(run.runId);
+        flushNow();
+      }
+    }
   };
 
   const reopenForResume = async (run: ChildRun): Promise<{ handle?: ChildSessionHandle; error?: string }> => {
     if (!run.sessionFile || !existsSync(run.sessionFile)) {
       return { error: `子 Agent 会话文件不存在：${run.sessionFile ?? "未知"}` };
     }
-    const cwd = sessionCwd ?? process.cwd();
+    const cwd = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : (sessionCwd ?? process.cwd());
     try {
       const handle = await reopenChildSession({
         sessionFile: run.sessionFile,
@@ -477,7 +501,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
   const executeRun = async (
     toolCallId: string,
-    params: { agent?: string; task?: string; model?: string; background?: boolean },
+    params: { agent?: string; task?: string; model?: string; background?: boolean; worktree?: boolean },
     signal: AbortSignal | undefined,
     onUpdate: ((update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => void) | undefined,
     ctx: ExtensionContext,
@@ -532,10 +556,32 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       startedAt: run.startedAt,
     };
 
+    const useWorktree = params.worktree ?? profile?.worktree ?? false;
+    let childCwd = ctx.cwd;
+    if (useWorktree) {
+      const repoRoot = await findGitRepoRoot(ctx.cwd);
+      if (!repoRoot) {
+        failRun(run, "failed", "当前目录不是 git 仓库，无法创建 worktree 隔离环境。");
+        throw new Error("worktree 隔离需要在 git 仓库内运行，当前目录不是 git 仓库。");
+      }
+      try {
+        const created = await createSubagentWorktree(repoRoot, run.runId);
+        run.worktreePath = created.worktreePath;
+        run.worktreeRepoRoot = repoRoot;
+        childCwd = created.worktreePath;
+        meta.worktreePath = created.worktreePath;
+        markDirty(run.runId);
+        flushNow();
+      } catch (error) {
+        failRun(run, "failed", errorMessage(error));
+        throw error;
+      }
+    }
+
     let handle: ChildSessionHandle;
     try {
       handle = await createChildSession({
-        cwd: ctx.cwd,
+        cwd: childCwd,
         agentDir: getAgentDir(),
         parentSessionDir: ctx.sessionManager.getSessionDir(),
         model: resolved.model,
@@ -546,6 +592,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       });
     } catch (error) {
       failRun(run, "failed", errorMessage(error));
+      if (run.worktreePath && run.worktreeRepoRoot) {
+        await removeSubagentWorktreeIfClean(run.worktreeRepoRoot, run.worktreePath).catch(() => false);
+        run.worktreePath = undefined;
+        run.worktreeRepoRoot = undefined;
+      }
       throw new Error(`子 Agent 会话创建失败：${errorMessage(error)}`);
     }
 
@@ -692,6 +743,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       "按角色选择 profile：只读侦察用 explore，代码评审用 reviewer，需要写代码用 worker；用 action=status（不带 runId）可查看可用的 profile 列表。",
       "不急于拿到结果、或想同时推进其他工作时用 background:true 派发；子 Agent 完成后会自动汇报，无需轮询，需要进度时用 action=status 查询。",
       "已完成的子 Agent 可以用 action=resume 复用其会话上下文继续相关工作，比重新派发更省上下文。",
+      "多个子 Agent 并行写同一个仓库时务必用 worktree:true（worker profile 默认开启），各自在独立 git worktree 分支上工作避免互相覆盖；完成后改动留在 worktree，由你审阅并合并。",
     ],
     parameters: SubagentParams,
 

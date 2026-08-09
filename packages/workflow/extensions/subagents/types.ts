@@ -101,5 +101,6 @@ export interface SubagentChildMeta {
   model?: string;
   background: boolean;
   parentSessionFile?: string;
+  worktreePath?: string;
   startedAt: number;
 }
