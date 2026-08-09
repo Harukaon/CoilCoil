@@ -873,7 +873,7 @@ async function main() {
     assert.ok(panelWidthAfterWindowResize.conversation < panelWidthBeforeWindowResize.conversation);
 
     await client.evaluate(`(() => { window.resizeTo(395, 700); return true; })()`);
-    await client.waitFor(`window.innerWidth <= 700`, "The window did not enter its compact layout.");
+    await client.waitFor(`window.innerWidth <= 700`, "The window did not reach its narrow desktop layout.");
     await client.evaluate(`(() => { window.resizeTo(395, 700); return true; })()`);
     await client.waitFor(
       `window.innerWidth <= 395`,
@@ -886,15 +886,12 @@ async function main() {
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       return true;
     })()`);
-    const compactSidebarClosed = await client.evaluate(`(async () => {
+    const narrowSidebarClosed = await client.evaluate(`(async () => {
       const button = document.querySelector('button[aria-label="收起侧栏"]');
       if (!button) return { ok: false, reason: "missing-button" };
-      const dragRegion = document.querySelector(".sidebar-drag-region");
       const buttonBounds = button.getBoundingClientRect();
-      const dragBounds = dragRegion?.getBoundingClientRect();
-      if (buttonBounds.width !== 50 || buttonBounds.height !== 50) return { ok: false, reason: "size", width: buttonBounds.width, height: buttonBounds.height };
+      if (buttonBounds.width !== 30 || buttonBounds.height !== 30) return { ok: false, reason: "size", width: buttonBounds.width, height: buttonBounds.height };
       if (getComputedStyle(button).webkitAppRegion !== "no-drag") return { ok: false, reason: "drag-region" };
-      if (dragBounds && buttonBounds.left < dragBounds.right) return { ok: false, reason: "overlap", buttonLeft: buttonBounds.left, dragRight: dragBounds.right };
       const hitPoints = [
         [buttonBounds.left + 5, buttonBounds.top + 5],
         [buttonBounds.right - 5, buttonBounds.top + 5],
@@ -912,16 +909,16 @@ async function main() {
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       return { ok: document.querySelector(".app-shell")?.classList.contains("left-collapsed") ?? false, reason: "click" };
     })()`);
-    assert.equal(compactSidebarClosed?.ok, true, JSON.stringify(compactSidebarClosed));
-    const compactSidebarOpened = await client.evaluate(`(async () => {
+    assert.equal(narrowSidebarClosed?.ok, true, JSON.stringify(narrowSidebarClosed));
+    const narrowSidebarOpened = await client.evaluate(`(async () => {
       const button = document.querySelector('button[aria-label="展开侧栏"]');
       if (!button) return false;
       button.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       return !document.querySelector(".app-shell")?.classList.contains("left-collapsed");
     })()`);
-    assert.equal(compactSidebarOpened, true);
-    const compactInspectorLayout = await client.evaluate(`(async () => {
+    assert.equal(narrowSidebarOpened, true);
+    const narrowInspectorLayout = await client.evaluate(`(async () => {
       document.querySelector('button[aria-label="展开作业栏"]')?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       const shell = document.querySelector(".app-shell");
@@ -943,13 +940,13 @@ async function main() {
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       return result;
     })()`);
-    assert.equal(compactInspectorLayout.shellTransition, "0s");
-    assert.equal(compactInspectorLayout.sidebarTransition, "0s");
-    assert.notEqual(compactInspectorLayout.inspectorPosition, "absolute");
-    assert.ok(compactInspectorLayout.conversationWidth >= 315);
-    assert.ok(compactInspectorLayout.inspectorWidth >= 40);
-    assert.ok(compactInspectorLayout.inspectorLeft >= compactInspectorLayout.conversationRight - 1);
-    assert.equal(compactInspectorLayout.rightResizer, true);
+    assert.equal(narrowInspectorLayout.shellTransition, "0s");
+    assert.equal(narrowInspectorLayout.sidebarTransition, "0s");
+    assert.notEqual(narrowInspectorLayout.inspectorPosition, "absolute");
+    assert.ok(narrowInspectorLayout.conversationWidth >= 315);
+    assert.ok(narrowInspectorLayout.inspectorWidth >= 40);
+    assert.ok(narrowInspectorLayout.inspectorLeft >= narrowInspectorLayout.conversationRight - 1);
+    assert.equal(narrowInspectorLayout.rightResizer, true);
     await client.evaluate(`(() => { window.resizeTo(1440, 900); return true; })()`);
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not return to its regular test size.");
     await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
@@ -968,9 +965,11 @@ async function main() {
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       center: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0,
-      tiled: document.querySelector(".app-shell")?.classList.contains("keep-tiled") ?? false
+      sidebarPosition: getComputedStyle(document.querySelector(".sidebar")).position,
+      inspectorPosition: getComputedStyle(document.querySelector(".inspector-pane")).position
     })`);
-    assert.equal(compressedPanelWidths.tiled, true);
+    assert.notEqual(compressedPanelWidths.sidebarPosition, "absolute");
+    assert.notEqual(compressedPanelWidths.inspectorPosition, "absolute");
     assert.ok(compressedPanelWidths.center <= 316 && compressedPanelWidths.center >= 314);
     assert.ok(compressedPanelWidths.right <= 41 && compressedPanelWidths.right >= 39);
     assert.ok(compressedPanelWidths.left > 40 && compressedPanelWidths.left < preferredPanelWidths.left);
