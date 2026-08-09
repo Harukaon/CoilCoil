@@ -571,6 +571,7 @@ export default function App(): React.JSX.Element {
     event.preventDefault();
     const prompt = draft.trim();
     const images = draftImages;
+    const runtimeCommand = prompt === "/memory" && images.length === 0;
     if ((!prompt && !images.length) || !project || startingSession) return;
     if (!modelConfigured) {
       toastError("发送第一条消息前，请先选择并配置模型。");
@@ -590,15 +591,15 @@ export default function App(): React.JSX.Element {
       let target = snapshotRef.current;
       if (!target || pendingProjectPath === project.path) {
         setStartingSession(true);
-        optimisticMessageIdRef.current = optimisticId;
-        setMessages([{ id: optimisticId, order: Date.now(), role: "user", text: prompt, images, timestamp: Date.now(), status: "succeeded" }]);
+        optimisticMessageIdRef.current = runtimeCommand ? undefined : optimisticId;
+        setMessages(runtimeCommand ? [] : [{ id: optimisticId, order: Date.now(), role: "user", text: prompt, images, timestamp: Date.now(), status: "succeeded" }]);
         const created = await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: project.path });
         const now = new Date().toISOString();
         const optimisticSession: SessionSummary = {
           ...created.session,
-          title: titleFromPrompt(prompt, images.length > 0),
+          title: runtimeCommand ? (created.session.title || "新对话") : titleFromPrompt(prompt, images.length > 0),
           updatedAt: now,
-          messageCount: Math.max(1, created.session.messageCount),
+          messageCount: runtimeCommand ? created.session.messageCount : Math.max(1, created.session.messageCount),
         };
         const activeSnapshot = { ...created, session: optimisticSession };
         createdSessionPath = optimisticSession.path;
