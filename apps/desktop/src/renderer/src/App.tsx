@@ -1,4 +1,5 @@
 import {
+  BrainCircuit,
   Files,
   PanelLeft,
   PanelRight,
@@ -29,12 +30,13 @@ import { SkillsWorkspace } from "./features/settings/SkillsWorkspace";
 import { WorkspaceSidebar, type SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
 import { FilesPanel } from "./features/files/FilesPanel";
+import { RuntimePanel } from "./features/runtime/RuntimePanel";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
 import { toastError } from "./ui/toast";
 
-type InspectorView = "files";
+type InspectorView = "files" | "runtime";
 type WorkspaceSurface = "conversation" | "skills";
 
 const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
@@ -285,6 +287,15 @@ export default function App(): React.JSX.Element {
           contextUsage: event.contextUsage,
           tokenUsage: event.tokenUsage,
         } : current);
+        break;
+      case "runtime_inspection_updated":
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = { ...current, runtimeInspection: event.inspection };
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
         break;
       case "run_state":
         setSnapshot((current) => current ? { ...current, running: event.running } : current);
@@ -611,6 +622,7 @@ export default function App(): React.JSX.Element {
 
   const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof Files }> = [
     { id: "files", label: "文件", icon: Files },
+    { id: "runtime", label: "运行时", icon: BrainCircuit },
   ];
 
   if (settingsOpen) {
@@ -733,6 +745,7 @@ export default function App(): React.JSX.Element {
           <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span></button>; })}</nav>
           <section className="inspector-content">
             {inspectorView === "files" ? <FilesPanel key="agent-files" project={projectState} runtimeId={snapshot?.runtimeId} onOpen={openFilePreview} /> : null}
+            {inspectorView === "runtime" ? <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} /> : null}
           </section>
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}

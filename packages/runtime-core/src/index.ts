@@ -57,6 +57,8 @@ import type {
   RuntimeBootstrap,
   RuntimeConfiguration,
   RuntimeEvent,
+  RuntimeInspectionSnapshot,
+  RuntimeSummaryEvent,
   ResponseMetrics,
   SessionSnapshot,
   SessionSummary,
@@ -72,6 +74,7 @@ import type {
   ToolRun,
 } from "@suocode/runtime-protocol";
 import { validateMcpJsonText } from "@suocode/runtime-protocol";
+import { buildRuntimeInspection, summaryEventFromEntry } from "./runtime-inspection.js";
 import {
   DEFAULT_OPENAI_RESPONSES_WS_BASE_URL,
   LEGACY_CLIPROXYAPI_CONFIG_FILE,
@@ -675,6 +678,8 @@ interface ActiveSession {
   nextTimelineOrder: number;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
+  sessionRevision: number;
+  summaryActivity?: RuntimeSummaryEvent;
   eventBus: EventBusController;
 }
 
@@ -3095,6 +3100,7 @@ export class SuoCodeRuntime {
       nextTimelineOrder: reconstructed.nextTimelineOrder,
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
+      sessionRevision: 1,
       eventBus,
     };
     this.active = active;
@@ -3387,6 +3393,84 @@ export class SuoCodeRuntime {
           this.scheduleProjectRefresh();
           void this.listSessions(active.cwd);
           break;
+        case "compaction_start":
+          active.summaryActivity = {
+            id: `compaction-${active.sessionRevision}-${Date.now()}`,
+            kind: "compaction",
+            status: "running",
+            timestamp: Date.now(),
+            active: true,
+            reason: event.reason,
+          };
+          this.publishRuntimeInspection(active);
+          break;
+        case "compaction_end": {
+          const leaf = active.session.sessionManager.getLeafEntry();
+          const activeIds = new Set(active.session.sessionManager.getBranch().map((entry) => entry.id));
+          const persisted = leaf ? summaryEventFromEntry(leaf, activeIds) : undefined;
+          if (event.result) {
+            active.summaryActivity = {
+              ...(persisted ?? active.summaryActivity ?? {
+                id: `compaction-${active.sessionRevision}-${Date.now()}`,
+                kind: "compaction" as const,
+                timestamp: Date.now(),
+                active: true,
+              }),
+              status: "succeeded",
+              reason: event.reason,
+              summary: event.result.summary,
+              tokensBefore: event.result.tokensBefore,
+              estimatedTokensAfter: event.result.estimatedTokensAfter,
+              firstKeptEntryId: event.result.firstKeptEntryId,
+              willRetry: event.willRetry,
+            };
+          } else {
+            active.summaryActivity = {
+              ...(active.summaryActivity ?? {
+                id: `compaction-${active.sessionRevision}-${Date.now()}`,
+                kind: "compaction" as const,
+                timestamp: Date.now(),
+                active: true,
+              }),
+              status: event.aborted ? "aborted" : "failed",
+              reason: event.reason,
+              error: event.errorMessage,
+              willRetry: event.willRetry,
+            };
+          }
+          this.publishRuntimeInspection(active);
+          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
+          break;
+        }
+        case "summarization_retry_scheduled":
+          active.summaryActivity = {
+            ...(active.summaryActivity ?? {
+              id: `summary-retry-${active.sessionRevision}-${Date.now()}`,
+              kind: "compaction" as const,
+              status: "running" as const,
+              timestamp: Date.now(),
+              active: true,
+            }),
+            status: "running",
+            retryAttempt: event.attempt,
+            retryMaxAttempts: event.maxAttempts,
+            error: event.errorMessage,
+          };
+          this.publishRuntimeInspection(active);
+          break;
+        case "summarization_retry_attempt_start":
+          active.summaryActivity = {
+            ...(active.summaryActivity ?? {
+              id: `summary-retry-${active.sessionRevision}-${Date.now()}`,
+              kind: event.source === "branchSummary" ? "branch_summary" as const : "compaction" as const,
+              timestamp: Date.now(),
+              active: true,
+            }),
+            status: "running",
+            ...(event.source === "compaction" ? { reason: event.reason } : {}),
+          };
+          this.publishRuntimeInspection(active);
+          break;
         case "entry_appended":
           if (event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE) {
             const metrics = responseMetricsFromData(event.entry.data);
@@ -3402,6 +3486,12 @@ export class SuoCodeRuntime {
               contextUsage: usage.contextUsage,
               tokenUsage: usage.tokenUsage,
             });
+          }
+          if (event.entry.type === "compaction" || event.entry.type === "branch_summary") {
+            active.sessionRevision += 1;
+            const activeIds = new Set(active.session.sessionManager.getBranch().map((entry) => entry.id));
+            active.summaryActivity = summaryEventFromEntry(event.entry, activeIds);
+            this.publishRuntimeInspection(active);
           }
           break;
         case "session_info_changed":
@@ -3627,6 +3717,8 @@ export class SuoCodeRuntime {
     if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");
     const result = await active.session.navigateTree(entryId, { summarize: false });
     if (result.cancelled) throw new Error("未能回溯到所选消息。");
+    active.sessionRevision += 1;
+    active.summaryActivity = undefined;
     const prepared = await preparePromptImages(images);
     const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
     const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
@@ -3764,8 +3856,21 @@ export class SuoCodeRuntime {
       responseMetricsHistory: active.responseMetricsHistory,
       contextUsage: usage.contextUsage,
       tokenUsage: usage.tokenUsage,
+      runtimeInspection: this.runtimeInspection(active),
       running: active.session.isStreaming,
     };
+  }
+
+  private runtimeInspection(active: ActiveSession): RuntimeInspectionSnapshot {
+    return buildRuntimeInspection(
+      active.session.sessionManager,
+      active.sessionRevision,
+      active.summaryActivity,
+    );
+  }
+
+  private publishRuntimeInspection(active: ActiveSession): void {
+    this.emitEvent({ type: "runtime_inspection_updated", inspection: this.runtimeInspection(active) });
   }
 
   async dispose(): Promise<void> {

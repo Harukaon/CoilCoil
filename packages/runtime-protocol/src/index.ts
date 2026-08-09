@@ -522,6 +522,45 @@ export interface TokenUsage {
   total: number;
 }
 
+export type RuntimeSummaryKind = "compaction" | "branch_summary";
+export type RuntimeSummaryStatus = "running" | "succeeded" | "failed" | "aborted";
+
+export interface RuntimeSummaryUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+  cost?: number;
+}
+
+export interface RuntimeSummaryEvent {
+  id: string;
+  kind: RuntimeSummaryKind;
+  status: RuntimeSummaryStatus;
+  timestamp: number;
+  active: boolean;
+  reason?: "manual" | "threshold" | "overflow";
+  summary?: string;
+  tokensBefore?: number;
+  estimatedTokensAfter?: number;
+  firstKeptEntryId?: string;
+  fromId?: string;
+  usage?: RuntimeSummaryUsage;
+  readFiles?: string[];
+  modifiedFiles?: string[];
+  error?: string;
+  willRetry?: boolean;
+  retryAttempt?: number;
+  retryMaxAttempts?: number;
+}
+
+export interface RuntimeInspectionSnapshot {
+  sessionRevision: number;
+  activeLeafId?: string;
+  summaryEvents: RuntimeSummaryEvent[];
+}
+
 export interface TerminalRun {
   id: string;
   command: string;
@@ -572,6 +611,7 @@ export interface SessionSnapshot {
   responseMetricsHistory: ResponseMetrics[];
   contextUsage?: ContextUsage;
   tokenUsage: TokenUsage;
+  runtimeInspection: RuntimeInspectionSnapshot;
   running: boolean;
 }
 
@@ -663,6 +703,7 @@ export type RuntimeEvent =
       contextUsage?: ContextUsage;
       tokenUsage: TokenUsage;
     }
+  | { type: "runtime_inspection_updated"; inspection: RuntimeInspectionSnapshot }
   | { type: "run_state"; running: boolean }
   | { type: "runtime_error"; message: string; detail?: string };
 

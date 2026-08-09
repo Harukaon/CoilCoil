@@ -86,6 +86,7 @@ class FakeRuntime {
       thinkingLevel: "off",
       responseMetricsHistory: [],
       tokenUsage: EMPTY_USAGE,
+      runtimeInspection: { sessionRevision: 1, activeLeafId: undefined, summaryEvents: [] },
       running: false,
     };
     this.emit({ type: "session_snapshot", snapshot: this.snapshotValue });
