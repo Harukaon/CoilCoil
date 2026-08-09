@@ -21,6 +21,7 @@ export interface CreateChildSessionOptions {
   parentSessionDir: string;
   model?: Model<never>;
   tools?: string[];
+  systemPrompt?: string;
   meta?: SubagentChildMeta;
   onEvent: (event: AgentSessionEvent) => void;
 }
@@ -37,14 +38,25 @@ async function buildChildSession(options: {
   sessionManager: SessionManager;
   model?: Model<never>;
   tools?: string[];
+  systemPrompt?: string;
 }): Promise<{ session: AgentSession }> {
   const settingsManager = SettingsManager.create(options.cwd, options.agentDir, { projectTrusted: true });
+  const profilePrompt = options.systemPrompt?.trim();
   const loader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: options.agentDir,
     settingsManager,
     noExtensions: true,
     noThemes: true,
+    extensionFactories: profilePrompt
+      ? [{
+          name: "suocode-subagent-prompt",
+          hidden: true,
+          factory: (pi) => {
+            pi.on("before_agent_start", (event) => ({ systemPrompt: `${event.systemPrompt}\n\n${profilePrompt}` }));
+          },
+        }]
+      : [],
   });
   await loader.reload();
   const created = await createAgentSession({
@@ -84,6 +96,7 @@ export async function createChildSession(options: CreateChildSessionOptions): Pr
     sessionManager,
     model: options.model,
     tools: options.tools,
+    systemPrompt: options.systemPrompt,
   });
   return wrapHandle(created.session, options.onEvent);
 }
@@ -92,6 +105,7 @@ export interface ReopenChildSessionOptions {
   sessionFile: string;
   cwd: string;
   agentDir: string;
+  systemPrompt?: string;
   onEvent: (event: AgentSessionEvent) => void;
 }
 
@@ -101,6 +115,7 @@ export async function reopenChildSession(options: ReopenChildSessionOptions): Pr
     cwd: options.cwd,
     agentDir: options.agentDir,
     sessionManager,
+    systemPrompt: options.systemPrompt,
   });
   return wrapHandle(created.session, options.onEvent);
 }

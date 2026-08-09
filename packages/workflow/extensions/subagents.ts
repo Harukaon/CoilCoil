@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { Model } from "@earendil-works/pi-ai";
 import { StringEnum } from "@earendil-works/pi-ai";
 import {
@@ -16,6 +17,11 @@ import {
   reopenChildSession,
   scanResumableChildren,
 } from "./subagents/child.ts";
+import {
+  formatProfileCatalog,
+  loadProfiles,
+  type SubagentProfile,
+} from "./subagents/profiles.ts";
 import {
   type ChildRun,
   createRunId,
@@ -42,6 +48,7 @@ const FINAL_OUTPUT_PREVIEW_CHARS = 8_000;
 const MAX_BASH_BUFFER_CHARS = 20_000;
 const STOP_SETTLE_WAIT_MS = 300;
 const DEFAULT_RESUME_PROMPT = "继续之前的任务：检查并完成未完成的工作，然后汇报最终结果。";
+const BUILTIN_AGENTS_DIR = fileURLToPath(new URL("../agents", import.meta.url));
 
 const SUBAGENT_ACTIONS = ["run", "status", "stop", "resume"] as const;
 
@@ -49,7 +56,7 @@ const SubagentParams = Type.Object({
   action: Type.Optional(
     StringEnum(SUBAGENT_ACTIONS, { description: "run 派发；status 查询；stop 停止；resume 复用已完成的子 Agent。默认 run。" }),
   ),
-  agent: Type.Optional(Type.String({ description: "子 Agent 名称，用于标识其角色，如 explore、reviewer。" })),
+  agent: Type.Optional(Type.String({ description: "子 Agent profile 名称（如 explore、reviewer、worker），会套用预设的提示词、模型和工具范围；省略则用默认配置派发。" })),
   task: Type.Optional(Type.String({ description: "action=run 时必填；action=resume 时作为追加指示，省略则继续原任务。" })),
   model: Type.Optional(Type.String({ description: '模型覆盖，格式 "provider/model-id"。省略则继承当前会话模型。' })),
   background: Type.Optional(Type.Boolean({ description: "true 时立即返回 runId，子 Agent 在后台运行，完成后会自动汇报。" })),
@@ -64,7 +71,6 @@ interface ResolvedModel {
 interface SubagentToolOutcome {
   content: Array<{ type: "text"; text: string }>;
   details: SubagentToolDetails | { error: string };
-  isError?: boolean;
 }
 
 function errorMessage(error: unknown): string {
@@ -181,6 +187,15 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   let detached = false;
   let sessionCwd: string | undefined;
   let sessionDir: string | undefined;
+  let profiles = new Map<string, SubagentProfile>();
+
+  const reloadProfiles = (cwd: string): void => {
+    profiles = loadProfiles({
+      builtinDir: BUILTIN_AGENTS_DIR,
+      userDir: join(getAgentDir(), "agents"),
+      projectDir: join(cwd, ".suocode", "agents"),
+    });
+  };
 
   const flushNow = (): void => {
     if (flushTimer) {
@@ -382,7 +397,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     if (run.status === "completed") {
       return { content: [{ type: "text", text: formatCompletionText(run) }], details };
     }
-    return { content: [{ type: "text", text: formatFailureText(run) }], details, isError: true };
+    return { content: [{ type: "text", text: formatFailureText(run) }], details };
   };
 
   const childSessionDir = (): string | undefined => {
@@ -440,6 +455,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         sessionFile: run.sessionFile,
         cwd,
         agentDir: getAgentDir(),
+        systemPrompt: profiles.get(run.agent)?.systemPrompt,
         onEvent: (event) => handleChildEvent(run, event),
       });
       return { handle };
@@ -467,18 +483,23 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
   ): Promise<SubagentToolOutcome> => {
     const task = (params.task ?? "").trim();
-    if (!task) return { content: [{ type: "text", text: "缺少子 Agent 任务描述（task）。" }], details: { error: "missing-task" }, isError: true };
+    if (!task) throw new Error("缺少子 Agent 任务描述（task）。");
     if (registry.liveCount() >= MAX_CONCURRENT_CHILDREN) {
-      return { content: [{ type: "text", text: `并发子 Agent 已达上限（${MAX_CONCURRENT_CHILDREN}），请等待已有运行结束。` }], details: { error: "concurrency-limit" }, isError: true };
+      throw new Error(`并发子 Agent 已达上限（${MAX_CONCURRENT_CHILDREN}），请等待已有运行结束。`);
     }
-    const resolved = resolveModel(params.model, ctx);
-    if ("error" in resolved) return { content: [{ type: "text", text: resolved.error }], details: { error: resolved.error }, isError: true };
+    const profileName = params.agent?.trim();
+    const profile = profileName ? profiles.get(profileName) : undefined;
+    if (profileName && !profile) {
+      throw new Error(`未找到子 Agent profile：${profileName}。\n${formatProfileCatalog(profiles)}`);
+    }
+    const resolved = resolveModel(params.model ?? profile?.model, ctx);
+    if ("error" in resolved) throw new Error(resolved.error);
 
     const background = params.background === true;
     const run: ChildRun = {
       runId: createRunId(),
       parentToolId: toolCallId,
-      agent: params.agent?.trim() || "default",
+      agent: profile?.name ?? (profileName || "default"),
       task,
       model: resolved.label,
       background,
@@ -518,12 +539,14 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         agentDir: getAgentDir(),
         parentSessionDir: ctx.sessionManager.getSessionDir(),
         model: resolved.model,
+        tools: profile?.tools,
+        systemPrompt: profile?.systemPrompt,
         meta,
         onEvent: (event) => handleChildEvent(run, event),
       });
     } catch (error) {
       failRun(run, "failed", errorMessage(error));
-      return { content: [{ type: "text", text: `子 Agent 会话创建失败：${errorMessage(error)}` }], details: registry.toDetails(run), isError: true };
+      throw new Error(`子 Agent 会话创建失败：${errorMessage(error)}`);
     }
 
     if (background) {
@@ -540,20 +563,21 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     const query = params.runId?.trim();
     if (!query) {
       const runs = registry.list();
-      if (runs.length === 0) return { content: [{ type: "text", text: "当前会话还没有派发过子 Agent。" }], details: { error: "no-runs" } };
+      const catalog = formatProfileCatalog(profiles);
+      if (runs.length === 0) return { content: [{ type: "text", text: `当前会话还没有派发过子 Agent。\n${catalog}` }], details: { error: "no-runs" } };
       const lines = runs.map((run) => `${run.runId} · ${run.agent} · ${run.status}${run.background ? " · 后台" : ""} · ${truncate(run.task, 120)}`);
-      return { content: [{ type: "text", text: `共 ${runs.length} 个子 Agent 运行：\n${lines.join("\n")}` }], details: { error: "no-runs" } };
+      return { content: [{ type: "text", text: `共 ${runs.length} 个子 Agent 运行：\n${lines.join("\n")}\n\n${catalog}` }], details: { error: "no-runs" } };
     }
     const run = findRun(query);
-    if (!run) return { content: [{ type: "text", text: `未找到子 Agent 运行：${query}` }], details: { error: "unknown-run" }, isError: true };
+    if (!run) throw new Error(`未找到子 Agent 运行：${query}`);
     return { content: [{ type: "text", text: formatStatusText(run) }], details: registry.toDetails(run) };
   };
 
   const executeStop = async (params: { runId?: string }): Promise<SubagentToolOutcome> => {
     const query = params.runId?.trim();
-    if (!query) return { content: [{ type: "text", text: "缺少要停止的运行标识（runId）。" }], details: { error: "missing-run-id" }, isError: true };
+    if (!query) throw new Error("缺少要停止的运行标识（runId）。");
     const run = registry.get(query);
-    if (!run) return { content: [{ type: "text", text: `未找到子 Agent 运行：${query}` }], details: { error: "unknown-run" }, isError: true };
+    if (!run) throw new Error(`未找到子 Agent 运行：${query}`);
     if (!runIsLive(run)) {
       return { content: [{ type: "text", text: `子 Agent ${run.runId} 已结束（${run.status}），无需停止。` }], details: registry.toDetails(run) };
     }
@@ -568,14 +592,14 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     onUpdate: ((update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => void) | undefined,
   ): Promise<SubagentToolOutcome> => {
     const query = params.runId?.trim();
-    if (!query) return { content: [{ type: "text", text: "缺少要复用的运行标识（runId）。" }], details: { error: "missing-run-id" }, isError: true };
+    if (!query) throw new Error("缺少要复用的运行标识（runId）。");
     const run = findRun(query);
-    if (!run) return { content: [{ type: "text", text: `未找到子 Agent 运行：${query}` }], details: { error: "unknown-run" }, isError: true };
+    if (!run) throw new Error(`未找到子 Agent 运行：${query}`);
     if (runIsLive(run)) {
-      return { content: [{ type: "text", text: `子 Agent ${run.runId} 仍在执行，可用 action=status 查看进度。` }], details: registry.toDetails(run), isError: true };
+      throw new Error(`子 Agent ${run.runId} 仍在执行，可用 action=status 查看进度。`);
     }
     const reopened = await reopenForResume(run);
-    if (!reopened.handle) return { content: [{ type: "text", text: reopened.error ?? "子 Agent 会话恢复失败。" }], details: registry.toDetails(run), isError: true };
+    if (!reopened.handle) throw new Error(reopened.error ?? "子 Agent 会话恢复失败。");
 
     const followUp = (params.task ?? "").trim() || DEFAULT_RESUME_PROMPT;
     const background = params.background === true;
@@ -597,6 +621,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     sessionCwd = ctx.cwd;
     sessionDir = ctx.sessionManager.getSessionDir();
+    reloadProfiles(ctx.cwd);
   });
 
   pi.events.on(SUBAGENT_RPC_REQUEST_CHANNEL, async (raw: unknown) => {
@@ -664,7 +689,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     promptGuidelines: [
       "需要大量文件读取、搜索或独立成块的子任务优先委派给子 Agent；多个相互独立的子任务应在同一条消息中发起多个 subagent 调用以并行执行。",
       "传给子 Agent 的 task 必须自包含：交代背景、关键路径和期望的产出格式，不要假设它能看到主会话的上下文。",
-      "派发前给子 Agent 起一个有意义的 agent 名称（如 explore、reviewer、worker），便于在结果中区分。",
+      "按角色选择 profile：只读侦察用 explore，代码评审用 reviewer，需要写代码用 worker；用 action=status（不带 runId）可查看可用的 profile 列表。",
       "不急于拿到结果、或想同时推进其他工作时用 background:true 派发；子 Agent 完成后会自动汇报，无需轮询，需要进度时用 action=status 查询。",
       "已完成的子 Agent 可以用 action=resume 复用其会话上下文继续相关工作，比重新派发更省上下文。",
     ],

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import subagentsExtension from "../extensions/subagents.ts";
 import { readChildMeta, scanResumableChildren } from "../extensions/subagents/child.ts";
+import { loadProfiles, parseProfileFile } from "../extensions/subagents/profiles.ts";
 import {
   clampText,
   createRunId,
@@ -49,6 +50,7 @@ function createHarness() {
   const tool = tools.find((entry) => entry.name === "subagent");
   assert.ok(tool, "subagent tool must be registered");
   return {
+    handlers: eventHandlers,
     emissions,
     eventHandlers,
     execute: tool.execute as (
@@ -88,23 +90,17 @@ test("subagent tool registers with run/status actions", () => {
 
 test("run rejects a missing task", async () => {
   const { execute } = createHarness();
-  const result = await execute("call-1", {}, undefined, undefined, createContext());
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /缺少子 Agent 任务描述/);
+  await assert.rejects(execute("call-1", {}, undefined, undefined, createContext()), /缺少子 Agent 任务描述/);
 });
 
 test("run rejects a malformed model override", async () => {
   const { execute } = createHarness();
-  const result = await execute("call-2", { task: "看一下 README", model: "no-slash" }, undefined, undefined, createContext());
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /模型格式无效/);
+  await assert.rejects(execute("call-2", { task: "看一下 README", model: "no-slash" }, undefined, undefined, createContext()), /模型格式无效/);
 });
 
 test("run rejects an unknown model", async () => {
   const { execute } = createHarness();
-  const result = await execute("call-3", { task: "看一下 README", model: "prov/unknown" }, undefined, undefined, createContext());
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /未找到模型/);
+  await assert.rejects(execute("call-3", { task: "看一下 README", model: "prov/unknown" }, undefined, undefined, createContext()), /未找到模型/);
 });
 
 test("run rejects a model without configured auth", async () => {
@@ -115,9 +111,7 @@ test("run rejects a model without configured auth", async () => {
       hasConfiguredAuth: () => false,
     },
   });
-  const result = await execute("call-4", { task: "看一下 README", model: "prov/locked" }, undefined, undefined, ctx);
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /尚未配置 API Key/);
+  await assert.rejects(execute("call-4", { task: "看一下 README", model: "prov/locked" }, undefined, undefined, ctx), /尚未配置 API Key/);
 });
 
 test("status reports an empty registry", async () => {
@@ -128,9 +122,7 @@ test("status reports an empty registry", async () => {
 
 test("status rejects an unknown run id", async () => {
   const { execute } = createHarness();
-  const result = await execute("call-6", { action: "status", runId: "missing" }, undefined, undefined, createContext());
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /未找到子 Agent 运行/);
+  await assert.rejects(execute("call-6", { action: "status", runId: "missing" }, undefined, undefined, createContext()), /未找到子 Agent 运行/);
 });
 
 test("rpc stop rejects an unknown run", async () => {
@@ -177,23 +169,17 @@ test("rpc resume rejects an unknown run", async () => {
 
 test("stop requires a run id", async () => {
   const { execute } = createHarness();
-  const result = await execute("call-7", { action: "stop" }, undefined, undefined, createContext());
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /runId/);
+  await assert.rejects(execute("call-7", { action: "stop" }, undefined, undefined, createContext()), /runId/);
 });
 
 test("stop rejects an unknown run", async () => {
   const { execute } = createHarness();
-  const result = await execute("call-8", { action: "stop", runId: "missing" }, undefined, undefined, createContext());
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /未找到/);
+  await assert.rejects(execute("call-8", { action: "stop", runId: "missing" }, undefined, undefined, createContext()), /未找到/);
 });
 
 test("resume requires a run id", async () => {
   const { execute } = createHarness();
-  const result = await execute("call-9", { action: "resume" }, undefined, undefined, createContext());
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /runId/);
+  await assert.rejects(execute("call-9", { action: "resume" }, undefined, undefined, createContext()), /runId/);
 });
 
 test("resume rejects an unknown run", async () => {
@@ -201,9 +187,7 @@ test("resume rejects an unknown run", async () => {
   const ctx = createContext({
     sessionManager: { getSessionDir: () => "/tmp/does-not-exist-suocode-subagents" },
   });
-  const result = await execute("call-10", { action: "resume", runId: "missing" }, undefined, undefined, ctx);
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /未找到/);
+  await assert.rejects(execute("call-10", { action: "resume", runId: "missing" }, undefined, undefined, ctx), /未找到/);
 });
 
 test("child meta round-trips through persisted session files", () => {
@@ -230,6 +214,77 @@ test("child meta round-trips through persisted session files", () => {
   assert.equal(scanned[0].sessionFile, sessionFile);
   assert.equal(readChildMeta(sessionFile)?.agent, "worker");
   assert.equal(scanResumableChildren(join(dir, "nope")).length, 0);
+});
+
+test("profile frontmatter parses name, tools, model, and prompt body", () => {
+  const profile = parseProfileFile(
+    ["---", "name: custom", "description: 测试", "tools: [read, grep]", "model: prov/fast", "worktree: true", "---", "你是一个测试代理。"].join("\n"),
+    "project",
+  );
+  assert.ok(profile);
+  assert.equal(profile.name, "custom");
+  assert.deepEqual(profile.tools, ["read", "grep"]);
+  assert.equal(profile.model, "prov/fast");
+  assert.equal(profile.worktree, true);
+  assert.equal(profile.systemPrompt, "你是一个测试代理。");
+});
+
+test("profile parsing rejects missing names and unknown tools", () => {
+  assert.equal(parseProfileFile("---\ndescription: 没有名字\n---\n正文", "project"), undefined);
+  assert.equal(parseProfileFile("---\nname: bad\ntools: [read, launch_rocket]\n---\n正文", "project"), undefined);
+  assert.equal(parseProfileFile("没有 frontmatter", "project"), undefined);
+});
+
+test("profile merge precedence is project > user > builtin", () => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-profiles-"));
+  const builtinDir = join(root, "builtin");
+  const userDir = join(root, "user");
+  const projectDir = join(root, "project");
+  mkdirSync(builtinDir, { recursive: true });
+  mkdirSync(userDir, { recursive: true });
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(join(builtinDir, "a.md"), "---\nname: shared\ndescription: builtin\n---\nBUILTIN", "utf8");
+  writeFileSync(join(builtinDir, "only-builtin.md"), "---\nname: only-builtin\n---\nB", "utf8");
+  writeFileSync(join(userDir, "a.md"), "---\nname: shared\ndescription: user\n---\nUSER", "utf8");
+  writeFileSync(join(projectDir, "a.md"), "---\nname: shared\ndescription: project\n---\nPROJECT", "utf8");
+
+  const merged = loadProfiles({ builtinDir, userDir, projectDir });
+  assert.equal(merged.size, 2);
+  assert.equal(merged.get("shared")?.description, "project");
+  assert.equal(merged.get("shared")?.systemPrompt, "PROJECT");
+  assert.equal(merged.get("shared")?.source, "project");
+  assert.equal(merged.get("only-builtin")?.source, "builtin");
+});
+
+test("builtin presets ship explore, reviewer, and worker", () => {
+  const builtinDir = join(import.meta.dirname, "..", "agents");
+  const merged = loadProfiles({ builtinDir, userDir: join(builtinDir, "none"), projectDir: join(builtinDir, "none") });
+  const explore = merged.get("explore");
+  const reviewer = merged.get("reviewer");
+  const worker = merged.get("worker");
+  assert.ok(explore && reviewer && worker);
+  assert.ok(!explore.tools?.includes("edit") && !explore.tools?.includes("write"), "explore must stay read-only");
+  assert.ok(worker.tools?.includes("edit") && worker.tools?.includes("write"), "worker must be able to write");
+  assert.equal(worker.worktree, true);
+  assert.match(explore.systemPrompt ?? "", /只读/);
+});
+
+test("status listing exposes the profile catalog after session_start", async () => {
+  const { handlers, execute } = createHarness();
+  await handlers.get("session_start")?.[0]({}, createContext());
+  const result = await execute("call-11", { action: "status" }, undefined, undefined, createContext());
+  assert.match(result.content[0].text, /explore/);
+  assert.match(result.content[0].text, /reviewer/);
+  assert.match(result.content[0].text, /worker/);
+});
+
+test("run rejects an unknown profile with the catalog", async () => {
+  const { handlers, execute } = createHarness();
+  await handlers.get("session_start")?.[0]({}, createContext());
+  await assert.rejects(
+    execute("call-12", { task: "做点事", agent: "no-such-profile" }, undefined, undefined, createContext()),
+    (error: Error) => /未找到子 Agent profile/.test(error.message) && /explore/.test(error.message),
+  );
 });
 
 function makeRun(overrides: Partial<ChildRun> = {}): ChildRun {
