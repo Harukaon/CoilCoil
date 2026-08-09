@@ -38,6 +38,7 @@ export function ConversationComposer({
   onSlashKeyDown,
   onModelMenuOpenChange,
   onSelectModel,
+  onConfigureModelOptions,
   onOpenSettings,
   onAbort,
   onEscape,
@@ -66,6 +67,7 @@ export function ConversationComposer({
   onSlashKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean;
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
+  onConfigureModelOptions?: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow: number) => Promise<void>;
   onOpenSettings: () => void;
   onAbort?: () => void;
   onEscape?: () => void;
@@ -199,6 +201,7 @@ export function ConversationComposer({
           side={inline ? "bottom" : "top"}
           onOpenChange={onModelMenuOpenChange}
           onSelect={onSelectModel}
+          onConfigureOptions={onConfigureModelOptions}
           onOpenSettings={onOpenSettings}
         />
         {!inline && running && onAbort ? (

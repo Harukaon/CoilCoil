@@ -684,6 +684,7 @@ export default function App(): React.JSX.Element {
           onKeyDown={composer.handleKeyDown}
           onModelMenuOpenChange={setModelMenuOpen}
           onSelectModel={(model) => { void composer.selectModel(model); }}
+          onConfigureModelOptions={composer.configureModelOptions}
           onOpenSettings={(section) => {
             setModelMenuOpen(false);
             setSettingsSection(section ?? "models");

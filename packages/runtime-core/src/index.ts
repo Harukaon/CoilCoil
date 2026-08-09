@@ -28,6 +28,8 @@ import type {
   ChangedFile,
   ChangeStatus,
   ChatMessage,
+  CliProxyApiConfiguration,
+  CliProxyApiConfigurationInput,
   ContextUsage,
   FileNode,
   McpConfigurationSnapshot,
@@ -1299,6 +1301,7 @@ function bundledRuntimeResources(workflowDirectory: string): RuntimeResources {
   const packageDirectories = [
     workflowDirectory,
     resolvePackageDirectory("pi-subagents"),
+    resolvePackageDirectory("@router-for-me/pi-cliproxyapi-provider"),
   ];
   const resources = packageDirectories.map(resourcesFromManifest);
   return {
@@ -1428,7 +1431,23 @@ export class SuoCodeRuntime {
    * so endpoint and provider metadata match the shared registry (new chats already do).
    */
   refreshSessionModelFromRegistry(): void {
-    this.active?.session.refreshModelFromRegistry();
+    const active = this.active;
+    if (!active) return;
+    active.session.refreshModelFromRegistry();
+    const model = active.session.model;
+    if (!model) return;
+    const effective = this.modelWithRuntimeOptions(model);
+    if (effective !== model) void active.session.setModel(effective).catch(() => undefined);
+  }
+
+  private async refreshActiveSessionModel(): Promise<void> {
+    const active = this.active;
+    if (!active) return;
+    active.session.refreshModelFromRegistry();
+    const model = active.session.model;
+    if (!model) return;
+    const effective = this.modelWithRuntimeOptions(model);
+    if (effective !== model) await active.session.setModel(effective);
   }
 
   async getConfiguration(): Promise<RuntimeConfiguration> {
@@ -1443,6 +1462,7 @@ export class SuoCodeRuntime {
       .map((provider) => provider.id)
       .sort();
     const configuredSet = new Set(configuredProviders);
+    const runtimeOptions = this.readModelRuntimeOptions();
     const models: ModelOption[] = modelRuntime
       .getModels()
       .filter((model) => !disabledProviders.has(model.provider))
@@ -1454,7 +1474,8 @@ export class SuoCodeRuntime {
         reasoning: Boolean(model.reasoning),
         supportsImages: model.input.includes("image"),
         supportedThinkingLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],
-        contextWindow: typeof model.contextWindow === "number" ? model.contextWindow : undefined,
+        contextWindow: runtimeOptions[model.provider]?.[model.id]?.contextWindow
+          ?? (typeof model.contextWindow === "number" ? model.contextWindow : undefined),
         configured: configuredSet.has(model.provider),
       }))
       .sort((a, b) => {
@@ -1471,6 +1492,109 @@ export class SuoCodeRuntime {
       models,
       migratedLegacyCredentials: this.migratedLegacyCredentials,
     };
+  }
+
+  private cliProxyApiConfigurationPath(): string {
+    return join(this.agentDir, "cliproxyapi.json");
+  }
+
+  private modelRuntimeOptionsPath(): string {
+    return join(this.agentDir, "model-runtime-options.json");
+  }
+
+  private readModelRuntimeOptions(): Record<string, Record<string, { contextWindow?: number }>> {
+    const path = this.modelRuntimeOptionsPath();
+    if (!existsSync(path)) return {};
+    try {
+      const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (!isRecord(value)) return {};
+      const result: Record<string, Record<string, { contextWindow?: number }>> = {};
+      for (const [provider, models] of Object.entries(value)) {
+        if (!isRecord(models)) continue;
+        result[provider] = {};
+        for (const [modelId, options] of Object.entries(models)) {
+          if (!isRecord(options)) continue;
+          const contextWindow = typeof options.contextWindow === "number" && Number.isFinite(options.contextWindow) && options.contextWindow > 0
+            ? Math.round(options.contextWindow)
+            : undefined;
+          if (contextWindow) result[provider][modelId] = { contextWindow };
+        }
+      }
+      return result;
+    } catch {
+      return {};
+    }
+  }
+
+  private writeModelRuntimeContextWindow(provider: string, modelId: string, contextWindow: number): void {
+    const values = this.readModelRuntimeOptions();
+    values[provider] ??= {};
+    values[provider][modelId] = { ...(values[provider][modelId] ?? {}), contextWindow };
+    const path = this.modelRuntimeOptionsPath();
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    mkdirSync(this.agentDir, { recursive: true });
+    writeFileSync(temporaryPath, `${JSON.stringify(values, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
+  }
+
+  private modelWithRuntimeOptions<T extends { provider: string; id: string; contextWindow: number }>(model: T): T {
+    const contextWindow = this.readModelRuntimeOptions()[model.provider]?.[model.id]?.contextWindow;
+    return contextWindow ? { ...model, contextWindow } : model;
+  }
+
+  private readCliProxyApiConfigurationFile(): Record<string, unknown> {
+    const path = this.cliProxyApiConfigurationPath();
+    if (!existsSync(path)) return {};
+    try {
+      const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (!isRecord(value)) throw new Error("配置文件必须包含 JSON 对象。");
+      return value;
+    } catch (error) {
+      throw new Error(`无法读取 CLIProxyAPI 配置：${errorMessage(error)}`);
+    }
+  }
+
+  async getCliProxyApiConfiguration(): Promise<CliProxyApiConfiguration> {
+    const value = this.readCliProxyApiConfigurationFile();
+    return {
+      configPath: this.cliProxyApiConfigurationPath(),
+      baseUrl: optionalString(value, "baseUrl") ?? "http://127.0.0.1:8317",
+      providerId: optionalString(value, "providerId") ?? "cliproxyapi",
+      providerName: optionalString(value, "providerName") ?? "CLIProxyAPI",
+      apiKeyConfigured: Boolean(optionalString(value, "apiKey")),
+      fast: optionalBoolean(value, "fast") ?? false,
+    };
+  }
+
+  async saveCliProxyApiConfiguration(input: CliProxyApiConfigurationInput): Promise<RuntimeConfiguration> {
+    const baseUrl = assertOptionalUrl(input.baseUrl, "CLIProxyAPI Base URL");
+    if (!baseUrl) throw new Error("CLIProxyAPI Base URL 不能为空。");
+    const existing = this.readCliProxyApiConfigurationFile();
+    const apiKey = input.apiKey?.trim() || (input.preserveApiKey ? optionalString(existing, "apiKey") : undefined);
+    if (!apiKey) throw new Error("CLIProxyAPI API Key 不能为空。");
+    const providerId = assertProviderId(input.providerId?.trim() || optionalString(existing, "providerId") || "cliproxyapi");
+    const providerName = input.providerName?.trim() || optionalString(existing, "providerName") || "CLIProxyAPI";
+    const value = {
+      ...existing,
+      baseUrl,
+      apiKey,
+      providerId,
+      providerName,
+      fast: input.fast === true,
+    };
+    mkdirSync(this.agentDir, { recursive: true });
+    const path = this.cliProxyApiConfigurationPath();
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
+    try { chmodSync(path, 0o600); } catch { /* Non-POSIX filesystems can ignore private modes. */ }
+
+    if (this.active && !this.active.session.isStreaming) {
+      await this.active.session.reload();
+    }
+    const configuration = await this.getConfiguration();
+    this.emitEvent({ type: "configuration_updated", configuration });
+    return configuration;
   }
 
   private disabledProviderIds(): Set<string> {
@@ -1558,9 +1682,10 @@ export class SuoCodeRuntime {
     const storedCredential = readStoredCredential(providerId, join(this.agentDir, "auth.json"));
     const storedApiKeyCredential = storedCredential?.type === "api_key" ? storedCredential : undefined;
     const providerName = runtimeProvider?.name;
+    const fallbackName = providerId === "cliproxyapi" ? "CLIProxyAPI" : providerId;
     return {
       id: providerId,
-      name: provider ? optionalString(provider, "name") ?? providerName ?? providerId : providerName ?? providerId,
+      name: provider ? optionalString(provider, "name") ?? providerName ?? fallbackName : providerName ?? fallbackName,
       baseUrl: provider ? optionalString(provider, "baseUrl") : undefined,
       api: provider ? optionalString(provider, "api") : undefined,
       oauth: provider?.oauth === "radius" ? "radius" : undefined,
@@ -1582,7 +1707,7 @@ export class SuoCodeRuntime {
   async getModelProviderConfiguration(): Promise<ModelProviderConfigurationSnapshot> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
-    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius"]);
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", "cliproxyapi"]);
     const providers = new Map(modelRuntime.getProviders().map((provider) => [provider.id, provider]));
     const allModels = modelRuntime.getModels();
     const models = new Map<string, Array<(typeof allModels)[number]>>();
@@ -1591,7 +1716,7 @@ export class SuoCodeRuntime {
       values.push(model);
       models.set(model.provider, values);
     }
-    const ids = new Set([...providers.keys(), ...Object.keys(privateConfiguration.providers)]);
+    const ids = new Set([...providers.keys(), ...Object.keys(privateConfiguration.providers), "cliproxyapi"]);
     const configuration = [...ids].map((id) => this.modelProviderFromConfiguration(
       id,
       privateConfiguration.providers[id],
@@ -1768,7 +1893,7 @@ export class SuoCodeRuntime {
   async saveModelProviderConfiguration(input: ModelProviderConfigurationInput): Promise<ModelProviderSaveResult> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
-    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius"]);
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", "cliproxyapi"]);
     const existing = privateConfiguration.providers[input.provider.id.trim()];
     const next = this.validateModelProviderConfiguration(input, existing, builtinIds);
     if (next.writeModelsConfig) {
@@ -1833,6 +1958,7 @@ export class SuoCodeRuntime {
     provider: string;
     modelId: string;
     thinkingLevel: ThinkingLevel;
+    contextWindow?: number;
     apiKey?: string;
   }): Promise<RuntimeConfiguration> {
     const modelRuntime = await this.ready();
@@ -1850,14 +1976,21 @@ export class SuoCodeRuntime {
       throw new Error(`No credential is configured for ${input.provider}.`);
     }
 
-    const effectiveThinkingLevel = clampThinkingLevel(model, input.thinkingLevel) as ThinkingLevel;
+    if (input.contextWindow !== undefined) {
+      if (!Number.isFinite(input.contextWindow) || input.contextWindow < 1_024) {
+        throw new Error("上下文窗口必须是不小于 1024 的数字。");
+      }
+      this.writeModelRuntimeContextWindow(input.provider, input.modelId, Math.round(input.contextWindow));
+    }
+    const effectiveModel = this.modelWithRuntimeOptions(model);
+    const effectiveThinkingLevel = clampThinkingLevel(effectiveModel, input.thinkingLevel) as ThinkingLevel;
     const settings = this.active?.session.settingsManager ?? SettingsManager.create(this.active?.cwd ?? process.cwd(), this.agentDir);
     settings.setDefaultModelAndProvider(input.provider, input.modelId);
     settings.setDefaultThinkingLevel(effectiveThinkingLevel);
     await settings.flush();
 
     if (this.active) {
-      await this.active.session.setModel(model);
+      await this.active.session.setModel(effectiveModel);
       this.active.session.setThinkingLevel(effectiveThinkingLevel);
       this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
     }
@@ -2901,6 +3034,10 @@ export class SuoCodeRuntime {
     markTiming("createAgentSession");
     await created.session.bindExtensions({});
     markTiming("bindExtensions");
+    if (created.session.model) {
+      const effectiveModel = this.modelWithRuntimeOptions(created.session.model);
+      if (effectiveModel !== created.session.model) await created.session.setModel(effectiveModel);
+    }
     created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => name !== "find"));
     const activeToolNames = new Set(created.session.getActiveToolNames());
     const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp", "subagent"];
@@ -3441,7 +3578,7 @@ export class SuoCodeRuntime {
 
   async prompt(text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    this.refreshSessionModelFromRegistry();
+    await this.refreshActiveSessionModel();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) return this.steer(prompt, images);
@@ -3460,7 +3597,7 @@ export class SuoCodeRuntime {
 
   async rewindPrompt(entryId: string, text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    this.refreshSessionModelFromRegistry();
+    await this.refreshActiveSessionModel();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");

@@ -16,6 +16,7 @@
     "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
     "@earendil-works/pi-protocol": "file:../../vendor/pi/packages/protocol",
     "@earendil-works/pi-tui": "file:../../vendor/pi/packages/tui",
+    "@router-for-me/pi-cliproxyapi-provider": "^1.4.13",
     "@suocode/runtime-protocol": "0.1.0",
     "@suocode/workflow": "0.1.0",
     "jiti": "2.7.0",

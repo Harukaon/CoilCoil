@@ -1,6 +1,7 @@
 import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, Plus, RefreshCw, Search, Trash2, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  CliProxyApiConfiguration,
   FetchProviderModelsResult,
   ModelProviderConfiguration,
   ModelProviderConfigurationInput,
@@ -317,6 +318,67 @@ function ProviderModelCard({
       </details>
     </article>
   );
+}
+
+function CliProxyApiEditor({ runtimeId, onSaved, onReload }: {
+  runtimeId?: string;
+  onSaved: (configuration: RuntimeConfiguration) => void;
+  onReload: (configuration: RuntimeConfiguration) => Promise<void>;
+}): React.JSX.Element {
+  const [configuration, setConfiguration] = useState<CliProxyApiConfiguration>();
+  const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:8317");
+  const [apiKey, setApiKey] = useState("");
+  const [fast, setFast] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    void window.suocode.request<CliProxyApiConfiguration>({ type: "get_cliproxyapi_configuration" }, runtimeId)
+      .then((next) => {
+        setConfiguration(next);
+        setBaseUrl(next.baseUrl);
+        setFast(next.fast);
+      })
+      .catch((caught) => toastError(caught instanceof Error ? caught.message : String(caught)));
+  }, [runtimeId]);
+
+  const save = async (): Promise<void> => {
+    setSaving(true);
+    try {
+      const next = await window.suocode.request<RuntimeConfiguration>({
+        type: "save_cliproxyapi_configuration",
+        input: {
+          baseUrl,
+          apiKey: apiKey.trim() || undefined,
+          preserveApiKey: Boolean(configuration?.apiKeyConfigured),
+          fast,
+        },
+      }, runtimeId);
+      const stored = await window.suocode.request<CliProxyApiConfiguration>({ type: "get_cliproxyapi_configuration" }, runtimeId);
+      setConfiguration(stored);
+      setApiKey("");
+      onSaved(next);
+      await onReload(next);
+      toastSuccess("CLIProxyAPI 已连接；模型目录已刷新。");
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <form className="cliproxyapi-editor" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+    <header className="provider-editor-heading">
+      <div><span className="provider-source-tag">SuoCode 内置扩展</span><strong>CLIProxyAPI WebSocket</strong><small>复用 CLIProxyAPI 官方维护的 Pi provider；使用普通 CPA API Key，不提取 ChatGPT accountId，并强制使用持久 WebSocket。</small></div>
+      <button className="primary-button" type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存并连接</button>
+    </header>
+    <div className="provider-native-summary"><strong>独立服务商，不修改现有配置</strong><p>它会注册为 <code>cliproxyapi</code>，不会覆盖 pierce 或 Pi 内置的 <code>openai-codex-responses</code>。模型目录从 CPA 的 <code>/v1/models?client_version=pi</code> 自动读取。</p></div>
+    <div className="settings-grid">
+      <label>CPA 地址（Base URL）<input value={baseUrl} placeholder="http://127.0.0.1:8317" onChange={(event) => setBaseUrl(event.target.value)} /></label>
+      <label>CPA API Key<span className="secret-input"><KeyRound size={13} /><input type="password" value={apiKey} autoComplete="off" placeholder={configuration?.apiKeyConfigured ? "已配置；留空即可保留" : "粘贴 CPA API Key"} onChange={(event) => setApiKey(event.target.value)} /></span></label>
+    </div>
+    <label className="checkbox-setting"><input type="checkbox" checked={fast} onChange={(event) => setFast(event.target.checked)} />启用 Fast / priority mode（仅支持该能力的 CPA 模型生效）</label>
+    <footer><span>{configuration?.configPath}</span><span className="provider-runtime-note">配置仅保存于 SuoCode 私有运行时。</span></footer>
+  </form>;
 }
 
 export function ModelSettings({ configuration, onSaved, runtimeId }: {
@@ -650,7 +712,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
       </aside>
       <section className="provider-editor">
         {!draft && !loading ? <div className="provider-editor-empty"><CircleDot size={22} /><strong>选择或添加一个服务商</strong><p>所有配置都会写入 SuoCode 私有运行时的 <code>models.json</code>，不会读取或修改用户的本地 Agent 目录。</p></div> : null}
-        {draft ? <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
+        {draft?.id === "cliproxyapi" ? <CliProxyApiEditor runtimeId={runtimeId} onSaved={onSaved} onReload={(next) => load("cliproxyapi", next)} /> : draft ? <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
           <header className="provider-editor-heading">
             <div>
               <span className="provider-source-tag">{selectedId ? sourceLabel(selectedSource) : "新的自定义服务商"}</span>

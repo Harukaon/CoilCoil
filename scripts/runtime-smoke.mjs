@@ -1,5 +1,6 @@
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,23 @@ for (let index = 0; index < 1_205; index += 1) {
   writeFileSync(join(largeDirectory, `entry-${String(index).padStart(4, "0")}.txt`), "x", "utf8");
 }
 writeFileSync(join(projectDir, "zz-root.txt"), "root sibling\n", "utf8");
+
+const cpaFixture = createHttpServer((request, response) => {
+  if (request.url?.startsWith("/v1/models")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ models: [{ slug: "gpt-5.6-cpa-smoke", display_name: "CPA Smoke", context_window: 196000, input_modalities: ["text", "image"], supported_reasoning_levels: ["low", "medium", "high"] }] }));
+    return;
+  }
+  response.writeHead(404);
+  response.end();
+});
+await new Promise((resolveListen, rejectListen) => {
+  cpaFixture.once("error", rejectListen);
+  cpaFixture.listen(0, "127.0.0.1", resolveListen);
+});
+const cpaAddress = cpaFixture.address();
+if (!cpaAddress || typeof cpaAddress === "string") throw new Error("CLIProxyAPI fixture did not bind a TCP port.");
+const cpaBaseUrl = `http://127.0.0.1:${cpaAddress.port}`;
 
 const oauthFixture = fork(mcpOAuthSmokeServerPath, [], { stdio: ["ignore", "pipe", "pipe", "ipc"] });
 let oauthFixtureError = "";
@@ -137,6 +155,14 @@ try {
   const mcpSecret = "suocode-mcp-secret-do-not-leak";
   const bootstrap = await request({ type: "bootstrap" });
   if (!bootstrap?.configuration?.models) throw new Error("Bootstrap did not return model configuration.");
+  await request({
+    type: "save_cliproxyapi_configuration",
+    input: { baseUrl: cpaBaseUrl, apiKey: "cpa-smoke-key", preserveApiKey: false, fast: false },
+  });
+  const cpaStored = await request({ type: "get_cliproxyapi_configuration" });
+  if (cpaStored.baseUrl !== cpaBaseUrl || cpaStored.apiKeyConfigured !== true || "apiKey" in cpaStored) {
+    throw new Error(`CLIProxyAPI private configuration was not safely projected: ${JSON.stringify(cpaStored)}`);
+  }
   const initialMcp = await request({ type: "get_mcp_configuration", cwd: projectDir });
   if (!initialMcp?.configPath?.startsWith(temporaryRoot) || initialMcp.servers.length !== 0) {
     throw new Error("MCP configuration was not isolated inside the SuoCode runtime.");
@@ -342,6 +368,11 @@ try {
   }
   await request({ type: "remove_mcp_server", cwd: projectDir, name: "project-smoke-server", scope: "project" });
   const snapshot = await request({ type: "create_session", cwd: projectDir });
+  const cpaConfiguration = await request({ type: "get_configuration" });
+  const cpaModel = cpaConfiguration.models.find((model) => model.provider === "cliproxyapi" && model.id === "gpt-5.6-cpa-smoke");
+  if (!cpaModel?.configured || cpaModel.contextWindow !== 196000 || !cpaModel.supportsImages) {
+    throw new Error(`The bundled CLIProxyAPI provider did not register its upstream model catalog: ${JSON.stringify(cpaModel)}`);
+  }
   if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
   if (!Array.isArray(snapshot.subagents)) throw new Error("Subagent activity was not included in the session snapshot.");
   const mcpStatus = await request({ type: "get_mcp_status" });
@@ -670,6 +701,6 @@ try {
   else if (child.exitCode === null) child.kill("SIGTERM");
   if (oauthFixture.connected) oauthFixture.send({ type: "shutdown" });
   else if (oauthFixture.exitCode === null) oauthFixture.kill("SIGTERM");
-  await Promise.all([runtimeExit, oauthExit]);
+  await Promise.all([runtimeExit, oauthExit, new Promise((resolveClose) => cpaFixture.close(resolveClose))]);
   rmSync(temporaryRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

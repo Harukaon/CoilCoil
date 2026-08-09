@@ -285,7 +285,8 @@ export class RuntimeServer {
     const result = await this.dispatchTo(runtime, command);
     if (command.type === "archive_session") await this.releaseSession(command.sessionPath);
     if (
-      command.type === "save_model_provider_configuration"
+      command.type === "save_cliproxyapi_configuration"
+      || command.type === "save_model_provider_configuration"
       || command.type === "remove_model_provider_configuration"
       || command.type === "configure_model"
       || command.type === "remove_provider_auth"
@@ -309,6 +310,10 @@ export class RuntimeServer {
         return runtime.initialize();
       case "get_configuration":
         return runtime.getConfiguration();
+      case "get_cliproxyapi_configuration":
+        return runtime.getCliProxyApiConfiguration();
+      case "save_cliproxyapi_configuration":
+        return runtime.saveCliProxyApiConfiguration(command.input);
       case "get_model_provider_configuration":
         return runtime.getModelProviderConfiguration();
       case "save_model_provider_configuration":

@@ -63,12 +63,10 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
   let current: ResponseTiming | undefined;
   let conversation: ConversationTiming | undefined;
   let lastResponseMetrics: string | undefined;
-  let responseMetricsData: Array<Omit<ResponseMetricsEntry, "turnDurationMs">> = [];
 
   pi.on("before_agent_start", () => {
     conversation = { startedAt: performance.now() };
     lastResponseMetrics = undefined;
-    responseMetricsData = [];
   });
 
   pi.on("before_provider_request", () => {
@@ -98,7 +96,7 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
       ? undefined
       : outputTokens / (generationMs / 1_000);
 
-    responseMetricsData.push({
+    const metrics: ResponseMetricsEntry = {
       firstTokenMs: firstTokenAt === undefined ? undefined : firstTokenAt - current.requestStartedAt,
       averageTokensPerSecond,
       inputTokens: event.message.usage.input,
@@ -106,8 +104,14 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
       cacheReadTokens: event.message.usage.cacheRead,
       cacheWriteTokens: event.message.usage.cacheWrite,
       totalMs,
+      turnDurationMs: conversation ? Math.max(0, endedAt - conversation.startedAt) : totalMs,
       timestamp: Date.now(),
-    });
+    };
+
+    // Persist each provider response as soon as it finishes. The desktop
+    // runtime projects custom entries immediately, so request history and
+    // token usage no longer wait for the complete agent/tool loop to settle.
+    pi.appendEntry<ResponseMetricsEntry>(RESPONSE_METRICS_ENTRY_TYPE, metrics);
 
     if (ctx.hasUI) {
       const firstToken = firstTokenAt === undefined
@@ -144,21 +148,12 @@ export default function responseMetricsExtension(pi: ExtensionAPI): void {
       );
     }
 
-    responseMetricsData.forEach((metrics, index) => {
-      pi.appendEntry<ResponseMetricsEntry>(RESPONSE_METRICS_ENTRY_TYPE, {
-        ...metrics,
-        turnDurationMs: index === responseMetricsData.length - 1 ? turnDurationMs : metrics.totalMs,
-      });
-    });
-
     conversation = undefined;
-    responseMetricsData = [];
   });
 
   pi.on("session_shutdown", () => {
     current = undefined;
     conversation = undefined;
     lastResponseMetrics = undefined;
-    responseMetricsData = [];
   });
 }

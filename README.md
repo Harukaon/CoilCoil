@@ -14,6 +14,7 @@ SuoCode Desktop does not require a user-installed Pi. The application starts its
 - Streaming Agent responses, reasoning, tool calls, steering, and cancellation
 - Persistent project-scoped conversations that survive application restarts
 - Model/provider selection and API-key configuration
+- Bundled CLIProxyAPI provider for plain CPA keys and persistent Codex WebSocket transport
 - Project tools for reading, searching, editing, writing, and running commands
 - Bundled `pi-mcp-adapter` and `pi-subagents` extensions, with SuoCode-owned GUI configuration and status projection
 - Structured todo plans, Git changes and patches, terminal output, and project file previews

@@ -82,6 +82,7 @@ export function ConversationPane({
   onKeyDown,
   onModelMenuOpenChange,
   onSelectModel,
+  onConfigureModelOptions,
   onOpenSettings,
   onAbort,
 }: {
@@ -127,6 +128,7 @@ export function ConversationPane({
   onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
+  onConfigureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow: number) => Promise<void>;
   onOpenSettings: (section?: SettingsSection) => void;
   onAbort: () => void;
 }): React.JSX.Element {
@@ -263,6 +265,7 @@ export function ConversationPane({
             onSlashKeyDown={slashMenu.handleSlashKeyDown}
             onModelMenuOpenChange={onModelMenuOpenChange}
             onSelectModel={onSelectModel}
+            onConfigureModelOptions={onConfigureModelOptions}
             onOpenSettings={() => onOpenSettings()}
             onAbort={onAbort}
           />

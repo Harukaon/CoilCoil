@@ -27,6 +27,25 @@ export interface RuntimeConfiguration {
   migratedLegacyCredentials: boolean;
 }
 
+/** Configuration for SuoCode's bundled CLIProxyAPI WebSocket provider. */
+export interface CliProxyApiConfiguration {
+  configPath: string;
+  baseUrl: string;
+  providerId: string;
+  providerName: string;
+  apiKeyConfigured: boolean;
+  fast: boolean;
+}
+
+export interface CliProxyApiConfigurationInput {
+  baseUrl: string;
+  apiKey?: string;
+  preserveApiKey: boolean;
+  providerId?: string;
+  providerName?: string;
+  fast?: boolean;
+}
+
 /**
  * Pi's built-in streaming transports that can be configured through
  * `models.json`. The runtime deliberately keeps the value as a string so a
@@ -574,6 +593,8 @@ export interface WorkspaceSnapshot {
 export type RuntimeCommand =
   | { type: "bootstrap" }
   | { type: "get_configuration" }
+  | { type: "get_cliproxyapi_configuration" }
+  | { type: "save_cliproxyapi_configuration"; input: CliProxyApiConfigurationInput }
   | { type: "get_model_provider_configuration" }
   | { type: "save_model_provider_configuration"; input: ModelProviderConfigurationInput }
   | { type: "remove_model_provider_configuration"; provider: string }
@@ -582,6 +603,8 @@ export type RuntimeCommand =
       provider: string;
       modelId: string;
       thinkingLevel: ThinkingLevel;
+      /** SuoCode-private context limit override for this provider/model. */
+      contextWindow?: number;
       apiKey?: string;
     }
   | { type: "remove_provider_auth"; provider: string }

@@ -30,6 +30,7 @@ export interface ComposerController {
   handleCompositionEnd: () => void;
   handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   selectModel: (model: ModelOption) => Promise<void>;
+  configureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow: number) => Promise<void>;
 }
 
 export function useComposerController({
@@ -108,6 +109,30 @@ export function useComposerController({
     }
   }, [configuration, modelChanging, onConfigurationChange, onError, runtimeId]);
 
+  const configureModelOptions = useCallback(async (
+    model: ModelOption,
+    thinkingLevel: RuntimeConfiguration["thinkingLevel"],
+    contextWindow: number,
+  ): Promise<void> => {
+    if (!configuration || modelChanging) return;
+    setModelChanging(true);
+    onError(undefined);
+    try {
+      const next = await window.suocode.request<RuntimeConfiguration>({
+        type: "configure_model",
+        provider: model.provider,
+        modelId: model.id,
+        thinkingLevel,
+        contextWindow,
+      }, runtimeId);
+      onConfigurationChange(next);
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setModelChanging(false);
+    }
+  }, [configuration, modelChanging, onConfigurationChange, onError, runtimeId]);
+
   return {
     draft,
     images,
@@ -125,5 +150,6 @@ export function useComposerController({
     handleCompositionEnd: () => { composingRef.current = false; },
     handleKeyDown,
     selectModel,
+    configureModelOptions,
   };
 }
