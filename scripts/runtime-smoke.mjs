@@ -22,22 +22,22 @@ for (let index = 0; index < 1_205; index += 1) {
 }
 writeFileSync(join(projectDir, "zz-root.txt"), "root sibling\n", "utf8");
 
-const cpaFixture = createHttpServer((request, response) => {
+const responsesWsFixture = createHttpServer((request, response) => {
   if (request.url?.startsWith("/v1/models")) {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ models: [{ slug: "gpt-5.6-cpa-smoke", display_name: "CPA Smoke", context_window: 196000, input_modalities: ["text", "image"], supported_reasoning_levels: ["low", "medium", "high"] }] }));
+    response.end(JSON.stringify({ models: [{ slug: "gpt-5.6-ws-smoke", display_name: "Responses WS Smoke", context_window: 196000, input_modalities: ["text", "image"], supported_reasoning_levels: ["low", "medium", "high"] }] }));
     return;
   }
   response.writeHead(404);
   response.end();
 });
 await new Promise((resolveListen, rejectListen) => {
-  cpaFixture.once("error", rejectListen);
-  cpaFixture.listen(0, "127.0.0.1", resolveListen);
+  responsesWsFixture.once("error", rejectListen);
+  responsesWsFixture.listen(0, "127.0.0.1", resolveListen);
 });
-const cpaAddress = cpaFixture.address();
-if (!cpaAddress || typeof cpaAddress === "string") throw new Error("CLIProxyAPI fixture did not bind a TCP port.");
-const cpaBaseUrl = `http://127.0.0.1:${cpaAddress.port}`;
+const responsesWsAddress = responsesWsFixture.address();
+if (!responsesWsAddress || typeof responsesWsAddress === "string") throw new Error("OpenAI Response (WS) fixture did not bind a TCP port.");
+const responsesWsBaseUrl = `http://127.0.0.1:${responsesWsAddress.port}`;
 
 const oauthFixture = fork(mcpOAuthSmokeServerPath, [], { stdio: ["ignore", "pipe", "pipe", "ipc"] });
 let oauthFixtureError = "";
@@ -156,12 +156,12 @@ try {
   const bootstrap = await request({ type: "bootstrap" });
   if (!bootstrap?.configuration?.models) throw new Error("Bootstrap did not return model configuration.");
   await request({
-    type: "save_cliproxyapi_configuration",
-    input: { baseUrl: cpaBaseUrl, apiKey: "cpa-smoke-key", preserveApiKey: false, fast: false },
+    type: "save_openai_responses_ws_configuration",
+    input: { baseUrl: responsesWsBaseUrl, apiKey: "responses-ws-smoke-key", preserveApiKey: false, fast: false },
   });
-  const cpaStored = await request({ type: "get_cliproxyapi_configuration" });
-  if (cpaStored.baseUrl !== cpaBaseUrl || cpaStored.apiKeyConfigured !== true || "apiKey" in cpaStored) {
-    throw new Error(`CLIProxyAPI private configuration was not safely projected: ${JSON.stringify(cpaStored)}`);
+  const responsesWsStored = await request({ type: "get_openai_responses_ws_configuration" });
+  if (responsesWsStored.baseUrl !== responsesWsBaseUrl || responsesWsStored.apiKeyConfigured !== true || "apiKey" in responsesWsStored) {
+    throw new Error(`OpenAI Response (WS) private configuration was not safely projected: ${JSON.stringify(responsesWsStored)}`);
   }
   const initialMcp = await request({ type: "get_mcp_configuration", cwd: projectDir });
   if (!initialMcp?.configPath?.startsWith(temporaryRoot) || initialMcp.servers.length !== 0) {
@@ -368,10 +368,10 @@ try {
   }
   await request({ type: "remove_mcp_server", cwd: projectDir, name: "project-smoke-server", scope: "project" });
   const snapshot = await request({ type: "create_session", cwd: projectDir });
-  const cpaConfiguration = await request({ type: "get_configuration" });
-  const cpaModel = cpaConfiguration.models.find((model) => model.provider === "cliproxyapi" && model.id === "gpt-5.6-cpa-smoke");
-  if (!cpaModel?.configured || cpaModel.contextWindow !== 196000 || !cpaModel.supportsImages) {
-    throw new Error(`The bundled CLIProxyAPI provider did not register its upstream model catalog: ${JSON.stringify(cpaModel)}`);
+  const responsesWsConfiguration = await request({ type: "get_configuration" });
+  const responsesWsModel = responsesWsConfiguration.models.find((model) => model.provider === "openai-responses-ws" && model.id === "gpt-5.6-ws-smoke");
+  if (!responsesWsModel?.configured || responsesWsModel.contextWindow !== 196000 || !responsesWsModel.supportsImages) {
+    throw new Error(`The SuoCode OpenAI Response (WS) extension did not register its upstream model catalog: ${JSON.stringify(responsesWsModel)}`);
   }
   if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
   if (!Array.isArray(snapshot.subagents)) throw new Error("Subagent activity was not included in the session snapshot.");
@@ -701,6 +701,6 @@ try {
   else if (child.exitCode === null) child.kill("SIGTERM");
   if (oauthFixture.connected) oauthFixture.send({ type: "shutdown" });
   else if (oauthFixture.exitCode === null) oauthFixture.kill("SIGTERM");
-  await Promise.all([runtimeExit, oauthExit, new Promise((resolveClose) => cpaFixture.close(resolveClose))]);
+  await Promise.all([runtimeExit, oauthExit, new Promise((resolveClose) => responsesWsFixture.close(resolveClose))]);
   rmSync(temporaryRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

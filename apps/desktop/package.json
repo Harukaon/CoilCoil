@@ -19,7 +19,7 @@
     "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
     "@radix-ui/react-context-menu": "^2.3.7",
     "@radix-ui/react-popover": "^1.1.23",
-    "@router-for-me/pi-cliproxyapi-provider": "^1.4.13",
+    "@suocode/openai-responses-ws": "0.1.0",
     "@suocode/runtime-core": "0.1.0",
     "@suocode/runtime-protocol": "0.1.0",
     "@suocode/runtime-server": "0.1.0",

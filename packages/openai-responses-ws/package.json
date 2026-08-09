@@ -1,0 +1,32 @@
+{
+  "name": "@suocode/openai-responses-ws",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SuoCode-maintained Pi extension for OpenAI Responses over persistent WebSocket",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config.ts",
+    "./transport": "./src/transport.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "file:../../vendor/pi/packages/ai",
+    "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
+    "@types/node": "26.1.2",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

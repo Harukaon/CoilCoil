@@ -13,6 +13,7 @@
     "packages/runtime-core",
     "packages/runtime-protocol",
     "packages/runtime-server",
+    "packages/openai-responses-ws",
     "packages/workflow"
   ],
   "scripts": {

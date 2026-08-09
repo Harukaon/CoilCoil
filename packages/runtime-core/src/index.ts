@@ -28,8 +28,8 @@ import type {
   ChangedFile,
   ChangeStatus,
   ChatMessage,
-  CliProxyApiConfiguration,
-  CliProxyApiConfigurationInput,
+  OpenAIResponsesWsConfiguration,
+  OpenAIResponsesWsConfigurationInput,
   ContextUsage,
   FileNode,
   McpConfigurationSnapshot,
@@ -72,6 +72,13 @@ import type {
   ToolRun,
 } from "@suocode/runtime-protocol";
 import { validateMcpJsonText } from "@suocode/runtime-protocol";
+import {
+  DEFAULT_OPENAI_RESPONSES_WS_BASE_URL,
+  LEGACY_CLIPROXYAPI_CONFIG_FILE,
+  OPENAI_RESPONSES_WS_CONFIG_FILE,
+  OPENAI_RESPONSES_WS_PROVIDER_ID,
+  OPENAI_RESPONSES_WS_PROVIDER_NAME,
+} from "@suocode/openai-responses-ws/config";
 import { execFile } from "node:child_process";
 import {
   chmodSync,
@@ -1301,7 +1308,7 @@ function bundledRuntimeResources(workflowDirectory: string): RuntimeResources {
   const packageDirectories = [
     workflowDirectory,
     resolvePackageDirectory("pi-subagents"),
-    resolvePackageDirectory("@router-for-me/pi-cliproxyapi-provider"),
+    resolvePackageDirectory("@suocode/openai-responses-ws"),
   ];
   const resources = packageDirectories.map(resourcesFromManifest);
   return {
@@ -1351,6 +1358,27 @@ function seedLegacyConfiguration(agentDir: string, legacyAgentDir: string): bool
   return migrated;
 }
 
+function migrateLegacyResponsesWsIdentity(agentDir: string): void {
+  const settings = SettingsManager.create(process.cwd(), agentDir);
+  if (settings.getDefaultProvider() === "cliproxyapi" && settings.getDefaultModel()) {
+    settings.setDefaultModelAndProvider(OPENAI_RESPONSES_WS_PROVIDER_ID, settings.getDefaultModel()!);
+  }
+
+  const runtimeOptionsPath = join(agentDir, "model-runtime-options.json");
+  if (!existsSync(runtimeOptionsPath)) return;
+  try {
+    const value = JSON.parse(readFileSync(runtimeOptionsPath, "utf8")) as Record<string, unknown>;
+    if (!isRecord(value) || !isRecord(value.cliproxyapi) || value[OPENAI_RESPONSES_WS_PROVIDER_ID] !== undefined) return;
+    value[OPENAI_RESPONSES_WS_PROVIDER_ID] = value.cliproxyapi;
+    delete value.cliproxyapi;
+    const temporaryPath = `${runtimeOptionsPath}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, runtimeOptionsPath);
+  } catch {
+    // A malformed optional override file must not block the runtime from starting.
+  }
+}
+
 export class SuoCodeRuntime {
   readonly agentDir: string;
   readonly sessionDir: string;
@@ -1396,6 +1424,7 @@ export class SuoCodeRuntime {
     this.migratedLegacyCredentials = options.legacyAgentDir
       ? seedLegacyConfiguration(this.agentDir, resolve(options.legacyAgentDir))
       : false;
+    migrateLegacyResponsesWsIdentity(this.agentDir);
     mkdirSync(this.sessionDir, { recursive: true });
   }
 
@@ -1494,8 +1523,8 @@ export class SuoCodeRuntime {
     };
   }
 
-  private cliProxyApiConfigurationPath(): string {
-    return join(this.agentDir, "cliproxyapi.json");
+  private openAIResponsesWsConfigurationPath(): string {
+    return join(this.agentDir, OPENAI_RESPONSES_WS_CONFIG_FILE);
   }
 
   private modelRuntimeOptionsPath(): string {
@@ -1542,48 +1571,43 @@ export class SuoCodeRuntime {
     return contextWindow ? { ...model, contextWindow } : model;
   }
 
-  private readCliProxyApiConfigurationFile(): Record<string, unknown> {
-    const path = this.cliProxyApiConfigurationPath();
-    if (!existsSync(path)) return {};
+  private readOpenAIResponsesWsConfigurationFile(): Record<string, unknown> {
+    const path = this.openAIResponsesWsConfigurationPath();
+    const legacyPath = join(this.agentDir, LEGACY_CLIPROXYAPI_CONFIG_FILE);
+    const sourcePath = existsSync(path) ? path : legacyPath;
+    if (!existsSync(sourcePath)) return {};
     try {
-      const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+      const value: unknown = JSON.parse(readFileSync(sourcePath, "utf8"));
       if (!isRecord(value)) throw new Error("配置文件必须包含 JSON 对象。");
       return value;
     } catch (error) {
-      throw new Error(`无法读取 CLIProxyAPI 配置：${errorMessage(error)}`);
+      throw new Error(`无法读取 OpenAI Response (WS) 配置：${errorMessage(error)}`);
     }
   }
 
-  async getCliProxyApiConfiguration(): Promise<CliProxyApiConfiguration> {
-    const value = this.readCliProxyApiConfigurationFile();
+  async getOpenAIResponsesWsConfiguration(): Promise<OpenAIResponsesWsConfiguration> {
+    const value = this.readOpenAIResponsesWsConfigurationFile();
     return {
-      configPath: this.cliProxyApiConfigurationPath(),
-      baseUrl: optionalString(value, "baseUrl") ?? "http://127.0.0.1:8317",
-      providerId: optionalString(value, "providerId") ?? "cliproxyapi",
-      providerName: optionalString(value, "providerName") ?? "CLIProxyAPI",
+      configPath: this.openAIResponsesWsConfigurationPath(),
+      baseUrl: optionalString(value, "baseUrl") ?? DEFAULT_OPENAI_RESPONSES_WS_BASE_URL,
       apiKeyConfigured: Boolean(optionalString(value, "apiKey")),
       fast: optionalBoolean(value, "fast") ?? false,
     };
   }
 
-  async saveCliProxyApiConfiguration(input: CliProxyApiConfigurationInput): Promise<RuntimeConfiguration> {
-    const baseUrl = assertOptionalUrl(input.baseUrl, "CLIProxyAPI Base URL");
-    if (!baseUrl) throw new Error("CLIProxyAPI Base URL 不能为空。");
-    const existing = this.readCliProxyApiConfigurationFile();
+  async saveOpenAIResponsesWsConfiguration(input: OpenAIResponsesWsConfigurationInput): Promise<RuntimeConfiguration> {
+    const baseUrl = assertOptionalUrl(input.baseUrl, "OpenAI Response (WS) Base URL");
+    if (!baseUrl) throw new Error("OpenAI Response (WS) Base URL 不能为空。");
+    const existing = this.readOpenAIResponsesWsConfigurationFile();
     const apiKey = input.apiKey?.trim() || (input.preserveApiKey ? optionalString(existing, "apiKey") : undefined);
-    if (!apiKey) throw new Error("CLIProxyAPI API Key 不能为空。");
-    const providerId = assertProviderId(input.providerId?.trim() || optionalString(existing, "providerId") || "cliproxyapi");
-    const providerName = input.providerName?.trim() || optionalString(existing, "providerName") || "CLIProxyAPI";
+    if (!apiKey) throw new Error("OpenAI Response (WS) API Key 不能为空。");
     const value = {
-      ...existing,
       baseUrl,
       apiKey,
-      providerId,
-      providerName,
       fast: input.fast === true,
     };
     mkdirSync(this.agentDir, { recursive: true });
-    const path = this.cliProxyApiConfigurationPath();
+    const path = this.openAIResponsesWsConfigurationPath();
     const temporaryPath = `${path}.${process.pid}.tmp`;
     writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     renameSync(temporaryPath, path);
@@ -1682,7 +1706,7 @@ export class SuoCodeRuntime {
     const storedCredential = readStoredCredential(providerId, join(this.agentDir, "auth.json"));
     const storedApiKeyCredential = storedCredential?.type === "api_key" ? storedCredential : undefined;
     const providerName = runtimeProvider?.name;
-    const fallbackName = providerId === "cliproxyapi" ? "CLIProxyAPI" : providerId;
+    const fallbackName = providerId === OPENAI_RESPONSES_WS_PROVIDER_ID ? OPENAI_RESPONSES_WS_PROVIDER_NAME : providerId;
     return {
       id: providerId,
       name: provider ? optionalString(provider, "name") ?? providerName ?? fallbackName : providerName ?? fallbackName,
@@ -1707,7 +1731,7 @@ export class SuoCodeRuntime {
   async getModelProviderConfiguration(): Promise<ModelProviderConfigurationSnapshot> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
-    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", "cliproxyapi"]);
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", OPENAI_RESPONSES_WS_PROVIDER_ID]);
     const providers = new Map(modelRuntime.getProviders().map((provider) => [provider.id, provider]));
     const allModels = modelRuntime.getModels();
     const models = new Map<string, Array<(typeof allModels)[number]>>();
@@ -1716,7 +1740,7 @@ export class SuoCodeRuntime {
       values.push(model);
       models.set(model.provider, values);
     }
-    const ids = new Set([...providers.keys(), ...Object.keys(privateConfiguration.providers), "cliproxyapi"]);
+    const ids = new Set([...providers.keys(), ...Object.keys(privateConfiguration.providers), OPENAI_RESPONSES_WS_PROVIDER_ID]);
     const configuration = [...ids].map((id) => this.modelProviderFromConfiguration(
       id,
       privateConfiguration.providers[id],
@@ -1893,7 +1917,7 @@ export class SuoCodeRuntime {
   async saveModelProviderConfiguration(input: ModelProviderConfigurationInput): Promise<ModelProviderSaveResult> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
-    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", "cliproxyapi"]);
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", OPENAI_RESPONSES_WS_PROVIDER_ID]);
     const existing = privateConfiguration.providers[input.provider.id.trim()];
     const next = this.validateModelProviderConfiguration(input, existing, builtinIds);
     if (next.writeModelsConfig) {

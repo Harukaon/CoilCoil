@@ -27,22 +27,18 @@ export interface RuntimeConfiguration {
   migratedLegacyCredentials: boolean;
 }
 
-/** Configuration for SuoCode's bundled CLIProxyAPI WebSocket provider. */
-export interface CliProxyApiConfiguration {
+/** Configuration for SuoCode's own OpenAI Responses WebSocket Pi extension. */
+export interface OpenAIResponsesWsConfiguration {
   configPath: string;
   baseUrl: string;
-  providerId: string;
-  providerName: string;
   apiKeyConfigured: boolean;
   fast: boolean;
 }
 
-export interface CliProxyApiConfigurationInput {
+export interface OpenAIResponsesWsConfigurationInput {
   baseUrl: string;
   apiKey?: string;
   preserveApiKey: boolean;
-  providerId?: string;
-  providerName?: string;
   fast?: boolean;
 }
 
@@ -593,8 +589,8 @@ export interface WorkspaceSnapshot {
 export type RuntimeCommand =
   | { type: "bootstrap" }
   | { type: "get_configuration" }
-  | { type: "get_cliproxyapi_configuration" }
-  | { type: "save_cliproxyapi_configuration"; input: CliProxyApiConfigurationInput }
+  | { type: "get_openai_responses_ws_configuration" }
+  | { type: "save_openai_responses_ws_configuration"; input: OpenAIResponsesWsConfigurationInput }
   | { type: "get_model_provider_configuration" }
   | { type: "save_model_provider_configuration"; input: ModelProviderConfigurationInput }
   | { type: "remove_model_provider_configuration"; provider: string }
