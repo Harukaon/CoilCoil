@@ -10,8 +10,8 @@ Electron main + sandboxed preload
 Bundled SuoCode runtime
     ├── runtime protocol and server
     ├── Pi AgentSession + ModelRuntime
-    ├── SuoCode workflow extensions
-    ├── bundled MCP and subagent extensions
+    ├── SuoCode workflow extensions (tools, policies, subagents)
+    ├── bundled MCP extension
     ├── SessionManager persistence
     └── project files, Git changes, plans, and terminal projection
 ```
@@ -21,7 +21,7 @@ Bundled SuoCode runtime
 - `@suocode/runtime-protocol` defines commands, responses, events, messages, sessions, plans, changes, terminal runs, and file-tree data.
 - `@suocode/runtime-core` owns model configuration, Pi session creation, workflow loading, event translation, session persistence, and project inspection.
 - `@suocode/runtime-server` exposes the core over Node process IPC for Desktop and strict JSONL over stdin/stdout for integrations.
-- `@suocode/workflow` contains the SuoCode-specific Pi extensions. The runtime explicitly loads it together with pinned `pi-mcp-adapter` and `pi-subagents` releases; it never reads the package list from the user's Pi settings.
+- `@suocode/workflow` contains the SuoCode-specific Pi extensions, including SuoCode's own subagent extension. The runtime explicitly loads it together with the pinned `pi-mcp-adapter` release; it never reads the package list from the user's Pi settings.
 
 ## Desktop isolation
 
@@ -57,7 +57,7 @@ The preferred order is:
 Examples:
 
 - MCP reuses `pi-mcp-adapter`; SuoCode only adds configuration and status UI.
-- Subagents reuse `pi-subagents`; SuoCode adds activity cards, execution details, and stop controls by projecting the extension's lifecycle.
+- Subagents run in SuoCode's own extension, which executes child AgentSessions in-process and publishes typed activity events plus an RPC channel for stop/status; the activity cards, execution details, and stop controls consume that contract.
 - Todo and workflow tools remain Pi extensions; the activity panel visualizes their structured state.
 
 When `pi-mcp-adapter` is reloading, its native `not_initialized` or `init_failed` result is projected as “初始化中” or “暂不可用”. SuoCode does not mistake that lifecycle state for a new MCP schema and does not fall back to a second protocol implementation.

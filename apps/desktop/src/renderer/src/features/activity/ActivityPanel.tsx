@@ -24,9 +24,7 @@ function statusLabel(status: SubagentActivity["status"]): string {
   if (status === "running") return "执行中";
   if (status === "completed") return "已完成";
   if (status === "failed") return "失败";
-  if (status === "stopped") return "已停止";
-  if (status === "paused") return "已暂停";
-  return "已转入后台";
+  return "已停止";
 }
 
 function agentSummary(activity: SubagentActivity): string {
@@ -121,7 +119,7 @@ export function ActivityPanel({
   if (!availableTabs.length) return null;
 
   const completed = todo.filter((item) => item.status === "completed").length;
-  const runningAgents = subagents.filter((item) => item.status === "pending" || item.status === "running" || item.status === "paused").length;
+  const runningAgents = subagents.filter((item) => item.status === "pending" || item.status === "running").length;
   const showTabs = availableTabs.length > 1;
   const title = tab === "commands"
     ? "命令"
@@ -209,7 +207,7 @@ export function ActivityPanel({
         ) : (
           <ol className="composer-subagent-list">
             {subagents.map((activity) => {
-              const active = activity.status === "pending" || activity.status === "running" || activity.status === "paused";
+              const active = activity.status === "pending" || activity.status === "running";
               const controllable = active && activity.controlReady === true;
               return <li className={activity.status} key={activity.id}>
                 <span className="subagent-state-icon">{activity.status === "running" ? <LoaderCircle className="spin" size={14} /> : activity.status === "completed" ? <CheckCircle2 size={14} /> : <Bot size={14} />}</span>

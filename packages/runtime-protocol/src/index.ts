@@ -441,7 +441,7 @@ export interface TodoItem {
   status: "pending" | "in_progress" | "completed";
 }
 
-export type SubagentActivityStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "paused" | "detached";
+export type SubagentActivityStatus = "pending" | "running" | "completed" | "failed" | "stopped";
 
 export interface SubagentRecentTool {
   tool: string;
@@ -467,10 +467,10 @@ export interface SubagentActivity {
   agent: string;
   task?: string;
   model?: string;
-  mode: "single" | "parallel" | "chain";
   status: SubagentActivityStatus;
   background: boolean;
   controlReady?: boolean;
+  resumable?: boolean;
   currentTool?: string;
   currentPath?: string;
   recentTools?: SubagentRecentTool[];
@@ -480,6 +480,7 @@ export interface SubagentActivity {
   finalOutput?: string;
   transcriptPath?: string;
   sessionFile?: string;
+  worktreePath?: string;
   toolCount: number;
   turnCount?: number;
   tokens: number;

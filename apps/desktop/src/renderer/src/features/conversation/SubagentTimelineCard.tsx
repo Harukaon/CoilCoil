@@ -4,7 +4,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import type { SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
 
 function isActive(activity: SubagentActivity): boolean {
-  return activity.status === "pending" || activity.status === "running" || activity.status === "paused";
+  return activity.status === "pending" || activity.status === "running";
 }
 
 function statusLabel(status: SubagentActivity["status"]): string {
@@ -12,9 +12,7 @@ function statusLabel(status: SubagentActivity["status"]): string {
   if (status === "running") return "执行中";
   if (status === "completed") return "已完成";
   if (status === "failed") return "失败";
-  if (status === "stopped") return "已停止";
-  if (status === "paused") return "已暂停";
-  return "已转入后台";
+  return "已停止";
 }
 
 function compactSummary(activities: SubagentActivity[], tool: ToolRun): string {
