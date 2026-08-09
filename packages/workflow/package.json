@@ -24,7 +24,8 @@
       "./extensions/response-metrics.ts",
       "./extensions/terminal.ts",
       "./extensions/todo.ts",
-      "./extensions/zh-cn.ts"
+      "./extensions/zh-cn.ts",
+      "./extensions/runtime-bridge.ts"
     ]
   },
   "dependencies": {
