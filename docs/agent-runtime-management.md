@@ -86,6 +86,51 @@
 
 第一阶段只做可观测视图；修改上下文必须在 Session 变换协议和恢复测试完成后开放。
 
+## 6.1 Pi 总结与上下文压缩事件
+
+右侧“运行时”必须把 Pi 原生总结作为一等事件展示，不能只在 Token 总数中静默合并。
+
+Pi 当前存在两类不同总结：
+
+- `compaction`：上下文接近阈值、发生溢出恢复或用户手动 `/compact` 时，把较早内容压缩成总结并保留较新的尾部上下文。
+- `branch_summary`：通过会话树切换到另一条路径时，可选地总结被离开的分支。
+
+每个总结卡至少展示：
+
+- 类型：自动压缩、溢出恢复、手动压缩或分支总结
+- 开始、重试、完成、失败、已取消状态
+- 触发时间与触发原因
+- 压缩前 Token、压缩后估算 Token、预计释放 Token
+- 生成总结本身消耗的 input/output/cache usage 与成本（上游提供时）
+- 总结正文，可折叠查看
+- 保留上下文的起点或 retained tail 概要
+- Pi 默认总结记录的已读文件、已修改文件等 details
+- 该总结是否位于当前活动分支、是否正在参与下一次模型请求
+
+Runtime 直接订阅 Pi 的 `compaction_start`、`compaction_end` 和 summarization retry 事件，并从 SessionManager 的 `compaction` / `branch_summary` 条目恢复历史。重新打开应用后不能只显示本次进程产生的事件。
+
+总结事件分为两个视角：
+
+1. **当前上下文**：只展示当前活动分支上实际生效的总结，并计入上下文组成。
+2. **会话历史**：允许查看其他分支上曾发生的总结，但明确标记“非当前分支”，不计入当前上下文与 Token。
+
+## 6.2 回溯后的运行时一致性
+
+SuoCode 当前的历史消息编辑通过 Pi `navigateTree(entryId, { summarize: false })` 回到目标位置，然后从那里继续。这种操作会改变同一 Session 文件的活动叶节点，但不会自动生成离开分支的 `branch_summary`。
+
+用户确认回溯时，右侧运行时面板必须和聊天时间线在同一个原子状态更新中完成：
+
+1. 显示“正在切换上下文”，暂停对旧快照的交互操作。
+2. Pi 导航完成后取得新的 `activeLeafId`、活动分支 entries 和有效模型上下文。
+3. 立即移除不在新活动分支上的消息、工具结果和 compaction 对当前上下文的贡献；它们仍可留在“会话历史”中。
+4. 重新计算 System Prompt、上下文占用、消息/工具 Token、缓存统计、技能、MCP 与 Memory 注入状态。
+5. 发布带递增 `sessionRevision` 的完整运行时快照，再开始发送编辑后的 Prompt。
+6. 后续每个增量事件都携带同一个 revision；前端丢弃来自旧分支或旧 revision 的迟到事件。
+
+不能等新回复结束后才刷新右侧栏，也不能让旧分支的总结、工具 Token 或 MCP 状态短暂残留。回溯只改变会话上下文，不恢复磁盘文件，这一提示继续保留。
+
+如果未来允许用户选择“总结离开的分支”，则显式调用 Pi 的 branch summarization，并把生成过程展示为独立事件；不能把当前 `summarize: false` 的线性回溯悄悄改成会产生额外模型请求的行为。
+
 ## 7. 会话级技能管理
 
 - 列出当前会话可用的技能、来源、启用状态和本次是否已注入。
@@ -126,6 +171,8 @@
 - `set_session_mcp_state`：当前 Session 的 MCP 暴露与连接意图
 - `compact_session_context`：带预览、确认和结果的上下文精简
 - `get_memory_status` / `run_memory_now`：项目记忆状态与手动整理
+- `RuntimeSummaryEvent`：compaction/branch summary 的生命周期、usage、details 与活动分支状态
+- `RuntimeInspectionSnapshot.sessionRevision` / `activeLeafId`：保证回溯前后的快照和增量事件不会串线
 - 对应的增量事件，保证模型每轮请求、工具调用、MCP 状态和 memory worker 状态实时更新
 
 所有命令必须携带 `runtimeId`/Session 作用域，保证多个并行会话互不影响。
@@ -139,3 +186,5 @@
 5. 上下文精简预览、确认、快照和恢复。
 
 每一阶段都需要覆盖历史会话恢复、并行会话隔离、应用重启、不同 Provider usage 字段缺失和极窄右侧栏。
+
+额外回归：包含多次 compaction 的长会话回溯到压缩前、压缩后以及另一分支，右侧“当前上下文”必须始终和 Pi `buildContextEntries()` 的活动分支一致。
