@@ -629,6 +629,7 @@ export type RuntimeCommand =
   | { type: "remove_skill_path"; path: string; cwd?: string }
   | { type: "set_enable_skill_commands"; enabled: boolean; cwd?: string }
   | { type: "stop_subagent"; id: string; background: boolean }
+  | { type: "resume_subagent"; id: string }
   | { type: "list_sessions"; cwd: string }
   | { type: "list_archived_sessions"; cwd: string }
   | { type: "archive_session"; cwd: string; sessionPath: string }

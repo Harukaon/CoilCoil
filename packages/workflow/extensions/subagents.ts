@@ -1,42 +1,59 @@
+import { existsSync } from "node:fs";
 import type { Model } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
 import {
+  type AgentSession,
   type AgentSessionEvent,
   type ExtensionAPI,
   type ExtensionContext,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { createChildSession, type ChildSessionHandle } from "./subagents/child.ts";
+import {
+  CHILD_SESSION_SUBDIR,
+  type ChildSessionHandle,
+  createChildSession,
+  reopenChildSession,
+  scanResumableChildren,
+} from "./subagents/child.ts";
 import {
   type ChildRun,
   createRunId,
   runIsLive,
   SubagentRegistry,
 } from "./subagents/registry.ts";
-import type { SubagentRpcRequest, SubagentToolDetails } from "./subagents/types.ts";
+import type {
+  SubagentChildMeta,
+  SubagentRpcRequest,
+  SubagentToolDetails,
+} from "./subagents/types.ts";
 import {
   SUBAGENT_ACTIVITY_CHANNEL,
   SUBAGENT_RPC_REQUEST_CHANNEL,
+  SUBAGENT_RUN_ENTRY_TYPE,
   subagentRpcReplyChannel,
 } from "./subagents/types.ts";
+import { join } from "node:path";
 
 const MAX_CONCURRENT_CHILDREN = 8;
 export const SUBAGENT_FLUSH_INTERVAL_MS = 250;
 const FLUSH_INTERVAL_MS = SUBAGENT_FLUSH_INTERVAL_MS;
 const FINAL_OUTPUT_PREVIEW_CHARS = 8_000;
 const MAX_BASH_BUFFER_CHARS = 20_000;
+const STOP_SETTLE_WAIT_MS = 300;
+const DEFAULT_RESUME_PROMPT = "继续之前的任务：检查并完成未完成的工作，然后汇报最终结果。";
 
-const SUBAGENT_ACTIONS = ["run", "status"] as const;
+const SUBAGENT_ACTIONS = ["run", "status", "stop", "resume"] as const;
 
 const SubagentParams = Type.Object({
   action: Type.Optional(
-    StringEnum(SUBAGENT_ACTIONS, { description: "run 派发子 Agent；status 查询运行状态。默认 run。" }),
+    StringEnum(SUBAGENT_ACTIONS, { description: "run 派发；status 查询；stop 停止；resume 复用已完成的子 Agent。默认 run。" }),
   ),
-  agent: Type.Optional(Type.String({ description: "子 Agent 名称，用于在结果中标识其角色，如 explore、reviewer。" })),
-  task: Type.Optional(Type.String({ description: "action=run 时必填。任务说明需自包含：背景、路径、期望产出。" })),
+  agent: Type.Optional(Type.String({ description: "子 Agent 名称，用于标识其角色，如 explore、reviewer。" })),
+  task: Type.Optional(Type.String({ description: "action=run 时必填；action=resume 时作为追加指示，省略则继续原任务。" })),
   model: Type.Optional(Type.String({ description: '模型覆盖，格式 "provider/model-id"。省略则继承当前会话模型。' })),
-  runId: Type.Optional(Type.String({ description: "action=status 时指定要查询的运行；省略则列出全部运行。" })),
+  background: Type.Optional(Type.Boolean({ description: "true 时立即返回 runId，子 Agent 在后台运行，完成后会自动汇报。" })),
+  runId: Type.Optional(Type.String({ description: "action=status/stop/resume 时指定目标运行；status 省略则列出全部。" })),
 });
 
 interface ResolvedModel {
@@ -57,6 +74,10 @@ function errorMessage(error: unknown): string {
 function truncate(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars)}\n…（已截断）`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveWait) => setTimeout(resolveWait, ms));
 }
 
 function modelLabel(model: Model<never> | undefined): string | undefined {
@@ -118,7 +139,7 @@ function formatDuration(ms: number): string {
 function formatCompletionText(run: ChildRun): string {
   const duration = formatDuration((run.finishedAt ?? Date.now()) - run.startedAt);
   const lines = [
-    `子 Agent 已完成（runId=${run.runId}）`,
+    `子 Agent 已完成（runId=${run.runId}${run.background ? "，后台运行" : ""}）`,
     `模型：${run.model ?? "继承"} · 耗时 ${duration} · ${run.turnCount} 轮 · ${run.toolCount} 次工具调用 · ${run.tokens} tokens`,
   ];
   if (run.sessionFile) lines.push(`会话文件：${run.sessionFile}`);
@@ -138,7 +159,7 @@ function formatFailureText(run: ChildRun): string {
 function formatStatusText(run: ChildRun): string {
   const duration = formatDuration((run.finishedAt ?? Date.now()) - run.startedAt);
   const lines = [
-    `运行 ${run.runId} · ${run.agent} · ${run.status}`,
+    `运行 ${run.runId} · ${run.agent} · ${run.status}${run.background ? " · 后台" : ""}`,
     `任务：${truncate(run.task, 400)}`,
     `模型：${run.model ?? "继承"} · 已运行 ${duration} · ${run.turnCount} 轮 · ${run.toolCount} 次工具调用`,
   ];
@@ -158,6 +179,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   const dirtyRuns = new Set<string>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   let detached = false;
+  let sessionCwd: string | undefined;
+  let sessionDir: string | undefined;
 
   const flushNow = (): void => {
     if (flushTimer) {
@@ -255,64 +278,77 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     flushNow();
   };
 
-  const executeRun = async (
-    toolCallId: string,
-    params: { agent?: string; task?: string; model?: string },
-    signal: AbortSignal | undefined,
-    onUpdate: ((update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => void) | undefined,
-    ctx: ExtensionContext,
-  ): Promise<SubagentToolOutcome> => {
-    const task = (params.task ?? "").trim();
-    if (!task) return { content: [{ type: "text", text: "缺少子 Agent 任务描述（task）。" }], details: { error: "missing-task" }, isError: true };
-    if (registry.liveCount() >= MAX_CONCURRENT_CHILDREN) {
-      return { content: [{ type: "text", text: `并发子 Agent 已达上限（${MAX_CONCURRENT_CHILDREN}），请等待已有运行结束。` }], details: { error: "concurrency-limit" }, isError: true };
-    }
-    const resolved = resolveModel(params.model, ctx);
-    if ("error" in resolved) return { content: [{ type: "text", text: resolved.error }], details: { error: resolved.error }, isError: true };
-
-    const run: ChildRun = {
-      runId: createRunId(),
-      parentToolId: toolCallId,
-      agent: params.agent?.trim() || "default",
-      task,
-      model: resolved.label,
-      background: false,
-      status: "running",
-      startedAt: Date.now(),
-      recentTools: [],
-      recentOutput: [],
-      messages: [],
-      toolCalls: [],
-      toolCount: 0,
-      turnCount: 0,
-      tokens: 0,
-      bashBuffer: "",
-    };
-    registry.add(run);
-    updateSinks.set(run.runId, (details) => {
-      onUpdate?.({ content: [{ type: "text", text: `子 Agent ${run.runId} 运行中（${run.status}）` }], details });
-    });
-    markDirty(run.runId);
-    flushNow();
-
-    let handle: ChildSessionHandle;
+  const collectStats = (run: ChildRun, session: AgentSession): void => {
     try {
-      handle = await createChildSession({
-        cwd: ctx.cwd,
-        agentDir: getAgentDir(),
-        parentSessionDir: ctx.sessionManager.getSessionDir(),
-        model: resolved.model,
-        onEvent: (event) => handleChildEvent(run, event),
-      });
-    } catch (error) {
-      failRun(run, "failed", errorMessage(error));
-      return { content: [{ type: "text", text: `子 Agent 会话创建失败：${errorMessage(error)}` }], details: registry.toDetails(run), isError: true };
+      const stats = session.getSessionStats();
+      run.tokens = stats.tokens.total;
+      run.toolCount = stats.toolCalls;
+      run.turnCount = stats.assistantMessages;
+    } catch {
+      // 统计失败不影响运行结果。
     }
+  };
 
+  const notifyParent = (run: ChildRun): void => {
+    if (detached) return;
+    try {
+      pi.appendEntry(SUBAGENT_RUN_ENTRY_TYPE, registry.toActivity(run));
+    } catch {
+      // 持久化失败不阻断唤醒。
+    }
+    const summary = run.status === "completed" ? formatCompletionText(run) : formatFailureText(run);
+    pi.sendMessage(
+      {
+        customType: "subagent-complete",
+        content: [{ type: "text", text: `${summary}\n\n（该运行的 runId 为 ${run.runId}，后续如需查询、停止或复用，可针对此 runId 操作。）` }],
+        display: true,
+        details: registry.toDetails(run),
+      },
+      { triggerTurn: true, deliverAs: "followUp" },
+    );
+  };
+
+  const runDetached = (run: ChildRun, handle: ChildSessionHandle, task: string): void => {
     run.session = handle.session;
     run.sessionFile = handle.sessionFile;
     run.dispose = handle.dispose;
     markDirty(run.runId);
+    flushNow();
+    void (async () => {
+      let promptError: unknown;
+      try {
+        await handle.session.prompt(task, { source: "extension" });
+      } catch (error) {
+        promptError = error;
+      }
+      collectStats(run, handle.session);
+      if (run.stopRequested) failRun(run, "stopped");
+      else if (promptError) failRun(run, "failed", errorMessage(promptError));
+      else {
+        run.status = "completed";
+        run.finishedAt = Date.now();
+        markDirty(run.runId);
+        flushNow();
+      }
+      await handle.dispose().catch(() => undefined);
+      run.session = undefined;
+      markDirty(run.runId);
+      flushNow();
+      notifyParent(run);
+    })();
+  };
+
+  const runBlocking = async (
+    run: ChildRun,
+    handle: ChildSessionHandle,
+    task: string,
+    signal: AbortSignal | undefined,
+  ): Promise<SubagentToolOutcome> => {
+    run.session = handle.session;
+    run.sessionFile = handle.sessionFile;
+    run.dispose = handle.dispose;
+    markDirty(run.runId);
+    flushNow();
 
     const abortListener = (): void => {
       void handle.session.abort().catch(() => undefined);
@@ -327,16 +363,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     }
     signal?.removeEventListener("abort", abortListener);
 
-    try {
-      const stats = handle.session.getSessionStats();
-      run.tokens = stats.tokens.total;
-      run.toolCount = stats.toolCalls;
-      run.turnCount = stats.assistantMessages;
-    } catch {
-      // 统计失败不影响运行结果。
-    }
+    collectStats(run, handle.session);
 
-    if (signal?.aborted) failRun(run, "stopped");
+    if (signal?.aborted || run.stopRequested) failRun(run, "stopped");
     else if (promptError) failRun(run, "failed", errorMessage(promptError));
     else {
       run.status = "completed";
@@ -356,18 +385,219 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     return { content: [{ type: "text", text: formatFailureText(run) }], details, isError: true };
   };
 
+  const childSessionDir = (): string | undefined => {
+    return sessionDir ? join(sessionDir, CHILD_SESSION_SUBDIR) : undefined;
+  };
+
+  const adoptScannedRun = (query: string): ChildRun | undefined => {
+    const dir = childSessionDir();
+    if (!dir) return undefined;
+    const candidates = scanResumableChildren(dir).filter((child) => child.meta.runId === query || child.meta.runId.startsWith(query));
+    if (candidates.length !== 1) return undefined;
+    const { meta, sessionFile } = candidates[0];
+    const run: ChildRun = {
+      runId: meta.runId,
+      agent: meta.agent || "default",
+      task: meta.task,
+      model: meta.model,
+      background: meta.background,
+      status: "stopped",
+      sessionFile,
+      startedAt: meta.startedAt,
+      finishedAt: meta.startedAt,
+      recentTools: [],
+      recentOutput: [],
+      messages: [],
+      toolCalls: [],
+      toolCount: 0,
+      turnCount: 0,
+      tokens: 0,
+      bashBuffer: "",
+    };
+    registry.add(run);
+    return run;
+  };
+
+  const findRun = (query: string): ChildRun | undefined => {
+    return registry.get(query) ?? adoptScannedRun(query);
+  };
+
+  const stopRun = async (run: ChildRun): Promise<void> => {
+    if (!runIsLive(run)) return;
+    run.stopRequested = true;
+    await run.session?.abort().catch(() => undefined);
+    await sleep(STOP_SETTLE_WAIT_MS);
+    if (runIsLive(run)) failRun(run, "stopped");
+  };
+
+  const reopenForResume = async (run: ChildRun): Promise<{ handle?: ChildSessionHandle; error?: string }> => {
+    if (!run.sessionFile || !existsSync(run.sessionFile)) {
+      return { error: `子 Agent 会话文件不存在：${run.sessionFile ?? "未知"}` };
+    }
+    const cwd = sessionCwd ?? process.cwd();
+    try {
+      const handle = await reopenChildSession({
+        sessionFile: run.sessionFile,
+        cwd,
+        agentDir: getAgentDir(),
+        onEvent: (event) => handleChildEvent(run, event),
+      });
+      return { handle };
+    } catch (error) {
+      return { error: `子 Agent 会话恢复失败：${errorMessage(error)}` };
+    }
+  };
+
+  const beginResume = (run: ChildRun): void => {
+    run.status = "running";
+    run.finishedAt = undefined;
+    run.error = undefined;
+    run.stopRequested = false;
+    run.currentTool = undefined;
+    run.currentPath = undefined;
+    markDirty(run.runId);
+    flushNow();
+  };
+
+  const executeRun = async (
+    toolCallId: string,
+    params: { agent?: string; task?: string; model?: string; background?: boolean },
+    signal: AbortSignal | undefined,
+    onUpdate: ((update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => void) | undefined,
+    ctx: ExtensionContext,
+  ): Promise<SubagentToolOutcome> => {
+    const task = (params.task ?? "").trim();
+    if (!task) return { content: [{ type: "text", text: "缺少子 Agent 任务描述（task）。" }], details: { error: "missing-task" }, isError: true };
+    if (registry.liveCount() >= MAX_CONCURRENT_CHILDREN) {
+      return { content: [{ type: "text", text: `并发子 Agent 已达上限（${MAX_CONCURRENT_CHILDREN}），请等待已有运行结束。` }], details: { error: "concurrency-limit" }, isError: true };
+    }
+    const resolved = resolveModel(params.model, ctx);
+    if ("error" in resolved) return { content: [{ type: "text", text: resolved.error }], details: { error: resolved.error }, isError: true };
+
+    const background = params.background === true;
+    const run: ChildRun = {
+      runId: createRunId(),
+      parentToolId: toolCallId,
+      agent: params.agent?.trim() || "default",
+      task,
+      model: resolved.label,
+      background,
+      status: "running",
+      startedAt: Date.now(),
+      recentTools: [],
+      recentOutput: [],
+      messages: [],
+      toolCalls: [],
+      toolCount: 0,
+      turnCount: 0,
+      tokens: 0,
+      bashBuffer: "",
+    };
+    registry.add(run);
+    if (!background) {
+      updateSinks.set(run.runId, (details) => {
+        onUpdate?.({ content: [{ type: "text", text: `子 Agent ${run.runId} 运行中（${run.status}）` }], details });
+      });
+    }
+    markDirty(run.runId);
+    flushNow();
+
+    const meta: SubagentChildMeta = {
+      runId: run.runId,
+      agent: run.agent,
+      task: run.task,
+      model: run.model,
+      background,
+      startedAt: run.startedAt,
+    };
+
+    let handle: ChildSessionHandle;
+    try {
+      handle = await createChildSession({
+        cwd: ctx.cwd,
+        agentDir: getAgentDir(),
+        parentSessionDir: ctx.sessionManager.getSessionDir(),
+        model: resolved.model,
+        meta,
+        onEvent: (event) => handleChildEvent(run, event),
+      });
+    } catch (error) {
+      failRun(run, "failed", errorMessage(error));
+      return { content: [{ type: "text", text: `子 Agent 会话创建失败：${errorMessage(error)}` }], details: registry.toDetails(run), isError: true };
+    }
+
+    if (background) {
+      runDetached(run, handle, task);
+      return {
+        content: [{ type: "text", text: `子 Agent 已在后台派发（runId=${run.runId}）。完成后会自动汇报；期间可用 action=status 查询进度，action=stop 停止。` }],
+        details: registry.toDetails(run),
+      };
+    }
+    return runBlocking(run, handle, task, signal);
+  };
+
   const executeStatus = (params: { runId?: string }): SubagentToolOutcome => {
     const query = params.runId?.trim();
     if (!query) {
       const runs = registry.list();
       if (runs.length === 0) return { content: [{ type: "text", text: "当前会话还没有派发过子 Agent。" }], details: { error: "no-runs" } };
-      const lines = runs.map((run) => `${run.runId} · ${run.agent} · ${run.status} · ${truncate(run.task, 120)}`);
+      const lines = runs.map((run) => `${run.runId} · ${run.agent} · ${run.status}${run.background ? " · 后台" : ""} · ${truncate(run.task, 120)}`);
       return { content: [{ type: "text", text: `共 ${runs.length} 个子 Agent 运行：\n${lines.join("\n")}` }], details: { error: "no-runs" } };
     }
-    const run = registry.get(query);
+    const run = findRun(query);
     if (!run) return { content: [{ type: "text", text: `未找到子 Agent 运行：${query}` }], details: { error: "unknown-run" }, isError: true };
     return { content: [{ type: "text", text: formatStatusText(run) }], details: registry.toDetails(run) };
   };
+
+  const executeStop = async (params: { runId?: string }): Promise<SubagentToolOutcome> => {
+    const query = params.runId?.trim();
+    if (!query) return { content: [{ type: "text", text: "缺少要停止的运行标识（runId）。" }], details: { error: "missing-run-id" }, isError: true };
+    const run = registry.get(query);
+    if (!run) return { content: [{ type: "text", text: `未找到子 Agent 运行：${query}` }], details: { error: "unknown-run" }, isError: true };
+    if (!runIsLive(run)) {
+      return { content: [{ type: "text", text: `子 Agent ${run.runId} 已结束（${run.status}），无需停止。` }], details: registry.toDetails(run) };
+    }
+    await stopRun(run);
+    return { content: [{ type: "text", text: `子 Agent ${run.runId} 已停止。` }], details: registry.toDetails(run) };
+  };
+
+  const executeResume = async (
+    toolCallId: string,
+    params: { runId?: string; task?: string; background?: boolean },
+    signal: AbortSignal | undefined,
+    onUpdate: ((update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => void) | undefined,
+  ): Promise<SubagentToolOutcome> => {
+    const query = params.runId?.trim();
+    if (!query) return { content: [{ type: "text", text: "缺少要复用的运行标识（runId）。" }], details: { error: "missing-run-id" }, isError: true };
+    const run = findRun(query);
+    if (!run) return { content: [{ type: "text", text: `未找到子 Agent 运行：${query}` }], details: { error: "unknown-run" }, isError: true };
+    if (runIsLive(run)) {
+      return { content: [{ type: "text", text: `子 Agent ${run.runId} 仍在执行，可用 action=status 查看进度。` }], details: registry.toDetails(run), isError: true };
+    }
+    const reopened = await reopenForResume(run);
+    if (!reopened.handle) return { content: [{ type: "text", text: reopened.error ?? "子 Agent 会话恢复失败。" }], details: registry.toDetails(run), isError: true };
+
+    const followUp = (params.task ?? "").trim() || DEFAULT_RESUME_PROMPT;
+    const background = params.background === true;
+    run.parentToolId = toolCallId;
+    beginResume(run);
+    if (background) {
+      runDetached(run, reopened.handle, followUp);
+      return {
+        content: [{ type: "text", text: `子 Agent ${run.runId} 已在后台继续运行，完成后会自动汇报。` }],
+        details: registry.toDetails(run),
+      };
+    }
+    updateSinks.set(run.runId, (details) => {
+      onUpdate?.({ content: [{ type: "text", text: `子 Agent ${run.runId} 运行中（${run.status}）` }], details });
+    });
+    return runBlocking(run, reopened.handle, followUp, signal);
+  };
+
+  pi.on("session_start", (_event, ctx) => {
+    sessionCwd = ctx.cwd;
+    sessionDir = ctx.sessionManager.getSessionDir();
+  });
 
   pi.events.on(SUBAGENT_RPC_REQUEST_CHANNEL, async (raw: unknown) => {
     if (!raw || typeof raw !== "object") return;
@@ -380,7 +610,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     try {
       const id = request.params?.id?.trim() ?? "";
       if (request.method === "status") {
-        const run = id ? registry.get(id) : undefined;
+        const run = id ? findRun(id) : undefined;
         if (!run) return replyError(`未找到子 Agent 运行：${id || "（缺少 id）"}`);
         pi.events.emit(replyChannel, { version: 1, requestId: request.requestId, success: true, data: { activity: registry.toActivity(run) } });
         return;
@@ -388,10 +618,19 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       if (request.method === "stop") {
         const run = id ? registry.get(id) : undefined;
         if (!run) return replyError(`未找到子 Agent 运行：${id || "（缺少 id）"}`);
-        if (runIsLive(run) && run.session) {
-          await run.session.abort().catch(() => undefined);
-          failRun(run, "stopped");
-        }
+        await stopRun(run);
+        pi.events.emit(replyChannel, { version: 1, requestId: request.requestId, success: true, data: { activity: registry.toActivity(run) } });
+        return;
+      }
+      if (request.method === "resume") {
+        const run = id ? findRun(id) : undefined;
+        if (!run) return replyError(`未找到子 Agent 运行：${id || "（缺少 id）"}`);
+        if (runIsLive(run)) return replyError(`子 Agent ${run.runId} 仍在执行。`);
+        const reopened = await reopenForResume(run);
+        if (!reopened.handle) return replyError(reopened.error ?? "子 Agent 会话恢复失败。");
+        run.background = true;
+        beginResume(run);
+        runDetached(run, reopened.handle, DEFAULT_RESUME_PROMPT);
         pi.events.emit(replyChannel, { version: 1, requestId: request.requestId, success: true, data: { activity: registry.toActivity(run) } });
         return;
       }
@@ -426,15 +665,19 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       "需要大量文件读取、搜索或独立成块的子任务优先委派给子 Agent；多个相互独立的子任务应在同一条消息中发起多个 subagent 调用以并行执行。",
       "传给子 Agent 的 task 必须自包含：交代背景、关键路径和期望的产出格式，不要假设它能看到主会话的上下文。",
       "派发前给子 Agent 起一个有意义的 agent 名称（如 explore、reviewer、worker），便于在结果中区分。",
+      "不急于拿到结果、或想同时推进其他工作时用 background:true 派发；子 Agent 完成后会自动汇报，无需轮询，需要进度时用 action=status 查询。",
+      "已完成的子 Agent 可以用 action=resume 复用其会话上下文继续相关工作，比重新派发更省上下文。",
     ],
     parameters: SubagentParams,
 
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const action = params.action ?? "run";
-      if (action === "status") return executeStatus(params);
       const forwardUpdate = onUpdate
         ? (update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => onUpdate(update)
         : undefined;
+      if (action === "status") return executeStatus(params);
+      if (action === "stop") return executeStop(params);
+      if (action === "resume") return executeResume(toolCallId, params, signal, forwardUpdate);
       return executeRun(toolCallId, params, signal, forwardUpdate, ctx);
     },
   });

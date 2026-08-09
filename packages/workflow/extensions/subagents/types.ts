@@ -1,6 +1,7 @@
 export const SUBAGENT_ACTIVITY_CHANNEL = "suocode:subagents:activity:v1";
 export const SUBAGENT_RPC_REQUEST_CHANNEL = "suocode:subagents:rpc:v1:request";
 export const SUBAGENT_RUN_ENTRY_TYPE = "subagent-run";
+export const SUBAGENT_META_ENTRY_TYPE = "suocode-subagent-meta";
 
 export function subagentRpcReplyChannel(requestId: string): string {
   return `suocode:subagents:rpc:v1:reply:${requestId}`;
@@ -83,7 +84,7 @@ export interface SubagentToolDetails {
   usage?: SubagentUsageDetails;
 }
 
-export type SubagentRpcMethod = "stop" | "status";
+export type SubagentRpcMethod = "stop" | "status" | "resume";
 
 export interface SubagentRpcRequest {
   version: number;
@@ -91,4 +92,14 @@ export interface SubagentRpcRequest {
   method: SubagentRpcMethod;
   params?: { id?: string };
   source?: { client?: string };
+}
+
+export interface SubagentChildMeta {
+  runId: string;
+  agent: string;
+  task: string;
+  model?: string;
+  background: boolean;
+  parentSessionFile?: string;
+  startedAt: number;
 }

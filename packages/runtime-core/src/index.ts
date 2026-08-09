@@ -100,6 +100,7 @@ const WORKFLOW_AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
 const RESPONSE_METRICS_ENTRY_TYPE = "suocode-response-metrics";
 const SUBAGENT_ACTIVITY_CHANNEL = "suocode:subagents:activity:v1";
 const SUBAGENT_RPC_REQUEST_CHANNEL = "suocode:subagents:rpc:v1:request";
+const SUBAGENT_RUN_ENTRY_TYPE = "subagent-run";
 const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
 const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
@@ -3073,6 +3074,10 @@ export class SuoCodeRuntime {
         });
       }
     }
+    for (const entry of session.sessionManager.getBranch()) {
+      if (entry.type !== "custom" || entry.customType !== SUBAGENT_RUN_ENTRY_TYPE) continue;
+      for (const activity of subagentActivitiesFromPayload({ activities: [entry.data] })) subagents.set(activity.id, activity);
+    }
     const responseMetricsHistory = restoredResponseMetrics(session);
     return {
       messages,
@@ -3151,7 +3156,7 @@ export class SuoCodeRuntime {
     this.publishSubagents();
   }
 
-  private subagentRpc(method: "stop" | "status", id: string): Promise<unknown> {
+  private subagentRpc(method: "stop" | "status" | "resume", id: string): Promise<unknown> {
     const active = this.requireActive();
     const requestId = `suocode-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const replyChannel = `suocode:subagents:rpc:v1:reply:${requestId}`;
@@ -3197,6 +3202,14 @@ export class SuoCodeRuntime {
     }
     this.publishSubagents();
     return { stopped: true };
+  }
+
+  async resumeSubagent(id: string): Promise<{ resumed: true }> {
+    if (!id.trim()) throw new Error("缺少子 Agent 标识。");
+    const reply = await this.subagentRpc("resume", id.trim());
+    const activity = isRecord(reply) && isRecord(reply.activity) ? subagentActivitiesFromPayload({ activities: [reply.activity] })[0] : undefined;
+    if (activity) this.mergeSubagentActivities([activity]);
+    return { resumed: true };
   }
 
   private handleSessionEvent(event: AgentSessionEvent): void {

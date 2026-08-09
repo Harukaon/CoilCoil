@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import subagentsExtension from "../extensions/subagents.ts";
+import { readChildMeta, scanResumableChildren } from "../extensions/subagents/child.ts";
 import {
   clampText,
   createRunId,
@@ -158,6 +162,74 @@ test("rpc rejects unsupported methods", async () => {
   const payload = reply.payload as { success: boolean; error?: { message?: string } };
   assert.equal(payload.success, false);
   assert.match(payload.error?.message ?? "", /不支持/);
+});
+
+test("rpc resume rejects an unknown run", async () => {
+  const { emitRpc, emissions } = createHarness();
+  emitRpc({ version: 1, requestId: "req-4", method: "resume", params: { id: "missing" } });
+  await settle();
+  const reply = emissions.find((entry) => entry.channel === subagentRpcReplyChannel("req-4"));
+  assert.ok(reply);
+  const payload = reply.payload as { success: boolean; error?: { message?: string } };
+  assert.equal(payload.success, false);
+  assert.match(payload.error?.message ?? "", /未找到/);
+});
+
+test("stop requires a run id", async () => {
+  const { execute } = createHarness();
+  const result = await execute("call-7", { action: "stop" }, undefined, undefined, createContext());
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /runId/);
+});
+
+test("stop rejects an unknown run", async () => {
+  const { execute } = createHarness();
+  const result = await execute("call-8", { action: "stop", runId: "missing" }, undefined, undefined, createContext());
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /未找到/);
+});
+
+test("resume requires a run id", async () => {
+  const { execute } = createHarness();
+  const result = await execute("call-9", { action: "resume" }, undefined, undefined, createContext());
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /runId/);
+});
+
+test("resume rejects an unknown run", async () => {
+  const { execute } = createHarness();
+  const ctx = createContext({
+    sessionManager: { getSessionDir: () => "/tmp/does-not-exist-suocode-subagents" },
+  });
+  const result = await execute("call-10", { action: "resume", runId: "missing" }, undefined, undefined, ctx);
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /未找到/);
+});
+
+test("child meta round-trips through persisted session files", () => {
+  const dir = mkdtempSync(join(tmpdir(), "suocode-subagent-scan-"));
+  mkdirSync(dir, { recursive: true });
+  const meta = {
+    runId: "sa-scan-test",
+    agent: "worker",
+    task: "写点东西",
+    background: true,
+    startedAt: Date.now(),
+  };
+  const sessionFile = join(dir, "2026-08-10T00-00-00-000Z_sa-scan-test.jsonl");
+  const lines = [
+    JSON.stringify({ type: "session", version: 3, id: "sa-scan-test" }),
+    JSON.stringify({ type: "custom", customType: "suocode-subagent-meta", data: meta }),
+  ];
+  writeFileSync(sessionFile, `${lines.join("\n")}\n`, "utf8");
+
+  const scanned = scanResumableChildren(dir);
+  assert.equal(scanned.length, 1);
+  assert.equal(scanned[0].meta.runId, "sa-scan-test");
+  assert.equal(scanned[0].meta.background, true);
+  assert.equal(scanned[0].sessionFile, sessionFile);
+  assert.equal(readChildMeta(sessionFile)?.agent, "worker");
+  assert.equal(scanResumableChildren(join(dir, "nope")).length, 0);
 });
 
 function makeRun(overrides: Partial<ChildRun> = {}): ChildRun {

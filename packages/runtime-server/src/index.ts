@@ -364,6 +364,8 @@ export class RuntimeServer {
         return runtime.setEnableSkillCommands(command.enabled, command.cwd);
       case "stop_subagent":
         return runtime.stopSubagent(command.id, command.background);
+      case "resume_subagent":
+        return runtime.resumeSubagent(command.id);
       case "list_sessions":
         return runtime.listSessions(command.cwd);
       case "list_archived_sessions":

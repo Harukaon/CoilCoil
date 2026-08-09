@@ -42,6 +42,7 @@ export interface ChildRun {
   tokens: number;
   finalOutput?: string;
   error?: string;
+  stopRequested?: boolean;
   bashBuffer: string;
 }
 
