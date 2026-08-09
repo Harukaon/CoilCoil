@@ -71,4 +71,8 @@ export interface RuntimeRequestPayload {
   runtimeId?: string;
 }
 
+export type RuntimeRequestResult =
+  | { ok: true; value: unknown }
+  | { ok: false; error: string };
+
 export type RuntimeEventPayload = ScopedRuntimeEvent;

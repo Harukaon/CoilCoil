@@ -2875,6 +2875,20 @@ export class SuoCodeRuntime {
       const message = extensionErrors.map((entry) => `${entry.path}: ${entry.error}`).join("\n");
       throw new Error(`SuoCode workflow failed to load:\n${message}`);
     }
+    if (timingEnabled) {
+      for (const extension of loader.getExtensions().extensions) {
+        const handlers = extension.handlers.get("session_start");
+        if (!handlers?.length) continue;
+        extension.handlers.set("session_start", handlers.map((handler, index) => (async (...args: Parameters<typeof handler>) => {
+          const startedAt = Date.now();
+          try {
+            return await handler(...args);
+          } finally {
+            process.stderr.write(`[suocode-runtime-timing] ${JSON.stringify({ extension: extension.path, event: "session_start", handler: index, elapsedMs: Date.now() - startedAt })}\n`);
+          }
+        }) as typeof handler));
+      }
+    }
 
     const created = await createAgentSession({
       cwd,

@@ -10,6 +10,7 @@ import type {
   ProjectSelection,
   RuntimeEventPayload,
   RuntimeRequestPayload,
+  RuntimeRequestResult,
   SuoCodeDesktopApi,
 } from "../shared/desktop-api";
 
@@ -59,8 +60,14 @@ const api: SuoCodeDesktopApi = {
     return () => ipcRenderer.removeListener(PREVIEW_UPDATED_CHANNEL, handler);
   },
   listProjectDirectory: (root: string, path?: string) => ipcRenderer.invoke(PROJECT_DIRECTORY_LIST_CHANNEL, root, path) as Promise<FileNode[]>,
-  request: <T>(command: RuntimeCommand, runtimeId?: string) =>
-    ipcRenderer.invoke(RUNTIME_REQUEST_CHANNEL, { command, runtimeId } satisfies RuntimeRequestPayload) as Promise<T>,
+  request: async <T>(command: RuntimeCommand, runtimeId?: string): Promise<T> => {
+    const result = await ipcRenderer.invoke(
+      RUNTIME_REQUEST_CHANNEL,
+      { command, runtimeId } satisfies RuntimeRequestPayload,
+    ) as RuntimeRequestResult;
+    if (!result.ok) throw new Error(result.error);
+    return result.value as T;
+  },
   onRuntimeEvent: (listener: (event: RuntimeEvent, runtimeId?: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: RuntimeEventPayload): void => listener(value.event, value.runtimeId);
     ipcRenderer.on(RUNTIME_EVENT_CHANNEL, handler);
