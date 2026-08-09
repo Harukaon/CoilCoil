@@ -72,12 +72,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 }
 .icon-button:hover:not(:disabled) { color: #262624; background: #e2e2df; }
 .icon-button:disabled { opacity: .42; cursor: default; }
-.primary-nav { padding: 2px 12px 20px; }
+.primary-nav { display: grid; gap: 2px; padding: 2px 12px 20px; }
 .nav-button, .conversation-row, .inspector-nav button { display: flex; align-items: center; width: 100%; background: transparent; cursor: pointer; }
 .nav-button { gap: 11px; min-height: 38px; padding: 0 10px; border-radius: 8px; font-size: 14px; font-weight: 500; }
 .nav-button kbd { margin-left: auto; color: #9b9b96; font-size: 10px; font-family: inherit; }
 .nav-button:disabled { opacity: .5; cursor: default; }
 .nav-button:hover:not(:disabled), .conversation-row:hover { background: #e4e4e1; }
+.nav-button.active { color: #2d2d2a; background: #e4e4e1; }
 .project-section { min-height: 0; padding: 0 11px; overflow-x: hidden; overflow-y: auto; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; height: 36px; padding-left: 8px; color: #777772; font-size: 11px; font-weight: 550; text-transform: uppercase; letter-spacing: .04em; }
 .section-heading-actions { display: flex; align-items: center; gap: 1px; }
@@ -158,6 +159,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .brand-copy span { max-width: 145px; margin-top: 2px; overflow: hidden; color: #8a8a85; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 
 .conversation-pane { --chat-content-width: 820px; position: relative; display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-rows: 56px minmax(0, 1fr) auto; background: var(--pane-fill); }
+.skills-workspace { display: grid; min-width: 0; min-height: 0; grid-column: 2 / -1; grid-template-rows: 76px minmax(0, 1fr); background: var(--pane-fill); }
+.skills-workspace-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid #e3e3df; }
+.skills-workspace-header > div { display: flex; min-width: 0; align-items: center; gap: 11px; }
+.skills-workspace-header h1 { margin: 0; color: #343431; font-size: 17px; font-weight: 650; }
+.skills-workspace-header p { margin: 4px 0 0; color: #898984; font-size: 10px; }
+.skills-workspace-content { min-width: 0; min-height: 0; overflow: hidden; }
+[data-platform="darwin"] .app-shell.left-collapsed .skills-workspace-header { padding-left: 82px; }
 .conversation-header { display: flex; align-items: center; gap: 10px; padding: 0 20px; }
 [data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 82px; }
 .conversation-title { display: flex; min-width: 0; flex-direction: column; gap: 2px; }

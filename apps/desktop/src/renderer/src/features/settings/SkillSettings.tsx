@@ -88,7 +88,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
           <button type="button" disabled={busy || loading} onClick={() => void addPath()}>
             <FolderPlus size={13} />添加技能目录
           </button>
-          <button type="button" aria-label="刷新 Skills" disabled={loading || busy} onClick={() => void load(true)}>
+          <button type="button" aria-label="刷新技能" disabled={loading || busy} onClick={() => void load(true)}>
             {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
           </button>
         </div>
@@ -112,7 +112,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
 
       <section className="skills-list" aria-label="已发现的技能">
         {loading ? (
-          <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载 Skills…</div>
+          <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载技能…</div>
         ) : null}
         {!loading && configuration?.skills.map((skill) => (
           <article key={skill.filePath} className={skill.enabled ? "enabled" : "disabled"}>

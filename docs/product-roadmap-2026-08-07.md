@@ -153,6 +153,12 @@ apps/desktop/src/renderer/src/
 - 首字 7–16 秒且输出 25–90 tok/s 通常应评为黄色或中等，而不是直接判红；评级应同时考虑首字与持续输出，不使用过严单阈值。
 - 上下文圆环与信号图标位置保持一致，点击分别查看上下文和请求性能详情。
 
+## 阶段 5.5：Agent 运行时管理中心
+
+主工作区增加高频“技能”入口，右侧栏增加“运行时”视图，用于查看和管理当前 Session 真正生效的上下文、System Prompt、技能、MCP 与项目记忆。设置页继续负责持久配置，运行时视图负责当前会话的状态和高频控制。
+
+详细产品边界、数据口径、上下文精简安全要求和 typed protocol 见 [`agent-runtime-management.md`](./agent-runtime-management.md)。在运行时只读快照完成前，不直接实现历史工具结果删除或 System Prompt 原位修改。
+
 ## 阶段 6：MCP 配置管理 UI
 
 MCP 的协议实现、连接管理和工具暴露全部复用 SuoCode 已内置的 `pi-mcp-adapter`。SuoCode Desktop 只为这个扩展提供图形化配置界面，不重新实现 MCP Client、Transport、OAuth、工具发现或资源调用。

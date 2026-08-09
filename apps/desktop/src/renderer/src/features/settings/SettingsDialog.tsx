@@ -441,13 +441,12 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
     <main className="settings-screen" aria-labelledby="settings-title" style={{ "--settings-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
       <aside className="settings-sidebar">
         <div className="settings-window-drag window-drag" />
-        <div className="settings-sidebar-brand"><span className="brand-mark">S</span><strong>SuoCode</strong></div>
+        <button className="settings-sidebar-home" type="button" aria-label="返回工作区" onClick={onClose}><ArrowLeft size={15} /><span>返回工作区</span></button>
         <nav className="settings-tabs" aria-label="设置栏目">
           <button className={section === "models" ? "active" : ""} type="button" onClick={() => setSection("models")}><Settings size={15} />模型与服务商</button>
           <button className={section === "mcp" ? "active" : ""} type="button" onClick={() => setSection("mcp")}><Network size={15} />MCP</button>
-          <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />Skills</button>
+          <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />技能</button>
         </nav>
-        <button className="settings-back" type="button" aria-label="关闭设置" onClick={onClose}><ArrowLeft size={15} />返回工作区</button>
       </aside>
       <div className="settings-sidebar-resizer" role="separator" aria-label="调整设置侧栏宽度" aria-orientation="vertical" onPointerDown={beginSidebarResize} />
       <section className="settings-page" role="region">
@@ -457,7 +456,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
               {section === "models" ? <Settings size={17} /> : section === "mcp" ? <Network size={17} /> : <Sparkles size={17} />}
             </span>
             <div>
-              <h1 id="settings-title">{section === "models" ? "模型与服务商" : section === "mcp" ? "MCP" : "Skills"}</h1>
+              <h1 id="settings-title">{section === "models" ? "模型与服务商" : section === "mcp" ? "MCP" : "技能"}</h1>
               <p>
                 {section === "skills"
                   ? "按需加载的专业技能包。"

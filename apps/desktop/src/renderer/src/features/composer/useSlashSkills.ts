@@ -192,7 +192,7 @@ export function useSlashMenu({
         id: "action:skills",
         kind: "action",
         title: "/skills",
-        description: "打开 Skills 设置，管理技能与目录",
+        description: "打开技能设置，管理技能与目录",
         openSettings: "skills",
       },
       {

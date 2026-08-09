@@ -16,6 +16,7 @@ import {
   PinOff,
   Plus,
   Settings,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
@@ -61,6 +62,8 @@ export function WorkspaceSidebar({
   onForkConversation,
   onRestoreSessions,
   onFocusPending,
+  skillsOpen,
+  onOpenSkills,
   onOpenSettings,
   onRemoveProject,
   onError,
@@ -86,6 +89,8 @@ export function WorkspaceSidebar({
   onForkConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onRestoreSessions: (project: ProjectSelection, sessions: SessionSummary[]) => void;
   onFocusPending: () => void;
+  skillsOpen: boolean;
+  onOpenSkills: () => void;
   onOpenSettings: () => void;
   onRemoveProject: (project: ProjectSelection) => void;
   onError: (message: string) => void;
@@ -116,7 +121,10 @@ export function WorkspaceSidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
-      <nav className="primary-nav"><button className="nav-button" type="button" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button></nav>
+      <nav className="primary-nav">
+        <button className="nav-button" type="button" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={18} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button>
+        <button className={`nav-button ${skillsOpen ? "active" : ""}`} type="button" onClick={onOpenSkills}><Sparkles size={18} strokeWidth={1.7} /><span>技能</span></button>
+      </nav>
       <section className="project-section">
         <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsPopover projects={projects} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></span></div>
         {projects.length ? projects.map((project) => {

@@ -20,8 +20,8 @@
   background: #efefed;
 }
 .settings-window-drag { height: 52px; flex: 0 0 52px; }
-.settings-sidebar-brand { display: flex; height: 40px; align-items: center; gap: 9px; padding: 0 8px 6px; color: #2b2b28; font-size: 12px; font-weight: 600; }
-.settings-sidebar-brand .brand-mark { width: 28px; height: 28px; font-size: 14px; }
+.settings-sidebar-home { display: flex; width: 100%; height: 40px; align-items: center; gap: 9px; padding: 0 10px 6px; border-radius: 8px; color: #50504c; background: transparent; font-size: 12px; font-weight: 600; text-align: left; cursor: pointer; }
+.settings-sidebar-home:hover { color: #292927; background: #e4e4e1; }
 .settings-page { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
 .settings-page-header { display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid #e3e3df; }
 .settings-page-header > div { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -179,8 +179,6 @@
 .settings-tabs button { display: flex; width: 100%; height: 34px; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: 8px; color: #6a6a65; background: transparent; font-size: 12px; font-weight: 500; text-align: left; cursor: pointer; }
 .settings-tabs button:hover { background: #e4e4e1; }
 .settings-tabs button.active { color: #2e2e2b; background: #e4e4e1; font-weight: 600; }
-.settings-back { display: flex; height: 34px; align-items: center; gap: 9px; margin-top: auto; padding: 0 10px; border: 0; border-radius: 8px; color: #6a6a65; background: transparent; font-size: 12px; font-weight: 500; text-align: left; cursor: pointer; }
-.settings-back:hover { color: #2e2e2b; background: #e4e4e1; }
 .settings-sidebar-resizer { position: absolute; z-index: 20; top: 0; bottom: 0; left: calc(var(--settings-sidebar-width) - 3px); width: 7px; cursor: col-resize; touch-action: none; }
 .settings-sidebar-resizer::after { position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; content: ""; background: transparent; transition: background 120ms ease; }
 .settings-sidebar-resizer:hover::after, .settings-sidebar-resizer:active::after { background: #aaa9a3; }

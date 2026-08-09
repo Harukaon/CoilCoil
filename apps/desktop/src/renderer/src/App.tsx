@@ -25,6 +25,7 @@ import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
 import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
 import { ConversationPane } from "./features/conversation/ConversationPane";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
+import { SkillsWorkspace } from "./features/settings/SkillsWorkspace";
 import { WorkspaceSidebar, type SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
 import { FilesPanel } from "./features/files/FilesPanel";
@@ -34,6 +35,7 @@ import { useFilePathDrop } from "./hooks/useFilePathDrop";
 import { toastError } from "./ui/toast";
 
 type InspectorView = "files";
+type WorkspaceSurface = "conversation" | "skills";
 
 const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
 const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
@@ -116,6 +118,7 @@ export default function App(): React.JSX.Element {
   const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"models" | "mcp" | "skills">("models");
+  const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("conversation");
   const [loading, setLoading] = useState(true);
   const composer = useComposerController({
     configuration,
@@ -173,6 +176,7 @@ export default function App(): React.JSX.Element {
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(selection.path);
+    setWorkspaceSurface("conversation");
     snapshotRef.current = undefined;
     setSnapshot(undefined);
     setMessages([]);
@@ -358,6 +362,15 @@ export default function App(): React.JSX.Element {
     if (viewport && shouldAutoScrollRef.current) viewport.scrollTop = viewport.scrollHeight;
   }, [messages, tools, snapshot?.running]);
 
+  useLayoutEffect(() => {
+    if (settingsOpen || workspaceSurface !== "conversation") return;
+    const frame = window.requestAnimationFrame(() => {
+      const viewport = timelineRef.current;
+      if (viewport && shouldAutoScrollRef.current) viewport.scrollTop = viewport.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [settingsOpen, workspaceSurface]);
+
   useEffect(() => {
     if (!snapshot?.running) return;
     const timer = window.setInterval(() => setActivityPhraseIndex((current) => current + 1), 2_300);
@@ -418,6 +431,8 @@ export default function App(): React.JSX.Element {
   };
 
   const openConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
+    shouldAutoScrollRef.current = true;
+    setWorkspaceSurface("conversation");
     if (owner.path === project?.path && session.id === activeConversation?.id) return;
     const requestId = ++selectionRequestRef.current;
     const cached = snapshotCacheRef.current.get(session.path);
@@ -599,7 +614,7 @@ export default function App(): React.JSX.Element {
   ];
 
   if (settingsOpen) {
-    return <SettingsDialog configuration={configuration} open onClose={() => setSettingsOpen(false)} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} initialSection={settingsSection} />;
+    return <SettingsDialog configuration={configuration} open onClose={() => { shouldAutoScrollRef.current = true; setSettingsOpen(false); }} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} initialSection={settingsSection} />;
   }
 
   return (
@@ -630,7 +645,15 @@ export default function App(): React.JSX.Element {
           onPinConversation={(owner, session, pinned) => { void pinConversation(owner, session, pinned); }}
           onForkConversation={(owner, session) => { void forkConversation(owner, session); }}
           onRestoreSessions={(owner, sessions) => setSessionsByProject((current) => ({ ...current, [owner.path]: sessions }))}
-          onFocusPending={() => { inputRef.current?.focus(); }}
+          onFocusPending={() => {
+            setWorkspaceSurface("conversation");
+            window.requestAnimationFrame(() => inputRef.current?.focus());
+          }}
+          skillsOpen={workspaceSurface === "skills"}
+          onOpenSkills={() => {
+            setModelMenuOpen(false);
+            setWorkspaceSurface("skills");
+          }}
           onOpenSettings={() => {
             setSettingsSection("models");
             setSettingsOpen(true);
@@ -641,6 +664,18 @@ export default function App(): React.JSX.Element {
         {leftOpen ? <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><span><PanelLeft size={17} /></span></button> : null}
         {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
 
+        {workspaceSurface === "skills" ? (
+          <SkillsWorkspace
+            runtimeId={snapshot?.runtimeId}
+            cwd={project?.path}
+            leftOpen={leftOpen}
+            onOpenLeft={() => setLeftOpen(true)}
+            onClose={() => {
+              shouldAutoScrollRef.current = true;
+              setWorkspaceSurface("conversation");
+            }}
+          />
+        ) : <>
         <ConversationPane
           fileDragActive={fileDragActive}
           leftOpen={leftOpen}
@@ -701,6 +736,7 @@ export default function App(): React.JSX.Element {
           </section>
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
+        </>}
       </main>
     </>
   );
