@@ -29,8 +29,7 @@ export function usePanelLayout(): {
 
   useEffect(() => {
     const fitPanelsToWindow = (): void => {
-      const compact = window.innerWidth <= 700 && !rightOpen;
-      const leftIsTiled = leftOpen && !compact;
+      const leftIsTiled = leftOpen;
       const rightIsTiled = rightOpen;
       let nextLeftWidth = preferredLeftWidthRef.current;
       let nextRightWidth = preferredRightWidthRef.current;

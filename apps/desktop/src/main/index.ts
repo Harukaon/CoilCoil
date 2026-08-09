@@ -350,16 +350,12 @@ function createWindow(): void {
     minWidth: 395,
     minHeight: 500,
     show: false,
-    backgroundColor: isMac ? "#00000000" : "#f7f7f5",
+    backgroundColor: "#f8f8f6",
     title: "SuoCode",
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,
           trafficLightPosition: { x: 18, y: 18 },
-          // Frosted glass over desktop wallpaper (macOS).
-          vibrancy: "under-window" as const,
-          visualEffectState: "active" as const,
-          transparent: true,
           hasShadow: true,
         }
       : {}),
@@ -371,11 +367,6 @@ function createWindow(): void {
       backgroundThrottling: false,
     },
   });
-
-  if (isMac) {
-    mainWindow.setBackgroundColor("#00000000");
-    mainWindow.setVibrancy("under-window");
-  }
 
   mainWindow.on("ready-to-show", () => mainWindow.show());
   if (process.env.ELECTRON_RENDERER_URL) {
