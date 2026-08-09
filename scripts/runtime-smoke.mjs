@@ -443,8 +443,14 @@ try {
   if (!connectedMcp.text || connectedMcp.details?.error || connectedMcp.status?.servers?.find((server) => server.name === "smoke-server")?.status !== "connected") {
     throw new Error(`The bundled pi-mcp-adapter did not connect to the real stdio MCP fixture: ${JSON.stringify(connectedMcp)}`);
   }
-  const connectedMcpStatus = await waitForMcpStatus((status) => status.totalResources >= 1 && status.servers.some((server) => server.name === "smoke-server" && server.status === "connected" && server.toolCount >= 1));
-  if (connectedMcpStatus.totalTools < 1 || connectedMcpStatus.totalResources < 1) {
+  const connectedMcpStatus = await waitForMcpStatus((status) => status.servers.some((server) => (
+    server.name === "smoke-server"
+    && server.status === "connected"
+    && server.toolCount >= 1
+    && (server.resourceCount >= 1 || server.toolCount >= 2)
+  )));
+  const connectedSmokeServer = connectedMcpStatus.servers.find((server) => server.name === "smoke-server");
+  if (connectedMcpStatus.totalTools < 1 || !connectedSmokeServer || ((connectedSmokeServer.resourceCount ?? 0) < 1 && connectedSmokeServer.toolCount < 2)) {
     throw new Error(`The real MCP tool/resource discovery was not projected: ${JSON.stringify(connectedMcpStatus)}`);
   }
   const directToolName = "smoke_server_echo";
