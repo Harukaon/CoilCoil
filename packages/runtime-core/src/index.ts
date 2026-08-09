@@ -8,6 +8,7 @@ import {
   configureHttpDispatcher,
   createEventBus,
   createAgentSession,
+  estimateTokens,
   loadSkills,
   processImage,
   readStoredCredential,
@@ -58,7 +59,11 @@ import type {
   RuntimeConfiguration,
   RuntimeEvent,
   RuntimeInspectionSnapshot,
+  RuntimeContextItem,
+  RuntimeSkillState,
+  RuntimeToolDefinition,
   RuntimeSummaryEvent,
+  ProjectMemoryRuntimeStatus,
   ResponseMetrics,
   SessionSnapshot,
   SessionSummary,
@@ -108,6 +113,11 @@ const MAX_PATCH_CHARS = 16_000;
 const MAX_TERMINAL_OUTPUT = 120_000;
 const WORKFLOW_AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
 const RESPONSE_METRICS_ENTRY_TYPE = "suocode-response-metrics";
+const PROJECT_MEMORY_STATUS_EVENT = "suocode:project-memory:status:v1";
+const RUNTIME_BRIDGE_COMMAND_EVENT = "suocode:runtime-bridge:command:v1";
+const RUNTIME_BRIDGE_REPLY_PREFIX = "suocode:runtime-bridge:reply:v1:";
+const RUNTIME_BRIDGE_STATE_EVENT = "suocode:runtime-bridge:state:v1";
+const ORIGINAL_SESSION_MUTATION_UNSUPPORTED = "Pi 当前无法安全地从原会话中删除这段历史内容，未执行任何修改。";
 const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
 const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
@@ -680,7 +690,21 @@ interface ActiveSession {
   responseMetricsHistory: ResponseMetrics[];
   sessionRevision: number;
   summaryActivity?: RuntimeSummaryEvent;
+  bridgeState?: RuntimeBridgeState;
+  memoryStatus?: ProjectMemoryRuntimeStatus;
+  skillConfiguration?: SkillConfigurationSnapshot;
+  mcpStatus?: McpRuntimeStatus;
   eventBus: EventBusController;
+}
+
+interface RuntimeBridgeState {
+  version: 1;
+  effectiveSystemPrompt?: string;
+  systemPromptOverride?: string;
+  disabledSkills: string[];
+  readSkills: string[];
+  contextMessages?: unknown[];
+  updatedAt: number;
 }
 
 interface ReconstructedSessionState {
@@ -714,6 +738,162 @@ function errorMessage(error: unknown): string {
 
 function errorDetail(error: unknown): string | undefined {
   return error instanceof Error ? error.stack : undefined;
+}
+
+function runtimeBridgeState(value: unknown): RuntimeBridgeState | undefined {
+  if (!isRecord(value) || value.version !== 1) return undefined;
+  return {
+    version: 1,
+    effectiveSystemPrompt: optionalString(value, "effectiveSystemPrompt"),
+    systemPromptOverride: optionalString(value, "systemPromptOverride"),
+    disabledSkills: stringArray(value.disabledSkills),
+    readSkills: stringArray(value.readSkills),
+    contextMessages: Array.isArray(value.contextMessages) ? value.contextMessages : undefined,
+    updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : Date.now(),
+  };
+}
+
+function projectMemoryStatus(value: unknown): ProjectMemoryRuntimeStatus | undefined {
+  if (!isRecord(value) || value.version !== 1) return undefined;
+  const states = new Set<ProjectMemoryRuntimeStatus["state"]>(["idle", "running", "busy", "succeeded", "failed", "disabled"]);
+  const sources = new Set<ProjectMemoryRuntimeStatus["source"]>(["startup", "prompt", "manual", "automatic"]);
+  if (!states.has(value.state as ProjectMemoryRuntimeStatus["state"]) || !sources.has(value.source as ProjectMemoryRuntimeStatus["source"])) return undefined;
+  const number = (key: string): number | undefined => typeof value[key] === "number" && Number.isFinite(value[key]) ? value[key] : undefined;
+  return {
+    state: value.state as ProjectMemoryRuntimeStatus["state"],
+    source: value.source as ProjectMemoryRuntimeStatus["source"],
+    exists: value.exists === true,
+    injected: value.injected === true,
+    projectRoot: optionalString(value, "projectRoot"),
+    projectName: optionalString(value, "projectName"),
+    memoryFile: optionalString(value, "memoryFile"),
+    projectMemoryDir: optionalString(value, "projectMemoryDir"),
+    contentChars: number("contentChars"),
+    estimatedTokens: number("estimatedTokens"),
+    content: optionalString(value, "content"),
+    sessionFile: optionalString(value, "sessionFile"),
+    processedSessions: stringArray(value.processedSessions),
+    startedAt: number("startedAt"),
+    completedAt: number("completedAt"),
+    durationMs: number("durationMs"),
+    message: optionalString(value, "message"),
+    error: optionalString(value, "error"),
+  };
+}
+
+function hydrateProjectMemoryStatus(status: ProjectMemoryRuntimeStatus): ProjectMemoryRuntimeStatus {
+  if (!status.memoryFile || !status.exists || !existsSync(status.memoryFile)) return status;
+  try {
+    return { ...status, content: readFileSync(status.memoryFile, "utf8") };
+  } catch {
+    return status;
+  }
+}
+
+function estimatedTextTokens(value: unknown): number {
+  if (typeof value === "string") return Math.ceil(value.length / 4);
+  try {
+    return Math.ceil(JSON.stringify(value).length / 4);
+  } catch {
+    return 0;
+  }
+}
+
+function contentText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value.map((item) => {
+    if (!isRecord(item)) return "";
+    if (typeof item.text === "string") return item.text;
+    if (typeof item.thinking === "string") return item.thinking;
+    if (item.type === "image") return "[图片]";
+    return "";
+  }).filter(Boolean).join("\n");
+}
+
+function contextPreview(value: unknown, maxLength = 180): string {
+  const text = typeof value === "string" ? value : contentText(value);
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function contextItemsFromMessages(messages: readonly unknown[]): RuntimeContextItem[] {
+  const items: RuntimeContextItem[] = [];
+  messages.forEach((raw, messageIndex) => {
+    if (!isRecord(raw)) return;
+    const role = stringValue(raw.role);
+    const timestamp = typeof raw.timestamp === "number" ? raw.timestamp : undefined;
+    const baseId = `context-${messageIndex}-${timestamp ?? messageIndex}`;
+    if (role === "assistant" && Array.isArray(raw.content)) {
+      raw.content.forEach((block, blockIndex) => {
+        if (!isRecord(block)) return;
+        if (block.type === "thinking") {
+          const thinking = stringValue(block.thinking);
+          items.push({
+            id: `${baseId}-thinking-${blockIndex}`,
+            kind: "reasoning",
+            label: "模型思考",
+            preview: contextPreview(thinking),
+            estimatedTokens: estimatedTextTokens(thinking),
+            active: true,
+            timestamp,
+          });
+        } else if (block.type === "toolCall") {
+          const toolName = stringValue(block.name) || "工具";
+          items.push({
+            id: `${baseId}-tool-${blockIndex}`,
+            kind: "tool_call",
+            label: `调用 ${toolName}`,
+            preview: contextPreview(block.arguments),
+            estimatedTokens: estimatedTextTokens({ name: toolName, arguments: block.arguments }),
+            active: true,
+            toolName,
+            timestamp,
+          });
+        } else if (block.type === "text") {
+          const text = stringValue(block.text);
+          if (!text) return;
+          items.push({
+            id: `${baseId}-text-${blockIndex}`,
+            kind: "assistant",
+            label: "模型回复",
+            preview: contextPreview(text),
+            estimatedTokens: estimatedTextTokens(text),
+            active: true,
+            timestamp,
+          });
+        }
+      });
+      return;
+    }
+    if (role === "toolResult") {
+      const toolName = stringValue(raw.toolName) || "工具";
+      items.push({
+        id: baseId,
+        kind: "tool_result",
+        label: `${toolName} 结果`,
+        preview: contextPreview(raw.content),
+        estimatedTokens: estimatedTextTokens(contentText(raw.content)),
+        active: true,
+        toolName,
+        timestamp,
+      });
+      return;
+    }
+    const text = contentText(raw.content);
+    const kind: RuntimeContextItem["kind"] = role === "user" ? "user" : role === "assistant" ? "assistant" : "custom";
+    items.push({
+      id: baseId,
+      kind,
+      label: role === "user" ? "用户消息" : role === "assistant" ? "模型回复" : "运行时消息",
+      preview: contextPreview(text || raw),
+      estimatedTokens: estimatedTextTokens(text || raw),
+      active: true,
+      timestamp,
+    });
+  });
+  return items;
 }
 
 async function shutdownAgentSession(
@@ -1401,6 +1581,7 @@ export class SuoCodeRuntime {
   private subagentRefreshTimer?: ReturnType<typeof setTimeout>;
   private mcpReloadTimer?: ReturnType<typeof setTimeout>;
   private resourceReloadTimer?: ReturnType<typeof setTimeout>;
+  private runtimeInspectionRefresh?: Promise<void>;
 
   constructor(options: SuoCodeRuntimeOptions) {
     // The Pi CLI configures its Undici dispatcher before provider SDKs run.
@@ -2408,6 +2589,103 @@ export class SuoCodeRuntime {
     return this.getSkillConfiguration(resolvedCwd);
   }
 
+  private runtimeBridgeRpc(
+    method: "get" | "set-system-prompt" | "set-skill-enabled",
+    params: Record<string, unknown> = {},
+  ): Promise<RuntimeBridgeState> {
+    const active = this.requireActive();
+    const requestId = `suocode-runtime-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `${RUNTIME_BRIDGE_REPLY_PREFIX}${requestId}`;
+    return new Promise((resolvePromise, rejectPromise) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        callback();
+      };
+      const unsubscribe = active.eventBus.on(replyChannel, (raw) => {
+        if (!isRecord(raw)) return;
+        if (raw.ok === true) {
+          const state = runtimeBridgeState(raw.state);
+          if (!state) {
+            finish(() => rejectPromise(new Error("运行时桥接返回了无效状态。")));
+            return;
+          }
+          finish(() => resolvePromise(state));
+          return;
+        }
+        finish(() => rejectPromise(new Error(stringValue(raw.error) || "运行时桥接请求失败。")));
+      });
+      const timer = setTimeout(() => finish(() => rejectPromise(new Error("运行时桥接请求超时。"))), 8_000);
+      active.eventBus.emit(RUNTIME_BRIDGE_COMMAND_EVENT, {
+        version: 1,
+        requestId,
+        method,
+        ...params,
+      });
+    });
+  }
+
+  private refreshRuntimeInspectionSources(active: ActiveSession): Promise<void> {
+    if (this.runtimeInspectionRefresh) return this.runtimeInspectionRefresh;
+    const refresh = Promise.allSettled([
+      this.getSkillConfiguration(active.cwd),
+      this.getMcpStatus(),
+      this.runtimeBridgeRpc("get"),
+    ]).then(([skills, mcp, bridge]) => {
+      if (this.active !== active) return;
+      if (skills.status === "fulfilled") active.skillConfiguration = skills.value;
+      if (mcp.status === "fulfilled") active.mcpStatus = mcp.value;
+      if (bridge.status === "fulfilled") active.bridgeState = bridge.value;
+      this.publishRuntimeInspection(active);
+    }).finally(() => {
+      if (this.runtimeInspectionRefresh === refresh) this.runtimeInspectionRefresh = undefined;
+    });
+    this.runtimeInspectionRefresh = refresh;
+    return refresh;
+  }
+
+  async getRuntimeInspection(): Promise<RuntimeInspectionSnapshot> {
+    const active = this.requireActive();
+    void this.refreshRuntimeInspectionSources(active);
+    return this.runtimeInspection(active);
+  }
+
+  async setSessionSystemPrompt(prompt?: string): Promise<RuntimeInspectionSnapshot> {
+    const active = this.requireActive();
+    active.bridgeState = await this.runtimeBridgeRpc("set-system-prompt", { prompt });
+    const inspection = this.runtimeInspection(active);
+    this.emitEvent({ type: "runtime_inspection_updated", inspection });
+    return inspection;
+  }
+
+  async setSessionSkillEnabled(filePath: string, enabled: boolean): Promise<RuntimeInspectionSnapshot> {
+    if (!filePath.trim()) throw new Error("缺少 Skill 路径。");
+    const active = this.requireActive();
+    active.bridgeState = await this.runtimeBridgeRpc("set-skill-enabled", { filePath: filePath.trim(), enabled });
+    const inspection = this.runtimeInspection(active);
+    this.emitEvent({ type: "runtime_inspection_updated", inspection });
+    return inspection;
+  }
+
+  async runMemoryNow(): Promise<{ accepted: true }> {
+    const active = this.requireActive();
+    if (active.session.isStreaming) throw new Error("请等待当前回复结束后再整理项目记忆。");
+    if (!active.session.model) throw new Error("当前没有可用于记忆整理的模型。");
+    if (!active.session.sessionFile || !existsSync(active.session.sessionFile)) {
+      throw new Error("当前会话还没有可供整理的历史记录。");
+    }
+    this.emitEvent({ type: "runtime_notice", level: "info", message: "正在启动当前项目的记忆整理…" });
+    await active.session.prompt("/memory");
+    return { accepted: true };
+  }
+
+  async removeOriginalSessionItem(_entryId: string): Promise<never> {
+    throw new Error(ORIGINAL_SESSION_MUTATION_UNSUPPORTED);
+  }
+
   private mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete" | "logout", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const active = this.requireActive();
     const requestId = `suocode-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -3015,6 +3293,32 @@ export class SuoCodeRuntime {
     const settingsManager = SettingsManager.create(cwd, this.agentDir, { projectTrusted: true });
     configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
     const eventBus = createEventBus();
+    let installedActive: ActiveSession | undefined;
+    let pendingBridgeState: RuntimeBridgeState | undefined;
+    let pendingMemoryStatus: ProjectMemoryRuntimeStatus | undefined;
+    eventBus.on(RUNTIME_BRIDGE_STATE_EVENT, (value) => {
+      const next = runtimeBridgeState(value);
+      if (!next) return;
+      pendingBridgeState = next;
+      if (!installedActive) return;
+      installedActive.bridgeState = next;
+      this.publishRuntimeInspection(installedActive);
+    });
+    eventBus.on(PROJECT_MEMORY_STATUS_EVENT, (value) => {
+      const parsed = projectMemoryStatus(value);
+      const next = parsed ? hydrateProjectMemoryStatus(parsed) : undefined;
+      if (!next) return;
+      const previous = pendingMemoryStatus;
+      pendingMemoryStatus = next;
+      if (!installedActive) return;
+      installedActive.memoryStatus = next;
+      this.publishRuntimeInspection(installedActive);
+      if (next.source !== "manual" || previous?.state === next.state) return;
+      if (next.state === "running") this.emitEvent({ type: "runtime_notice", level: "info", message: next.message || "正在整理当前项目记忆…" });
+      else if (next.state === "succeeded") this.emitEvent({ type: "runtime_notice", level: "success", message: next.message || "项目记忆整理完成" });
+      else if (next.state === "busy") this.emitEvent({ type: "runtime_notice", level: "info", message: next.message || "当前项目已有记忆整理正在运行" });
+      else if (next.state === "failed") this.emitEvent({ type: "runtime_notice", level: "error", message: next.error || "项目记忆整理失败" });
+    });
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: this.agentDir,
@@ -3101,13 +3405,17 @@ export class SuoCodeRuntime {
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
       sessionRevision: 1,
+      bridgeState: pendingBridgeState,
+      memoryStatus: pendingMemoryStatus,
       eventBus,
     };
+    installedActive = active;
     this.active = active;
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
     const snapshot = await this.snapshot(reconstructed);
     markTiming("snapshot");
     this.emitEvent({ type: "session_snapshot", snapshot });
+    void this.refreshRuntimeInspectionSources(active);
     setTimeout(() => {
       if (this.active !== active) return;
       void this.refreshAsyncSubagents();
@@ -3695,6 +4003,7 @@ export class SuoCodeRuntime {
     await this.refreshActiveSessionModel();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
+    if (prompt === "/memory" && !images?.length) return this.runMemoryNow();
     if (active.session.isStreaming) return this.steer(prompt, images);
     const prepared = await preparePromptImages(images);
     const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
@@ -3862,11 +4171,89 @@ export class SuoCodeRuntime {
   }
 
   private runtimeInspection(active: ActiveSession): RuntimeInspectionSnapshot {
-    return buildRuntimeInspection(
+    const base = buildRuntimeInspection(
       active.session.sessionManager,
       active.sessionRevision,
       active.summaryActivity,
     );
+    const messages: readonly unknown[] = active.session.isStreaming && active.bridgeState?.contextMessages?.length
+      ? active.bridgeState.contextMessages
+      : active.session.messages;
+    const contextItems = contextItemsFromMessages(messages);
+    const estimatedMessages = messages.reduce<number>((total, message) => {
+      try {
+        return total + estimateTokens(message as Parameters<typeof estimateTokens>[0]);
+      } catch {
+        return total + estimatedTextTokens(message);
+      }
+    }, 0);
+    const activeToolNames = new Set(active.session.getActiveToolNames());
+    const tools: RuntimeToolDefinition[] = active.session.getAllTools().map((tool) => {
+      const source = tool.sourceInfo.source || tool.sourceInfo.path || "unknown";
+      return {
+        name: tool.name,
+        description: tool.description,
+        source,
+        active: activeToolNames.has(tool.name),
+        estimatedTokens: estimatedTextTokens({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          promptGuidelines: tool.promptGuidelines,
+        }),
+      };
+    }).sort((left, right) => Number(right.active) - Number(left.active) || left.name.localeCompare(right.name));
+    const disabledSkills = new Set(active.bridgeState?.disabledSkills ?? []);
+    const readSkills = new Set((active.bridgeState?.readSkills ?? []).map((path) => resolve(path)));
+    const skills: RuntimeSkillState[] = (active.skillConfiguration?.skills ?? []).map((skill) => {
+      const resolvedPath = resolve(skill.filePath);
+      const sessionEnabled = skill.enabled && !disabledSkills.has(skill.filePath) && !disabledSkills.has(resolvedPath);
+      return {
+        name: skill.name,
+        description: skill.description,
+        filePath: skill.filePath,
+        source: skill.source,
+        globallyEnabled: skill.enabled,
+        sessionEnabled,
+        publishedToModel: sessionEnabled && !skill.disableModelInvocation,
+        readInSession: readSkills.has(resolvedPath),
+        estimatedMetadataTokens: estimatedTextTokens({
+          name: skill.name,
+          description: skill.description,
+          location: skill.filePath,
+        }),
+      };
+    });
+    const effectiveSystemPrompt = active.bridgeState?.effectiveSystemPrompt || active.session.systemPrompt || undefined;
+    const systemPromptTokens = effectiveSystemPrompt ? estimatedTextTokens(effectiveSystemPrompt) : undefined;
+    const toolDefinitionTokens = tools.filter((tool) => tool.active).reduce((total, tool) => total + tool.estimatedTokens, 0);
+    const usage = sessionUsage(active.session);
+    const cacheDenominator = usage.tokenUsage.input + usage.tokenUsage.cacheRead + usage.tokenUsage.cacheWrite;
+    const cacheHitRate = usage.tokenUsage.cacheRead > 0 && cacheDenominator > 0
+      ? usage.tokenUsage.cacheRead / cacheDenominator
+      : undefined;
+    return {
+      ...base,
+      effectiveSystemPrompt,
+      systemPromptOverride: Boolean(active.bridgeState?.systemPromptOverride),
+      estimates: {
+        systemPrompt: systemPromptTokens,
+        toolDefinitions: toolDefinitionTokens || undefined,
+        messages: estimatedMessages || undefined,
+        total: usage.contextUsage?.tokens ?? (((systemPromptTokens ?? 0) + toolDefinitionTokens + estimatedMessages) || undefined),
+      },
+      cacheHitRate,
+      contextItems,
+      tools,
+      skills,
+      mcp: active.mcpStatus,
+      memory: active.memoryStatus,
+      capabilities: {
+        editSystemPrompt: true,
+        removeOriginalSessionItems: false,
+        removeOriginalSessionItemsReason: ORIGINAL_SESSION_MUTATION_UNSUPPORTED,
+      },
+    };
   }
 
   private publishRuntimeInspection(active: ActiveSession): void {

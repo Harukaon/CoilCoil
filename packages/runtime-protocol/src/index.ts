@@ -559,6 +559,80 @@ export interface RuntimeInspectionSnapshot {
   sessionRevision: number;
   activeLeafId?: string;
   summaryEvents: RuntimeSummaryEvent[];
+  effectiveSystemPrompt?: string;
+  systemPromptOverride: boolean;
+  estimates: {
+    systemPrompt?: number;
+    toolDefinitions?: number;
+    messages?: number;
+    total?: number;
+  };
+  cacheHitRate?: number;
+  contextItems: RuntimeContextItem[];
+  tools: RuntimeToolDefinition[];
+  skills: RuntimeSkillState[];
+  mcp?: McpRuntimeStatus;
+  memory?: ProjectMemoryRuntimeStatus;
+  capabilities: {
+    editSystemPrompt: boolean;
+    removeOriginalSessionItems: false;
+    removeOriginalSessionItemsReason: string;
+  };
+}
+
+export type RuntimeContextItemKind = "user" | "assistant" | "reasoning" | "tool_call" | "tool_result" | "custom";
+
+export interface RuntimeContextItem {
+  id: string;
+  entryId?: string;
+  kind: RuntimeContextItemKind;
+  label: string;
+  preview: string;
+  estimatedTokens: number;
+  active: boolean;
+  toolName?: string;
+  timestamp?: number;
+}
+
+export interface RuntimeToolDefinition {
+  name: string;
+  description: string;
+  source: string;
+  active: boolean;
+  estimatedTokens: number;
+}
+
+export interface RuntimeSkillState {
+  name: string;
+  description: string;
+  filePath: string;
+  source: SkillSource;
+  globallyEnabled: boolean;
+  sessionEnabled: boolean;
+  publishedToModel: boolean;
+  readInSession: boolean;
+  estimatedMetadataTokens: number;
+}
+
+export interface ProjectMemoryRuntimeStatus {
+  state: "idle" | "running" | "busy" | "succeeded" | "failed" | "disabled";
+  source: "startup" | "prompt" | "manual" | "automatic";
+  exists: boolean;
+  injected: boolean;
+  projectRoot?: string;
+  projectName?: string;
+  memoryFile?: string;
+  projectMemoryDir?: string;
+  contentChars?: number;
+  estimatedTokens?: number;
+  content?: string;
+  sessionFile?: string;
+  processedSessions: string[];
+  startedAt?: number;
+  completedAt?: number;
+  durationMs?: number;
+  message?: string;
+  error?: string;
 }
 
 export interface TerminalRun {
@@ -663,6 +737,11 @@ export type RuntimeCommand =
   | { type: "add_skill_path"; path: string; cwd?: string }
   | { type: "remove_skill_path"; path: string; cwd?: string }
   | { type: "set_enable_skill_commands"; enabled: boolean; cwd?: string }
+  | { type: "get_runtime_inspection" }
+  | { type: "set_session_system_prompt"; prompt?: string }
+  | { type: "set_session_skill_enabled"; filePath: string; enabled: boolean }
+  | { type: "run_memory_now" }
+  | { type: "remove_original_session_item"; entryId: string }
   | { type: "stop_subagent"; id: string; background: boolean }
   | { type: "list_sessions"; cwd: string }
   | { type: "list_archived_sessions"; cwd: string }
@@ -704,6 +783,7 @@ export type RuntimeEvent =
       tokenUsage: TokenUsage;
     }
   | { type: "runtime_inspection_updated"; inspection: RuntimeInspectionSnapshot }
+  | { type: "runtime_notice"; level: "info" | "success" | "error"; message: string }
   | { type: "run_state"; running: boolean }
   | { type: "runtime_error"; message: string; detail?: string };
 

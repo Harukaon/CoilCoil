@@ -1,4 +1,5 @@
 import { fork } from "node:child_process";
+import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
@@ -375,6 +376,27 @@ try {
   }
   if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
   if (!Array.isArray(snapshot.subagents)) throw new Error("Subagent activity was not included in the session snapshot.");
+  const runtimeInspection = await request({ type: "get_runtime_inspection" });
+  if (
+    !runtimeInspection?.effectiveSystemPrompt
+    || !runtimeInspection.tools.some((tool) => tool.name === "read" && tool.active)
+    || runtimeInspection.capabilities?.removeOriginalSessionItems !== false
+  ) {
+    throw new Error(`The session runtime inspection bridge was incomplete: ${JSON.stringify(runtimeInspection)}`);
+  }
+  const smokePromptOverride = "SuoCode runtime inspection smoke prompt";
+  const overriddenInspection = await request({ type: "set_session_system_prompt", prompt: smokePromptOverride });
+  if (!overriddenInspection.systemPromptOverride || overriddenInspection.effectiveSystemPrompt !== smokePromptOverride) {
+    throw new Error("The session-scoped System Prompt override did not update immediately.");
+  }
+  const restoredInspection = await request({ type: "set_session_system_prompt" });
+  if (restoredInspection.systemPromptOverride || restoredInspection.effectiveSystemPrompt === smokePromptOverride) {
+    throw new Error("The session-scoped System Prompt override was not restored.");
+  }
+  await assert.rejects(
+    request({ type: "remove_original_session_item", entryId: "unsupported-smoke-entry" }),
+    /无法安全地从原会话中删除.*未执行任何修改/,
+  );
   const mcpStatus = await request({ type: "get_mcp_status" });
   if (!mcpStatus.servers.some((server) => server.name === "smoke-server") || typeof mcpStatus.totalTools !== "number" || typeof mcpStatus.totalResources !== "number") {
     throw new Error(`The extension-native MCP status bridge did not expose pi-mcp-adapter state: ${JSON.stringify(mcpStatus)}`);

@@ -99,5 +99,15 @@ export function buildRuntimeInspection(
     sessionRevision,
     activeLeafId: manager.getLeafId() ?? undefined,
     summaryEvents: projected,
+    systemPromptOverride: false,
+    estimates: {},
+    contextItems: [],
+    tools: [],
+    skills: [],
+    capabilities: {
+      editSystemPrompt: true,
+      removeOriginalSessionItems: false,
+      removeOriginalSessionItemsReason: "Pi 当前没有安全修改原 Session 中间历史的 API；未执行任何修改。",
+    },
   };
 }

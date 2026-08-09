@@ -34,7 +34,7 @@ import { RuntimePanel } from "./features/runtime/RuntimePanel";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
-import { toastError } from "./ui/toast";
+import { toastError, toastInfo, toastSuccess } from "./ui/toast";
 
 type InspectorView = "files" | "runtime";
 type WorkspaceSurface = "conversation" | "skills";
@@ -297,6 +297,11 @@ export default function App(): React.JSX.Element {
           return next;
         });
         break;
+      case "runtime_notice":
+        if (event.level === "error") toastError(event.message);
+        else if (event.level === "success") toastSuccess(event.message);
+        else toastInfo(event.message);
+        break;
       case "run_state":
         setSnapshot((current) => current ? { ...current, running: event.running } : current);
         setAgentPhase(event.running ? "思考" : undefined);
@@ -381,6 +386,27 @@ export default function App(): React.JSX.Element {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [settingsOpen, workspaceSurface]);
+
+  useEffect(() => {
+    const runtimeId = snapshot?.runtimeId;
+    if (inspectorView !== "runtime" || !runtimeId) return;
+    let cancelled = false;
+    void window.suocode.request<SessionSnapshot["runtimeInspection"]>({ type: "get_runtime_inspection" }, runtimeId)
+      .then((inspection) => {
+        if (cancelled) return;
+        setSnapshot((current) => {
+          if (!current || current.runtimeId !== runtimeId) return current;
+          const next = { ...current, runtimeInspection: inspection };
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
+      })
+      .catch((caught) => {
+        if (!cancelled) toastError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => { cancelled = true; };
+  }, [inspectorView, snapshot?.runtimeId]);
 
   useEffect(() => {
     if (!snapshot?.running) return;
@@ -745,7 +771,7 @@ export default function App(): React.JSX.Element {
           <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span></button>; })}</nav>
           <section className="inspector-content">
             {inspectorView === "files" ? <FilesPanel key="agent-files" project={projectState} runtimeId={snapshot?.runtimeId} onOpen={openFilePreview} /> : null}
-            {inspectorView === "runtime" ? <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} /> : null}
+            {inspectorView === "runtime" ? <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} /> : null}
           </section>
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}

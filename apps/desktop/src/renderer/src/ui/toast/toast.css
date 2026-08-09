@@ -26,6 +26,11 @@
   color: #3f563d;
   background: #f4f9f2;
 }
+.toast-info {
+  border-color: #cbd7df;
+  color: #405866;
+  background: #f4f9fc;
+}
 .toast-error {
   border-color: #e5c5c1;
   color: #8f3f38;
@@ -40,6 +45,7 @@
   place-items: center;
 }
 .toast-success .toast-icon { color: #557753; }
+.toast-info .toast-icon { color: #557487; }
 .toast-error .toast-icon { color: #a04740; }
 .toast-message {
   min-width: 0;

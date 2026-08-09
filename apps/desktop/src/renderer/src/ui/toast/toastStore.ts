@@ -1,4 +1,4 @@
-export type ToastKind = "success" | "error";
+export type ToastKind = "info" | "success" | "error";
 
 export interface ToastItem {
   id: string;
@@ -10,6 +10,7 @@ export interface ToastItem {
 type Listener = () => void;
 
 const DEFAULT_DURATION_MS: Record<ToastKind, number> = {
+  info: 3500,
   success: 3500,
   error: 5200,
 };
@@ -66,6 +67,10 @@ export function showToast(
 
 export function toastSuccess(message: string, options?: { durationMs?: number }): string {
   return showToast("success", message, options);
+}
+
+export function toastInfo(message: string, options?: { durationMs?: number }): string {
+  return showToast("info", message, options);
 }
 
 export function toastError(message: string, options?: { durationMs?: number }): string {

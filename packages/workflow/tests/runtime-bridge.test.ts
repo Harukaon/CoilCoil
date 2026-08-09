@@ -57,4 +57,12 @@ test("applies session prompt and Skill controls through the event bridge", async
   const result = await handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, {});
   assert.equal(result.systemPrompt, "custom effective prompt");
   assert.equal(emitted.find((event) => event.channel === `${RUNTIME_BRIDGE_REPLY_PREFIX}prompt`)?.value.ok, true);
+  pi.events.emit(RUNTIME_BRIDGE_COMMAND_EVENT, {
+    version: 1,
+    requestId: "restore",
+    method: "set-system-prompt",
+  });
+  const restored = emitted.find((event) => event.channel === `${RUNTIME_BRIDGE_REPLY_PREFIX}restore`)?.value.state;
+  assert.equal(restored.systemPromptOverride, undefined);
+  assert.equal(restored.effectiveSystemPrompt, "base");
 });

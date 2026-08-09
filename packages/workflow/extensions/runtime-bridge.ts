@@ -57,6 +57,7 @@ function commandFrom(raw: unknown): RuntimeBridgeCommand {
 
 export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   let effectiveSystemPrompt: string | undefined;
+  let baseSystemPrompt: string | undefined;
   let systemPromptOverride: string | undefined;
   let contextMessages: AgentMessage[] | undefined;
   const disabledSkills = new Set<string>();
@@ -81,6 +82,7 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
       if (command.method === "set-system-prompt") {
         const value = command.prompt?.trim();
         systemPromptOverride = value || undefined;
+        effectiveSystemPrompt = systemPromptOverride ?? baseSystemPrompt;
       } else if (command.method === "set-skill-enabled") {
         const filePath = command.filePath?.trim();
         if (!filePath) throw new Error("缺少 Skill 路径。");
@@ -99,6 +101,7 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event) => {
     const filtered = filterDisabledSkillsFromPrompt(event.systemPrompt, disabledSkills);
+    baseSystemPrompt = filtered;
     effectiveSystemPrompt = systemPromptOverride ?? filtered;
     publish();
     if (effectiveSystemPrompt !== event.systemPrompt) return { systemPrompt: effectiveSystemPrompt };

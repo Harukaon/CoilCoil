@@ -57,6 +57,7 @@ function eventChangesSnapshot(event: RuntimeEvent): boolean {
     || event.type === "subagents_updated"
     || event.type === "project_updated"
     || event.type === "metrics_updated"
+    || event.type === "runtime_inspection_updated"
     || event.type === "run_state";
 }
 
@@ -362,6 +363,16 @@ export class RuntimeServer {
         return runtime.removeSkillPath(command.path, command.cwd);
       case "set_enable_skill_commands":
         return runtime.setEnableSkillCommands(command.enabled, command.cwd);
+      case "get_runtime_inspection":
+        return runtime.getRuntimeInspection();
+      case "set_session_system_prompt":
+        return runtime.setSessionSystemPrompt(command.prompt);
+      case "set_session_skill_enabled":
+        return runtime.setSessionSkillEnabled(command.filePath, command.enabled);
+      case "run_memory_now":
+        return runtime.runMemoryNow();
+      case "remove_original_session_item":
+        return runtime.removeOriginalSessionItem(command.entryId);
       case "stop_subagent":
         return runtime.stopSubagent(command.id, command.background);
       case "list_sessions":
