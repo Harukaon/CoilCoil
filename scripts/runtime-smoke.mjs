@@ -1,6 +1,6 @@
 import { fork } from "node:child_process";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -150,6 +150,17 @@ async function waitForMcpStatus(predicate, timeoutMs = 30_000) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 200));
   }
   throw new Error(`Timed out waiting for MCP status: ${JSON.stringify(status)}`);
+}
+
+async function waitForRuntimeInspection(predicate, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  let inspection;
+  while (Date.now() < deadline) {
+    inspection = await request({ type: "get_runtime_inspection" });
+    if (predicate(inspection)) return inspection;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error(`Timed out waiting for runtime inspection: ${JSON.stringify(inspection)}`);
 }
 
 try {
@@ -384,6 +395,19 @@ try {
   ) {
     throw new Error(`The session runtime inspection bridge was incomplete: ${JSON.stringify(runtimeInspection)}`);
   }
+  await assert.rejects(
+    request({ type: "run_memory_now" }),
+    /还没有可供整理的历史记录/,
+  );
+  const emptyMemoryInspection = await waitForRuntimeInspection((inspection) => inspection.memory?.state === "failed");
+  if (
+    emptyMemoryInspection.memory?.source !== "manual"
+    || !emptyMemoryInspection.memory.attemptId
+    || !emptyMemoryInspection.memory.updatedAt
+    || realpathSync(emptyMemoryInspection.memory.cwd) !== realpathSync(projectDir)
+  ) {
+    throw new Error(`An empty /memory request did not leave structured runtime feedback: ${JSON.stringify(emptyMemoryInspection.memory)}`);
+  }
   const smokePromptOverride = "SuoCode runtime inspection smoke prompt";
   const overriddenInspection = await request({ type: "set_session_system_prompt", prompt: smokePromptOverride });
   if (!overriddenInspection.systemPromptOverride || overriddenInspection.effectiveSystemPrompt !== smokePromptOverride) {
@@ -422,6 +446,29 @@ try {
   const connectedMcpStatus = await waitForMcpStatus((status) => status.totalResources >= 1 && status.servers.some((server) => server.name === "smoke-server" && server.status === "connected" && server.toolCount >= 1));
   if (connectedMcpStatus.totalTools < 1 || connectedMcpStatus.totalResources < 1) {
     throw new Error(`The real MCP tool/resource discovery was not projected: ${JSON.stringify(connectedMcpStatus)}`);
+  }
+  const directToolName = "smoke_server_echo";
+  await waitForRuntimeInspection((inspection) => inspection.tools.some((tool) => tool.name === directToolName && tool.active));
+  const mcpConfigBeforeSessionToggle = readFileSync(savedMcp.configPath, "utf8");
+  const sessionDisabledInspection = await request({ type: "set_session_mcp_server_enabled", name: "smoke-server", enabled: false });
+  if (
+    sessionDisabledInspection.mcp?.servers.find((server) => server.name === "smoke-server")?.sessionDisabled !== true
+    || sessionDisabledInspection.tools.find((tool) => tool.name === directToolName)?.active !== false
+  ) {
+    throw new Error(`The session MCP policy did not hide the disabled server and direct tool: ${JSON.stringify(sessionDisabledInspection)}`);
+  }
+  if (readFileSync(savedMcp.configPath, "utf8") !== mcpConfigBeforeSessionToggle) {
+    throw new Error("The session MCP policy unexpectedly rewrote the workspace MCP configuration.");
+  }
+  const sessionEnabledInspection = await request({ type: "set_session_mcp_server_enabled", name: "smoke-server", enabled: true });
+  if (
+    sessionEnabledInspection.mcp?.servers.find((server) => server.name === "smoke-server")?.sessionDisabled === true
+    || sessionEnabledInspection.tools.find((tool) => tool.name === directToolName)?.active !== true
+  ) {
+    throw new Error(`Re-enabling the session MCP server did not restore its direct tool: ${JSON.stringify(sessionEnabledInspection)}`);
+  }
+  if (readFileSync(savedMcp.configPath, "utf8") !== mcpConfigBeforeSessionToggle) {
+    throw new Error("Re-enabling a session MCP server unexpectedly rewrote the workspace MCP configuration.");
   }
   await request({
     type: "save_mcp_server",

@@ -121,6 +121,26 @@ class FakeRuntime {
     return this.snapshotValue;
   }
 
+  emitMemoryState(state: "running" | "succeeded" | "failed"): void {
+    if (!this.snapshotValue) throw new Error("No active session");
+    const cwd = this.snapshotValue.session.cwd;
+    const inspection = {
+      ...this.snapshotValue.runtimeInspection,
+      memory: {
+        cwd,
+        updatedAt: Date.now(),
+        attemptId: `memory-${this.ordinal}`,
+        state,
+        source: "manual" as const,
+        exists: true,
+        injected: false,
+        processedSessions: [],
+      },
+    };
+    this.snapshotValue = { ...this.snapshotValue, runtimeInspection: inspection };
+    this.emit({ type: "runtime_inspection_updated", inspection });
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true;
   }
@@ -364,5 +384,81 @@ test("idle historical runtimes are bounded while recent sessions remain reopenab
   assert.equal(reopened.ok, true, "an evicted idle session must transparently restore from disk");
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(runtimes.filter((runtime) => !runtime.disposed).length, 7);
+  await server.dispose();
+});
+
+test("a background Memory job is retained beyond the idle runtime limit", async () => {
+  const runtimes: FakeRuntime[] = [];
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options);
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  await server.handle({
+    id: "memory-session",
+    command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/memory.jsonl" },
+  });
+  runtimes[1].emitMemoryState("running");
+
+  for (let index = 0; index < 10; index += 1) {
+    assert.equal((await server.handle({
+      id: `open-${index}`,
+      command: { type: "open_session", cwd: "/project", sessionPath: `/sessions/other-${index}.jsonl` },
+    })).ok, true);
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimes[1].disposed, false, "a Memory worker must not be evicted as an idle Agent runtime");
+  assert.equal(
+    runtimes.filter((runtime) => !runtime.disposed).length,
+    8,
+    "control, one background worker, and six ordinary idle session runtimes should remain",
+  );
+
+  runtimes[1].emitMemoryState("succeeded");
+  await server.handle({
+    id: "open-after-memory",
+    command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/after-memory.jsonl" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimes[1].disposed, true, "the completed background runtime may return to normal LRU retirement");
+  await server.dispose();
+});
+
+test("workspace Memory changes invalidate cached sibling session snapshots", async () => {
+  const runtimes: FakeRuntime[] = [];
+  const snapshotCalls = new Map<string, number>();
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options, { snapshotCalls });
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  const firstPath = "/sessions/workspace-a.jsonl";
+  const secondPath = "/sessions/workspace-b.jsonl";
+  await server.handle({ id: "open-a", command: { type: "open_session", cwd: "/project", sessionPath: firstPath } });
+  await server.handle({ id: "open-b", command: { type: "open_session", cwd: "/project", sessionPath: secondPath } });
+  await server.handle({ id: "cached-a", command: { type: "open_session", cwd: "/project", sessionPath: firstPath } });
+  assert.equal(snapshotCalls.get(firstPath) ?? 0, 0);
+
+  runtimes[2].emitMemoryState("running");
+  await server.handle({ id: "refresh-a", command: { type: "open_session", cwd: "/project", sessionPath: firstPath } });
+  assert.equal(snapshotCalls.get(firstPath), 1, "same-workspace Memory updates must mark sibling snapshots dirty");
   await server.dispose();
 });

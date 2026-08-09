@@ -5,6 +5,7 @@ type AgentMessage = ContextEvent["messages"][number];
 export const RUNTIME_BRIDGE_COMMAND_EVENT = "suocode:runtime-bridge:command:v1";
 export const RUNTIME_BRIDGE_REPLY_PREFIX = "suocode:runtime-bridge:reply:v1:";
 export const RUNTIME_BRIDGE_STATE_EVENT = "suocode:runtime-bridge:state:v1";
+export const RUNTIME_BRIDGE_POLICY_ENTRY = "suocode-runtime-bridge-policy";
 
 interface RuntimeBridgeCommand {
   version: 1;
@@ -55,6 +56,25 @@ function commandFrom(raw: unknown): RuntimeBridgeCommand {
   return raw as unknown as RuntimeBridgeCommand;
 }
 
+function restorePolicy(entries: readonly unknown[]): {
+  systemPromptOverride?: string;
+  disabledSkills: string[];
+} {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (!isRecord(entry) || entry.type !== "custom" || entry.customType !== RUNTIME_BRIDGE_POLICY_ENTRY || !isRecord(entry.data)) continue;
+    return {
+      systemPromptOverride: typeof entry.data.systemPromptOverride === "string" && entry.data.systemPromptOverride.trim()
+        ? entry.data.systemPromptOverride
+        : undefined,
+      disabledSkills: Array.isArray(entry.data.disabledSkills)
+        ? entry.data.disabledSkills.filter((path): path is string => typeof path === "string" && Boolean(path.trim()))
+        : [],
+    };
+  }
+  return { disabledSkills: [] };
+}
+
 export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   let effectiveSystemPrompt: string | undefined;
   let baseSystemPrompt: string | undefined;
@@ -62,6 +82,13 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   let contextMessages: AgentMessage[] | undefined;
   const disabledSkills = new Set<string>();
   const readSkills = new Set<string>();
+
+  const recomputeEffectiveSystemPrompt = (): void => {
+    const filteredBase = baseSystemPrompt === undefined
+      ? undefined
+      : filterDisabledSkillsFromPrompt(baseSystemPrompt, disabledSkills);
+    effectiveSystemPrompt = systemPromptOverride ?? filteredBase;
+  };
 
   const state = (): RuntimeBridgeState => ({
     version: 1,
@@ -73,6 +100,11 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     updatedAt: Date.now(),
   });
   const publish = (): void => pi.events.emit(RUNTIME_BRIDGE_STATE_EVENT, state());
+  const persistPolicy = (): void => pi.appendEntry(RUNTIME_BRIDGE_POLICY_ENTRY, {
+    version: 1,
+    systemPromptOverride,
+    disabledSkills: [...disabledSkills].sort(),
+  });
 
   const unsubscribe = pi.events.on(RUNTIME_BRIDGE_COMMAND_EVENT, (raw) => {
     let requestId = "unknown";
@@ -82,13 +114,14 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
       if (command.method === "set-system-prompt") {
         const value = command.prompt?.trim();
         systemPromptOverride = value || undefined;
-        effectiveSystemPrompt = systemPromptOverride ?? baseSystemPrompt;
       } else if (command.method === "set-skill-enabled") {
         const filePath = command.filePath?.trim();
         if (!filePath) throw new Error("缺少 Skill 路径。");
         if (command.enabled === false) disabledSkills.add(filePath);
         else disabledSkills.delete(filePath);
       }
+      recomputeEffectiveSystemPrompt();
+      if (command.method !== "get") persistPolicy();
       publish();
       pi.events.emit(`${RUNTIME_BRIDGE_REPLY_PREFIX}${requestId}`, { ok: true, state: state() });
     } catch (error) {
@@ -100,9 +133,8 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", async (event) => {
-    const filtered = filterDisabledSkillsFromPrompt(event.systemPrompt, disabledSkills);
-    baseSystemPrompt = filtered;
-    effectiveSystemPrompt = systemPromptOverride ?? filtered;
+    baseSystemPrompt = event.systemPrompt;
+    recomputeEffectiveSystemPrompt();
     publish();
     if (effectiveSystemPrompt !== event.systemPrompt) return { systemPrompt: effectiveSystemPrompt };
     return undefined;
@@ -124,6 +156,22 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     return undefined;
   });
 
-  pi.on("session_start", async () => publish());
+  pi.on("session_start", async (_event, context) => {
+    const restored = restorePolicy(context.sessionManager.getBranch());
+    systemPromptOverride = restored.systemPromptOverride;
+    disabledSkills.clear();
+    for (const path of restored.disabledSkills) disabledSkills.add(path);
+    baseSystemPrompt = context.getSystemPrompt();
+    recomputeEffectiveSystemPrompt();
+    publish();
+  });
+  pi.on("session_tree", async (_event, context) => {
+    const restored = restorePolicy(context.sessionManager.getBranch());
+    systemPromptOverride = restored.systemPromptOverride;
+    disabledSkills.clear();
+    for (const path of restored.disabledSkills) disabledSkills.add(path);
+    recomputeEffectiveSystemPrompt();
+    publish();
+  });
   pi.on("session_shutdown", async () => unsubscribe());
 }

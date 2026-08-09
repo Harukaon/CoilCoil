@@ -344,6 +344,8 @@ export interface McpServerRuntimeStatus {
   resourceCount: number;
   failedAgo: number | null;
   disabled: boolean;
+  /** Disabled only for this Pi session; the workspace configuration is unchanged. */
+  sessionDisabled: boolean;
 }
 
 export interface McpRuntimeStatus {
@@ -352,6 +354,7 @@ export interface McpRuntimeStatus {
   totalResources: number;
   connectedCount: number;
   disabledCount: number;
+  sessionDisabledCount: number;
   state?: "ready" | "initializing" | "unavailable";
   diagnostic?: string;
 }
@@ -615,6 +618,9 @@ export interface RuntimeSkillState {
 }
 
 export interface ProjectMemoryRuntimeStatus {
+  cwd: string;
+  updatedAt: number;
+  attemptId?: string;
   state: "idle" | "running" | "busy" | "succeeded" | "failed" | "disabled";
   source: "startup" | "prompt" | "manual" | "automatic";
   exists: boolean;
@@ -740,6 +746,7 @@ export type RuntimeCommand =
   | { type: "get_runtime_inspection" }
   | { type: "set_session_system_prompt"; prompt?: string }
   | { type: "set_session_skill_enabled"; filePath: string; enabled: boolean }
+  | { type: "set_session_mcp_server_enabled"; name: string; enabled: boolean }
   | { type: "run_memory_now" }
   | { type: "remove_original_session_item"; entryId: string }
   | { type: "stop_subagent"; id: string; background: boolean }

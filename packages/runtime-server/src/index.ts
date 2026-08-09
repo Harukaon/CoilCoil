@@ -72,6 +72,7 @@ export class RuntimeServer {
   private readonly runtimePaths = new Map<string, string>();
   private readonly runtimeAccess = new Map<string, number>();
   private readonly runningRuntimes = new Set<string>();
+  private readonly backgroundBusyRuntimes = new Set<string>();
   private readonly dirtyRuntimes = new Set<string>();
   private readonly runtimeSnapshots = new Map<string, SessionSnapshot>();
   private readonly openingSessions = new Map<string, Promise<SessionSnapshot>>();
@@ -115,6 +116,22 @@ export class RuntimeServer {
         this.retireExcessIdleRuntimes(runtimeId);
       }
     }
+    if (runtimeId && event.type === "runtime_inspection_updated" && event.inspection.memory) {
+      const memory = event.inspection.memory;
+      const wasBackgroundBusy = this.backgroundBusyRuntimes.has(runtimeId);
+      if (memory.state === "running") this.backgroundBusyRuntimes.add(runtimeId);
+      else if (wasBackgroundBusy) {
+        this.backgroundBusyRuntimes.delete(runtimeId);
+        this.retireExcessIdleRuntimes(runtimeId);
+      }
+      const workspacePath = normalizeSessionPath(memory.cwd);
+      for (const [otherRuntimeId, snapshot] of this.runtimeSnapshots) {
+        if (otherRuntimeId === runtimeId) continue;
+        if (normalizeSessionPath(snapshot.session.cwd) === workspacePath) {
+          this.dirtyRuntimes.add(otherRuntimeId);
+        }
+      }
+    }
     const scopedEvent = runtimeId && event.type === "session_snapshot"
       ? { ...event, snapshot: this.decorateSnapshot(runtimeId, event.snapshot) }
       : event;
@@ -127,6 +144,8 @@ export class RuntimeServer {
     this.dirtyRuntimes.delete(runtimeId);
     if (snapshot.running) this.runningRuntimes.add(runtimeId);
     else this.runningRuntimes.delete(runtimeId);
+    if (snapshot.runtimeInspection?.memory?.state === "running") this.backgroundBusyRuntimes.add(runtimeId);
+    else this.backgroundBusyRuntimes.delete(runtimeId);
     this.runtimeAccess.set(runtimeId, Date.now());
     if (snapshot.session.path) {
       const normalizedPath = normalizeSessionPath(snapshot.session.path);
@@ -145,6 +164,7 @@ export class RuntimeServer {
     this.runtimes.delete(runtimeId);
     this.runtimeAccess.delete(runtimeId);
     this.runningRuntimes.delete(runtimeId);
+    this.backgroundBusyRuntimes.delete(runtimeId);
     this.dirtyRuntimes.delete(runtimeId);
     this.runtimeSnapshots.delete(runtimeId);
     const sessionPath = this.runtimePaths.get(runtimeId);
@@ -156,7 +176,7 @@ export class RuntimeServer {
 
   private retireExcessIdleRuntimes(protectedRuntimeId: string): void {
     const idleRuntimeIds = [...this.runtimes.keys()]
-      .filter((runtimeId) => !this.runningRuntimes.has(runtimeId))
+      .filter((runtimeId) => !this.runningRuntimes.has(runtimeId) && !this.backgroundBusyRuntimes.has(runtimeId))
       .sort((left, right) => (this.runtimeAccess.get(left) ?? 0) - (this.runtimeAccess.get(right) ?? 0));
     let excess = idleRuntimeIds.length - MAX_RETAINED_IDLE_SESSION_RUNTIMES;
     if (excess <= 0) return;
@@ -369,6 +389,8 @@ export class RuntimeServer {
         return runtime.setSessionSystemPrompt(command.prompt);
       case "set_session_skill_enabled":
         return runtime.setSessionSkillEnabled(command.filePath, command.enabled);
+      case "set_session_mcp_server_enabled":
+        return runtime.setSessionMcpServerEnabled(command.name, command.enabled);
       case "run_memory_now":
         return runtime.runMemoryNow();
       case "remove_original_session_item":

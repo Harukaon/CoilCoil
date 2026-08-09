@@ -115,7 +115,8 @@ function RuntimeSection({
 }
 
 function mcpStatusLabel(server: McpServerRuntimeStatus): string {
-  if (server.disabled) return "已停用";
+  if (server.disabled) return "工作区已停用";
+  if (server.sessionDisabled) return "本会话已停用";
   if (server.status === "connected") return "已连接";
   if (server.status === "needs-auth") return "需要认证";
   if (server.status === "failed") return "连接失败";
@@ -128,13 +129,11 @@ export function RuntimePanel({
   contextUsage,
   tokenUsage,
   runtimeId,
-  cwd,
 }: {
   inspection?: RuntimeInspectionSnapshot;
   contextUsage?: ContextUsage;
   tokenUsage?: TokenUsage;
   runtimeId?: string;
-  cwd?: string;
 }): React.JSX.Element {
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(inspection?.effectiveSystemPrompt ?? "");
@@ -185,9 +184,7 @@ export function RuntimePanel({
   };
 
   const setMcpEnabled = async (server: McpServerRuntimeStatus, enabled: boolean): Promise<void> => {
-    if (!cwd) return;
-    await request(`mcp:${server.name}`, { type: "set_mcp_server_enabled", name: server.name, enabled, cwd });
-    await request(`inspection:mcp:${server.name}`, { type: "get_runtime_inspection" });
+    await request(`mcp:${server.name}`, { type: "set_session_mcp_server_enabled", name: server.name, enabled });
   };
 
   const connectMcp = async (server: McpServerRuntimeStatus): Promise<void> => {
@@ -263,18 +260,19 @@ export function RuntimePanel({
         ))}</div> : <p className="runtime-muted">当前工作区没有发现可用 Skill。</p>}
       </RuntimeSection>
 
-      <RuntimeSection title="MCP" icon={<PlugZap size={14} />} badge={inspection?.mcp ? `${inspection.mcp.connectedCount}/${inspection.mcp.servers.length} 已连接` : undefined}>
+      <RuntimeSection title="MCP" icon={<PlugZap size={14} />} badge={inspection?.mcp ? `${inspection.mcp.servers.length - inspection.mcp.disabledCount - inspection.mcp.sessionDisabledCount}/${inspection.mcp.servers.length} 本会话可用` : undefined}>
         {inspection?.mcp?.servers.length ? <div className="runtime-mcp-list">{inspection.mcp.servers.map((server) => (
           <div key={server.name}>
             <span><strong>{server.name}</strong><small>{mcpStatusLabel(server)}{server.toolCount ? ` · ${server.toolCount} 工具` : ""}</small></span>
-            <div>{!server.disabled && server.status !== "connected" ? <button type="button" disabled={busyAction === `mcp:${server.name}`} onClick={() => { void connectMcp(server); }}>连接</button> : null}<button type="button" disabled={!cwd || busyAction === `mcp:${server.name}`} onClick={() => { void setMcpEnabled(server, server.disabled); }}>{server.disabled ? "启用" : "停用"}</button></div>
+            <div>{!server.disabled && !server.sessionDisabled && server.status !== "connected" ? <button type="button" disabled={busyAction === `mcp:${server.name}`} onClick={() => { void connectMcp(server); }}>连接</button> : null}<button type="button" disabled={server.disabled || busyAction === `mcp:${server.name}`} title={server.disabled ? "请先在设置中启用这个 MCP Server" : undefined} onClick={() => { void setMcpEnabled(server, server.sessionDisabled); }}>{server.sessionDisabled ? "本会话启用" : "本会话停用"}</button></div>
           </div>
         ))}</div> : <p className="runtime-muted">{inspection?.mcp?.diagnostic || "当前工作区没有 MCP Server。"}</p>}
-        <p className="runtime-section-footnote">这里复用 SuoCode 内置的 Pi MCP 扩展；启停会更新当前工作区配置。</p>
+        <p className="runtime-section-footnote">这里复用 SuoCode 内置的 Pi MCP 扩展；开关只影响当前会话，不会改写工作区配置。设置页负责工作区级配置和连接生命周期。</p>
       </RuntimeSection>
 
       <RuntimeSection title="项目记忆" icon={<Sparkles size={14} />} badge={inspection?.memory ? ({ idle: "就绪", running: "整理中", busy: "正忙", succeeded: "已完成", failed: "失败", disabled: "已停用" }[inspection.memory.state]) : undefined} open={inspection?.memory?.state === "running" || inspection?.memory?.state === "failed"}>
         {inspection?.memory ? <div className="runtime-memory-card">
+          <p className="runtime-section-footnote">这是工作区级记忆；切换或回溯会话不会回滚磁盘上的记忆文件。</p>
           {inspection.memory.message ? <p>{inspection.memory.message}</p> : null}
           {inspection.memory.error ? <p className="runtime-summary-error">{inspection.memory.error}</p> : null}
           <dl>
@@ -283,7 +281,9 @@ export function RuntimePanel({
             {inspection.memory.injected ? <div><dt>当前会话</dt><dd>已注入</dd></div> : null}
             {inspection.memory.processedSessions.length ? <div><dt>最近处理</dt><dd>{inspection.memory.processedSessions.length} 个会话</dd></div> : null}
             {inspection.memory.durationMs !== undefined ? <div><dt>耗时</dt><dd>{(inspection.memory.durationMs / 1000).toFixed(1)} 秒</dd></div> : null}
+            {inspection.memory.updatedAt ? <div><dt>最近更新</dt><dd>{new Date(inspection.memory.updatedAt).toLocaleString("zh-CN", { hour12: false })}</dd></div> : null}
           </dl>
+          {inspection.memory.processedSessions.length ? <div className="runtime-summary-files"><strong>已整理会话</strong>{inspection.memory.processedSessions.map((path) => <code key={path} title={path}>{path.split(/[\\/]/).at(-1) || path}</code>)}</div> : null}
           {inspection.memory.content ? <pre className="runtime-memory-content">{inspection.memory.content}</pre> : null}
           <div className="runtime-actions"><button className="primary" type="button" disabled={!runtimeId || inspection.memory.state === "running" || busyAction === "memory"} onClick={() => { void request("memory", { type: "run_memory_now" }); }}><RefreshCw className={inspection.memory.state === "running" ? "spin" : ""} size={12} />立即整理</button></div>
         </div> : <p className="runtime-muted">Memory 扩展正在初始化。输入 <code>/memory</code> 或点击这里后，运行状态会实时显示。</p>}

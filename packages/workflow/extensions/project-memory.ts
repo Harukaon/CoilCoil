@@ -35,6 +35,8 @@ export type ProjectMemoryRunState = "idle" | "running" | "busy" | "succeeded" | 
 export interface ProjectMemoryStatusEvent {
   version: 1;
   cwd: string;
+  updatedAt: number;
+  attemptId?: string;
   projectRoot?: string;
   projectName?: string;
   memoryFile?: string;
@@ -76,6 +78,7 @@ export interface ProjectMemoryPaths {
   projectMemoryDir: string;
   workerSessionsDir: string;
   workerLockFile: string;
+  runtimeStateFile: string;
 }
 
 export interface EnforcedMemory {
@@ -194,6 +197,7 @@ export async function resolveProjectMemoryPaths(
     projectMemoryDir,
     workerSessionsDir: join(projectMemoryDir, ".worker-sessions"),
     workerLockFile: join(projectMemoryDir, ".worker.lock"),
+    runtimeStateFile: join(projectMemoryDir, ".suocode-memory-state.json"),
   };
 }
 
@@ -277,6 +281,38 @@ async function withFileLock<T>(
     await handle.close().catch(() => undefined);
     await unlink(lockPath).catch(() => undefined);
   }
+}
+
+interface PersistedProjectMemoryState {
+  version: 1;
+  processedSessions: string[];
+}
+
+async function readPersistedMemoryState(paths: ProjectMemoryPaths): Promise<PersistedProjectMemoryState> {
+  try {
+    const parsed = JSON.parse(await readFile(paths.runtimeStateFile, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { version: 1, processedSessions: [] };
+    }
+    const processedSessions = Array.isArray((parsed as { processedSessions?: unknown }).processedSessions)
+      ? (parsed as { processedSessions: unknown[] }).processedSessions.filter(
+          (value): value is string => typeof value === "string" && Boolean(value.trim()),
+        )
+      : [];
+    return { version: 1, processedSessions: [...new Set(processedSessions)] };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return { version: 1, processedSessions: [] };
+    return { version: 1, processedSessions: [] };
+  }
+}
+
+async function recordProcessedSession(paths: ProjectMemoryPaths, sessionFile: string): Promise<string[]> {
+  return withFileLock(paths.runtimeStateFile, async () => {
+    const current = await readPersistedMemoryState(paths);
+    const processedSessions = [...new Set([...current.processedSessions, sessionFile])];
+    await atomicWrite(paths.runtimeStateFile, `${JSON.stringify({ version: 1, processedSessions }, null, 2)}\n`);
+    return processedSessions;
+  });
 }
 
 function migratedConflictName(name: string, content: string): string {
@@ -647,24 +683,28 @@ export default function projectMemoryExtension(
     ctx: ExtensionContext,
     update: Partial<ProjectMemoryStatusEvent> & Pick<ProjectMemoryStatusEvent, "state" | "source">,
   ): ProjectMemoryStatusEvent => {
-    status = {
+    const updatedAt = Math.max(Date.now(), (status?.updatedAt ?? 0) + 1);
+    const next = {
       version: 1,
       cwd: ctx.cwd,
+      updatedAt,
       exists: status?.exists ?? false,
       injected: status?.injected ?? false,
       processedSessions: status?.processedSessions ?? [],
       ...status,
       ...update,
     };
+    status = { ...next, version: 1, cwd: ctx.cwd, updatedAt };
     pi.events.emit(PROJECT_MEMORY_STATUS_EVENT, status);
     return status;
   };
 
   const memoryMetadata = async (paths: ProjectMemoryPaths): Promise<Pick<ProjectMemoryStatusEvent,
-    "projectRoot" | "projectName" | "memoryFile" | "projectMemoryDir" | "exists" | "contentChars" | "estimatedTokens"
+    "projectRoot" | "projectName" | "memoryFile" | "projectMemoryDir" | "exists" | "contentChars" | "estimatedTokens" | "processedSessions"
   >> => {
     const content = await readUtf8(paths.memoryFile);
     const contentChars = countCharacters(content);
+    const persisted = await readPersistedMemoryState(paths);
     return {
       projectRoot: paths.projectRoot,
       projectName: paths.projectName,
@@ -673,15 +713,16 @@ export default function projectMemoryExtension(
       exists: await pathExists(paths.memoryFile),
       contentChars,
       estimatedTokens: Math.ceil(contentChars / 4),
+      processedSessions: persisted.processedSessions,
     };
   };
 
   const launchWorker = async (
     request: MemoryWorkerRequest,
     callbacks: {
-      onStarted?: () => void;
-      onComplete?: () => void;
-      onError?: (error: unknown) => void;
+      onStarted?: () => void | Promise<void>;
+      onComplete?: () => void | Promise<void>;
+      onError?: (error: unknown) => void | Promise<void>;
     } = {},
   ): Promise<"started" | "busy" | "failed"> => {
     let lease: WorkerLease | undefined;
@@ -699,11 +740,12 @@ export default function projectMemoryExtension(
       });
       const child = spawnWorker(launch);
       child.unref?.();
-      callbacks.onStarted?.();
+      await callbacks.onStarted?.();
 
       let timeout: NodeJS.Timeout | undefined;
       let killTimeout: NodeJS.Timeout | undefined;
       let finished = false;
+      let timeoutError: Error | undefined;
 
       const finish = async (error?: unknown): Promise<void> => {
         if (finished) return;
@@ -711,35 +753,40 @@ export default function projectMemoryExtension(
         if (timeout) clearTimeout(timeout);
         if (killTimeout) clearTimeout(killTimeout);
 
-        await lease?.release();
-
-        if (error) callbacks.onError?.(error);
-        else callbacks.onComplete?.();
+        try {
+          if (error) await callbacks.onError?.(error);
+          else await callbacks.onComplete?.();
+        } finally {
+          await lease?.release();
+        }
       };
 
       child.once("error", (error) => void finish(error));
       child.once("exit", (code, signal) => {
-        const error = code === 0
+        const error = timeoutError ?? (code === 0
           ? undefined
           : new Error(
               `后台 Pi 异常退出（code=${String(code)}, signal=${String(signal)}）`,
-            );
+            ));
         void finish(error);
       });
 
       timeout = setTimeout(() => {
+        timeoutError = new Error("后台 Pi 记忆整理超时，已终止");
         terminateWorker(child, "SIGTERM");
         killTimeout = setTimeout(() => {
           terminateWorker(child, "SIGKILL");
         }, WORKER_KILL_GRACE_MS);
-        callbacks.onError?.(new Error("后台 Pi 记忆整理超时，已终止"));
       }, workerTimeoutMs);
       timeout.unref?.();
 
       return "started";
     } catch (error) {
-      await lease?.release();
-      callbacks.onError?.(error);
+      try {
+        await callbacks.onError?.(error);
+      } finally {
+        await lease?.release();
+      }
       return "failed";
     }
   };
@@ -749,23 +796,29 @@ export default function projectMemoryExtension(
     notifyStarted: boolean,
     source: ProjectMemoryStatusEvent["source"] = notifyStarted ? "manual" : "automatic",
   ): Promise<"started" | "busy" | "skipped" | "failed"> => {
+    const attemptId = randomUUID();
     if (await memoryIsDisabled(ctx.cwd, env)) {
-      publishStatus(ctx, { state: "disabled", source, exists: false, injected: false, message: "当前目录已禁用项目记忆" });
+      publishStatus(ctx, { state: "disabled", source, attemptId, exists: false, injected: false, message: "当前目录已禁用项目记忆" });
+      if (notifyStarted) ctx.ui.notify("当前目录位于 .pi 内，已禁用记忆整理以防递归", "warning");
       return "skipped";
     }
     if (!ctx.model) {
-      publishStatus(ctx, { state: "failed", source, error: "当前没有可用于记忆整理的模型" });
+      publishStatus(ctx, { state: "failed", source, attemptId, error: "当前没有可用于记忆整理的模型" });
+      if (notifyStarted) ctx.ui.notify("当前没有可用于记忆整理的模型", "warning");
       return "skipped";
     }
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile || !(await pathExists(sessionFile))) {
-      publishStatus(ctx, { state: "failed", source, error: "当前会话没有可读取的 session 文件" });
+      publishStatus(ctx, { state: "failed", source, attemptId, error: "当前会话没有可读取的 session 文件" });
+      if (notifyStarted) ctx.ui.notify("当前会话没有可读取的 session 文件", "warning");
       return "skipped";
     }
 
     try {
       const { paths } = await prepareMemory(ctx.cwd, storageRoot);
       const canonicalSessionFile = await canonicalPath(sessionFile);
+      const persisted = await readPersistedMemoryState(paths);
+      const processedSessions = [...new Set([...(status?.processedSessions ?? []), ...persisted.processedSessions])];
       const startedAt = Date.now();
       const result = await launchWorker({
         paths,
@@ -777,10 +830,11 @@ export default function projectMemoryExtension(
           publishStatus(ctx, {
             state: "running",
             source,
+            attemptId,
             ...paths,
             exists: true,
             sessionFile: canonicalSessionFile,
-            processedSessions: [canonicalSessionFile],
+            processedSessions,
             startedAt,
             completedAt: undefined,
             durationMs: undefined,
@@ -788,32 +842,36 @@ export default function projectMemoryExtension(
             message: "正在整理当前项目记忆…",
           });
         },
-        onComplete: () => {
-          void memoryMetadata(paths).then((metadata) => {
+        onComplete: async () => {
+          try {
+            const completedSessions = await recordProcessedSession(paths, canonicalSessionFile);
+            const metadata = await memoryMetadata(paths);
             const completedAt = Date.now();
             publishStatus(ctx, {
               state: "succeeded",
               source,
+              attemptId,
               ...metadata,
               sessionFile: canonicalSessionFile,
-              processedSessions: [canonicalSessionFile],
+              processedSessions: [...new Set([...completedSessions, ...metadata.processedSessions])],
               startedAt,
               completedAt,
               durationMs: completedAt - startedAt,
               error: undefined,
               message: "项目记忆整理完成",
             });
-          }).catch((error) => {
+          } catch (error) {
             publishStatus(ctx, {
               state: "failed",
               source,
+              attemptId,
               sessionFile: canonicalSessionFile,
-              processedSessions: [canonicalSessionFile],
+              processedSessions,
               startedAt,
               completedAt: Date.now(),
               error: error instanceof Error ? error.message : String(error),
             });
-          });
+          }
         },
         onError: (error) => {
           notifyOnce(backgroundWarningState, ctx, error, "后台记忆整理失败");
@@ -821,8 +879,9 @@ export default function projectMemoryExtension(
           publishStatus(ctx, {
             state: "failed",
             source,
+            attemptId,
             sessionFile: canonicalSessionFile,
-            processedSessions: [canonicalSessionFile],
+            processedSessions,
             startedAt,
             completedAt,
             durationMs: completedAt - startedAt,
@@ -835,6 +894,7 @@ export default function projectMemoryExtension(
         publishStatus(ctx, {
           state: "busy",
           source,
+          attemptId,
           ...await memoryMetadata(paths),
           sessionFile: canonicalSessionFile,
           message: "当前项目已有记忆整理正在运行",
@@ -844,7 +904,7 @@ export default function projectMemoryExtension(
       return result;
     } catch (error) {
       notifyOnce(backgroundWarningState, ctx, error, "后台记忆整理失败");
-      publishStatus(ctx, { state: "failed", source, error: error instanceof Error ? error.message : String(error) });
+      publishStatus(ctx, { state: "failed", source, attemptId, error: error instanceof Error ? error.message : String(error) });
       return "failed";
     }
   };
@@ -854,19 +914,6 @@ export default function projectMemoryExtension(
     handler: async (args, ctx) => {
       if (args.trim()) {
         ctx.ui.notify("用法：/memory", "warning");
-        return;
-      }
-      if (await memoryIsDisabled(ctx.cwd, env)) {
-        ctx.ui.notify("当前目录位于 .pi 内，已禁用记忆整理以防递归", "warning");
-        return;
-      }
-      if (!ctx.model) {
-        ctx.ui.notify("当前没有可用于记忆整理的模型", "warning");
-        return;
-      }
-      const sessionFile = ctx.sessionManager.getSessionFile();
-      if (!sessionFile || !(await pathExists(sessionFile))) {
-        ctx.ui.notify("当前会话没有可读取的 session 文件", "warning");
         return;
       }
       await summarizeSession(ctx, true, "manual");

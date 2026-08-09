@@ -573,6 +573,14 @@ export default function App(): React.JSX.Element {
     const images = draftImages;
     const runtimeCommand = prompt === "/memory" && images.length === 0;
     if ((!prompt && !images.length) || !project || startingSession) return;
+    if (runtimeCommand && (
+      !snapshotRef.current
+      || pendingProjectPath === project.path
+      || snapshotRef.current.messages.length === 0
+    )) {
+      toastError("当前会话还没有可供整理的历史记录。");
+      return;
+    }
     if (!modelConfigured) {
       toastError("发送第一条消息前，请先选择并配置模型。");
       setSettingsOpen(true);
@@ -584,6 +592,10 @@ export default function App(): React.JSX.Element {
     }
     setDraft("");
     setDraftImages([]);
+    if (runtimeCommand) {
+      setInspectorView("runtime");
+      setRightOpen(true);
+    }
     shouldAutoScrollRef.current = true;
     const optimisticId = `local-${Date.now()}-${Math.random()}`;
     let createdSessionPath: string | undefined;
@@ -622,7 +634,8 @@ export default function App(): React.JSX.Element {
         setPendingProjectPath(undefined);
         target = activeSnapshot;
       }
-      await window.suocode.request({ type: target.running ? "steer" : "prompt", text: prompt, images }, target.runtimeId);
+      if (runtimeCommand) await window.suocode.request({ type: "run_memory_now" }, target.runtimeId);
+      else await window.suocode.request({ type: target.running ? "steer" : "prompt", text: prompt, images }, target.runtimeId);
     } catch (caught) {
       optimisticMessageIdRef.current = undefined;
       setDraft(prompt);
@@ -772,7 +785,7 @@ export default function App(): React.JSX.Element {
           <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span></button>; })}</nav>
           <section className="inspector-content">
             {inspectorView === "files" ? <FilesPanel key="agent-files" project={projectState} runtimeId={snapshot?.runtimeId} onOpen={openFilePreview} /> : null}
-            {inspectorView === "runtime" ? <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} /> : null}
+            {inspectorView === "runtime" ? <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} /> : null}
           </section>
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}

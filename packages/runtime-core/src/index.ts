@@ -118,6 +118,7 @@ const RUNTIME_BRIDGE_COMMAND_EVENT = "suocode:runtime-bridge:command:v1";
 const RUNTIME_BRIDGE_REPLY_PREFIX = "suocode:runtime-bridge:reply:v1:";
 const RUNTIME_BRIDGE_STATE_EVENT = "suocode:runtime-bridge:state:v1";
 const ORIGINAL_SESSION_MUTATION_UNSUPPORTED = "Pi 当前无法安全地从原会话中删除这段历史内容，未执行任何修改。";
+const projectMemoryStatusByCwd = new Map<string, ProjectMemoryRuntimeStatus>();
 const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
 const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
@@ -760,6 +761,9 @@ function projectMemoryStatus(value: unknown): ProjectMemoryRuntimeStatus | undef
   if (!states.has(value.state as ProjectMemoryRuntimeStatus["state"]) || !sources.has(value.source as ProjectMemoryRuntimeStatus["source"])) return undefined;
   const number = (key: string): number | undefined => typeof value[key] === "number" && Number.isFinite(value[key]) ? value[key] : undefined;
   return {
+    cwd: optionalString(value, "cwd") ?? "",
+    updatedAt: number("updatedAt") ?? Date.now(),
+    attemptId: optionalString(value, "attemptId"),
     state: value.state as ProjectMemoryRuntimeStatus["state"],
     source: value.source as ProjectMemoryRuntimeStatus["source"],
     exists: value.exists === true,
@@ -788,6 +792,90 @@ function hydrateProjectMemoryStatus(status: ProjectMemoryRuntimeStatus): Project
   } catch {
     return status;
   }
+}
+
+function mergedSessionPaths(...groups: readonly string[][]): string[] {
+  return [...new Set(groups.flat().filter(Boolean))];
+}
+
+function isWorkspaceMemoryJob(status: ProjectMemoryRuntimeStatus): boolean {
+  return status.source === "manual" || status.source === "automatic";
+}
+
+function memoryAttemptStartedAt(status: ProjectMemoryRuntimeStatus): number {
+  return status.startedAt ?? status.updatedAt;
+}
+
+function mergeWorkspaceMemoryStatus(
+  previous: ProjectMemoryRuntimeStatus | undefined,
+  incoming: ProjectMemoryRuntimeStatus,
+): ProjectMemoryRuntimeStatus {
+  const processedSessions = mergedSessionPaths(
+    previous?.processedSessions ?? [],
+    incoming.processedSessions,
+  );
+  const sessionMetadataOnly = !isWorkspaceMemoryJob(incoming);
+  if (!previous) return { ...incoming, injected: false, processedSessions };
+
+  if (sessionMetadataOnly) {
+    if (!isWorkspaceMemoryJob(previous)) {
+      return { ...previous, ...incoming, injected: false, processedSessions };
+    }
+    return {
+      ...incoming,
+      ...previous,
+      exists: incoming.exists,
+      projectRoot: incoming.projectRoot ?? previous.projectRoot,
+      projectName: incoming.projectName ?? previous.projectName,
+      memoryFile: incoming.memoryFile ?? previous.memoryFile,
+      projectMemoryDir: incoming.projectMemoryDir ?? previous.projectMemoryDir,
+      contentChars: incoming.contentChars ?? previous.contentChars,
+      estimatedTokens: incoming.estimatedTokens ?? previous.estimatedTokens,
+      content: incoming.content ?? previous.content,
+      processedSessions,
+      injected: false,
+      updatedAt: Math.max(previous.updatedAt, incoming.updatedAt),
+    };
+  }
+
+  if (isWorkspaceMemoryJob(previous)) {
+    const sameAttempt = Boolean(incoming.attemptId && incoming.attemptId === previous.attemptId);
+    const incomingStartedAt = memoryAttemptStartedAt(incoming);
+    const previousStartedAt = memoryAttemptStartedAt(previous);
+    const staleAttempt = !sameAttempt
+      && Boolean(incoming.attemptId && previous.attemptId)
+      && incomingStartedAt < previousStartedAt;
+    const busyWhileRunning = incoming.state === "busy" && previous.state === "running";
+    if (staleAttempt || busyWhileRunning) {
+      return {
+        ...previous,
+        processedSessions,
+        content: incoming.content ?? previous.content,
+        contentChars: incoming.contentChars ?? previous.contentChars,
+        estimatedTokens: incoming.estimatedTokens ?? previous.estimatedTokens,
+      };
+    }
+  }
+
+  return { ...previous, ...incoming, injected: false, processedSessions };
+}
+
+function memoryStatusForInspection(
+  local: ProjectMemoryRuntimeStatus | undefined,
+  shared: ProjectMemoryRuntimeStatus | undefined,
+): ProjectMemoryRuntimeStatus | undefined {
+  if (!local) return shared;
+  if (!shared) return local;
+  const sharedWins = isWorkspaceMemoryJob(shared)
+    || (!isWorkspaceMemoryJob(local) && shared.updatedAt >= local.updatedAt);
+  const primary = sharedWins ? shared : local;
+  const secondary = sharedWins ? local : shared;
+  return {
+    ...secondary,
+    ...primary,
+    injected: local.injected,
+    processedSessions: mergedSessionPaths(local.processedSessions, shared.processedSessions),
+  };
 }
 
 function estimatedTextTokens(value: unknown): number {
@@ -2670,15 +2758,81 @@ export class SuoCodeRuntime {
     return inspection;
   }
 
+  private publishManualMemoryStatus(
+    active: ActiveSession,
+    state: ProjectMemoryRuntimeStatus["state"],
+    message: string,
+    error?: string,
+  ): ProjectMemoryRuntimeStatus {
+    const shared = projectMemoryStatusByCwd.get(safeRealPath(active.cwd));
+    const previous = active.memoryStatus ?? shared;
+    const now = Date.now();
+    const next: ProjectMemoryRuntimeStatus = {
+      ...previous,
+      cwd: active.cwd,
+      updatedAt: now,
+      attemptId: `manual-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      state,
+      source: "manual",
+      exists: previous?.exists ?? false,
+      injected: previous?.injected ?? false,
+      processedSessions: previous?.processedSessions ?? [],
+      startedAt: state === "running" ? now : previous?.startedAt,
+      completedAt: state === "failed" ? now : undefined,
+      durationMs: undefined,
+      message,
+      error,
+    };
+    active.memoryStatus = next;
+    const memoryKey = safeRealPath(active.cwd);
+    projectMemoryStatusByCwd.set(
+      memoryKey,
+      mergeWorkspaceMemoryStatus(projectMemoryStatusByCwd.get(memoryKey), next),
+    );
+    this.publishRuntimeInspection(active);
+    this.emitEvent({
+      type: "runtime_notice",
+      level: state === "failed" ? "error" : "info",
+      message: error || message,
+    });
+    return next;
+  }
+
   async runMemoryNow(): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    if (active.session.isStreaming) throw new Error("请等待当前回复结束后再整理项目记忆。");
-    if (!active.session.model) throw new Error("当前没有可用于记忆整理的模型。");
-    if (!active.session.sessionFile || !existsSync(active.session.sessionFile)) {
-      throw new Error("当前会话还没有可供整理的历史记录。");
+    if (active.session.isStreaming) {
+      const message = "当前回复仍在运行，请结束后再整理项目记忆。";
+      this.publishManualMemoryStatus(active, "busy", message);
+      throw new Error(message);
     }
-    this.emitEvent({ type: "runtime_notice", level: "info", message: "正在启动当前项目的记忆整理…" });
-    await active.session.prompt("/memory");
+    const sharedMemory = projectMemoryStatusByCwd.get(safeRealPath(active.cwd));
+    if (sharedMemory?.state === "running") {
+      const message = "当前工作区已有记忆整理正在运行。";
+      this.publishManualMemoryStatus(active, "busy", message);
+      throw new Error(message);
+    }
+    if (!active.session.model) {
+      const message = "当前没有可用于记忆整理的模型。";
+      this.publishManualMemoryStatus(active, "failed", message, message);
+      throw new Error(message);
+    }
+    if (
+      active.session.messages.length === 0
+      || !active.session.sessionFile
+      || !existsSync(active.session.sessionFile)
+    ) {
+      const message = "当前会话还没有可供整理的历史记录。";
+      this.publishManualMemoryStatus(active, "failed", message, message);
+      throw new Error(message);
+    }
+    this.publishManualMemoryStatus(active, "running", "正在启动当前项目的记忆整理…");
+    try {
+      await active.session.prompt("/memory");
+    } catch (error) {
+      const message = errorMessage(error);
+      this.publishManualMemoryStatus(active, "failed", "项目记忆整理启动失败", message);
+      throw error;
+    }
     return { accepted: true };
   }
 
@@ -2686,7 +2840,7 @@ export class SuoCodeRuntime {
     throw new Error(ORIGINAL_SESSION_MUTATION_UNSUPPORTED);
   }
 
-  private mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete" | "logout", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  private mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete" | "logout" | "session-enable", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const active = this.requireActive();
     const requestId = `suocode-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const replyChannel = `suocode:mcp:rpc:v1:reply:${requestId}`;
@@ -2746,6 +2900,7 @@ export class SuoCodeRuntime {
         resourceCount: typeof raw.resourceCount === "number" && Number.isFinite(raw.resourceCount) ? raw.resourceCount : 0,
         failedAgo: typeof raw.failedAgoSeconds === "number" ? raw.failedAgoSeconds : typeof raw.failedAgo === "number" ? raw.failedAgo : null,
         disabled: raw.disabled === true || status === "disabled",
+        sessionDisabled: raw.sessionDisabled === true,
       } satisfies McpServerRuntimeStatus;
     });
     return {
@@ -2754,6 +2909,9 @@ export class SuoCodeRuntime {
       totalResources: typeof details.totalResources === "number" && Number.isFinite(details.totalResources) ? details.totalResources : servers.reduce((sum, server) => sum + server.resourceCount, 0),
       connectedCount: typeof details.connectedCount === "number" && Number.isFinite(details.connectedCount) ? details.connectedCount : 0,
       disabledCount: typeof details.disabledCount === "number" && Number.isFinite(details.disabledCount) ? details.disabledCount : servers.filter((server) => server.disabled).length,
+      sessionDisabledCount: typeof details.sessionDisabledCount === "number" && Number.isFinite(details.sessionDisabledCount)
+        ? details.sessionDisabledCount
+        : servers.filter((server) => server.sessionDisabled).length,
       state: "ready",
     };
   }
@@ -2796,9 +2954,10 @@ export class SuoCodeRuntime {
         ...status,
         servers,
         disabledCount: servers.filter((server) => server?.disabled).length,
-        connectedCount: servers.filter((server) => server?.status === "connected").length,
-        totalTools: servers.reduce((sum, server) => sum + (server?.toolCount ?? 0), 0),
-        totalResources: servers.reduce((sum, server) => sum + (server?.resourceCount ?? 0), 0),
+        sessionDisabledCount: servers.filter((server) => server?.sessionDisabled).length,
+        connectedCount: servers.filter((server) => server?.status === "connected" && !server.sessionDisabled).length,
+        totalTools: servers.reduce((sum, server) => sum + (server?.sessionDisabled ? 0 : server?.toolCount ?? 0), 0),
+        totalResources: servers.reduce((sum, server) => sum + (server?.sessionDisabled ? 0 : server?.resourceCount ?? 0), 0),
       };
     }
     const details = isRecord(result.details) ? result.details : {};
@@ -2811,11 +2970,13 @@ export class SuoCodeRuntime {
         resourceCount: 0,
         failedAgo: null,
         disabled: server.disabled,
+        sessionDisabled: false,
       })),
       totalTools: 0,
       totalResources: 0,
       connectedCount: 0,
       disabledCount: configuration.servers.filter((server) => server.disabled).length,
+      sessionDisabledCount: 0,
       state: details.error === "init_failed" ? "unavailable" : "initializing",
       diagnostic: redactSensitiveText(stringValue(details.message) || stringValue(result.text), secrets) || undefined,
     };
@@ -2861,6 +3022,19 @@ export class SuoCodeRuntime {
   async logoutMcpServer(name: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
     return this.mcpAction("logout", { server: name.trim() });
+  }
+
+  async setSessionMcpServerEnabled(name: string, enabled: boolean): Promise<RuntimeInspectionSnapshot> {
+    const normalizedName = name.trim();
+    if (!normalizedName) throw new Error("缺少 MCP Server 名称。");
+    const active = this.requireActive();
+    const result = await this.mcpRpc("session-enable", { server: normalizedName, enabled });
+    const status = this.mcpStatusFromDetails(result.details);
+    if (!status) throw new Error("MCP 扩展没有返回当前会话状态。");
+    active.mcpStatus = status;
+    const inspection = this.runtimeInspection(active);
+    this.emitEvent({ type: "runtime_inspection_updated", inspection });
+    return inspection;
   }
 
   private removedMcpServersPath(): string {
@@ -3306,10 +3480,15 @@ export class SuoCodeRuntime {
     });
     eventBus.on(PROJECT_MEMORY_STATUS_EVENT, (value) => {
       const parsed = projectMemoryStatus(value);
-      const next = parsed ? hydrateProjectMemoryStatus(parsed) : undefined;
+      const next = parsed ? hydrateProjectMemoryStatus({ ...parsed, cwd: parsed.cwd || cwd }) : undefined;
       if (!next) return;
-      const previous = pendingMemoryStatus;
+      const previous = installedActive?.memoryStatus ?? pendingMemoryStatus;
       pendingMemoryStatus = next;
+      const memoryKey = safeRealPath(next.cwd);
+      projectMemoryStatusByCwd.set(
+        memoryKey,
+        mergeWorkspaceMemoryStatus(projectMemoryStatusByCwd.get(memoryKey), next),
+      );
       if (!installedActive) return;
       installedActive.memoryStatus = next;
       this.publishRuntimeInspection(installedActive);
@@ -3406,7 +3585,7 @@ export class SuoCodeRuntime {
       responseMetricsHistory: reconstructed.responseMetricsHistory,
       sessionRevision: 1,
       bridgeState: pendingBridgeState,
-      memoryStatus: pendingMemoryStatus,
+      memoryStatus: pendingMemoryStatus ?? projectMemoryStatusByCwd.get(safeRealPath(cwd)),
       eventBus,
     };
     installedActive = active;
@@ -4033,6 +4212,10 @@ export class SuoCodeRuntime {
     const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
     if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
     this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+    // Session-scoped System Prompt, Skill, and MCP policies live on the active
+    // Pi branch. Rewinding changes that branch, so refresh the right-hand
+    // runtime inspector without blocking the new prompt on MCP discovery.
+    void this.refreshRuntimeInspectionSources(active);
     void active.session.prompt(expandedPrompt, {
       images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
     }).catch((error) => {
@@ -4232,6 +4415,8 @@ export class SuoCodeRuntime {
     const cacheHitRate = usage.tokenUsage.cacheRead > 0 && cacheDenominator > 0
       ? usage.tokenUsage.cacheRead / cacheDenominator
       : undefined;
+    const sharedMemoryStatus = projectMemoryStatusByCwd.get(safeRealPath(active.cwd));
+    const memoryStatus = memoryStatusForInspection(active.memoryStatus, sharedMemoryStatus);
     return {
       ...base,
       effectiveSystemPrompt,
@@ -4247,7 +4432,7 @@ export class SuoCodeRuntime {
       tools,
       skills,
       mcp: active.mcpStatus,
-      memory: active.memoryStatus,
+      memory: memoryStatus ? hydrateProjectMemoryStatus(memoryStatus) : undefined,
       capabilities: {
         editSystemPrompt: true,
         removeOriginalSessionItems: false,

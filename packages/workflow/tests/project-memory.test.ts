@@ -381,10 +381,12 @@ test("memory command publishes immediate, completed, and injected runtime status
 
   await harness.handlers.get("session_start")?.[0]({}, context);
   await harness.commands.get("memory")?.handler("", context);
-  const states = () => harness.emittedEvents
+  const memoryEvents = () => harness.emittedEvents
     .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
-    .map((event) => (event.value as { state: string }).state);
+    .map((event) => event.value as { state: string; updatedAt: number; processedSessions: string[] });
+  const states = () => memoryEvents().map((event) => event.state);
   assert.deepEqual(states().slice(-2), ["idle", "running"]);
+  assert.ok(memoryEvents().at(-1)!.updatedAt > memoryEvents().at(-2)!.updatedAt);
 
   const paths = await resolveProjectMemoryPaths(project, memoryRoot);
   await writeFile(paths.memoryFile, "可复用的项目记忆", "utf8");
@@ -392,15 +394,68 @@ test("memory command publishes immediate, completed, and injected runtime status
   await waitFor(async () => states().includes("succeeded") && await pathMissing(paths.workerLockFile));
   const completed = harness.emittedEvents
     .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
-    .at(-1)?.value as { state: string; contentChars: number; processedSessions: string[] };
+    .at(-1)?.value as {
+      state: string;
+      source: string;
+      cwd: string;
+      updatedAt: number;
+      attemptId?: string;
+      contentChars: number;
+      processedSessions: string[];
+    };
   assert.equal(completed.state, "succeeded");
+  assert.equal(completed.source, "manual");
+  assert.equal(completed.cwd, project);
+  assert.ok(completed.updatedAt > 0);
+  assert.ok(completed.attemptId);
   assert.equal(completed.contentChars, 8);
   assert.deepEqual(completed.processedSessions, [await realpath(sessionFile)]);
+  const completedIndex = memoryEvents().findIndex((event) => event.state === "succeeded");
+  const runningIndex = memoryEvents().findIndex((event) => event.state === "running");
+  assert.ok(memoryEvents()[completedIndex].updatedAt > memoryEvents()[runningIndex].updatedAt);
+
+  const reopenedHarness = createHarness();
+  projectMemoryExtension(reopenedHarness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+  });
+  await reopenedHarness.handlers.get("session_start")?.[0]({}, context);
+  const reopenedStatus = reopenedHarness.emittedEvents
+    .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
+    .at(-1)?.value as { processedSessions: string[] };
+  assert.deepEqual(reopenedStatus.processedSessions, [await realpath(sessionFile)]);
 
   await harness.handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, context);
   const injected = harness.emittedEvents.at(-1)?.value as { injected: boolean; source: string };
   assert.equal(injected.injected, true);
   assert.equal(injected.source, "prompt");
+});
+
+test("failed workers do not mark their session as successfully processed", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const sessionFile = join(root, "failed-session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  const child = new FakeWorker();
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+    spawnWorker: () => child,
+  });
+  const context = contextFor(project, sessionFile);
+
+  await harness.commands.get("memory")?.handler("", context);
+  child.emit("exit", 1, null);
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  await waitFor(() => pathMissing(paths.workerLockFile));
+
+  const failed = harness.emittedEvents
+    .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
+    .at(-1)?.value as { state: string; processedSessions: string[] };
+  assert.equal(failed.state, "failed");
+  assert.deepEqual(failed.processedSessions, []);
+  assert.equal(await pathMissing(paths.runtimeStateFile), true);
 });
 
 test("Pi started inside global .pi memory cannot recursively trigger /memory", async (t) => {
@@ -429,6 +484,50 @@ test("Pi started inside global .pi memory cannot recursively trigger /memory", a
   assert.equal(result, undefined);
   assert.equal(launches.length, 0);
   assert.match(notices.join("\n"), /防递归/);
+  const status = harness.emittedEvents
+    .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
+    .at(-1)?.value as { state: string; source: string; updatedAt: number; attemptId?: string };
+  assert.equal(status.state, "disabled");
+  assert.equal(status.source, "manual");
+  assert.ok(status.updatedAt > 0);
+  assert.ok(status.attemptId);
+});
+
+test("manual memory prechecks always publish a terminal runtime status", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  await mkdir(project, { recursive: true });
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, { env: { PI_PROJECT_MEMORY_DIR: memoryRoot } });
+  const notices: string[] = [];
+  const context = {
+    cwd: project,
+    hasUI: true,
+    ui: { notify: (message: string) => notices.push(message) },
+    model: undefined,
+    sessionManager: { getSessionFile: () => undefined },
+  };
+
+  await harness.commands.get("memory")?.handler("", context);
+
+  const status = harness.emittedEvents
+    .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
+    .at(-1)?.value as {
+      state: string;
+      source: string;
+      cwd: string;
+      updatedAt: number;
+      attemptId?: string;
+      error?: string;
+    };
+  assert.equal(status.state, "failed");
+  assert.equal(status.source, "manual");
+  assert.equal(status.cwd, project);
+  assert.ok(status.updatedAt > 0);
+  assert.ok(status.attemptId);
+  assert.match(status.error ?? "", /没有可用于记忆整理的模型/);
+  assert.match(notices.join("\n"), /没有可用于记忆整理的模型/);
 });
 
 test("same project allows only one memory worker at a time", async (t) => {
