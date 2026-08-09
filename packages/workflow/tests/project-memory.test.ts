@@ -15,6 +15,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_STATUS_EVENT,
   buildMemoryCountCommand,
   buildMemoryWorkerLaunch,
   buildMemoryWorkerPrompt,
@@ -56,6 +57,8 @@ class FakeWorker extends EventEmitter implements MemoryWorkerChild {
 function createHarness() {
   const handlers = new Map<string, Array<(...args: any[]) => any>>();
   const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
+  const eventHandlers = new Map<string, Set<(value: unknown) => void>>();
+  const emittedEvents: Array<{ channel: string; value: unknown }> = [];
   let registeredTools = 0;
   const pi = {
     on(event: string, handler: (...args: any[]) => any) {
@@ -67,8 +70,20 @@ function createHarness() {
     registerTool() {
       registeredTools++;
     },
+    events: {
+      on(channel: string, listener: (value: unknown) => void) {
+        const listeners = eventHandlers.get(channel) ?? new Set();
+        listeners.add(listener);
+        eventHandlers.set(channel, listeners);
+        return () => listeners.delete(listener);
+      },
+      emit(channel: string, value: unknown) {
+        emittedEvents.push({ channel, value });
+        for (const listener of eventHandlers.get(channel) ?? []) listener(value);
+      },
+    },
   };
-  return { pi, handlers, commands, registeredTools: () => registeredTools };
+  return { pi, handlers, commands, emittedEvents, registeredTools: () => registeredTools };
 }
 
 async function waitFor(
@@ -347,6 +362,45 @@ test("settled sessions are summarized in the background and injected into later 
 
   const injected = await harness.handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, context);
   assert.match(injected.systemPrompt, /稳定部署端口：8443/);
+});
+
+test("memory command publishes immediate, completed, and injected runtime status", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  const child = new FakeWorker();
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+    spawnWorker: () => child,
+  });
+  const context = contextFor(project, sessionFile);
+
+  await harness.handlers.get("session_start")?.[0]({}, context);
+  await harness.commands.get("memory")?.handler("", context);
+  const states = () => harness.emittedEvents
+    .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
+    .map((event) => (event.value as { state: string }).state);
+  assert.deepEqual(states().slice(-2), ["idle", "running"]);
+
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  await writeFile(paths.memoryFile, "可复用的项目记忆", "utf8");
+  child.emit("exit", 0, null);
+  await waitFor(async () => states().includes("succeeded") && await pathMissing(paths.workerLockFile));
+  const completed = harness.emittedEvents
+    .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
+    .at(-1)?.value as { state: string; contentChars: number; processedSessions: string[] };
+  assert.equal(completed.state, "succeeded");
+  assert.equal(completed.contentChars, 8);
+  assert.deepEqual(completed.processedSessions, [await realpath(sessionFile)]);
+
+  await harness.handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, context);
+  const injected = harness.emittedEvents.at(-1)?.value as { injected: boolean; source: string };
+  assert.equal(injected.injected, true);
+  assert.equal(injected.source, "prompt");
 });
 
 test("Pi started inside global .pi memory cannot recursively trigger /memory", async (t) => {

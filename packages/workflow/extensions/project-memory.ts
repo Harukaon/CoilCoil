@@ -28,6 +28,31 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 export const PROJECT_MEMORY_MAX_CHARS = 1_000;
+export const PROJECT_MEMORY_STATUS_EVENT = "suocode:project-memory:status:v1";
+
+export type ProjectMemoryRunState = "idle" | "running" | "busy" | "succeeded" | "failed" | "disabled";
+
+export interface ProjectMemoryStatusEvent {
+  version: 1;
+  cwd: string;
+  projectRoot?: string;
+  projectName?: string;
+  memoryFile?: string;
+  projectMemoryDir?: string;
+  state: ProjectMemoryRunState;
+  source: "startup" | "prompt" | "manual" | "automatic";
+  exists: boolean;
+  injected: boolean;
+  contentChars?: number;
+  estimatedTokens?: number;
+  sessionFile?: string;
+  processedSessions: string[];
+  startedAt?: number;
+  completedAt?: number;
+  durationMs?: number;
+  message?: string;
+  error?: string;
+}
 
 const MEMORY_TEMPLATE = "";
 const LOCK_WAIT_MS = 2_000;
@@ -616,10 +641,48 @@ export default function projectMemoryExtension(
   const spawnWorker = options.spawnWorker ?? defaultSpawnWorker;
   const workerTimeoutMs = options.workerTimeoutMs ?? WORKER_TIMEOUT_MS;
   const storageRoot = resolveProjectMemoryStorageRoot(env);
+  let status: ProjectMemoryStatusEvent | undefined;
+
+  const publishStatus = (
+    ctx: ExtensionContext,
+    update: Partial<ProjectMemoryStatusEvent> & Pick<ProjectMemoryStatusEvent, "state" | "source">,
+  ): ProjectMemoryStatusEvent => {
+    status = {
+      version: 1,
+      cwd: ctx.cwd,
+      exists: status?.exists ?? false,
+      injected: status?.injected ?? false,
+      processedSessions: status?.processedSessions ?? [],
+      ...status,
+      ...update,
+    };
+    pi.events.emit(PROJECT_MEMORY_STATUS_EVENT, status);
+    return status;
+  };
+
+  const memoryMetadata = async (paths: ProjectMemoryPaths): Promise<Pick<ProjectMemoryStatusEvent,
+    "projectRoot" | "projectName" | "memoryFile" | "projectMemoryDir" | "exists" | "contentChars" | "estimatedTokens"
+  >> => {
+    const content = await readUtf8(paths.memoryFile);
+    const contentChars = countCharacters(content);
+    return {
+      projectRoot: paths.projectRoot,
+      projectName: paths.projectName,
+      memoryFile: paths.memoryFile,
+      projectMemoryDir: paths.projectMemoryDir,
+      exists: await pathExists(paths.memoryFile),
+      contentChars,
+      estimatedTokens: Math.ceil(contentChars / 4),
+    };
+  };
 
   const launchWorker = async (
     request: MemoryWorkerRequest,
-    onError?: (error: unknown) => void,
+    callbacks: {
+      onStarted?: () => void;
+      onComplete?: () => void;
+      onError?: (error: unknown) => void;
+    } = {},
   ): Promise<"started" | "busy" | "failed"> => {
     let lease: WorkerLease | undefined;
     try {
@@ -636,6 +699,7 @@ export default function projectMemoryExtension(
       });
       const child = spawnWorker(launch);
       child.unref?.();
+      callbacks.onStarted?.();
 
       let timeout: NodeJS.Timeout | undefined;
       let killTimeout: NodeJS.Timeout | undefined;
@@ -649,7 +713,8 @@ export default function projectMemoryExtension(
 
         await lease?.release();
 
-        if (error) onError?.(error);
+        if (error) callbacks.onError?.(error);
+        else callbacks.onComplete?.();
       };
 
       child.once("error", (error) => void finish(error));
@@ -667,14 +732,14 @@ export default function projectMemoryExtension(
         killTimeout = setTimeout(() => {
           terminateWorker(child, "SIGKILL");
         }, WORKER_KILL_GRACE_MS);
-        onError?.(new Error("后台 Pi 记忆整理超时，已终止"));
+        callbacks.onError?.(new Error("后台 Pi 记忆整理超时，已终止"));
       }, workerTimeoutMs);
       timeout.unref?.();
 
       return "started";
     } catch (error) {
       await lease?.release();
-      onError?.(error);
+      callbacks.onError?.(error);
       return "failed";
     }
   };
@@ -682,30 +747,104 @@ export default function projectMemoryExtension(
   const summarizeSession = async (
     ctx: ExtensionContext,
     notifyStarted: boolean,
+    source: ProjectMemoryStatusEvent["source"] = notifyStarted ? "manual" : "automatic",
   ): Promise<"started" | "busy" | "skipped" | "failed"> => {
-    if (await memoryIsDisabled(ctx.cwd, env)) return "skipped";
-    if (!ctx.model) return "skipped";
+    if (await memoryIsDisabled(ctx.cwd, env)) {
+      publishStatus(ctx, { state: "disabled", source, exists: false, injected: false, message: "当前目录已禁用项目记忆" });
+      return "skipped";
+    }
+    if (!ctx.model) {
+      publishStatus(ctx, { state: "failed", source, error: "当前没有可用于记忆整理的模型" });
+      return "skipped";
+    }
     const sessionFile = ctx.sessionManager.getSessionFile();
-    if (!sessionFile || !(await pathExists(sessionFile))) return "skipped";
+    if (!sessionFile || !(await pathExists(sessionFile))) {
+      publishStatus(ctx, { state: "failed", source, error: "当前会话没有可读取的 session 文件" });
+      return "skipped";
+    }
 
     try {
       const { paths } = await prepareMemory(ctx.cwd, storageRoot);
+      const canonicalSessionFile = await canonicalPath(sessionFile);
+      const startedAt = Date.now();
       const result = await launchWorker({
         paths,
-        sessionFile: await canonicalPath(sessionFile),
+        sessionFile: canonicalSessionFile,
         provider: ctx.model.provider,
         model: ctx.model.id,
-      }, (error) => notifyOnce(
-        backgroundWarningState,
-        ctx,
-        error,
-        "后台记忆整理失败",
-      ));
+      }, {
+        onStarted: () => {
+          publishStatus(ctx, {
+            state: "running",
+            source,
+            ...paths,
+            exists: true,
+            sessionFile: canonicalSessionFile,
+            processedSessions: [canonicalSessionFile],
+            startedAt,
+            completedAt: undefined,
+            durationMs: undefined,
+            error: undefined,
+            message: "正在整理当前项目记忆…",
+          });
+        },
+        onComplete: () => {
+          void memoryMetadata(paths).then((metadata) => {
+            const completedAt = Date.now();
+            publishStatus(ctx, {
+              state: "succeeded",
+              source,
+              ...metadata,
+              sessionFile: canonicalSessionFile,
+              processedSessions: [canonicalSessionFile],
+              startedAt,
+              completedAt,
+              durationMs: completedAt - startedAt,
+              error: undefined,
+              message: "项目记忆整理完成",
+            });
+          }).catch((error) => {
+            publishStatus(ctx, {
+              state: "failed",
+              source,
+              sessionFile: canonicalSessionFile,
+              processedSessions: [canonicalSessionFile],
+              startedAt,
+              completedAt: Date.now(),
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+        },
+        onError: (error) => {
+          notifyOnce(backgroundWarningState, ctx, error, "后台记忆整理失败");
+          const completedAt = Date.now();
+          publishStatus(ctx, {
+            state: "failed",
+            source,
+            sessionFile: canonicalSessionFile,
+            processedSessions: [canonicalSessionFile],
+            startedAt,
+            completedAt,
+            durationMs: completedAt - startedAt,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      });
       if (notifyStarted && result === "started") ctx.ui.notify("记忆整理已在后台启动", "info");
-      if (notifyStarted && result === "busy") ctx.ui.notify("当前项目已有记忆整理正在运行", "info");
+      if (result === "busy") {
+        publishStatus(ctx, {
+          state: "busy",
+          source,
+          ...await memoryMetadata(paths),
+          sessionFile: canonicalSessionFile,
+          message: "当前项目已有记忆整理正在运行",
+        });
+        if (notifyStarted) ctx.ui.notify("当前项目已有记忆整理正在运行", "info");
+      }
       return result;
     } catch (error) {
       notifyOnce(backgroundWarningState, ctx, error, "后台记忆整理失败");
+      publishStatus(ctx, { state: "failed", source, error: error instanceof Error ? error.message : String(error) });
       return "failed";
     }
   };
@@ -730,14 +869,24 @@ export default function projectMemoryExtension(
         ctx.ui.notify("当前会话没有可读取的 session 文件", "warning");
         return;
       }
-      await summarizeSession(ctx, true);
+      await summarizeSession(ctx, true, "manual");
     },
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    if (await memoryIsDisabled(ctx.cwd, env)) return;
+    if (await memoryIsDisabled(ctx.cwd, env)) {
+      publishStatus(ctx, { state: "disabled", source: "startup", exists: false, injected: false });
+      return;
+    }
     try {
-      await prepareMemory(ctx.cwd, storageRoot);
+      const { paths } = await prepareMemory(ctx.cwd, storageRoot);
+      publishStatus(ctx, {
+        state: "idle",
+        source: "startup",
+        ...await memoryMetadata(paths),
+        injected: false,
+        message: "项目记忆已就绪",
+      });
     } catch (error) {
       notifyOnce(warningState, ctx, error, "项目记忆初始化失败");
     }
@@ -748,6 +897,13 @@ export default function projectMemoryExtension(
     if (event.systemPrompt.includes(PROMPT_MARKER)) return undefined;
     try {
       const { paths, memory } = await prepareMemory(ctx.cwd, storageRoot);
+      publishStatus(ctx, {
+        state: status?.state === "running" ? "running" : "idle",
+        source: "prompt",
+        ...await memoryMetadata(paths),
+        injected: true,
+        message: "项目记忆已注入当前会话",
+      });
       return {
         systemPrompt: `${event.systemPrompt}\n\n${buildProjectMemoryPrompt(paths, memory.content)}`,
       };
@@ -758,7 +914,7 @@ export default function projectMemoryExtension(
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    await summarizeSession(ctx, false);
+    await summarizeSession(ctx, false, "automatic");
   });
 
 }
