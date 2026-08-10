@@ -119,6 +119,9 @@ const RUNTIME_BRIDGE_REPLY_PREFIX = "suocode:runtime-bridge:reply:v1:";
 const RUNTIME_BRIDGE_STATE_EVENT = "suocode:runtime-bridge:state:v1";
 const ORIGINAL_SESSION_MUTATION_UNSUPPORTED = "Pi 当前无法安全地从原会话中删除这段历史内容，未执行任何修改。";
 const projectMemoryStatusByCwd = new Map<string, ProjectMemoryRuntimeStatus>();
+const SUBAGENT_ACTIVITY_CHANNEL = "suocode:subagents:activity:v1";
+const SUBAGENT_RPC_REQUEST_CHANNEL = "suocode:subagents:rpc:v1:request";
+const SUBAGENT_RUN_ENTRY_TYPE = "subagent-run";
 const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
 const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
@@ -153,70 +156,13 @@ interface McpAdapterConfigModule {
   writeProjectServerDisabledOverride(overridePath: string | undefined, cwd: string, serverName: string, disabled: boolean): { path: string; changed: boolean };
 }
 
-interface PiSubagentsStatusModule {
-  ASYNC_DIR: string;
-  RESULTS_DIR: string;
-  deliverStopRequest(input: { asyncDir: string; source?: string }): void;
-  listAsyncRuns(asyncDirRoot: string, options?: {
-    states?: string[];
-    sessionId?: string;
-    resultsDir?: string;
-  }): Array<{
-    id: string;
-    asyncDir: string;
-    state: "queued" | "running" | "complete" | "failed" | "paused" | "stopped";
-    mode: "single" | "parallel" | "chain";
-    startedAt: number;
-    lastUpdate?: number;
-    currentTool?: string;
-    currentPath?: string;
-    turnCount?: number;
-    toolCount?: number;
-    totalTokens?: { total?: number };
-    error?: string;
-    steps: Array<{
-      index: number;
-      agent: string;
-      label?: string;
-      status: "pending" | "running" | "complete" | "completed" | "failed" | "paused" | "stopped" | "detached";
-      currentTool?: string;
-      currentPath?: string;
-      recentTools?: Array<{ tool: string; args: string; endMs?: number }>;
-      recentOutput?: string[];
-      turnCount?: number;
-      toolCount?: number;
-      durationMs?: number;
-      tokens?: { total?: number };
-      model?: string;
-      error?: string;
-    }>;
-  }>;
-}
-
 let mcpAdapterConfigModule: Promise<McpAdapterConfigModule> | undefined;
-let piSubagentsStatusModule: Promise<PiSubagentsStatusModule> | undefined;
 
 function loadMcpAdapterConfigModule(): Promise<McpAdapterConfigModule> {
   const { createJiti } = require("jiti") as typeof import("jiti");
   const jiti = createJiti(import.meta.url, { interopDefault: true });
   mcpAdapterConfigModule ??= jiti.import(join(resolvePackageDirectory("pi-mcp-adapter"), "config.ts")) as Promise<McpAdapterConfigModule>;
   return mcpAdapterConfigModule;
-}
-
-function loadPiSubagentsStatusModule(): Promise<PiSubagentsStatusModule> {
-  const { createJiti } = require("jiti") as typeof import("jiti");
-  const jiti = createJiti(import.meta.url, { interopDefault: true });
-  const packageDirectory = resolvePackageDirectory("pi-subagents");
-  piSubagentsStatusModule ??= Promise.all([
-    jiti.import(join(packageDirectory, "src", "runs", "background", "async-status.ts")),
-    jiti.import(join(packageDirectory, "src", "shared", "types.ts")),
-    jiti.import(join(packageDirectory, "src", "runs", "background", "control-channel.ts")),
-  ]).then(([status, shared, control]) => ({
-    ...(status as Pick<PiSubagentsStatusModule, "listAsyncRuns">),
-    ...(shared as Pick<PiSubagentsStatusModule, "ASYNC_DIR" | "RESULTS_DIR">),
-    ...(control as Pick<PiSubagentsStatusModule, "deliverStopRequest">),
-  }));
-  return piSubagentsStatusModule;
 }
 
 function recordOfStrings(value: unknown): Record<string, string> {
@@ -1165,120 +1111,102 @@ function toolResultText(result: unknown): string {
   }
 }
 
-function subagentStatus(value: unknown, fallback: SubagentActivity["status"] = "running"): SubagentActivity["status"] {
-  if (value === "pending" || value === "running" || value === "completed" || value === "failed" || value === "stopped" || value === "paused" || value === "detached") return value;
-  if (value === "complete") return "completed";
-  return fallback;
+function subagentActivityStatusFrom(value: unknown): SubagentActivity["status"] {
+  if (value === "pending" || value === "running" || value === "completed" || value === "failed" || value === "stopped") return value;
+  return "completed";
 }
 
-function subagentTokens(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (!isRecord(value)) return 0;
-  return typeof value.total === "number" && Number.isFinite(value.total) ? value.total : 0;
+function subagentActivityFromDetails(details: unknown, parentToolId: string): SubagentActivity | undefined {
+  if (!isRecord(details)) return undefined;
+  const runId = stringValue(details.runId) || parentToolId;
+  const usage = isRecord(details.usage) ? details.usage : undefined;
+  const tokens = usage && typeof usage.total === "number" && Number.isFinite(usage.total) ? usage.total : 0;
+  const turnCount = usage && typeof usage.turns === "number" && Number.isFinite(usage.turns) ? usage.turns : undefined;
+  const finalOutput = stringValue(details.finalOutput);
+  return {
+    id: runId,
+    runId,
+    parentToolId,
+    index: 0,
+    agent: stringValue(details.agent) || "子 Agent",
+    task: stringValue(details.task) || undefined,
+    model: stringValue(details.model) || undefined,
+    status: subagentActivityStatusFrom(details.status),
+    background: details.background === true,
+    controlReady: details.status === "running",
+    resumable: details.resumable === true || undefined,
+    finalOutput: finalOutput ? clampText(finalOutput, 48_000) : undefined,
+    sessionFile: stringValue(details.sessionFile) || undefined,
+    worktreePath: stringValue(details.worktreePath) || undefined,
+    toolCount: typeof details.toolCount === "number" && Number.isFinite(details.toolCount) ? details.toolCount : 0,
+    turnCount,
+    tokens,
+    durationMs: typeof details.durationMs === "number" && Number.isFinite(details.durationMs) ? details.durationMs : 0,
+    error: stringValue(details.error) || undefined,
+    updatedAt: Date.now(),
+  };
 }
 
-function subagentUsageTokens(value: unknown): number {
-  if (!isRecord(value)) return 0;
-  return [value.input, value.output, value.cacheRead, value.cacheWrite]
-    .reduce<number>((total, item) => total + (typeof item === "number" && Number.isFinite(item) ? item : 0), 0);
-}
-
-function subagentRecentTools(value: unknown): Array<{ tool: string; args: string }> | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const tools = value.flatMap((entry) => {
+function subagentActivitiesFromPayload(raw: unknown): SubagentActivity[] {
+  if (!isRecord(raw) || !Array.isArray(raw.activities)) return [];
+  return raw.activities.flatMap((entry) => {
     if (!isRecord(entry)) return [];
-    const tool = stringValue(entry.tool);
-    if (!tool) return [];
-    return [{ tool, args: stringValue(entry.args) }];
-  });
-  return tools.length ? tools : undefined;
-}
-
-function subagentRecentOutput(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const output = value.flatMap((entry) => typeof entry === "string" && entry.trim() ? [clampText(entry, 12_000)] : []).slice(-24);
-  return output.length ? output : undefined;
-}
-
-function subagentMessages(value: unknown): Array<{ role: string; text: string; thinking?: string }> | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const messages = value.flatMap((entry) => {
-    if (!isRecord(entry)) return [];
-    const parts = contentParts(entry.content);
-    const text = parts.text || stringValue(entry.text);
-    const thinking = parts.thinking || undefined;
-    if (!text && !thinking) return [];
-    return [{ role: stringValue(entry.role) || "unknown", text: clampText(text, 24_000), thinking: thinking ? clampText(thinking, 24_000) : undefined }];
-  }).slice(-40);
-  return messages.length ? messages : undefined;
-}
-
-function subagentToolCalls(value: unknown): Array<{ text: string; expandedText?: string }> | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const calls = value.flatMap((entry) => {
-    if (!isRecord(entry)) return [];
-    const text = stringValue(entry.text);
-    const expandedText = stringValue(entry.expandedText) || undefined;
-    if (!text && !expandedText) return [];
-    return [{ text: clampText(text || expandedText || "工具调用", 2_000), expandedText: expandedText ? clampText(expandedText, 16_000) : undefined }];
-  }).slice(-80);
-  return calls.length ? calls : undefined;
-}
-
-function subagentActivitiesFromResult(result: unknown, fallbackRunId: string, background = false): SubagentActivity[] {
-  if (!isRecord(result) || !isRecord(result.details)) return [];
-  const details = result.details;
-  const mode = details.mode === "parallel" || details.mode === "chain" ? details.mode : "single";
-  const runId = stringValue(details.runId) || stringValue(details.asyncId) || fallbackRunId;
-  const isBackground = background || Boolean(details.asyncId);
-  const updatedAt = Date.now();
-  const progress = Array.isArray(details.progress) ? details.progress : [];
-  const results = Array.isArray(details.results) ? details.results : [];
-  const progressByIndex = new Map<number, Record<string, unknown>>();
-  progress.forEach((raw, position) => {
-    if (!isRecord(raw)) return;
-    progressByIndex.set(typeof raw.index === "number" ? raw.index : position, raw);
-  });
-  const resultByIndex = new Map<number, Record<string, unknown>>();
-  results.forEach((raw, index) => { if (isRecord(raw)) resultByIndex.set(index, raw); });
-  const indexes = [...new Set([...progressByIndex.keys(), ...resultByIndex.keys()])].sort((left, right) => left - right);
-  return indexes.map((index) => {
-    const progressItem = progressByIndex.get(index);
-    const resultItem = resultByIndex.get(index);
-    const failed = resultItem
-      ? resultItem.stopped === true ? "stopped" : resultItem.detached === true ? "detached" : resultItem.exitCode === 0 ? "completed" : "failed"
-      : subagentStatus(progressItem?.status);
-    const usage = resultItem && isRecord(resultItem.usage) ? resultItem.usage : undefined;
-    const progressSummary = resultItem && isRecord(resultItem.progressSummary) ? resultItem.progressSummary : undefined;
-    return {
-      id: `${runId}:${index}`,
+    const runId = stringValue(entry.runId);
+    if (!runId) return [];
+    const recentTools = Array.isArray(entry.recentTools)
+      ? entry.recentTools.flatMap((item) => isRecord(item) && stringValue(item.tool) ? [{ tool: stringValue(item.tool), args: stringValue(item.args) }] : [])
+      : undefined;
+    const recentOutput = Array.isArray(entry.recentOutput)
+      ? entry.recentOutput.filter((item): item is string => typeof item === "string")
+      : undefined;
+    const messages = Array.isArray(entry.messages)
+      ? entry.messages.flatMap((item) => isRecord(item) && stringValue(item.text) ? [{ role: stringValue(item.role) || "assistant", text: stringValue(item.text), thinking: stringValue(item.thinking) || undefined }] : [])
+      : undefined;
+    const toolCalls = Array.isArray(entry.toolCalls)
+      ? entry.toolCalls.flatMap((item) => isRecord(item) && stringValue(item.text) ? [{ text: stringValue(item.text), expandedText: stringValue(item.expandedText) || undefined }] : [])
+      : undefined;
+    const finalOutput = stringValue(entry.finalOutput);
+    const activity: SubagentActivity = {
+      id: stringValue(entry.id) || runId,
       runId,
-      parentToolId: fallbackRunId,
-      index,
-      agent: stringValue(resultItem?.agent) || stringValue(progressItem?.agent) || `代理 ${index + 1}`,
-      task: stringValue(resultItem?.task) || stringValue(progressItem?.task) || undefined,
-      model: stringValue(resultItem?.model) || stringValue(progressItem?.model) || undefined,
-      mode,
-      status: failed,
-      background: isBackground,
-      controlReady: !isBackground && runId !== fallbackRunId,
-      currentTool: stringValue(progressItem?.currentTool) || undefined,
-      currentPath: stringValue(progressItem?.currentPath) || undefined,
-      recentTools: subagentRecentTools(progressItem?.recentTools),
-      recentOutput: subagentRecentOutput(progressItem?.recentOutput),
-      messages: subagentMessages(resultItem?.messages),
-      toolCalls: subagentToolCalls(resultItem?.toolCalls),
-      finalOutput: stringValue(resultItem?.finalOutput) ? clampText(stringValue(resultItem?.finalOutput), 48_000) : undefined,
-      transcriptPath: stringValue(resultItem?.transcriptPath) || undefined,
-      sessionFile: stringValue(resultItem?.sessionFile) || undefined,
-      toolCount: typeof progressSummary?.toolCount === "number" ? progressSummary.toolCount : Array.isArray(resultItem?.toolCalls) ? resultItem.toolCalls.length : typeof progressItem?.toolCount === "number" ? progressItem.toolCount : 0,
-      turnCount: usage && typeof usage.turns === "number" ? usage.turns : typeof progressItem?.turnCount === "number" ? progressItem.turnCount : undefined,
-      tokens: subagentUsageTokens(usage) || subagentTokens(progressSummary?.tokens) || subagentTokens(progressItem?.tokens),
-      durationMs: typeof progressSummary?.durationMs === "number" ? progressSummary.durationMs : typeof progressItem?.durationMs === "number" ? progressItem.durationMs : 0,
-      error: stringValue(resultItem?.error) || stringValue(progressItem?.error) || undefined,
-      updatedAt,
-    } satisfies SubagentActivity;
+      parentToolId: stringValue(entry.parentToolId) || undefined,
+      index: typeof entry.index === "number" ? entry.index : 0,
+      agent: stringValue(entry.agent) || "子 Agent",
+      task: stringValue(entry.task) || undefined,
+      model: stringValue(entry.model) || undefined,
+      status: subagentActivityStatusFrom(entry.status),
+      background: entry.background === true,
+      controlReady: entry.controlReady === true || undefined,
+      resumable: entry.resumable === true || undefined,
+      currentTool: stringValue(entry.currentTool) || undefined,
+      currentPath: stringValue(entry.currentPath) || undefined,
+      recentTools: recentTools?.length ? recentTools : undefined,
+      recentOutput: recentOutput?.length ? recentOutput : undefined,
+      messages: messages?.length ? messages : undefined,
+      toolCalls: toolCalls?.length ? toolCalls : undefined,
+      finalOutput: finalOutput ? clampText(finalOutput, 48_000) : undefined,
+      sessionFile: stringValue(entry.sessionFile) || undefined,
+      worktreePath: stringValue(entry.worktreePath) || undefined,
+      toolCount: typeof entry.toolCount === "number" && Number.isFinite(entry.toolCount) ? entry.toolCount : 0,
+      turnCount: typeof entry.turnCount === "number" && Number.isFinite(entry.turnCount) ? entry.turnCount : undefined,
+      tokens: typeof entry.tokens === "number" && Number.isFinite(entry.tokens) ? entry.tokens : 0,
+      durationMs: typeof entry.durationMs === "number" && Number.isFinite(entry.durationMs) ? entry.durationMs : 0,
+      error: stringValue(entry.error) || undefined,
+      updatedAt: typeof entry.updatedAt === "number" ? entry.updatedAt : Date.now(),
+    };
+    return [activity];
   });
+}
+
+function restoredSubagentActivity(activity: SubagentActivity): SubagentActivity {
+  if (activity.status !== "pending" && activity.status !== "running") return activity;
+  const resumable = Boolean(activity.sessionFile && existsSync(activity.sessionFile));
+  return {
+    ...activity,
+    status: "stopped",
+    controlReady: false,
+    resumable: resumable || undefined,
+  };
 }
 
 function messageTimestamp(message: Record<string, unknown>): number {
@@ -1580,7 +1508,6 @@ function resolvePackageDirectory(packageName: string): string {
 function bundledRuntimeResources(workflowDirectory: string): RuntimeResources {
   const packageDirectories = [
     workflowDirectory,
-    resolvePackageDirectory("pi-subagents"),
     resolvePackageDirectory("@suocode/openai-responses-ws"),
   ];
   const resources = packageDirectories.map(resourcesFromManifest);
@@ -1666,7 +1593,6 @@ export class SuoCodeRuntime {
   private active?: ActiveSession;
   private migratedLegacyCredentials = false;
   private projectRefreshTimer?: ReturnType<typeof setTimeout>;
-  private subagentRefreshTimer?: ReturnType<typeof setTimeout>;
   private mcpReloadTimer?: ReturnType<typeof setTimeout>;
   private resourceReloadTimer?: ReturnType<typeof setTimeout>;
   private runtimeInspectionRefresh?: Promise<void>;
@@ -1693,7 +1619,6 @@ export class SuoCodeRuntime {
     }
     const codingAgentRoot = resolvePackageDirectory("@earendil-works/pi-coding-agent");
     process.env.PI_CODING_AGENT_DIR = this.agentDir;
-    process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = codingAgentRoot;
     process.env.PI_MEMORY_WORKER_ENTRY = join(codingAgentRoot, "dist", "cli.js");
     this.migratedLegacyCredentials = options.legacyAgentDir
       ? seedLegacyConfiguration(this.agentDir, resolve(options.legacyAgentDir))
@@ -1887,8 +1812,9 @@ export class SuoCodeRuntime {
     renameSync(temporaryPath, path);
     try { chmodSync(path, 0o600); } catch { /* Non-POSIX filesystems can ignore private modes. */ }
 
-    if (this.active && !this.active.session.isStreaming) {
-      await this.active.session.reload();
+    if (this.active) {
+      if (this.canReloadActiveSession(this.active)) await this.active.session.reload();
+      else this.reloadActiveSessionResources("OpenAI Response (WS) 配置重新加载失败");
     }
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
@@ -2461,15 +2387,26 @@ export class SuoCodeRuntime {
     this.reloadActiveSessionResources("MCP 扩展重新加载失败");
   }
 
+  private canReloadActiveSession(active: ActiveSession): boolean {
+    if (active.session.isStreaming) return false;
+    return ![...active.subagents.values()].some((subagent) =>
+      (subagent.status === "pending" || subagent.status === "running") && subagent.controlReady === true,
+    );
+  }
+
   private reloadActiveSessionResources(errorLabel = "资源重新加载失败"): void {
     if (this.resourceReloadTimer) clearTimeout(this.resourceReloadTimer);
     if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
     this.mcpReloadTimer = undefined;
     const active = this.active;
     if (!active) return;
-    this.resourceReloadTimer = setTimeout(() => {
+    const attemptReload = (): void => {
       this.resourceReloadTimer = undefined;
-      if (this.active !== active || active.session.isStreaming) return;
+      if (this.active !== active) return;
+      if (!this.canReloadActiveSession(active)) {
+        this.resourceReloadTimer = setTimeout(attemptReload, 750);
+        return;
+      }
       void active.session.reload()
         .then(async () => {
           if (this.active !== active) return;
@@ -2478,7 +2415,8 @@ export class SuoCodeRuntime {
         .catch((error) => {
           this.emitEvent({ type: "runtime_error", message: `${errorLabel}：${errorMessage(error)}`, detail: errorDetail(error) });
         });
-    }, 750);
+    };
+    this.resourceReloadTimer = setTimeout(attemptReload, 750);
   }
 
   private skillSettingsManager(cwd?: string): SettingsManager {
@@ -3455,7 +3393,6 @@ export class SuoCodeRuntime {
       return runtime;
     });
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
-    if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
     if (this.active) {
       const previous = this.active;
       this.active = undefined;
@@ -3591,13 +3528,16 @@ export class SuoCodeRuntime {
     installedActive = active;
     this.active = active;
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
+    eventBus.on(SUBAGENT_ACTIVITY_CHANNEL, (raw) => {
+      if (this.active !== active) return;
+      this.mergeSubagentActivities(subagentActivitiesFromPayload(raw));
+    });
     const snapshot = await this.snapshot(reconstructed);
     markTiming("snapshot");
     this.emitEvent({ type: "session_snapshot", snapshot });
     void this.refreshRuntimeInspectionSources(active);
     setTimeout(() => {
       if (this.active !== active) return;
-      void this.refreshAsyncSubagents();
       void this.refreshProject().catch((error) => {
         this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       });
@@ -3659,7 +3599,8 @@ export class SuoCodeRuntime {
       const restoredPlan = normalizeTodoPlan(isRecord(rawMessage.details) ? rawMessage.details.plan : undefined);
       if (name === "todo" && restoredPlan) plan = restoredPlan;
       if (name === "subagent") {
-        for (const activity of subagentActivitiesFromResult(rawMessage, id)) subagents.set(activity.id, activity);
+        const activity = subagentActivityFromDetails(rawMessage.details, id);
+        if (activity) subagents.set(activity.id, restoredSubagentActivity(activity));
       }
       if (name === "bash" || (name === "terminal" && args.action === "start")) {
         terminals.set(id, {
@@ -3672,6 +3613,12 @@ export class SuoCodeRuntime {
           endedAt: messageTimestamp(rawMessage),
           exitCode: extractExitCode(rawMessage.details),
         });
+      }
+    }
+    for (const entry of session.sessionManager.getBranch()) {
+      if (entry.type !== "custom" || entry.customType !== SUBAGENT_RUN_ENTRY_TYPE) continue;
+      for (const activity of subagentActivitiesFromPayload({ activities: [entry.data] })) {
+        subagents.set(activity.id, restoredSubagentActivity(activity));
       }
     }
     const responseMetricsHistory = restoredResponseMetrics(session);
@@ -3752,63 +3699,10 @@ export class SuoCodeRuntime {
     this.publishSubagents();
   }
 
-  private async refreshAsyncSubagents(): Promise<void> {
-    const active = this.active;
-    if (!active) return;
-    if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
-    try {
-      const statusModule = await loadPiSubagentsStatusModule();
-      if (active !== this.active) return;
-      const runs = statusModule.listAsyncRuns(statusModule.ASYNC_DIR, {
-        sessionId: active.session.sessionFile ?? active.session.sessionId,
-        resultsDir: statusModule.RESULTS_DIR,
-      });
-      const updatedAt = Date.now();
-      const activities = runs.flatMap((run) => run.steps.map((step) => ({
-        id: `${run.id}:${step.index}`,
-        runId: run.id,
-        index: step.index,
-        agent: step.agent || `代理 ${step.index + 1}`,
-        task: step.label,
-        model: step.model,
-        mode: run.mode,
-        status: subagentStatus(step.status, subagentStatus(run.state)),
-        background: true,
-        controlReady: run.state === "running",
-        currentTool: step.currentTool ?? run.currentTool,
-        currentPath: step.currentPath ?? run.currentPath,
-        recentTools: subagentRecentTools(step.recentTools),
-        recentOutput: subagentRecentOutput(step.recentOutput),
-        toolCount: step.toolCount ?? run.toolCount ?? 0,
-        turnCount: step.turnCount ?? run.turnCount,
-        tokens: subagentTokens(step.tokens) || subagentTokens(run.totalTokens),
-        durationMs: step.durationMs ?? Math.max(0, (run.lastUpdate ?? updatedAt) - run.startedAt),
-        error: step.error ?? run.error,
-        updatedAt: run.lastUpdate ?? updatedAt,
-      } satisfies SubagentActivity)));
-      this.mergeSubagentActivities(activities);
-      if (runs.some((run) => run.state === "queued" || run.state === "running" || run.state === "paused")) {
-        this.subagentRefreshTimer = setTimeout(() => {
-          void this.refreshAsyncSubagents().catch((error) => {
-            this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
-          });
-        }, 750);
-      } else if ([...active.subagents.values()].some((activity) => activity.background && activity.status === "running" && activity.controlReady !== true && Date.now() - activity.updatedAt < 15_000)) {
-        this.subagentRefreshTimer = setTimeout(() => {
-          void this.refreshAsyncSubagents().catch((error) => {
-            this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
-          });
-        }, 250);
-      }
-    } catch (error) {
-      this.emitEvent({ type: "runtime_error", message: `子 Agent 状态读取失败：${errorMessage(error)}`, detail: errorDetail(error) });
-    }
-  }
-
-  private subagentRpc(method: "stop" | "interrupt", id: string): Promise<unknown> {
+  private subagentRpc(method: "stop" | "status" | "resume", id: string): Promise<unknown> {
     const active = this.requireActive();
     const requestId = `suocode-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const replyChannel = `subagents:rpc:v1:reply:${requestId}`;
+    const replyChannel = `suocode:subagents:rpc:v1:reply:${requestId}`;
     return new Promise((resolvePromise, rejectPromise) => {
       let settled = false;
       const finish = (callback: () => void): void => {
@@ -3828,7 +3722,7 @@ export class SuoCodeRuntime {
         finish(() => rejectPromise(new Error(rpcError || "子 Agent 控制请求失败。")));
       });
       const timer = setTimeout(() => finish(() => rejectPromise(new Error("子 Agent 控制请求超时。"))), 8_000);
-      active.eventBus.emit("subagents:rpc:v1:request", {
+      active.eventBus.emit(SUBAGENT_RPC_REQUEST_CHANNEL, {
         version: 1,
         requestId,
         method,
@@ -3838,30 +3732,21 @@ export class SuoCodeRuntime {
     });
   }
 
-  async stopSubagent(id: string, background: boolean): Promise<{ stopped: true }> {
+  async stopSubagent(id: string, _background: boolean): Promise<{ stopped: true }> {
     if (!id.trim()) throw new Error("缺少子 Agent 标识。");
-    const active = this.requireActive();
-    if (background) {
-      const statusModule = await loadPiSubagentsStatusModule();
-      const runs = statusModule.listAsyncRuns(statusModule.ASYNC_DIR, {
-        states: ["running"],
-        sessionId: active.session.sessionFile ?? active.session.sessionId,
-        resultsDir: statusModule.RESULTS_DIR,
-      });
-      const run = runs.find((candidate) => candidate.id === id.trim());
-      if (!run) throw new Error("后台子 Agent 尚未进入可停止状态，或已经结束。");
-      statusModule.deliverStopRequest({ asyncDir: run.asyncDir, source: "suocode-desktop" });
-    } else {
-      await this.subagentRpc("interrupt", id.trim());
-    }
-    for (const [key, activity] of active.subagents) {
-      if (activity.runId === id || activity.id === id) {
-        active.subagents.set(key, { ...activity, status: "stopped", updatedAt: Date.now() });
-      }
-    }
-    this.publishSubagents();
-    await this.refreshAsyncSubagents();
+    const reply = await this.subagentRpc("stop", id.trim());
+    const activity = isRecord(reply) && isRecord(reply.activity) ? subagentActivitiesFromPayload({ activities: [reply.activity] })[0] : undefined;
+    if (!activity) throw new Error("子 Agent 停止响应缺少运行状态。");
+    this.mergeSubagentActivities([activity]);
     return { stopped: true };
+  }
+
+  async resumeSubagent(id: string): Promise<{ resumed: true }> {
+    if (!id.trim()) throw new Error("缺少子 Agent 标识。");
+    const reply = await this.subagentRpc("resume", id.trim());
+    const activity = isRecord(reply) && isRecord(reply.activity) ? subagentActivitiesFromPayload({ activities: [reply.activity] })[0] : undefined;
+    if (activity) this.mergeSubagentActivities([activity]);
+    return { resumed: true };
   }
 
   private handleSessionEvent(event: AgentSessionEvent): void {
@@ -4039,7 +3924,7 @@ export class SuoCodeRuntime {
           if (event.toolName === "subagent") {
             const task = stringValue(args.task);
             const agent = stringValue(args.agent) || "子 Agent";
-            const background = args.async === true;
+            const background = args.background === true;
             const placeholder: SubagentActivity = {
               id: `${tool.id}:0`,
               runId: tool.id,
@@ -4048,7 +3933,6 @@ export class SuoCodeRuntime {
               agent,
               task: task || undefined,
               model: stringValue(args.model) || undefined,
-              mode: Array.isArray(args.tasks) ? "parallel" : Array.isArray(args.chain) ? "chain" : "single",
               status: "running",
               background,
               controlReady: false,
@@ -4083,9 +3967,12 @@ export class SuoCodeRuntime {
           const terminal = active.terminals.get(tool.id);
           if (terminal && output) terminal.output = clampText(output, MAX_TERMINAL_OUTPUT);
           if (tool.name === "subagent") {
-            const activities = subagentActivitiesFromResult(event.partialResult, tool.id, tool.args.async === true);
-            if (activities.some((activity) => activity.runId !== tool.id || activity.index !== 0)) active.subagents.delete(`${tool.id}:0`);
-            this.mergeSubagentActivities(activities);
+            const details = isRecord(event.partialResult) ? event.partialResult.details : undefined;
+            const activity = subagentActivityFromDetails(details, tool.id);
+            if (activity) {
+              active.subagents.delete(`${tool.id}:0`);
+              this.mergeSubagentActivities([activity]);
+            }
           }
           this.emitEvent({ type: "tool_updated", tool: { ...tool } });
           this.publishProjectFromMemory();
@@ -4121,33 +4008,26 @@ export class SuoCodeRuntime {
             }
           }
           if (event.toolName === "subagent") {
-            const activities = subagentActivitiesFromResult(event.result, tool.id, tool.args.async === true);
-            if (activities.length > 0) {
-              if (activities.some((activity) => activity.runId !== tool.id || activity.index !== 0)) active.subagents.delete(`${tool.id}:0`);
-              this.mergeSubagentActivities(activities);
-            }
-            else {
+            const details = isRecord(event.result) ? event.result.details : undefined;
+            const activity = subagentActivityFromDetails(details, tool.id);
+            if (activity) {
+              active.subagents.delete(`${tool.id}:0`);
+              this.mergeSubagentActivities([activity]);
+            } else {
               const placeholder = active.subagents.get(`${tool.id}:0`);
               if (placeholder) {
-                const rawResult = isRecord(event.result) ? event.result : undefined;
-                const details = rawResult && isRecord(rawResult.details) ? rawResult.details : undefined;
-                const actualRunId = stringValue(details?.asyncId) || stringValue(details?.runId);
                 const updated = {
                   ...placeholder,
-                  id: actualRunId ? `${actualRunId}:0` : placeholder.id,
-                  runId: actualRunId || placeholder.runId,
                   status: event.isError ? "failed" : placeholder.background ? "running" : "completed",
                   controlReady: false,
                   error: event.isError ? tool.output : placeholder.error,
                   durationMs: Date.now() - placeholder.updatedAt,
                   updatedAt: Date.now(),
                 } satisfies SubagentActivity;
-                active.subagents.delete(placeholder.id);
-                active.subagents.set(updated.id, updated);
+                active.subagents.set(placeholder.id, updated);
                 this.publishSubagents();
               }
             }
-            void this.refreshAsyncSubagents();
           }
           this.emitEvent({ type: "tool_finished", tool: { ...tool } });
           this.publishProjectFromMemory();
@@ -4447,7 +4327,6 @@ export class SuoCodeRuntime {
 
   async dispose(): Promise<void> {
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
-    if (this.subagentRefreshTimer) clearTimeout(this.subagentRefreshTimer);
     if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
     if (this.resourceReloadTimer) clearTimeout(this.resourceReloadTimer);
     if (this.active) {

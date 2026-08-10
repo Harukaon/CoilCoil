@@ -16,7 +16,7 @@ SuoCode Desktop does not require a user-installed Pi. The application starts its
 - Model/provider selection and API-key configuration
 - SuoCode-owned `OpenAI Response (WS)` Pi extension for ordinary proxy keys and persistent WebSocket transport
 - Project tools for reading, searching, editing, writing, and running commands
-- Bundled `pi-mcp-adapter` and `pi-subagents` extensions, with SuoCode-owned GUI configuration and status projection
+- Bundled `pi-mcp-adapter` with SuoCode-owned GUI configuration, plus SuoCode's own subagent engine and typed runtime activity events
 - Structured todo plans, Git changes and patches, terminal output, and project file previews
 - SuoCode's bundled Simplified Chinese workflow, policies, project memory, and terminal support
 - Explicit development-only migration support for an existing Pi model configuration

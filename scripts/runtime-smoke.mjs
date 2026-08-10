@@ -569,7 +569,7 @@ try {
     invalidSubagentStopRejected = !String(error).includes("超时");
   }
   if (!invalidSubagentStopRejected) {
-    throw new Error("The bundled pi-subagents RPC bridge did not reject an unknown background run.");
+    throw new Error("The subagent RPC bridge did not reject an unknown run.");
   }
   if (!snapshot.project.files.some((entry) => entry.name === "zz-root.txt")) {
     throw new Error("A large nested directory starved later root files from the project tree.");
@@ -618,20 +618,17 @@ try {
           toolName: "subagent",
           content: [{ type: "text", text: "子 Agent 已完成" }],
           details: {
-            mode: "single",
             runId: "subagent-smoke-run",
-            results: [{
-              agent: "scout",
-              task: "验证扩展投影",
-              exitCode: 0,
-              model: "smoke-child-model",
-              usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 0, cost: 0, turns: 2 },
-              messages: [{ role: "assistant", content: [{ type: "thinking", text: "检查结构化事件" }, { type: "text", text: "扩展投影完成" }] }],
-              toolCalls: [{ text: "读取测试文件", expandedText: "read /tmp/subagent-smoke" }],
-              finalOutput: "扩展投影完成",
-              transcriptPath: "/tmp/subagent-smoke.jsonl",
-              sessionFile: "/tmp/subagent-smoke-session.jsonl",
-            }],
+            background: false,
+            agent: "scout",
+            task: "验证扩展投影",
+            model: "smoke-child-model",
+            status: "completed",
+            sessionFile: "/tmp/subagent-smoke-session.jsonl",
+            finalOutput: "扩展投影完成",
+            toolCount: 3,
+            durationMs: 4200,
+            usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 0, total: 17, turns: 2 },
           },
           isError: false,
           timestamp: Date.now(),
@@ -653,11 +650,13 @@ try {
       !restoredSubagent
       || restoredSubagent.parentToolId !== subagentToolId
       || restoredSubagent.model !== "smoke-child-model"
-      || restoredSubagent.messages?.[0]?.thinking !== "检查结构化事件"
-      || restoredSubagent.toolCalls?.[0]?.expandedText !== "read /tmp/subagent-smoke"
+      || restoredSubagent.status !== "completed"
       || restoredSubagent.finalOutput !== "扩展投影完成"
+      || restoredSubagent.tokens !== 17
+      || restoredSubagent.turnCount !== 2
+      || restoredSubagent.toolCount !== 3
     ) {
-      throw new Error("The pi-subagents structured result was not restored through the SuoCode projection bridge.");
+      throw new Error("The subagent tool result was not restored through the SuoCode projection bridge.");
     }
   }
 

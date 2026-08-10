@@ -72,7 +72,8 @@ export class RuntimeServer {
   private readonly runtimePaths = new Map<string, string>();
   private readonly runtimeAccess = new Map<string, number>();
   private readonly runningRuntimes = new Set<string>();
-  private readonly backgroundBusyRuntimes = new Set<string>();
+  private readonly memoryBusyRuntimes = new Set<string>();
+  private readonly subagentBusyRuntimes = new Set<string>();
   private readonly dirtyRuntimes = new Set<string>();
   private readonly runtimeSnapshots = new Map<string, SessionSnapshot>();
   private readonly openingSessions = new Map<string, Promise<SessionSnapshot>>();
@@ -118,10 +119,10 @@ export class RuntimeServer {
     }
     if (runtimeId && event.type === "runtime_inspection_updated" && event.inspection.memory) {
       const memory = event.inspection.memory;
-      const wasBackgroundBusy = this.backgroundBusyRuntimes.has(runtimeId);
-      if (memory.state === "running") this.backgroundBusyRuntimes.add(runtimeId);
-      else if (wasBackgroundBusy) {
-        this.backgroundBusyRuntimes.delete(runtimeId);
+      const wasMemoryBusy = this.memoryBusyRuntimes.has(runtimeId);
+      if (memory.state === "running") this.memoryBusyRuntimes.add(runtimeId);
+      else if (wasMemoryBusy) {
+        this.memoryBusyRuntimes.delete(runtimeId);
         this.retireExcessIdleRuntimes(runtimeId);
       }
       const workspacePath = normalizeSessionPath(memory.cwd);
@@ -130,6 +131,17 @@ export class RuntimeServer {
         if (normalizeSessionPath(snapshot.session.cwd) === workspacePath) {
           this.dirtyRuntimes.add(otherRuntimeId);
         }
+      }
+    }
+    if (runtimeId && event.type === "subagents_updated") {
+      const wasSubagentBusy = this.subagentBusyRuntimes.has(runtimeId);
+      const hasLiveSubagents = event.subagents.some((subagent) =>
+        (subagent.status === "pending" || subagent.status === "running") && subagent.controlReady === true,
+      );
+      if (hasLiveSubagents) this.subagentBusyRuntimes.add(runtimeId);
+      else if (wasSubagentBusy) {
+        this.subagentBusyRuntimes.delete(runtimeId);
+        this.retireExcessIdleRuntimes(runtimeId);
       }
     }
     const scopedEvent = runtimeId && event.type === "session_snapshot"
@@ -144,8 +156,11 @@ export class RuntimeServer {
     this.dirtyRuntimes.delete(runtimeId);
     if (snapshot.running) this.runningRuntimes.add(runtimeId);
     else this.runningRuntimes.delete(runtimeId);
-    if (snapshot.runtimeInspection?.memory?.state === "running") this.backgroundBusyRuntimes.add(runtimeId);
-    else this.backgroundBusyRuntimes.delete(runtimeId);
+    if (snapshot.runtimeInspection?.memory?.state === "running") this.memoryBusyRuntimes.add(runtimeId);
+    else this.memoryBusyRuntimes.delete(runtimeId);
+    // Subagent liveness is process-local. A persisted snapshot may contain a
+    // run interrupted by an earlier process, so only live activity events can
+    // pin a runtime in memory.
     this.runtimeAccess.set(runtimeId, Date.now());
     if (snapshot.session.path) {
       const normalizedPath = normalizeSessionPath(snapshot.session.path);
@@ -164,7 +179,8 @@ export class RuntimeServer {
     this.runtimes.delete(runtimeId);
     this.runtimeAccess.delete(runtimeId);
     this.runningRuntimes.delete(runtimeId);
-    this.backgroundBusyRuntimes.delete(runtimeId);
+    this.memoryBusyRuntimes.delete(runtimeId);
+    this.subagentBusyRuntimes.delete(runtimeId);
     this.dirtyRuntimes.delete(runtimeId);
     this.runtimeSnapshots.delete(runtimeId);
     const sessionPath = this.runtimePaths.get(runtimeId);
@@ -176,7 +192,9 @@ export class RuntimeServer {
 
   private retireExcessIdleRuntimes(protectedRuntimeId: string): void {
     const idleRuntimeIds = [...this.runtimes.keys()]
-      .filter((runtimeId) => !this.runningRuntimes.has(runtimeId) && !this.backgroundBusyRuntimes.has(runtimeId))
+      .filter((runtimeId) => !this.runningRuntimes.has(runtimeId)
+        && !this.memoryBusyRuntimes.has(runtimeId)
+        && !this.subagentBusyRuntimes.has(runtimeId))
       .sort((left, right) => (this.runtimeAccess.get(left) ?? 0) - (this.runtimeAccess.get(right) ?? 0));
     let excess = idleRuntimeIds.length - MAX_RETAINED_IDLE_SESSION_RUNTIMES;
     if (excess <= 0) return;
@@ -397,6 +415,8 @@ export class RuntimeServer {
         return runtime.removeOriginalSessionItem(command.entryId);
       case "stop_subagent":
         return runtime.stopSubagent(command.id, command.background);
+      case "resume_subagent":
+        return runtime.resumeSubagent(command.id);
       case "list_sessions":
         return runtime.listSessions(command.cwd);
       case "list_archived_sessions":
@@ -453,6 +473,8 @@ export class RuntimeServer {
     this.runtimePaths.clear();
     this.runtimeAccess.clear();
     this.runningRuntimes.clear();
+    this.memoryBusyRuntimes.clear();
+    this.subagentBusyRuntimes.clear();
     this.dirtyRuntimes.clear();
     this.runtimeSnapshots.clear();
     this.openingSessions.clear();

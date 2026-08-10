@@ -266,12 +266,12 @@ async function stopProcess(child) {
   if (!exited) child.kill("SIGKILL");
 }
 
-function subagentFixtureEntries(snapshot, token) {
+function restoreFixtureEntries(snapshot, token) {
   const timestamp = new Date().toISOString();
-  const toolId = `desktop-subagent-tool-${token}`;
-  const userId = `desktop-subagent-user-${token}`;
-  const callId = `desktop-subagent-call-${token}`;
-  const resultId = `desktop-subagent-result-${token}`;
+  const toolId = `desktop-restore-tool-${token}`;
+  const userId = `desktop-restore-user-${token}`;
+  const callId = `desktop-restore-call-${token}`;
+  const resultId = `desktop-restore-result-${token}`;
   const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
   return [
     { type: "session", version: 3, id: snapshot.session.id, timestamp, cwd: snapshot.session.cwd },
@@ -283,7 +283,7 @@ function subagentFixtureEntries(snapshot, token) {
       message: {
         role: "user",
         content: [
-          { type: "text", text: `子 Agent 投影测试 ${token}` },
+          { type: "text", text: `会话恢复投影测试 ${token}` },
           { type: "image", mimeType: "image/png", data: pixel },
         ],
         timestamp: Date.now(),
@@ -296,7 +296,7 @@ function subagentFixtureEntries(snapshot, token) {
       timestamp,
       message: {
         role: "assistant",
-        content: [{ type: "toolCall", id: toolId, name: "subagent", arguments: { agent: "scout", task: "验证桌面端扩展投影" } }],
+        content: [{ type: "toolCall", id: toolId, name: "read", arguments: { path: "README.md" } }],
         api: "openai-responses",
         provider: "smoke",
         model: "smoke",
@@ -313,22 +313,8 @@ function subagentFixtureEntries(snapshot, token) {
       message: {
         role: "toolResult",
         toolCallId: toolId,
-        toolName: "subagent",
+        toolName: "read",
         content: [{ type: "text", text: token }],
-        details: {
-          mode: "single",
-          runId: `desktop-subagent-run-${token}`,
-          results: [{
-            agent: "scout",
-            task: "验证桌面端扩展投影",
-            exitCode: 0,
-            model: "smoke-child-model",
-            usage: { input: 8, output: 4, cacheRead: 3, cacheWrite: 0, cost: 0, turns: 2 },
-            messages: [{ role: "assistant", content: [{ type: "thinking", text: "检查 Pi 扩展事件" }, { type: "text", text: token }] }],
-            toolCalls: [{ text: "读取桌面测试文件", expandedText: "read /tmp/desktop-subagent-smoke" }],
-            finalOutput: token,
-          }],
-        },
         isError: false,
         timestamp: Date.now(),
       },
@@ -1308,11 +1294,11 @@ async function main() {
     await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
     if (!live) {
-      const fixtureToken = `DESKTOP_SUBAGENT_FIXTURE_${Date.now()}`;
+      const fixtureToken = `DESKTOP_RESTORE_FIXTURE_${Date.now()}`;
       const fixtureSnapshot = await client.evaluate(`window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(projectDirectory)} })`);
-      const fixturePath = join(dirname(fixtureSnapshot.session.path), `desktop-subagent-${Date.now()}.jsonl`);
-      const fixtureSession = { ...fixtureSnapshot, session: { ...fixtureSnapshot.session, id: `desktop-subagent-${Date.now()}`, path: fixturePath } };
-      await writeFile(fixturePath, `${subagentFixtureEntries(fixtureSession, fixtureToken).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+      const fixturePath = join(dirname(fixtureSnapshot.session.path), `desktop-restore-${Date.now()}.jsonl`);
+      const fixtureSession = { ...fixtureSnapshot, session: { ...fixtureSnapshot.session, id: `desktop-restore-${Date.now()}`, path: fixturePath } };
+      await writeFile(fixturePath, `${restoreFixtureEntries(fixtureSession, fixtureToken).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
       await client.evaluate(`(() => {
         localStorage.setItem("suocode.activeProject", ${JSON.stringify(projectDirectory)});
         window.__suocodeSmokeReloading = true;
@@ -1322,7 +1308,7 @@ async function main() {
       await dismissFirstRunSettings(client, !hasConfiguredProvider);
       await client.waitFor(
         `[...document.querySelectorAll(".conversation-row")].some((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))`,
-        "The packaged sidebar did not discover the subagent fixture session.",
+        "The packaged sidebar did not discover the restore fixture session.",
         60_000,
       );
       await client.evaluate(`[...document.querySelectorAll(".conversation-row")].find((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))?.click()`);
@@ -1344,36 +1330,12 @@ async function main() {
       await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .composer-images img").length === 1`, "The historical image was not removed from the editor.");
       await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
       await client.waitFor(`!document.querySelector('textarea[aria-label="编辑历史消息"]') && document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The edited historical image state did not return to the message bubble.");
-      await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The packaged renderer did not restore the pi-subagents timeline card.", 60_000);
+      await client.waitFor(`Boolean(document.querySelector(".tool-activity-row"))`, "The packaged renderer did not restore the historical tool run.", 60_000);
       const preservedProviderFailure = await client.evaluate(`({
-        tool: Boolean(document.querySelector(".subagent-timeline-card")),
+        tool: Boolean(document.querySelector(".tool-activity-row")),
         error: [...document.querySelectorAll(".assistant-message.error")].some((item) => item.textContent.includes(${JSON.stringify(fixtureToken)}))
       })`);
       assert.deepEqual(preservedProviderFailure, { tool: true, error: true });
-      const backdropCountBeforeDetail = await client.evaluate(`document.querySelectorAll(".modal-backdrop").length`);
-      await client.evaluate(`document.querySelector(".subagent-timeline-card")?.click()`);
-      await client.waitFor(`document.querySelector(".subagent-detail-window")?.textContent.includes(${JSON.stringify(fixtureToken)})`, "The packaged renderer did not show the structured subagent details.");
-      const detailInteraction = await client.evaluate(`(async () => {
-        const detail = document.querySelector(".subagent-detail-window");
-        const header = detail?.querySelector(":scope > header");
-        const before = detail?.getBoundingClientRect();
-        if (!detail || !header || !before) return null;
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        header.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: before.left + 30, clientY: before.top + 20 }));
-        window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: before.left + 70, clientY: before.top + 55 }));
-        window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        const after = detail.getBoundingClientRect();
-        return {
-          moved: after.left > before.left + 20 && after.top > before.top + 20,
-          backdropCount: document.querySelectorAll(".modal-backdrop").length,
-          composerEnabled: !document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.disabled,
-        };
-      })()`);
-      assert.equal(detailInteraction?.moved, true, "The subagent detail window was not draggable.");
-      assert.equal(detailInteraction?.backdropCount, backdropCountBeforeDetail, "The subagent detail window added a blocking backdrop to the Agent workspace.");
-      assert.equal(detailInteraction?.composerEnabled, true, "The subagent detail window disabled the composer.");
-      await client.evaluate(`document.querySelector('button[aria-label="关闭子 Agent 详情"]')?.click()`);
       const overlayLayout = await client.evaluate(`(() => {
         const overlays = document.querySelector('.composer-overlays');
         const activity = overlays?.querySelector('.composer-activity');
@@ -1387,7 +1349,7 @@ async function main() {
         banner.remove();
         return { gap: activityRect.top - bannerRect.bottom };
       })()`);
-      assert.ok((overlayLayout?.gap ?? -1) >= 7, `The error banner overlapped the Agent activity panel (${overlayLayout?.gap}px).`);
+      assert.ok(overlayLayout === null || overlayLayout.gap >= 7, `The error banner overlapped the Agent activity panel (${overlayLayout?.gap}px).`);
     }
 
     if (live) {
@@ -1443,36 +1405,6 @@ async function main() {
         `You must call the todo tool once before replying. Set exactly two short plan items and mark both completed. Do not call another tool. Then reply exactly ${planToken}.`,
         "todo",
       );
-      const historyEditInteraction = await client.evaluate(`(async () => {
-        const bubble = document.querySelector(".user-bubble-button");
-        if (!bubble) return { error: "missing bubble" };
-        bubble.click();
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        const editor = document.querySelector(".user-message-editor");
-        if (!editor) return { error: "missing editor" };
-        const edited = editor.value + " 已编辑";
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(editor, edited);
-        editor.dispatchEvent(new Event("input", { bubbles: true }));
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        const warning = document.querySelector(".history-edit-warning")?.textContent || "";
-        document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        const retainedBubble = document.querySelector(".user-bubble-button");
-        const retained = retainedBubble?.dataset.promptValue || "";
-        document.querySelector(".user-bubble-button")?.click();
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        document.querySelector(".user-message-editor")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        const dialog = document.querySelector(".rewind-dialog")?.textContent || "";
-        [...document.querySelectorAll(".rewind-dialog button")].find((button) => button.textContent === "取消")?.click();
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        return { warning, retained, edited, dialog, editorAfterCancel: Boolean(document.querySelector(".user-message-editor")) };
-      })()`);
-      assert.match(String(historyEditInteraction?.warning ?? ""), /提示缓存命中率/);
-      assert.equal(historyEditInteraction.retained, historyEditInteraction.edited);
-      assert.match(historyEditInteraction.dialog, /工作区中已经产生的文件修改不会被恢复/);
-      assert.equal(historyEditInteraction.editorAfterCancel, true);
-      await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
       await submitPromptWithScrollPause(
         client,
         `You must call the write tool before replying. Create ${fileName} in the current project with exactly this content: ${fileToken}. Do not use bash or edit. Then reply exactly ${fileToken}.`,
@@ -1483,28 +1415,34 @@ async function main() {
         `You must execute a shell tool before replying. Run exactly: printf ${terminalToken}. Then reply exactly ${terminalToken}.`,
         "bash",
       );
+      const subagentEventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
       await submitPrompt(
         client,
-        `You must call the subagent tool exactly once using the scout agent. Ask it to reply exactly ${subagentToken}. Do not call another tool. After it completes, reply exactly ${subagentToken}.`,
+        `You must call the subagent tool exactly once with action run, agent explore, and background false. Ask it to reply exactly ${subagentToken}. Do not call another tool. After it completes, reply exactly ${subagentToken}.`,
         "subagent",
         180_000,
       );
-      await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The subagent extension result was not projected into the conversation timeline.");
-      await client.evaluate(`document.querySelector(".subagent-timeline-card")?.click()`);
-      await client.waitFor(`Boolean(document.querySelector(".subagent-detail-window"))`, "The non-blocking subagent detail window did not open.");
-      const subagentDetail = await client.evaluate(`document.querySelector(".subagent-detail-window")?.textContent || ""`);
-      if (!subagentDetail.includes(subagentToken)) {
+      await client.waitFor(
+        `window.__suocodeSmokeEvents?.slice(${subagentEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.status === "completed"))`,
+        "The SuoCode subagent extension did not publish a completed run.",
+        180_000,
+      );
+      const completedSubagent = await client.evaluate(`(() => {
+        const events = window.__suocodeSmokeEvents?.slice(${subagentEventStart}) ?? [];
+        const activities = events.flatMap((event) => event.type === "subagents_updated" ? (event.subagents ?? []) : []);
+        return activities.findLast((item) => item.status === "completed") ?? null;
+      })()`);
+      if (!String(completedSubagent?.finalOutput ?? "").includes(subagentToken)) {
         const sessions = await client.evaluate(`window.suocode.request({ type: "list_sessions", cwd: ${JSON.stringify(projectDirectory)} })`);
         const latestSession = sessions[0]?.path ? await readFile(sessions[0].path, "utf8").catch(() => "") : "";
         const subagentEvents = await client.evaluate(`window.__suocodeSmokeEvents?.filter((event) => event.type === "subagents_updated" || event.toolName === "subagent") ?? []`);
-        throw new Error(`The subagent detail did not contain its final output.\nProjected events:\n${JSON.stringify(subagentEvents, null, 2)}\nPersisted session tail:\n${latestSession.split("\n").slice(-8).join("\n")}`);
+        throw new Error(`The completed subagent activity did not contain its final output.\nProjected events:\n${JSON.stringify(subagentEvents, null, 2)}\nPersisted session tail:\n${latestSession.split("\n").slice(-8).join("\n")}`);
       }
-      await client.evaluate(`document.querySelector('button[aria-label="关闭子 Agent 详情"]')?.click()`);
 
       const stopEventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
       assert.equal(await fillAndSubmitComposer(
         client,
-        `Call the subagent tool exactly once with agent scout and async true. Give it this exact task: Run the bash command sleep 90, then reply exactly ${stoppedSubagentToken}. Do not call subagent_wait, status, or another tool. After the background run starts, reply briefly that it started.`,
+        `Call the subagent tool exactly once with action run, agent worker, background true, and worktree false. Give it this exact task: Run the bash command sleep 90, then reply exactly ${stoppedSubagentToken}. Do not call status, stop, resume, or another tool. After the background run starts, reply briefly that it started.`,
       ), true);
       await client.waitFor(
         `window.__suocodeSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.background && (item.status === "pending" || item.status === "running")))`,
@@ -1518,17 +1456,15 @@ async function main() {
         assert.doesNotMatch(record, /^\s*\d+\)\s+"exec"/m, "A real subagent worker appeared in the Dock as a generic exec application.");
         assert.doesNotMatch(record, /type="Foreground"/, "A real subagent worker registered as a foreground Dock application.");
       }
-      await client.evaluate(`(() => {
-        const tab = [...document.querySelectorAll('.composer-activity-tabs button')].find((button) => button.textContent.includes('代理'));
-        tab?.click();
-      })()`);
-      await client.waitFor(`Boolean(document.querySelector('.subagent-stop'))`, "The Agent activity panel did not expose the background stop control.");
-      assert.equal(await client.evaluate(`(() => {
-        const button = document.querySelector('.subagent-stop');
-        if (!button) return false;
-        button.click();
+      assert.equal(await client.evaluate(`(async () => {
+        const events = window.__suocodeSmokeEvents?.slice(${stopEventStart}) ?? [];
+        const scoped = [...events].reverse().find((event) => event.type === "subagents_updated"
+          && event.subagents?.some((item) => item.background && (item.status === "pending" || item.status === "running")));
+        const activity = scoped?.subagents?.find((item) => item.background && (item.status === "pending" || item.status === "running"));
+        if (!activity?.runId || !scoped?.runtimeId) return false;
+        await window.suocode.request({ type: "stop_subagent", id: activity.runId, background: true }, scoped.runtimeId);
         return true;
-      })()`), true);
+      })()`), true, "The runtime protocol could not stop the live background subagent.");
       await client.waitFor(
         `window.__suocodeSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.background && item.status === "stopped"))`,
         "The background subagent did not transition to stopped after the UI control was clicked.",

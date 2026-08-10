@@ -17,9 +17,7 @@
     "packages/workflow"
   ],
   "scripts": {
-    "postinstall": "node scripts/apply-dependency-patches.mjs",
-    "patch:dependencies": "node scripts/apply-dependency-patches.mjs",
-    "setup": "npm ci --prefix vendor/pi --ignore-scripts && npm run build:offline --prefix vendor/pi && npm ci --ignore-scripts && npm run patch:dependencies && npm rebuild node-pty esbuild && node node_modules/electron/install.js",
+    "setup": "npm ci --prefix vendor/pi --ignore-scripts && npm run build:offline --prefix vendor/pi && npm ci --ignore-scripts && npm rebuild node-pty esbuild && node node_modules/electron/install.js",
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build:pi": "npm run build:offline --prefix vendor/pi",

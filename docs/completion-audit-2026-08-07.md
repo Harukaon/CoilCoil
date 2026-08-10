@@ -14,7 +14,7 @@
 | 需求 | 状态 | 当前证据 / 缺口 |
 | --- | --- | --- |
 | SuoCode 内置 Pi，不依赖用户本机 Pi | 已验证 | Runtime 使用私有 Agent/Session 目录；打包 smoke 验证 Home 与内置 Helper 启动器。 |
-| 工作流、MCP、子 Agent 以 Pi 扩展形式随包交付 | 已验证 | Runtime 显式加载 `@suocode/workflow`、`pi-mcp-adapter`、`pi-subagents`。 |
+| 工作流、MCP、子 Agent 以 Pi 扩展形式随包交付 | 已验证 | Runtime 显式加载 `@suocode/workflow`；MCP 由 `pi-mcp-adapter` 提供，子 Agent 由 SuoCode 自有扩展以内嵌 child `AgentSession` 提供。 |
 | CLI 与 Desktop 共用 Runtime Core | 已验证 | Workspace 构建、类型检查和 Runtime smoke。 |
 | 不向 Renderer 暴露 Node | 已验证 | Desktop smoke 检查 `window.require` / `window.process` 不存在。 |
 | 超限桌面代码按功能域拆分 | 已验证 | 全局样式从 613 行降至 507 行；设置/MCP 与预览样式归入功能目录，生产构建和打包 Desktop smoke 通过。 |
@@ -51,11 +51,11 @@
 
 | 需求 | 状态 | 当前证据 / 缺口 |
 | --- | --- | --- |
-| Todo 与子 Agent 共用可切换活动面板 | 已验证 | `ActivityPanel` 与 Desktop smoke。 |
-| 子 Agent 时间线卡片、详情、工具/消息/Reasoning 投影 | 已验证 | 标准 Pi Session fixture、Runtime smoke、Desktop smoke。 |
-| 停止子 Agent | 已验证 | Runtime 直接复用 `pi-subagents` 的持久化异步运行状态与停止请求；MiniMax M3 真实长任务从 UI 停止后进入 stopped，父 Agent 正常收敛。 |
+| Todo 与子 Agent 共用可切换活动面板 | 未完成 | 合并自有子 Agent 引擎时已移除依赖旧扩展结构的专用 UI；等待按稳定 Runtime 协议重建。 |
+| 子 Agent 时间线卡片、详情、工具/消息/Reasoning 投影 | 未完成 | Runtime 已提供结构化活动、消息与工具摘要；Desktop 专用投影视图尚待重建。 |
+| 停止子 Agent | 部分完成 | Runtime 已提供 stop/status/resume RPC；Desktop 停止入口尚待按新协议接回。 |
 | 子 Agent 不产生独立 Workspace 会话 | 已验证 | 投影基于父工具调用。 |
-| macOS 不出现 `exec` Dock 图标 | 已验证 | 打包 Desktop smoke 同时启动三个 Headless Helper，并在真实子 Agent 运行期间递归检查进程树与 LaunchServices；没有 descendant 注册为 `exec` 或 Foreground。 |
+| macOS 不出现 `exec` Dock 图标 | 已验证 | 子 Agent 直接创建进程内 child `AgentSession`，不再派生外部 `exec` 应用；live Desktop smoke 继续检查 Runtime 后代进程的 LaunchServices 注册。 |
 
 ## 文件与预览
 

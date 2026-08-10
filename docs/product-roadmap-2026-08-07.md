@@ -17,7 +17,7 @@
 典型应用：
 
 - MCP：复用 `pi-mcp-adapter`，GUI 只编辑配置并展示扩展状态。
-- 子 Agent：复用 `pi-subagents`，GUI 展示子任务执行过程、统计和停止入口。
+- 子 Agent：使用 SuoCode 自有 Pi 扩展以内嵌 child `AgentSession` 执行，GUI 只消费 Runtime 标准化后的活动、详情和控制协议。
 - Todo：复用现有结构化 Todo 扩展，GUI 将状态投影为活动面板。
 - 后续能力在立项时先完成“可复用扩展调查”，再决定是否自行实现。
 

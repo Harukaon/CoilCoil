@@ -10,8 +10,8 @@ Electron main + sandboxed preload
 Bundled SuoCode runtime
     ├── runtime protocol and server
     ├── Pi AgentSession + ModelRuntime
-    ├── SuoCode workflow extensions
-    ├── bundled MCP and subagent extensions
+    ├── SuoCode workflow extensions (tools, policies, subagents)
+    ├── bundled MCP extension
     ├── SessionManager persistence
     └── project files, Git changes, plans, and terminal projection
 ```
@@ -21,7 +21,7 @@ Bundled SuoCode runtime
 - `@suocode/runtime-protocol` defines commands, responses, events, messages, sessions, plans, changes, terminal runs, and file-tree data.
 - `@suocode/runtime-core` owns model configuration, Pi session creation, workflow loading, event translation, session persistence, and project inspection.
 - `@suocode/runtime-server` exposes the core over Node process IPC for Desktop and strict JSONL over stdin/stdout for integrations.
-- `@suocode/workflow` contains the SuoCode-specific Pi extensions. The runtime explicitly loads it together with pinned `pi-mcp-adapter` and `pi-subagents` releases; it never reads the package list from the user's Pi settings.
+- `@suocode/workflow` contains the SuoCode-specific Pi extensions, including SuoCode's own subagent extension. The runtime explicitly loads it together with the pinned `pi-mcp-adapter` release; it never reads the package list from the user's Pi settings.
 
 ## Desktop isolation
 
@@ -35,7 +35,7 @@ Desktop owns exactly one long-lived Runtime operating-system process. That proce
 
 Workspace opening keeps only session construction and the root file listing on the response path. Git inspection, asynchronous subagent restoration, and session-list refresh run after the first snapshot. The Runtime process also begins model initialization as soon as it starts, before the renderer requests the active workspace.
 
-Subagents and background memory workers launch the Pi CLI shipped inside SuoCode using the current runtime executable. They do not discover or invoke a `pi` executable from the user's shell `PATH`. MCP uses SuoCode's own Agent directory plus standard/project MCP configuration files; secrets are never copied into the repository or installation image.
+Subagents run as child Pi `AgentSession`s inside SuoCode's private Runtime process; they never discover or invoke a `pi` executable from the user's shell `PATH`. Background project-memory workers use SuoCode's bundled runtime executable. MCP uses SuoCode's own Agent directory plus standard/project MCP configuration files; secrets are never copied into the repository or installation image.
 
 Project memory remains owned by the bundled `project-memory` Pi extension. Once a foreground Agent request emits `agent_settled`, the extension starts the isolated bundled memory worker and returns without blocking the conversation UI. The worker summarizes the persisted session into the project-scoped memory directory. Later requests in the same project receive that memory through `before_agent_start`; Desktop does not maintain a second memory database or depend on the user's local Pi installation.
 
@@ -57,7 +57,7 @@ The preferred order is:
 Examples:
 
 - MCP reuses `pi-mcp-adapter`; SuoCode only adds configuration and status UI.
-- Subagents reuse `pi-subagents`; SuoCode adds activity cards, execution details, and stop controls by projecting the extension's lifecycle.
+- Subagents run in SuoCode's own extension, which executes child AgentSessions in-process and publishes typed activity events plus an RPC channel for stop/status/resume. Runtime Core consumes that contract; the dedicated Desktop cards, execution details, and controls will be rebuilt against the stable SuoCode protocol instead of extension-internal types.
 - Todo and workflow tools remain Pi extensions; the activity panel visualizes their structured state.
 
 When `pi-mcp-adapter` is reloading, its native `not_initialized` or `init_failed` result is projected as “初始化中” or “暂不可用”. SuoCode does not mistake that lifecycle state for a new MCP schema and does not fall back to a second protocol implementation.

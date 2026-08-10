@@ -440,7 +440,7 @@ export interface TodoItem {
   status: "pending" | "in_progress" | "completed";
 }
 
-export type SubagentActivityStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "paused" | "detached";
+export type SubagentActivityStatus = "pending" | "running" | "completed" | "failed" | "stopped";
 
 export interface SubagentRecentTool {
   tool: string;
@@ -466,10 +466,10 @@ export interface SubagentActivity {
   agent: string;
   task?: string;
   model?: string;
-  mode: "single" | "parallel" | "chain";
   status: SubagentActivityStatus;
   background: boolean;
   controlReady?: boolean;
+  resumable?: boolean;
   currentTool?: string;
   currentPath?: string;
   recentTools?: SubagentRecentTool[];
@@ -479,6 +479,7 @@ export interface SubagentActivity {
   finalOutput?: string;
   transcriptPath?: string;
   sessionFile?: string;
+  worktreePath?: string;
   toolCount: number;
   turnCount?: number;
   tokens: number;
@@ -750,6 +751,7 @@ export type RuntimeCommand =
   | { type: "run_memory_now" }
   | { type: "remove_original_session_item"; entryId: string }
   | { type: "stop_subagent"; id: string; background: boolean }
+  | { type: "resume_subagent"; id: string }
   | { type: "list_sessions"; cwd: string }
   | { type: "list_archived_sessions"; cwd: string }
   | { type: "archive_session"; cwd: string; sessionPath: string }

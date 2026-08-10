@@ -36,6 +36,7 @@ class FakeRuntime {
       openGates?: Map<string, ReturnType<typeof deferred>>;
       openCalls?: Map<string, number>;
       snapshotCalls?: Map<string, number>;
+      initialSubagentStatus?: "pending" | "running" | "completed" | "failed" | "stopped";
     } = {},
   ) {
     this.emit = options.onEvent ?? (() => undefined);
@@ -69,6 +70,19 @@ class FakeRuntime {
   }
 
   private install(cwd: string, path: string): SessionSnapshot {
+    const initialSubagent = this.controls.initialSubagentStatus ? [{
+      id: `persisted-subagent-${this.ordinal}`,
+      runId: `persisted-subagent-${this.ordinal}`,
+      index: 0,
+      agent: "worker",
+      status: this.controls.initialSubagentStatus,
+      background: true,
+      controlReady: true,
+      toolCount: 0,
+      tokens: 0,
+      durationMs: 0,
+      updatedAt: Date.now(),
+    } as const] : [];
     this.snapshotValue = {
       session: {
         id: `session-${this.ordinal}`,
@@ -81,7 +95,7 @@ class FakeRuntime {
       },
       messages: [],
       tools: [],
-      subagents: [],
+      subagents: initialSubagent,
       project: { cwd, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
       thinkingLevel: "off",
       responseMetricsHistory: [],
@@ -139,6 +153,25 @@ class FakeRuntime {
     };
     this.snapshotValue = { ...this.snapshotValue, runtimeInspection: inspection };
     this.emit({ type: "runtime_inspection_updated", inspection });
+  }
+
+  emitSubagentState(status: "pending" | "running" | "completed" | "failed" | "stopped"): void {
+    if (!this.snapshotValue) throw new Error("No active session");
+    const subagent = {
+      id: `subagent-${this.ordinal}`,
+      runId: `subagent-${this.ordinal}`,
+      index: 0,
+      agent: "worker",
+      status,
+      background: true,
+      controlReady: status === "pending" || status === "running" ? true : undefined,
+      toolCount: 0,
+      tokens: 0,
+      durationMs: 0,
+      updatedAt: Date.now(),
+    } as const;
+    this.snapshotValue = { ...this.snapshotValue, subagents: [subagent] };
+    this.emit({ type: "subagents_updated", subagents: [subagent] });
   }
 
   async dispose(): Promise<void> {
@@ -430,6 +463,85 @@ test("a background Memory job is retained beyond the idle runtime limit", async 
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(runtimes[1].disposed, true, "the completed background runtime may return to normal LRU retirement");
+  await server.dispose();
+});
+
+test("a background subagent is retained beyond the idle runtime limit", async () => {
+  const runtimes: FakeRuntime[] = [];
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options);
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  await server.handle({
+    id: "subagent-session",
+    command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/subagent.jsonl" },
+  });
+  runtimes[1].emitSubagentState("running");
+
+  for (let index = 0; index < 10; index += 1) {
+    assert.equal((await server.handle({
+      id: `open-subagent-${index}`,
+      command: { type: "open_session", cwd: "/project", sessionPath: `/sessions/subagent-other-${index}.jsonl` },
+    })).ok, true);
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimes[1].disposed, false, "a live background subagent must not be evicted as an idle Agent runtime");
+  assert.equal(
+    runtimes.filter((runtime) => !runtime.disposed).length,
+    8,
+    "control, one background subagent runtime, and six ordinary idle session runtimes should remain",
+  );
+
+  runtimes[1].emitSubagentState("completed");
+  await server.handle({
+    id: "open-after-subagent",
+    command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/after-subagent.jsonl" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimes[1].disposed, true, "a completed background subagent runtime may return to normal LRU retirement");
+  await server.dispose();
+});
+
+test("a stale persisted running subagent does not pin a restored runtime", async () => {
+  const runtimes: FakeRuntime[] = [];
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const ordinal = runtimes.length;
+        const runtime = new FakeRuntime(ordinal, options, ordinal === 1 ? { initialSubagentStatus: "running" } : undefined);
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  await server.handle({
+    id: "stale-subagent-session",
+    command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/stale-subagent.jsonl" },
+  });
+  for (let index = 0; index < 10; index += 1) {
+    assert.equal((await server.handle({
+      id: `open-after-stale-${index}`,
+      command: { type: "open_session", cwd: "/project", sessionPath: `/sessions/stale-other-${index}.jsonl` },
+    })).ok, true);
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimes[1].disposed, true, "persisted liveness from an earlier process must not pin a runtime");
+  assert.equal(runtimes.filter((runtime) => !runtime.disposed).length, 7);
   await server.dispose();
 });
 
