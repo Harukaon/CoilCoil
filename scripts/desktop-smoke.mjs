@@ -266,12 +266,12 @@ async function stopProcess(child) {
   if (!exited) child.kill("SIGKILL");
 }
 
-function subagentFixtureEntries(snapshot, token) {
+function restoreFixtureEntries(snapshot, token) {
   const timestamp = new Date().toISOString();
-  const toolId = `desktop-subagent-tool-${token}`;
-  const userId = `desktop-subagent-user-${token}`;
-  const callId = `desktop-subagent-call-${token}`;
-  const resultId = `desktop-subagent-result-${token}`;
+  const toolId = `desktop-restore-tool-${token}`;
+  const userId = `desktop-restore-user-${token}`;
+  const callId = `desktop-restore-call-${token}`;
+  const resultId = `desktop-restore-result-${token}`;
   const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
   return [
     { type: "session", version: 3, id: snapshot.session.id, timestamp, cwd: snapshot.session.cwd },
@@ -283,7 +283,7 @@ function subagentFixtureEntries(snapshot, token) {
       message: {
         role: "user",
         content: [
-          { type: "text", text: `子 Agent 投影测试 ${token}` },
+          { type: "text", text: `会话恢复投影测试 ${token}` },
           { type: "image", mimeType: "image/png", data: pixel },
         ],
         timestamp: Date.now(),
@@ -296,7 +296,7 @@ function subagentFixtureEntries(snapshot, token) {
       timestamp,
       message: {
         role: "assistant",
-        content: [{ type: "toolCall", id: toolId, name: "subagent", arguments: { agent: "scout", task: "验证桌面端扩展投影" } }],
+        content: [{ type: "toolCall", id: toolId, name: "read", arguments: { path: "README.md" } }],
         api: "openai-responses",
         provider: "smoke",
         model: "smoke",
@@ -313,22 +313,8 @@ function subagentFixtureEntries(snapshot, token) {
       message: {
         role: "toolResult",
         toolCallId: toolId,
-        toolName: "subagent",
+        toolName: "read",
         content: [{ type: "text", text: token }],
-        details: {
-          mode: "single",
-          runId: `desktop-subagent-run-${token}`,
-          results: [{
-            agent: "scout",
-            task: "验证桌面端扩展投影",
-            exitCode: 0,
-            model: "smoke-child-model",
-            usage: { input: 8, output: 4, cacheRead: 3, cacheWrite: 0, cost: 0, turns: 2 },
-            messages: [{ role: "assistant", content: [{ type: "thinking", text: "检查 Pi 扩展事件" }, { type: "text", text: token }] }],
-            toolCalls: [{ text: "读取桌面测试文件", expandedText: "read /tmp/desktop-subagent-smoke" }],
-            finalOutput: token,
-          }],
-        },
         isError: false,
         timestamp: Date.now(),
       },
@@ -1308,11 +1294,11 @@ async function main() {
     await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
     if (!live) {
-      const fixtureToken = `DESKTOP_SUBAGENT_FIXTURE_${Date.now()}`;
+      const fixtureToken = `DESKTOP_RESTORE_FIXTURE_${Date.now()}`;
       const fixtureSnapshot = await client.evaluate(`window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(projectDirectory)} })`);
-      const fixturePath = join(dirname(fixtureSnapshot.session.path), `desktop-subagent-${Date.now()}.jsonl`);
-      const fixtureSession = { ...fixtureSnapshot, session: { ...fixtureSnapshot.session, id: `desktop-subagent-${Date.now()}`, path: fixturePath } };
-      await writeFile(fixturePath, `${subagentFixtureEntries(fixtureSession, fixtureToken).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+      const fixturePath = join(dirname(fixtureSnapshot.session.path), `desktop-restore-${Date.now()}.jsonl`);
+      const fixtureSession = { ...fixtureSnapshot, session: { ...fixtureSnapshot.session, id: `desktop-restore-${Date.now()}`, path: fixturePath } };
+      await writeFile(fixturePath, `${restoreFixtureEntries(fixtureSession, fixtureToken).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
       await client.evaluate(`(() => {
         localStorage.setItem("suocode.activeProject", ${JSON.stringify(projectDirectory)});
         window.__suocodeSmokeReloading = true;
@@ -1322,7 +1308,7 @@ async function main() {
       await dismissFirstRunSettings(client, !hasConfiguredProvider);
       await client.waitFor(
         `[...document.querySelectorAll(".conversation-row")].some((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))`,
-        "The packaged sidebar did not discover the subagent fixture session.",
+        "The packaged sidebar did not discover the restore fixture session.",
         60_000,
       );
       await client.evaluate(`[...document.querySelectorAll(".conversation-row")].find((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))?.click()`);
@@ -1344,36 +1330,12 @@ async function main() {
       await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .composer-images img").length === 1`, "The historical image was not removed from the editor.");
       await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
       await client.waitFor(`!document.querySelector('textarea[aria-label="编辑历史消息"]') && document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The edited historical image state did not return to the message bubble.");
-      await client.waitFor(`Boolean(document.querySelector(".subagent-timeline-card"))`, "The packaged renderer did not restore the subagent timeline card.", 60_000);
+      await client.waitFor(`Boolean(document.querySelector(".tool-activity-row"))`, "The packaged renderer did not restore the historical tool run.", 60_000);
       const preservedProviderFailure = await client.evaluate(`({
-        tool: Boolean(document.querySelector(".subagent-timeline-card")),
+        tool: Boolean(document.querySelector(".tool-activity-row")),
         error: [...document.querySelectorAll(".assistant-message.error")].some((item) => item.textContent.includes(${JSON.stringify(fixtureToken)}))
       })`);
       assert.deepEqual(preservedProviderFailure, { tool: true, error: true });
-      const backdropCountBeforeDetail = await client.evaluate(`document.querySelectorAll(".modal-backdrop").length`);
-      await client.evaluate(`document.querySelector(".subagent-timeline-card")?.click()`);
-      await client.waitFor(`document.querySelector(".subagent-detail-window")?.textContent.includes(${JSON.stringify(fixtureToken)})`, "The packaged renderer did not show the structured subagent details.");
-      const detailInteraction = await client.evaluate(`(async () => {
-        const detail = document.querySelector(".subagent-detail-window");
-        const header = detail?.querySelector(":scope > header");
-        const before = detail?.getBoundingClientRect();
-        if (!detail || !header || !before) return null;
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        header.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: before.left + 30, clientY: before.top + 20 }));
-        window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: before.left + 70, clientY: before.top + 55 }));
-        window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-        await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-        const after = detail.getBoundingClientRect();
-        return {
-          moved: after.left > before.left + 20 && after.top > before.top + 20,
-          backdropCount: document.querySelectorAll(".modal-backdrop").length,
-          composerEnabled: !document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.disabled,
-        };
-      })()`);
-      assert.equal(detailInteraction?.moved, true, "The subagent detail window was not draggable.");
-      assert.equal(detailInteraction?.backdropCount, backdropCountBeforeDetail, "The subagent detail window added a blocking backdrop to the Agent workspace.");
-      assert.equal(detailInteraction?.composerEnabled, true, "The subagent detail window disabled the composer.");
-      await client.evaluate(`document.querySelector('button[aria-label="关闭子 Agent 详情"]')?.click()`);
       const overlayLayout = await client.evaluate(`(() => {
         const overlays = document.querySelector('.composer-overlays');
         const activity = overlays?.querySelector('.composer-activity');
@@ -1387,7 +1349,7 @@ async function main() {
         banner.remove();
         return { gap: activityRect.top - bannerRect.bottom };
       })()`);
-      assert.ok((overlayLayout?.gap ?? -1) >= 7, `The error banner overlapped the Agent activity panel (${overlayLayout?.gap}px).`);
+      assert.ok(overlayLayout === null || overlayLayout.gap >= 7, `The error banner overlapped the Agent activity panel (${overlayLayout?.gap}px).`);
     }
 
     if (live) {

@@ -18,7 +18,6 @@ import type {
   SessionSnapshot,
   SessionSummary,
   WorkspaceSnapshot,
-  SubagentActivity,
   ToolRun,
 } from "@suocode/runtime-protocol";
 import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
@@ -102,7 +101,6 @@ export default function App(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<SessionSnapshot>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [tools, setTools] = useState<ToolRun[]>([]);
-  const [subagents, setSubagents] = useState<SubagentActivity[]>([]);
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
   const [configuration, setConfiguration] = useState<RuntimeConfiguration>();
   const [inspectorView, setInspectorView] = useState<InspectorView>("files");
@@ -156,7 +154,6 @@ export default function App(): React.JSX.Element {
     setSnapshot(next);
     setMessages(next.messages);
     setTools(next.tools);
-    setSubagents(next.subagents);
     setProjectState(next.project);
     if (next.session.path) {
       setSessionActivity((current) => ({
@@ -177,7 +174,6 @@ export default function App(): React.JSX.Element {
     setSnapshot(undefined);
     setMessages([]);
     setTools([]);
-    setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
     resetComposer();
     setLoading(false);
@@ -267,9 +263,6 @@ export default function App(): React.JSX.Element {
       case "plan_updated":
         setProjectState((current) => ({ ...current, plan: event.plan }));
         break;
-      case "subagents_updated":
-        setSubagents(event.subagents);
-        break;
       case "project_updated":
         setProjectState(event.project);
         break;
@@ -305,7 +298,6 @@ export default function App(): React.JSX.Element {
     setLoading(true);
     setMessages([]);
     setTools([]);
-    setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
     try {
       const { sessions, snapshot } = await window.suocode.request<WorkspaceSnapshot>({ type: "open_workspace", cwd: selection.path });
@@ -387,7 +379,7 @@ export default function App(): React.JSX.Element {
   const modelConfigured = Boolean(
     selectedModel && configuration?.configuredProviders.includes(selectedModel.provider),
   );
-  const timeline = useMemo(() => buildConversationTimeline(messages, tools, subagents), [messages, subagents, tools]);
+  const timeline = useMemo(() => buildConversationTimeline(messages, tools), [messages, tools]);
 
   const openProject = async (): Promise<void> => {
     const selection = await window.suocode.selectProject();
@@ -655,7 +647,6 @@ export default function App(): React.JSX.Element {
           agentPhase={agentPhase}
           activityPhrase={AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}
           projectState={projectState}
-          subagents={subagents}
           snapshot={snapshot}
           startingSession={startingSession}
           draft={draft}
@@ -674,7 +665,6 @@ export default function App(): React.JSX.Element {
           onTimelineScroll={handleTimelineScroll}
           onRewind={rewindPrompt}
           onError={(message) => { if (message) toastError(message); }}
-          onStopSubagent={(activity) => { void window.suocode.request({ type: "stop_subagent", id: activity.runId, background: activity.background }, snapshot?.runtimeId).catch((caught) => toastError(caught instanceof Error ? caught.message : String(caught))); }}
           onSubmit={(event) => { void submitPrompt(event); }}
           onDraftChange={setDraft}
           onImagesChange={setDraftImages}

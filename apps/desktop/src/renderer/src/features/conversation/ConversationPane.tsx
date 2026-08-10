@@ -14,7 +14,6 @@ import type {
   ProjectSnapshot,
   RuntimeConfiguration,
   SessionSnapshot,
-  SubagentActivity,
 } from "@suocode/runtime-protocol";
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
 import { ActivityPanel } from "../activity/ActivityPanel";
@@ -53,7 +52,6 @@ export function ConversationPane({
   agentPhase,
   activityPhrase,
   projectState,
-  subagents,
   snapshot,
   startingSession,
   draft,
@@ -72,7 +70,6 @@ export function ConversationPane({
   onTimelineScroll,
   onRewind,
   onError,
-  onStopSubagent,
   onSubmit,
   onDraftChange,
   onImagesChange,
@@ -99,7 +96,6 @@ export function ConversationPane({
   agentPhase?: "思考" | "回复" | "工具";
   activityPhrase: string;
   projectState: ProjectSnapshot;
-  subagents: SubagentActivity[];
   snapshot?: SessionSnapshot;
   startingSession: boolean;
   draft: string;
@@ -118,7 +114,6 @@ export function ConversationPane({
   onTimelineScroll: () => void;
   onRewind: (message: ChatMessage, text: string, images: PromptImage[]) => Promise<void>;
   onError: (message?: string) => void;
-  onStopSubagent: (activity: SubagentActivity) => void;
   onSubmit: (event: FormEvent) => void;
   onDraftChange: (value: string) => void;
   onImagesChange: React.Dispatch<React.SetStateAction<PromptImage[]>>;
@@ -212,7 +207,6 @@ export function ConversationPane({
                   items={item.items}
                   running={running && index === timeline.length - 1}
                   modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")}
-                  onStopSubagent={onStopSubagent}
                 />
               ))}
               {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}
@@ -235,11 +229,9 @@ export function ConversationPane({
           <div className="composer-overlays">
             <ActivityPanel
               todo={projectState.plan}
-              subagents={subagents}
               commands={slashMenu.slashActive ? slashMenu.filteredItems : undefined}
               commandIndex={slashMenu.itemIndex}
               onSelectCommand={slashMenu.selectItem}
-              onStopSubagent={onStopSubagent}
             />
           </div>
           <ConversationComposer

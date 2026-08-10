@@ -11,18 +11,15 @@ import type {
   PromptImage,
   RuntimeConfiguration,
   SessionSnapshot,
-  SubagentActivity,
   ToolRun,
 } from "@suocode/runtime-protocol";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { ConfirmDialog } from "../../ui/dialog";
-import { SubagentTimelineCard } from "./SubagentTimelineCard";
 
 export type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
-  | { kind: "tools"; order: number; tools: ToolRun[] }
-  | { kind: "subagents"; order: number; tool: ToolRun; subagents: SubagentActivity[] };
+  | { kind: "tools"; order: number; tools: ToolRun[] };
 
 export type ConversationTimelineItem =
   | { kind: "user"; order: number; message: ChatMessage }
@@ -352,7 +349,7 @@ function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX
   );
 }
 
-export function AgentTurnView({ items, modelName, running, onStopSubagent }: { items: TimelineItem[]; modelName: string; running: boolean; onStopSubagent: (activity: SubagentActivity) => void }): React.JSX.Element {
+export function AgentTurnView({ items, modelName, running }: { items: TimelineItem[]; modelName: string; running: boolean }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -386,11 +383,6 @@ export function AgentTurnView({ items, modelName, running, onStopSubagent }: { i
     rendered.push(<ActivityGroupView key={`activity-${entries[0].id}`} entries={entries} />);
   };
   for (const item of items) {
-    if (item.kind === "subagents") {
-      flushActivity();
-      rendered.push(<SubagentTimelineCard key={`subagents-${item.tool.id}`} tool={item.tool} activities={item.subagents} onStop={onStopSubagent} />);
-      continue;
-    }
     if (item.kind === "tools") {
       activity.push(...item.tools.map((tool) => ({ kind: "tool" as const, id: tool.id, tool })));
       continue;
