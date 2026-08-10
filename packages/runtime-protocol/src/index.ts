@@ -458,6 +458,26 @@ export interface SubagentMessage {
   thinking?: string;
 }
 
+export type SubagentTimelineEntry =
+  | {
+      id: string;
+      order: number;
+      kind: "message";
+      role: string;
+      text: string;
+      thinking?: string;
+    }
+  | {
+      id: string;
+      order: number;
+      kind: "tool";
+      tool: string;
+      args: string;
+      expandedArgs?: string;
+      output?: string;
+      status: "running" | "succeeded" | "failed";
+    };
+
 export interface SubagentActivity {
   id: string;
   runId: string;
@@ -476,6 +496,8 @@ export interface SubagentActivity {
   recentOutput?: string[];
   messages?: SubagentMessage[];
   toolCalls?: SubagentToolCall[];
+  /** Ordered child-session events used by the read-only miniature conversation UI. */
+  timeline?: SubagentTimelineEntry[];
   finalOutput?: string;
   transcriptPath?: string;
   sessionFile?: string;

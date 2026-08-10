@@ -14,6 +14,7 @@ import type {
   ProjectSnapshot,
   RuntimeConfiguration,
   SessionSnapshot,
+  SubagentActivity,
 } from "@suocode/runtime-protocol";
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
 import { ActivityPanel } from "../activity/ActivityPanel";
@@ -22,6 +23,7 @@ import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
+import { SubagentCard, SubagentDetailDialog } from "../subagents/SubagentActivity";
 
 function truncateTitle(value: string, maximum = 10): string {
   const characters = Array.from(value);
@@ -52,6 +54,7 @@ export function ConversationPane({
   agentPhase,
   activityPhrase,
   projectState,
+  subagents,
   snapshot,
   startingSession,
   draft,
@@ -96,6 +99,7 @@ export function ConversationPane({
   agentPhase?: "思考" | "回复" | "工具";
   activityPhrase: string;
   projectState: ProjectSnapshot;
+  subagents: SubagentActivity[];
   snapshot?: SessionSnapshot;
   startingSession: boolean;
   draft: string;
@@ -130,6 +134,8 @@ export function ConversationPane({
   const { chatContentWidth, beginChatWidthResize } = useChatContentWidth();
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [selectedSubagentId, setSelectedSubagentId] = useState<string>();
+  const selectedSubagent = subagents.find((activity) => activity.id === selectedSubagentId);
   const slashMenu = useSlashMenu({
     draft,
     inputRef,
@@ -141,6 +147,7 @@ export function ConversationPane({
 
   useEffect(() => {
     setEditingMessageId(undefined);
+    setSelectedSubagentId(undefined);
   }, [activeConversation?.id, pendingProjectPath]);
 
   const updateScrollDownVisibility = useCallback((): void => {
@@ -207,6 +214,7 @@ export function ConversationPane({
                   items={item.items}
                   running={running && index === timeline.length - 1}
                   modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")}
+                  renderSubagent={(activity) => <SubagentCard activity={activity} onOpen={(selected) => setSelectedSubagentId(selected.id)} />}
                 />
               ))}
               {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}
@@ -229,9 +237,11 @@ export function ConversationPane({
           <div className="composer-overlays">
             <ActivityPanel
               todo={projectState.plan}
+              subagents={subagents}
               commands={slashMenu.slashActive ? slashMenu.filteredItems : undefined}
               commandIndex={slashMenu.itemIndex}
               onSelectCommand={slashMenu.selectItem}
+              onOpenSubagent={(activity) => setSelectedSubagentId(activity.id)}
             />
           </div>
           <ConversationComposer
@@ -264,6 +274,7 @@ export function ConversationPane({
         </div>
         <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} />
       </div>
+      <SubagentDetailDialog activity={selectedSubagent} onClose={() => setSelectedSubagentId(undefined)} />
     </section>
   );
 }

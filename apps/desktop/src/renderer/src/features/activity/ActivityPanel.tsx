@@ -10,10 +10,12 @@ import {
   Terminal,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { TodoItem } from "@suocode/runtime-protocol";
+import type { SubagentActivity, TodoItem } from "@suocode/runtime-protocol";
 import type { SlashMenuItem } from "../composer/useSlashSkills";
+import { SubagentCard } from "../subagents/SubagentActivity";
 
-type ActivityTab = "todo" | "commands";
+type PermanentTab = "todo" | "subagents";
+type ActivityTab = PermanentTab | "commands";
 
 function commandIcon(item: SlashMenuItem): React.JSX.Element {
   if (item.kind === "skill") return <Sparkles size={14} />;
@@ -24,18 +26,25 @@ function commandIcon(item: SlashMenuItem): React.JSX.Element {
 
 export function ActivityPanel({
   todo,
+  subagents,
   commands,
   commandIndex = 0,
   onSelectCommand,
+  onOpenSubagent,
 }: {
   todo: TodoItem[];
+  subagents: SubagentActivity[];
   commands?: SlashMenuItem[];
   commandIndex?: number;
   onSelectCommand?: (item: SlashMenuItem) => void;
+  onOpenSubagent: (activity: SubagentActivity) => void;
 }): React.JSX.Element | null {
   const commandsActive = commands !== undefined;
   const commandItems = commands ?? [];
-  const permanentTabs = useMemo<ActivityTab[]>(() => (todo.length ? ["todo" as const] : []), [todo.length]);
+  const permanentTabs = useMemo<PermanentTab[]>(() => [
+    ...(todo.length ? ["todo" as const] : []),
+    ...(subagents.length ? ["subagents" as const] : []),
+  ], [subagents.length, todo.length]);
   const availableTabs = useMemo<ActivityTab[]>(() => [
     ...permanentTabs,
     ...(commandsActive ? ["commands" as const] : []),
@@ -43,11 +52,11 @@ export function ActivityPanel({
 
   const [tab, setTab] = useState<ActivityTab>(availableTabs[0] ?? "todo");
   const [expanded, setExpanded] = useState(true);
-  const previousPermanentTab = useRef<ActivityTab>(permanentTabs[0] ?? "todo");
+  const previousPermanentTab = useRef<PermanentTab>(permanentTabs[0] ?? "todo");
   const activeCommandRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (tab === "todo") previousPermanentTab.current = tab;
+    if (tab === "todo" || tab === "subagents") previousPermanentTab.current = tab;
   }, [tab]);
 
   useEffect(() => {
@@ -91,10 +100,15 @@ export function ActivityPanel({
   if (!availableTabs.length) return null;
 
   const completed = todo.filter((item) => item.status === "completed").length;
+  const runningAgents = subagents.filter((item) => item.status === "pending" || item.status === "running").length;
   const showTabs = availableTabs.length > 1;
-  const title = tab === "commands" ? "命令" : "Todo";
+  const title = tab === "commands" ? "命令" : tab === "subagents" ? "代理" : "Todo";
   const toggleExpanded = (): void => setExpanded((value) => !value);
-  const toggleLabel = tab === "commands" ? `${commandItems.length}` : `${completed}/${todo.length}`;
+  const toggleLabel = tab === "commands"
+    ? `${commandItems.length}`
+    : tab === "subagents"
+      ? `${runningAgents}/${subagents.length}`
+      : `${completed}/${todo.length}`;
 
   return (
     <section className={`composer-activity ${expanded ? "expanded" : "collapsed"}`} aria-label="Agent 活动">
@@ -119,6 +133,9 @@ export function ActivityPanel({
           <div className="composer-activity-tabs" role="tablist" aria-label="活动类型">
             {permanentTabs.includes("todo") ? (
               <button className={tab === "todo" ? "active" : ""} type="button" role="tab" aria-selected={tab === "todo"} onClick={() => { setTab("todo"); setExpanded(true); }}>Todo</button>
+            ) : null}
+            {permanentTabs.includes("subagents") ? (
+              <button className={tab === "subagents" ? "active" : ""} type="button" role="tab" aria-selected={tab === "subagents"} onClick={() => { setTab("subagents"); setExpanded(true); }}>代理 <small>{runningAgents || subagents.length}</small></button>
             ) : null}
             {commandsActive ? (
               <button className={tab === "commands" ? "active" : ""} type="button" role="tab" aria-selected={tab === "commands"} onClick={() => { setTab("commands"); setExpanded(true); }}>命令 <small>{commandItems.length}</small></button>
@@ -157,12 +174,18 @@ export function ActivityPanel({
           ) : (
             <div className="composer-command-empty">没有匹配的命令。</div>
           )
-        ) : (
+        ) : tab === "todo" ? (
           <ol className="composer-todo-list">
             {todo.map((item, index) => <li className={item.status} key={`${index}-${item.text}`}>
               {item.status === "completed" ? <CheckCircle2 size={14} /> : item.status === "in_progress" ? <CircleDot size={14} /> : <Circle size={14} />}
               <span>{item.text}</span>
             </li>)}
+          </ol>
+        ) : (
+          <ol className="composer-subagent-list">
+            {subagents.map((activity) => (
+              <li key={activity.id}><SubagentCard activity={activity} variant="panel" onOpen={onOpenSubagent} /></li>
+            ))}
           </ol>
         )}
       </div>

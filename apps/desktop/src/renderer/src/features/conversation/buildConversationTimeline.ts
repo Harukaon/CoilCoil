@@ -1,13 +1,34 @@
-import type { ChatMessage, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
 import type { ConversationTimelineItem, TimelineItem } from "./ConversationTimeline";
 
-export function buildConversationTimeline(messages: ChatMessage[], tools: ToolRun[]): ConversationTimelineItem[] {
-  const ordered = [
+export function buildConversationTimeline(messages: ChatMessage[], tools: ToolRun[], subagents: SubagentActivity[] = []): ConversationTimelineItem[] {
+  const subagentsByParent = new Map<string, SubagentActivity[]>();
+  for (const activity of subagents) {
+    const parent = activity.parentToolId ?? activity.runId;
+    const group = subagentsByParent.get(parent) ?? [];
+    group.push(activity);
+    subagentsByParent.set(parent, group);
+  }
+  type OrderedItem =
+    | { kind: "message"; order: number; message: ChatMessage }
+    | { kind: "tool"; order: number; tool: ToolRun }
+    | { kind: "subagent"; order: number; activity: SubagentActivity };
+  const ordered: OrderedItem[] = [
     ...messages
       .filter((message) => message.role !== "tool" && (message.text || message.thinking || message.images?.length))
       .map((message) => ({ kind: "message" as const, order: message.order, message })),
-    ...tools.map((tool) => ({ kind: "tool" as const, order: tool.order, tool })),
-  ].sort((left, right) => left.order - right.order);
+  ];
+  for (const tool of tools) {
+    const activities = tool.name === "subagent" ? subagentsByParent.get(tool.id) ?? [] : [];
+    if (!activities.length) {
+      ordered.push({ kind: "tool", order: tool.order, tool });
+      continue;
+    }
+    activities
+      .sort((left, right) => left.index - right.index || left.updatedAt - right.updatedAt)
+      .forEach((activity, index) => ordered.push({ kind: "subagent", order: tool.order + index / 1000, activity }));
+  }
+  ordered.sort((left, right) => left.order - right.order);
 
   const grouped: TimelineItem[] = [];
   for (const item of ordered) {

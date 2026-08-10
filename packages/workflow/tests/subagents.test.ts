@@ -347,6 +347,7 @@ function makeRun(overrides: Partial<ChildRun> = {}): ChildRun {
     recentOutput: [],
     messages: [],
     toolCalls: [],
+    timeline: [],
     toolCount: 0,
     turnCount: 0,
     tokens: 0,
@@ -354,6 +355,63 @@ function makeRun(overrides: Partial<ChildRun> = {}): ChildRun {
     ...overrides,
   };
 }
+
+test("subagent activity preserves child messages and tool results in execution order", () => {
+  const registry = new SubagentRegistry();
+  const run = makeRun();
+  registry.add(run);
+
+  registry.recordTimelineMessage(run, { role: "assistant", text: "我先检查项目。", thinking: "分析目录结构" });
+  registry.recordTimelineToolStart(run, {
+    id: "tool-1",
+    tool: "read",
+    args: "读取 package.json",
+    expandedArgs: '{"path":"package.json"}',
+  });
+  registry.recordTimelineToolEnd(run, { id: "tool-1", output: "{\"name\":\"demo\"}", failed: false });
+  registry.recordTimelineMessage(run, { role: "assistant", text: "已经找到入口。" });
+
+  assert.deepEqual(registry.toActivity(run).timeline, [
+    {
+      id: "message-sa-test-run-0",
+      order: 0,
+      kind: "message",
+      role: "assistant",
+      text: "我先检查项目。",
+      thinking: "分析目录结构",
+    },
+    {
+      id: "tool-1",
+      order: 1,
+      kind: "tool",
+      tool: "read",
+      args: "读取 package.json",
+      expandedArgs: '{"path":"package.json"}',
+      output: "{\"name\":\"demo\"}",
+      status: "succeeded",
+    },
+    {
+      id: "message-sa-test-run-2",
+      order: 2,
+      kind: "message",
+      role: "assistant",
+      text: "已经找到入口。",
+      thinking: undefined,
+    },
+  ]);
+});
+
+test("subagent timeline retains reasoning-only turns before a tool call", () => {
+  const registry = new SubagentRegistry();
+  const run = makeRun();
+  registry.recordTimelineMessage(run, { role: "assistant", text: "", thinking: "先定位入口文件" });
+  registry.recordTimelineToolStart(run, { id: "tool-reasoning", tool: "grep", args: "搜索 main" });
+
+  assert.deepEqual(registry.toActivity(run).timeline?.map((entry) => entry.kind), ["message", "tool"]);
+  const reasoning = registry.toActivity(run).timeline?.[0];
+  assert.equal(reasoning?.kind, "message");
+  if (reasoning?.kind === "message") assert.equal(reasoning.thinking, "先定位入口文件");
+});
 
 test("resume preserves the tool allowlist captured by the original profile", () => {
   const run = makeRun({ tools: ["read", "grep", "ls"] });

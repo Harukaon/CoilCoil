@@ -72,6 +72,7 @@ import type {
   SkillEntry,
   SkillSource,
   SubagentActivity,
+  SubagentTimelineEntry,
   TerminalRun,
   ThinkingLevel,
   TokenUsage,
@@ -1165,6 +1166,42 @@ function subagentActivitiesFromPayload(raw: unknown): SubagentActivity[] {
     const toolCalls = Array.isArray(entry.toolCalls)
       ? entry.toolCalls.flatMap((item) => isRecord(item) && stringValue(item.text) ? [{ text: stringValue(item.text), expandedText: stringValue(item.expandedText) || undefined }] : [])
       : undefined;
+    let timeline: SubagentTimelineEntry[] | undefined;
+    if (Array.isArray(entry.timeline)) {
+      const projected: SubagentTimelineEntry[] = [];
+      entry.timeline.forEach((item, fallbackOrder) => {
+        if (!isRecord(item)) return;
+        const kind = stringValue(item.kind);
+        const id = stringValue(item.id);
+        const order = typeof item.order === "number" && Number.isFinite(item.order) ? item.order : fallbackOrder;
+        if (!id || (kind !== "message" && kind !== "tool")) return;
+        if (kind === "message") {
+          const text = stringValue(item.text);
+          if (!text && !stringValue(item.thinking)) return;
+          projected.push({
+            id,
+            order,
+            kind: "message",
+            role: stringValue(item.role) || "assistant",
+            text,
+            thinking: stringValue(item.thinking) || undefined,
+          });
+          return;
+        }
+        const status: Extract<SubagentTimelineEntry, { kind: "tool" }>["status"] = item.status === "running" || item.status === "failed" ? item.status : "succeeded";
+        projected.push({
+          id,
+          order,
+          kind: "tool",
+          tool: stringValue(item.tool) || "tool",
+          args: stringValue(item.args),
+          expandedArgs: stringValue(item.expandedArgs) || undefined,
+          output: stringValue(item.output) || undefined,
+          status,
+        });
+      });
+      timeline = projected.length ? projected : undefined;
+    }
     const finalOutput = stringValue(entry.finalOutput);
     const activity: SubagentActivity = {
       id: stringValue(entry.id) || runId,
@@ -1184,6 +1221,7 @@ function subagentActivitiesFromPayload(raw: unknown): SubagentActivity[] {
       recentOutput: recentOutput?.length ? recentOutput : undefined,
       messages: messages?.length ? messages : undefined,
       toolCalls: toolCalls?.length ? toolCalls : undefined,
+      timeline: timeline?.length ? timeline : undefined,
       finalOutput: finalOutput ? clampText(finalOutput, 48_000) : undefined,
       sessionFile: stringValue(entry.sessionFile) || undefined,
       worktreePath: stringValue(entry.worktreePath) || undefined,
@@ -3688,6 +3726,7 @@ export class SuoCodeRuntime {
         recentOutput: activity.recentOutput ?? existing.recentOutput,
         messages: activity.messages ?? existing.messages,
         toolCalls: activity.toolCalls ?? existing.toolCalls,
+        timeline: activity.timeline ?? existing.timeline,
         finalOutput: activity.finalOutput ?? existing.finalOutput,
         transcriptPath: activity.transcriptPath ?? existing.transcriptPath,
         sessionFile: activity.sessionFile ?? existing.sessionFile,

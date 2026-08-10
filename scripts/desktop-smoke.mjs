@@ -1438,6 +1438,41 @@ async function main() {
         const subagentEvents = await client.evaluate(`window.__suocodeSmokeEvents?.filter((event) => event.type === "subagents_updated" || event.toolName === "subagent") ?? []`);
         throw new Error(`The completed subagent activity did not contain its final output.\nProjected events:\n${JSON.stringify(subagentEvents, null, 2)}\nPersisted session tail:\n${latestSession.split("\n").slice(-8).join("\n")}`);
       }
+      await client.waitFor(
+        `Boolean(document.querySelector(".subagent-card.timeline.completed"))`,
+        "The completed subagent did not render as an inline conversation card.",
+      );
+      assert.equal(await client.evaluate(`(() => {
+        const card = document.querySelector(".subagent-card.timeline.completed");
+        if (!(card instanceof HTMLButtonElement)) return false;
+        card.click();
+        return true;
+      })()`), true, "The inline subagent card was not clickable.");
+      await client.waitFor(
+        `Boolean(document.querySelector(".subagent-dialog"))`,
+        "Clicking the inline subagent card did not open the read-only detail dialog.",
+      );
+      assert.equal(await client.evaluate(`(() => {
+        const dialog = document.querySelector(".subagent-dialog");
+        const text = dialog?.textContent ?? "";
+        return text.includes("explore") && text.includes(${JSON.stringify(subagentToken)});
+      })()`), true, "The subagent detail dialog did not render the child transcript.");
+      await client.evaluate(`document.querySelector('.subagent-dialog header button')?.click()`);
+      await client.waitFor(
+        `!document.querySelector(".subagent-dialog")`,
+        "The subagent detail dialog did not close.",
+      );
+      assert.equal(await client.evaluate(`(() => {
+        const tab = [...document.querySelectorAll(".composer-activity-tabs button")]
+          .find((button) => button.textContent?.trim().startsWith("代理"));
+        if (!(tab instanceof HTMLButtonElement)) return false;
+        tab.click();
+        return true;
+      })()`), true, "The composer activity panel did not expose its subagent tab.");
+      await client.waitFor(
+        `Boolean(document.querySelector(".composer-subagent-list .subagent-card.panel"))`,
+        "The composer activity panel did not render the subagent card list.",
+      );
 
       const stopEventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
       assert.equal(await fillAndSubmitComposer(

@@ -6,6 +6,7 @@ import type {
   SubagentRunStatus,
   SubagentToolCallEntry,
   SubagentToolDetails,
+  SubagentTimelineEntry,
 } from "./types.ts";
 import { SUBAGENT_RUN_STATUSES } from "./types.ts";
 
@@ -13,6 +14,7 @@ const MAX_RECENT_TOOLS = 12;
 const MAX_RECENT_OUTPUT = 24;
 const MAX_MESSAGES = 40;
 const MAX_TOOL_CALLS = 80;
+const MAX_TIMELINE_ENTRIES = 120;
 const MAX_OUTPUT_CHARS = 12_000;
 const MAX_FINAL_OUTPUT_CHARS = 48_000;
 
@@ -40,6 +42,7 @@ export interface ChildRun {
   recentOutput: string[];
   messages: SubagentMessageEntry[];
   toolCalls: SubagentToolCallEntry[];
+  timeline: SubagentTimelineEntry[];
   toolCount: number;
   turnCount: number;
   tokens: number;
@@ -140,6 +143,7 @@ export class SubagentRegistry {
       recentOutput: run.recentOutput.length ? [...run.recentOutput] : undefined,
       messages: run.messages.length ? [...run.messages] : undefined,
       toolCalls: run.toolCalls.length ? [...run.toolCalls] : undefined,
+      timeline: run.timeline.length ? [...run.timeline] : undefined,
       finalOutput: run.finalOutput ? clampText(run.finalOutput, MAX_FINAL_OUTPUT_CHARS) : undefined,
       sessionFile: run.sessionFile,
       worktreePath: run.worktreePath,
@@ -198,6 +202,44 @@ export class SubagentRegistry {
       expandedText: call.expandedText ? clampText(call.expandedText, 16_000) : undefined,
     });
     if (run.toolCalls.length > MAX_TOOL_CALLS) run.toolCalls.splice(0, run.toolCalls.length - MAX_TOOL_CALLS);
+  }
+
+  recordTimelineMessage(run: ChildRun, message: SubagentMessageEntry): void {
+    run.timeline.push({
+      id: `message-${run.runId}-${run.timeline.length}`,
+      order: run.timeline.length,
+      kind: "message",
+      role: message.role,
+      text: clampText(message.text, 24_000),
+      thinking: message.thinking ? clampText(message.thinking, 24_000) : undefined,
+    });
+    this.trimTimeline(run);
+  }
+
+  recordTimelineToolStart(run: ChildRun, input: { id: string; tool: string; args: string; expandedArgs?: string }): void {
+    run.timeline.push({
+      id: input.id,
+      order: run.timeline.length,
+      kind: "tool",
+      tool: input.tool,
+      args: clampText(input.args, 2_000),
+      expandedArgs: input.expandedArgs ? clampText(input.expandedArgs, 16_000) : undefined,
+      status: "running",
+    });
+    this.trimTimeline(run);
+  }
+
+  recordTimelineToolEnd(run: ChildRun, input: { id: string; output?: string; failed: boolean }): void {
+    const entry = run.timeline.find((item) => item.kind === "tool" && item.id === input.id);
+    if (!entry || entry.kind !== "tool") return;
+    entry.output = input.output ? clampText(input.output, 24_000) : undefined;
+    entry.status = input.failed ? "failed" : "succeeded";
+  }
+
+  private trimTimeline(run: ChildRun): void {
+    if (run.timeline.length <= MAX_TIMELINE_ENTRIES) return;
+    run.timeline.splice(0, run.timeline.length - MAX_TIMELINE_ENTRIES);
+    run.timeline.forEach((entry, index) => { entry.order = index; });
   }
 }
 

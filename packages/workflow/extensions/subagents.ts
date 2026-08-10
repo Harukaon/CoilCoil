@@ -175,6 +175,26 @@ function extractAssistantParts(message: unknown): { text: string; thinking: stri
   return { text, thinking };
 }
 
+function extractToolResultText(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (!result || typeof result !== "object") return result === undefined ? "" : String(result);
+  const content = (result as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const text = content.flatMap((part) => {
+      if (!part || typeof part !== "object") return [];
+      const value = (part as { text?: unknown }).text;
+      return typeof value === "string" ? [value] : [];
+    }).join("\n");
+    if (text) return text;
+  }
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
+}
+
 function formatDuration(ms: number): string {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds} 秒`;
@@ -289,6 +309,12 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           text: `${event.toolName}${argsSummary ? ` ${truncate(argsSummary, 200)}` : ""}`,
           expandedText: expanded,
         });
+        registry.recordTimelineToolStart(run, {
+          id: event.toolCallId,
+          tool: event.toolName,
+          args: argsSummary,
+          expandedArgs: expanded,
+        });
         markDirty(run.runId);
         break;
       }
@@ -302,6 +328,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           registry.recordRecentOutput(run, run.bashBuffer);
           run.bashBuffer = "";
         }
+        registry.recordTimelineToolEnd(run, {
+          id: event.toolCallId,
+          output: extractToolResultText(event.result),
+          failed: event.isError,
+        });
         markDirty(run.runId);
         break;
       }
@@ -319,9 +350,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         const role = (event.message as { role?: unknown }).role;
         if (role !== "assistant") break;
         const parts = extractAssistantParts(event.message);
-        if (parts.text) {
-          run.finalOutput = parts.text;
-          registry.recordMessage(run, { role: "assistant", text: parts.text, thinking: parts.thinking || undefined });
+        if (parts.text) run.finalOutput = parts.text;
+        if (parts.text || parts.thinking) {
+          const message = { role: "assistant", text: parts.text, thinking: parts.thinking || undefined };
+          registry.recordMessage(run, message);
+          registry.recordTimelineMessage(run, message);
         }
         markDirty(run.runId);
         break;
@@ -478,6 +511,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       recentOutput: [],
       messages: [],
       toolCalls: [],
+      timeline: [],
       toolCount: 0,
       turnCount: 0,
       tokens: 0,
@@ -577,6 +611,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       recentOutput: [],
       messages: [],
       toolCalls: [],
+      timeline: [],
       toolCount: 0,
       turnCount: 0,
       tokens: 0,

@@ -1,5 +1,6 @@
 import { AlertCircle, Check, ChevronRight, Copy, LoaderCircle } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { ClipboardEvent as ReactClipboardEvent, FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -11,6 +12,7 @@ import type {
   PromptImage,
   RuntimeConfiguration,
   SessionSnapshot,
+  SubagentActivity,
   ToolRun,
 } from "@suocode/runtime-protocol";
 import { ConversationComposer } from "../composer/ConversationComposer";
@@ -19,7 +21,8 @@ import { ConfirmDialog } from "../../ui/dialog";
 
 export type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
-  | { kind: "tools"; order: number; tools: ToolRun[] };
+  | { kind: "tools"; order: number; tools: ToolRun[] }
+  | { kind: "subagent"; order: number; activity: SubagentActivity };
 
 export type ConversationTimelineItem =
   | { kind: "user"; order: number; message: ChatMessage }
@@ -349,7 +352,17 @@ function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX
   );
 }
 
-export function AgentTurnView({ items, modelName, running }: { items: TimelineItem[]; modelName: string; running: boolean }): React.JSX.Element {
+export function AgentTurnView({
+  items,
+  modelName,
+  running,
+  renderSubagent,
+}: {
+  items: TimelineItem[];
+  modelName: string;
+  running: boolean;
+  renderSubagent?: (activity: SubagentActivity) => ReactNode;
+}): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -383,6 +396,11 @@ export function AgentTurnView({ items, modelName, running }: { items: TimelineIt
     rendered.push(<ActivityGroupView key={`activity-${entries[0].id}`} entries={entries} />);
   };
   for (const item of items) {
+    if (item.kind === "subagent") {
+      flushActivity();
+      rendered.push(<Fragment key={`subagent-${item.activity.id}`}>{renderSubagent?.(item.activity)}</Fragment>);
+      continue;
+    }
     if (item.kind === "tools") {
       activity.push(...item.tools.map((tool) => ({ kind: "tool" as const, id: tool.id, tool })));
       continue;

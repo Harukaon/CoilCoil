@@ -265,6 +265,44 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .tool-execution-details section > span { display: block; margin: 0 0 4px 11px; color: #a0a09b; font-size: 9px; font-weight: 600; }
 .tool-activity-row pre, .tool-execution-details pre { max-height: 260px; margin: 0; overflow: auto; padding: 9px 11px; border-left: 2px solid #ddddda; color: #666661; background: transparent; font: 10px/1.55 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-activity { display: flex; align-items: center; gap: 8px; margin: -8px 0 25px; color: #858580; font-size: 12px; }
+.subagent-card { display: grid; width: min(560px, 100%); min-width: 0; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 0 0 18px; padding: 10px 12px; border: 1px solid #deded9; border-radius: 12px; color: #686863; background: #fafaf8; text-align: left; cursor: pointer; }
+.subagent-card:hover { border-color: #c9c9c3; background: #f4f4f1; }
+.subagent-card.panel { width: 100%; margin: 0; padding: 7px 4px; border: 0; border-radius: 8px; background: transparent; }
+.subagent-card.panel:hover { background: #f1f1ee; }
+.subagent-card-state { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #deded9; border-radius: 9px; color: #777772; background: #fff; }
+.subagent-card.panel .subagent-card-state { width: 22px; height: 22px; border: 0; background: transparent; }
+.subagent-card.running .subagent-card-state, .subagent-card.pending .subagent-card-state { color: #526d58; }
+.subagent-card.failed .subagent-card-state { color: #b14d47; }
+.subagent-card-copy { display: grid; min-width: 0; gap: 3px; }
+.subagent-card-copy strong, .subagent-card-copy span, .subagent-card-copy small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-card-copy strong { color: #30302d; font-size: 12px; font-weight: 650; }
+.subagent-card.panel .subagent-card-copy strong { font-size: 11px; }
+.subagent-card-copy span { color: #686863; font-size: 11px; }
+.subagent-card-copy small { color: #999994; font-size: 10px; }
+.subagent-card > svg { color: #8e8e89; }
+.composer-subagent-list { display: grid; gap: 1px; max-height: 152px; margin: 0; overflow-y: auto; padding: 0 8px var(--composer-overlap, 28px); scroll-padding-bottom: var(--composer-overlap, 28px); list-style: none; }
+.composer-subagent-list li { min-width: 0; }
+.subagent-dialog-backdrop { position: fixed; z-index: 300; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(30 30 27 / 12%); }
+.subagent-dialog { display: grid; width: min(650px, calc(100vw - 48px)); max-height: min(760px, calc(100vh - 48px)); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid #d7d7d2; border-radius: 16px; background: #fafaf8; box-shadow: 0 24px 80px rgb(28 28 25 / 24%), 0 4px 18px rgb(28 28 25 / 12%); }
+.subagent-dialog > header { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 13px 14px; border-bottom: 1px solid #e3e3df; }
+.subagent-dialog > header > button { display: grid; width: 28px; height: 28px; margin-left: auto; place-items: center; border-radius: 7px; color: #858580; background: transparent; cursor: pointer; }
+.subagent-dialog > header > button:hover { color: #30302d; background: #e9e9e5; }
+.subagent-dialog-state { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #deded9; border-radius: 9px; color: #777772; background: #fff; }
+.subagent-dialog-state.running, .subagent-dialog-state.pending { color: #526d58; }
+.subagent-dialog-state.failed { color: #b14d47; }
+.subagent-dialog-title { display: grid; min-width: 0; gap: 3px; }
+.subagent-dialog-title strong, .subagent-dialog-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-dialog-title strong { color: #30302d; font-size: 13px; font-weight: 650; }
+.subagent-dialog-title small { color: #92928d; font-size: 10px; }
+.subagent-dialog-scroll { min-height: 0; overflow-y: auto; padding: 18px 22px 28px; scrollbar-width: thin; scrollbar-color: #c7c7c2 transparent; }
+.subagent-mini-chat { width: min(560px, 100%); margin: 0 auto; }
+.subagent-task-message { display: grid; justify-items: end; gap: 5px; margin: 0 0 24px; }
+.subagent-task-message > span { color: #999994; font-size: 10px; }
+.subagent-task-message > div { max-width: 86%; padding: 10px 13px; border: 1px solid #deded9; border-radius: 12px 12px 4px 12px; color: #30302d; background: #fff; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.subagent-mini-chat .agent-turn { margin: 0; }
+.subagent-mini-chat .agent-turn-content { width: 100%; }
+.subagent-dialog-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 160px; color: #999994; font-size: 12px; }
+.subagent-dialog-error { margin-top: 16px; padding: 10px 12px; border: 1px solid #e2b5b1; border-radius: 9px; color: #a5453f; background: #fff8f7; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .suo-loader { --loader-size: 14px; display: inline-flex; width: var(--loader-size); height: var(--loader-size); flex: 0 0 auto; align-items: center; justify-content: center; gap: 1px; }
 .suo-loader i { width: max(2px, calc(var(--loader-size) / 6)); height: 34%; border-radius: 99px; background: currentColor; animation: loader-wave 900ms ease-in-out infinite; }
 .suo-loader i:nth-child(2) { animation-delay: 120ms; }
