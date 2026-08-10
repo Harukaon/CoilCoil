@@ -73,6 +73,7 @@ function createHarness() {
     handlers: eventHandlers,
     emissions,
     eventHandlers,
+    parameters: tool.parameters as { properties?: Record<string, unknown> },
     execute: tool.execute as (
       toolCallId: string,
       params: Record<string, unknown>,
@@ -108,8 +109,9 @@ async function settle(): Promise<void> {
 }
 
 test("subagent tool registers with run/status actions", () => {
-  const { execute } = createHarness();
+  const { execute, parameters } = createHarness();
   assert.equal(typeof execute, "function");
+  assert.equal(parameters.properties?.planId, undefined, "plan correlation stays on the private runtime RPC");
 });
 
 test("run rejects a missing task", async () => {

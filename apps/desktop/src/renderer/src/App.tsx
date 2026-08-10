@@ -10,6 +10,8 @@ import type { CSSProperties, FormEvent } from "react";
 import type {
   ChatMessage,
   FileNode,
+  PlanApprovalState,
+  PlanExecutionTarget,
   ProjectSelection,
   ProjectSnapshot,
   RuntimeBootstrap,
@@ -272,6 +274,16 @@ export default function App(): React.JSX.Element {
         break;
       case "plan_updated":
         setProjectState((current) => ({ ...current, plan: event.plan }));
+        break;
+      case "plan_approval_updated":
+        setProjectState((current) => ({ ...current, planApproval: event.plan }));
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = { ...current, project: { ...current.project, planApproval: event.plan } };
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
         break;
       case "subagents_updated":
         setSubagents(event.subagents);
@@ -567,6 +579,20 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  const approvePlan = async (planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState> => {
+    if (!snapshot?.runtimeId) throw new Error("当前会话尚未准备好。");
+    const plan = await window.suocode.request<PlanApprovalState>({ type: "approve_plan", planId, target, agent }, snapshot.runtimeId);
+    setProjectState((current) => ({ ...current, planApproval: plan }));
+    return plan;
+  };
+
+  const rejectPlan = async (planId: string): Promise<PlanApprovalState> => {
+    if (!snapshot?.runtimeId) throw new Error("当前会话尚未准备好。");
+    const plan = await window.suocode.request<PlanApprovalState>({ type: "reject_plan", planId }, snapshot.runtimeId);
+    setProjectState((current) => ({ ...current, planApproval: plan }));
+    return plan;
+  };
+
   const openFilePreview = (node: FileNode): void => {
     if (!projectState.cwd || node.kind !== "file") return;
     void window.suocode.openFilePreview({ root: projectState.cwd, path: node.path }).catch((caught) => {
@@ -784,6 +810,8 @@ export default function App(): React.JSX.Element {
             setSettingsOpen(true);
           }}
           onAbort={() => { void window.suocode.request({ type: "abort" }, snapshot?.runtimeId); }}
+          onApprovePlan={approvePlan}
+          onRejectPlan={rejectPlan}
         />
 
         <aside className="inspector-pane">

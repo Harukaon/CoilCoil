@@ -81,6 +81,8 @@ export interface SubagentActivityPayload {
   durationMs: number;
   error?: string;
   updatedAt: number;
+  /** Durable plan that requested this run, when dispatched from the plan tool. */
+  planId?: string;
 }
 
 export interface SubagentUsageDetails {
@@ -103,15 +105,24 @@ export interface SubagentToolDetails {
   toolCount?: number;
   durationMs?: number;
   usage?: SubagentUsageDetails;
+  planId?: string;
 }
 
-export type SubagentRpcMethod = "stop" | "status" | "resume";
+export type SubagentRpcMethod = "run" | "stop" | "status" | "resume";
 
 export interface SubagentRpcRequest {
   version: number;
   requestId: string;
   method: SubagentRpcMethod;
-  params?: { id?: string };
+  params?: {
+    id?: string;
+    agent?: string;
+    task?: string;
+    model?: string;
+    background?: boolean;
+    worktree?: boolean;
+    planId?: string;
+  };
   source?: { client?: string };
 }
 
@@ -127,4 +138,5 @@ export interface SubagentChildMeta {
   worktree?: boolean;
   worktreePath?: string;
   startedAt: number;
+  planId?: string;
 }

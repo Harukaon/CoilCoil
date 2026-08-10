@@ -51,6 +51,7 @@ export interface ChildRun {
   stopRequested?: boolean;
   controlOperation?: SubagentControlOperation;
   bashBuffer: string;
+  planId?: string;
 }
 
 export type SubagentControlOperation = "stop" | "resume";
@@ -153,6 +154,7 @@ export class SubagentRegistry {
       durationMs: (run.finishedAt ?? now) - run.startedAt,
       error: run.error,
       updatedAt: run.finishedAt ?? now,
+      planId: run.planId,
     };
   }
 
@@ -172,6 +174,7 @@ export class SubagentRegistry {
       toolCount: run.toolCount,
       durationMs: (run.finishedAt ?? Date.now()) - run.startedAt,
       usage: { total: run.tokens, turns: run.turnCount || undefined },
+      planId: run.planId,
     };
   }
 

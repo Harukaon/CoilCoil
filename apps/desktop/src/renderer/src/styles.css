@@ -381,6 +381,46 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .composer-activity ol::-webkit-scrollbar-track { background: transparent; }
 .composer-activity ol::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 5px; background: #c7c7c2; background-clip: padding-box; }
 .composer-activity ol::-webkit-scrollbar-thumb:hover { background: #aaa9a3; background-clip: padding-box; }
+.composer-activity-body:has(.plan-approval-card) { max-height: 330px; overflow-y: auto; }
+.plan-approval-card { display: grid; gap: 9px; max-height: 310px; overflow-y: auto; padding: 3px 12px calc(var(--composer-overlap, 20px) + 10px); color: #4b4b47; scrollbar-width: thin; scrollbar-color: #c7c7c2 transparent; }
+.plan-approval-card::-webkit-scrollbar { width: 4px; }
+.plan-approval-card::-webkit-scrollbar-thumb { border-radius: 5px; background: #c7c7c2; }
+.plan-approval-summary { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.plan-approval-icon { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border: 1px solid #deded9; border-radius: 8px; color: #65655f; background: #fff; }
+.plan-approval-copy { display: grid; min-width: 0; gap: 1px; }
+.plan-approval-copy strong { overflow: hidden; color: #30302d; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.plan-approval-copy small { color: #8d8d87; font-size: 9px; }
+.plan-approval-objective { margin: 0; color: #575752; font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer-activity ol.plan-approval-steps { display: grid; gap: 3px; max-height: none; overflow: visible; padding: 0; }
+.plan-approval-steps li { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 6px; align-items: start; color: #676762; font-size: 10px; line-height: 1.4; }
+.plan-approval-steps li svg { margin-top: 1px; color: #92928d; }
+.plan-approval-steps li.in_progress { color: #30302d; font-weight: 600; }
+.plan-approval-steps li.in_progress svg { color: #536b55; }
+.plan-approval-steps li.completed { color: #999994; text-decoration: line-through; }
+.plan-approval-section { display: grid; gap: 4px; padding: 7px 9px; border: 1px solid #e3e3de; border-radius: 8px; background: #fafaf8; }
+.plan-approval-section > strong { color: #555550; font-size: 10px; }
+.plan-approval-section ul { display: grid; gap: 3px; margin: 0; padding-left: 16px; color: #6a6a65; font-size: 10px; line-height: 1.4; }
+.plan-approval-section p { margin: 0; color: #6a6a65; font-size: 10px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plan-file-path { display: flex; min-width: 0; align-items: center; gap: 5px; color: #979791; font-size: 9px; }
+.plan-file-path svg { flex: 0 0 auto; }
+.plan-file-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-approval-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 2px; }
+.plan-approval-actions > button { display: inline-flex; height: 27px; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid #d9d9d4; border-radius: 8px; color: #4f4f4a; background: #fff; font-size: 10px; font-weight: 600; cursor: pointer; }
+.plan-approval-actions > button:hover:not(:disabled) { border-color: #bdbdb7; background: #f4f4f1; }
+.plan-approval-actions > button:disabled { cursor: default; opacity: .55; }
+.plan-approval-actions > button.plan-primary-action { border-color: #353531; color: #fff; background: #353531; }
+.plan-approval-actions > button.plan-primary-action:hover:not(:disabled) { background: #1f1f1d; }
+.plan-approval-actions > button.plan-reject-action { color: #8b5d58; }
+.plan-agent-picker { display: inline-flex; padding: 2px; border-radius: 8px; background: #ecece8; }
+.plan-agent-picker button { height: 23px; padding: 0 7px; border-radius: 6px; color: #85857f; background: transparent; font-size: 9px; cursor: pointer; }
+.plan-agent-picker button.active { color: #343431; background: #fff; box-shadow: 0 1px 3px rgb(23 23 20 / 8%); }
+.plan-agent-picker input { width: 88px; min-width: 0; height: 23px; padding: 0 7px; border-left: 1px solid #d6d6d0; border-radius: 0 6px 6px 0; color: #4f4f4a; background: #fff; font-size: 9px; outline: none; }
+.plan-agent-picker input::placeholder { color: #9a9a94; }
+.plan-execution-note { padding: 7px 9px; border-radius: 8px; color: #5f6e5d; background: #edf2eb; font-size: 10px; }
+.plan-execution-report { display: grid; gap: 3px; padding: 8px 9px; border-radius: 8px; background: #f0f0ed; font-size: 10px; }
+.plan-execution-report strong { color: #4b4b47; }
+.plan-execution-report p { max-height: 90px; margin: 0; overflow-y: auto; color: #686863; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plan-approval-error { padding: 7px 9px; border: 1px solid #e4b8b4; border-radius: 8px; color: #a64842; background: #fff7f6; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer-todo-list li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 7px; align-items: start; padding: 5px 4px; color: #696964; font-size: 11px; line-height: 1.4; }
 .composer-todo-list li svg { margin-top: 1px; color: #92928d; }
 .composer-todo-list li.in_progress { color: #292927; font-weight: 550; }

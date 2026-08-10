@@ -9,6 +9,8 @@ import type {
 import type {
   ChatMessage,
   ModelOption,
+  PlanApprovalState,
+  PlanExecutionTarget,
   PromptImage,
   ProjectSelection,
   ProjectSnapshot,
@@ -85,6 +87,8 @@ export function ConversationPane({
   onConfigureModelOptions,
   onOpenSettings,
   onAbort,
+  onApprovePlan,
+  onRejectPlan,
 }: {
   fileDragActive: boolean;
   leftOpen: boolean;
@@ -130,6 +134,8 @@ export function ConversationPane({
   onConfigureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow: number) => Promise<void>;
   onOpenSettings: (section?: SettingsSection) => void;
   onAbort: () => void;
+  onApprovePlan: (planId: string, target: PlanExecutionTarget, agent?: string) => Promise<PlanApprovalState>;
+  onRejectPlan: (planId: string) => Promise<PlanApprovalState>;
 }): React.JSX.Element {
   const { chatContentWidth, beginChatWidthResize } = useChatContentWidth();
   const [editingMessageId, setEditingMessageId] = useState<string>();
@@ -237,11 +243,14 @@ export function ConversationPane({
           <div className="composer-overlays">
             <ActivityPanel
               todo={projectState.plan}
+              planApproval={projectState.planApproval}
               subagents={subagents}
               commands={slashMenu.slashActive ? slashMenu.filteredItems : undefined}
               commandIndex={slashMenu.itemIndex}
               onSelectCommand={slashMenu.selectItem}
               onOpenSubagent={(activity) => setSelectedSubagentId(activity.id)}
+              onApprovePlan={onApprovePlan}
+              onRejectPlan={onRejectPlan}
             />
           </div>
           <ConversationComposer

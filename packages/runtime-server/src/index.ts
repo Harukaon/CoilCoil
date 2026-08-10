@@ -54,6 +54,7 @@ function eventChangesSnapshot(event: RuntimeEvent): boolean {
     || event.type === "tool_updated"
     || event.type === "tool_finished"
     || event.type === "plan_updated"
+    || event.type === "plan_approval_updated"
     || event.type === "subagents_updated"
     || event.type === "project_updated"
     || event.type === "metrics_updated"
@@ -411,6 +412,10 @@ export class RuntimeServer {
         return runtime.setSessionSkillEnabled(command.filePath, command.enabled);
       case "set_session_mcp_server_enabled":
         return runtime.setSessionMcpServerEnabled(command.name, command.enabled);
+      case "approve_plan":
+        return runtime.approvePlan(command.planId, command.target, command.agent);
+      case "reject_plan":
+        return runtime.rejectPlan(command.planId);
       case "run_memory_now":
         return runtime.runMemoryNow();
       case "remove_original_session_item":

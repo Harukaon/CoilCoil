@@ -254,6 +254,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   let sessionCwd: string | undefined;
   let sessionDir: string | undefined;
   let sessionId: string | undefined;
+  let sessionContext: ExtensionContext | undefined;
   let profiles = new Map<string, SubagentProfile>();
 
   const reloadProfiles = (cwd: string): void => {
@@ -505,6 +506,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       sessionFile,
       worktreeRequired: meta.worktree === true || Boolean(meta.worktreePath),
       worktreePath: meta.worktreePath,
+      planId: meta.planId,
       startedAt: meta.startedAt,
       finishedAt: meta.startedAt,
       recentTools: [],
@@ -575,7 +577,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
   const executeRun = async (
     toolCallId: string,
-    params: { agent?: string; task?: string; model?: string; background?: boolean; worktree?: boolean },
+    params: { agent?: string; task?: string; model?: string; background?: boolean; worktree?: boolean; planId?: string },
     signal: AbortSignal | undefined,
     onUpdate: ((update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => void) | undefined,
     ctx: ExtensionContext,
@@ -616,6 +618,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       turnCount: 0,
       tokens: 0,
       bashBuffer: "",
+      planId: params.planId,
     };
     registry.add(run);
     if (!background) {
@@ -637,6 +640,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       parentSessionFile: ctx.sessionManager.getSessionFile(),
       worktree: useWorktree,
       startedAt: run.startedAt,
+      planId: run.planId,
     };
 
     let childCwd = ctx.cwd;
@@ -778,6 +782,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   };
 
   pi.on("session_start", (_event, ctx) => {
+    sessionContext = ctx;
     sessionCwd = ctx.cwd;
     sessionDir = ctx.sessionManager.getSessionDir();
     sessionId = ctx.sessionManager.getSessionId();
@@ -794,6 +799,32 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     };
     try {
       const id = request.params?.id?.trim() ?? "";
+      if (request.method === "run") {
+        const task = request.params?.task?.trim() ?? "";
+        if (!task) return replyError("缺少子 Agent 任务描述（task）。");
+        if (!sessionContext) return replyError("父会话尚未完成初始化，暂时无法派发子 Agent。");
+        const outcome = await executeRun(
+          `plan-${request.params?.planId ?? request.requestId}`,
+          {
+            agent: request.params?.agent,
+            task,
+            model: request.params?.model,
+            background: request.params?.background ?? true,
+            worktree: request.params?.worktree,
+            planId: request.params?.planId,
+          },
+          undefined,
+          undefined,
+          sessionContext,
+        );
+        pi.events.emit(replyChannel, {
+          version: 1,
+          requestId: request.requestId,
+          success: true,
+          data: { details: outcome.details },
+        });
+        return;
+      }
       if (request.method === "status") {
         const run = id ? findRun(id) : undefined;
         if (!run) return replyError(`未找到子 Agent 运行：${id || "（缺少 id）"}`);
@@ -847,6 +878,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     const runs = registry.list();
     await disposeRunsForShutdown(runs);
     registry.clear();
+    sessionContext = undefined;
   });
 
   pi.registerTool({

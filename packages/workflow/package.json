@@ -23,6 +23,7 @@
       "./extensions/project-memory.ts",
       "./extensions/response-metrics.ts",
       "./extensions/subagents.ts",
+      "./extensions/plan.ts",
       "./extensions/terminal.ts",
       "./extensions/todo.ts",
       "./extensions/zh-cn.ts",

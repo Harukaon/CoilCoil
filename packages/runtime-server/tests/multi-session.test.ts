@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import type { SuoCodeRuntime, SuoCodeRuntimeOptions } from "@suocode/runtime-core";
 import type {
+  PlanApprovalState,
+  PlanExecutionTarget,
   RuntimeBootstrap,
   RuntimeEvent,
   RuntimeWireMessage,
@@ -128,6 +130,38 @@ class FakeRuntime {
     return { accepted: true };
   }
 
+  async approvePlan(planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState> {
+    return {
+      id: planId,
+      title: "测试计划",
+      objective: "验证运行时路由",
+      steps: [{ id: "step-1", text: "执行", status: "pending" }],
+      acceptanceCriteria: [],
+      filePath: "/tmp/plan.md",
+      revision: 2,
+      status: target === "main" ? "running" : "delegated",
+      createdAt: 1,
+      updatedAt: 2,
+      executionTarget: target,
+      agentProfile: agent,
+    };
+  }
+
+  async rejectPlan(planId: string): Promise<PlanApprovalState> {
+    return {
+      id: planId,
+      title: "测试计划",
+      objective: "验证运行时路由",
+      steps: [{ id: "step-1", text: "执行", status: "pending" }],
+      acceptanceCriteria: [],
+      filePath: "/tmp/plan.md",
+      revision: 2,
+      status: "rejected",
+      createdAt: 1,
+      updatedAt: 2,
+    };
+  }
+
   async snapshot(): Promise<SessionSnapshot> {
     if (!this.snapshotValue) throw new Error("No active session");
     const path = this.snapshotValue.session.path;
@@ -237,6 +271,35 @@ test("one runtime server keeps multiple Agent sessions alive and independently s
 
   await server.dispose();
   assert.ok(runtimes.every((runtime) => runtime.disposed));
+});
+
+test("plan approval commands are routed to the selected live session runtime", async () => {
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => new FakeRuntime(1, options) as unknown as SuoCodeRuntime,
+      createRuntimeId: () => "runtime-plan",
+    },
+  );
+  const created = await server.handle({ id: "create", command: { type: "create_session", cwd: "/project" } });
+  const runtimeId = (created.result as SessionSnapshot).runtimeId;
+
+  const delegated = await server.handle({
+    id: "approve",
+    runtimeId,
+    command: { type: "approve_plan", planId: "plan-a", target: "subagent", agent: "worker" },
+  });
+  assert.equal((delegated.result as PlanApprovalState).status, "delegated");
+  assert.equal((delegated.result as PlanApprovalState).agentProfile, "worker");
+
+  const rejected = await server.handle({
+    id: "reject",
+    runtimeId,
+    command: { type: "reject_plan", planId: "plan-b" },
+  });
+  assert.equal((rejected.result as PlanApprovalState).status, "rejected");
+  await server.dispose();
 });
 
 test("repeated clicks share one in-flight historical session restore", async () => {

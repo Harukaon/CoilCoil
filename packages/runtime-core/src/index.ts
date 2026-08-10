@@ -64,6 +64,9 @@ import type {
   RuntimeToolDefinition,
   RuntimeSummaryEvent,
   ProjectMemoryRuntimeStatus,
+  PlanApprovalState,
+  PlanExecutionTarget,
+  PlanStep,
   ResponseMetrics,
   SessionSnapshot,
   SessionSummary,
@@ -123,6 +126,9 @@ const projectMemoryStatusByCwd = new Map<string, ProjectMemoryRuntimeStatus>();
 const SUBAGENT_ACTIVITY_CHANNEL = "suocode:subagents:activity:v1";
 const SUBAGENT_RPC_REQUEST_CHANNEL = "suocode:subagents:rpc:v1:request";
 const SUBAGENT_RUN_ENTRY_TYPE = "subagent-run";
+const PLAN_STATE_CHANNEL = "suocode:plan:state:v1";
+const PLAN_RPC_REQUEST_CHANNEL = "suocode:plan:rpc:v1:request";
+const PLAN_ENTRY_TYPE = "suocode-plan";
 const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
 const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
@@ -642,6 +648,7 @@ interface ActiveSession {
   memoryStatus?: ProjectMemoryRuntimeStatus;
   skillConfiguration?: SkillConfigurationSnapshot;
   mcpStatus?: McpRuntimeStatus;
+  planApproval?: PlanApprovalState;
   eventBus: EventBusController;
 }
 
@@ -664,6 +671,7 @@ interface ReconstructedSessionState {
   nextTimelineOrder: number;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
+  planApproval?: PlanApprovalState;
 }
 
 interface WorkflowManifest {
@@ -698,6 +706,48 @@ function runtimeBridgeState(value: unknown): RuntimeBridgeState | undefined {
     readSkills: stringArray(value.readSkills),
     contextMessages: Array.isArray(value.contextMessages) ? value.contextMessages : undefined,
     updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : Date.now(),
+  };
+}
+
+function planApprovalState(value: unknown): PlanApprovalState | undefined {
+  if (!isRecord(value)) return undefined;
+  const statuses = new Set<PlanApprovalState["status"]>([
+    "pending_approval", "running", "delegated", "completed", "rejected", "failed",
+  ]);
+  if (!statuses.has(value.status as PlanApprovalState["status"])) return undefined;
+  const id = optionalString(value, "id");
+  const title = optionalString(value, "title");
+  const objective = optionalString(value, "objective");
+  const filePath = optionalString(value, "filePath");
+  if (!id || !title || !objective || !filePath || !Array.isArray(value.steps)) return undefined;
+  const stepStatuses = new Set<PlanStep["status"]>(["pending", "in_progress", "completed"]);
+  const steps: PlanStep[] = [];
+  for (const raw of value.steps) {
+    if (!isRecord(raw) || !stepStatuses.has(raw.status as PlanStep["status"])) return undefined;
+    const stepId = optionalString(raw, "id");
+    const text = optionalString(raw, "text");
+    if (!stepId || !text) return undefined;
+    steps.push({ id: stepId, text, status: raw.status as PlanStep["status"] });
+  }
+  const number = (key: string, fallback: number): number => typeof value[key] === "number" && Number.isFinite(value[key]) ? value[key] as number : fallback;
+  const target = value.executionTarget === "main" || value.executionTarget === "subagent" ? value.executionTarget : undefined;
+  return {
+    id,
+    title,
+    objective,
+    steps,
+    acceptanceCriteria: stringArray(value.acceptanceCriteria),
+    notes: optionalString(value, "notes"),
+    filePath,
+    revision: Math.max(1, Math.floor(number("revision", 1))),
+    status: value.status as PlanApprovalState["status"],
+    createdAt: number("createdAt", Date.now()),
+    updatedAt: number("updatedAt", Date.now()),
+    executionTarget: target,
+    agentProfile: optionalString(value, "agentProfile"),
+    subagentRunId: optionalString(value, "subagentRunId"),
+    report: optionalString(value, "report"),
+    error: optionalString(value, "error"),
   };
 }
 
@@ -1157,6 +1207,7 @@ function subagentActivityFromDetails(details: unknown, parentToolId: string): Su
     durationMs: typeof details.durationMs === "number" && Number.isFinite(details.durationMs) ? details.durationMs : 0,
     error: stringValue(details.error) || undefined,
     updatedAt: Date.now(),
+    planId: stringValue(details.planId) || undefined,
   };
 }
 
@@ -1243,6 +1294,7 @@ function subagentActivitiesFromPayload(raw: unknown): SubagentActivity[] {
       durationMs: typeof entry.durationMs === "number" && Number.isFinite(entry.durationMs) ? entry.durationMs : 0,
       error: stringValue(entry.error) || undefined,
       updatedAt: typeof entry.updatedAt === "number" ? entry.updatedAt : Date.now(),
+      planId: stringValue(entry.planId) || undefined,
     };
     return [activity];
   });
@@ -3527,6 +3579,7 @@ export class SuoCodeRuntime {
     let installedActive: ActiveSession | undefined;
     let pendingBridgeState: RuntimeBridgeState | undefined;
     let pendingMemoryStatus: ProjectMemoryRuntimeStatus | undefined;
+    let pendingPlanApproval: PlanApprovalState | undefined;
     eventBus.on(RUNTIME_BRIDGE_STATE_EVENT, (value) => {
       const next = runtimeBridgeState(value);
       if (!next) return;
@@ -3554,6 +3607,16 @@ export class SuoCodeRuntime {
       else if (next.state === "succeeded") this.emitEvent({ type: "runtime_notice", level: "success", message: next.message || "项目记忆整理完成" });
       else if (next.state === "busy") this.emitEvent({ type: "runtime_notice", level: "info", message: next.message || "当前项目已有记忆整理正在运行" });
       else if (next.state === "failed") this.emitEvent({ type: "runtime_notice", level: "error", message: next.error || "项目记忆整理失败" });
+    });
+    eventBus.on(PLAN_STATE_CHANNEL, (value) => {
+      const next = planApprovalState(value);
+      if (value !== null && value !== undefined && !next) return;
+      pendingPlanApproval = next;
+      if (!installedActive) return;
+      installedActive.planApproval = next;
+      installedActive.project = { ...installedActive.project, planApproval: next, refreshedAt: Date.now() };
+      this.emitEvent({ type: "plan_approval_updated", plan: next });
+      this.emitEvent({ type: "project_updated", project: installedActive.project });
     });
     const loader = new DefaultResourceLoader({
       cwd,
@@ -3609,7 +3672,7 @@ export class SuoCodeRuntime {
     }
     created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => name !== "find"));
     const activeToolNames = new Set(created.session.getActiveToolNames());
-    const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp", "subagent"];
+    const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp", "subagent", "plan"];
     const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
     if (missingTools.length > 0) {
       await shutdownAgentSession(created.session, "quit").catch(() => undefined);
@@ -3625,6 +3688,7 @@ export class SuoCodeRuntime {
       changes: [],
       terminals: [...reconstructed.terminals.values()],
       plan: reconstructed.plan,
+      planApproval: reconstructed.planApproval ?? pendingPlanApproval,
       refreshedAt: Date.now(),
     };
     const active: ActiveSession = {
@@ -3643,6 +3707,7 @@ export class SuoCodeRuntime {
       sessionRevision: 1,
       bridgeState: pendingBridgeState,
       memoryStatus: pendingMemoryStatus ?? projectMemoryStatusByCwd.get(safeRealPath(cwd)),
+      planApproval: reconstructed.planApproval ?? pendingPlanApproval,
       eventBus,
     };
     installedActive = active;
@@ -3677,6 +3742,7 @@ export class SuoCodeRuntime {
     const subagents = new Map<string, SubagentActivity>();
     const terminals = new Map<string, TerminalRun>();
     let plan: TodoItem[] = [];
+    let planApproval: PlanApprovalState | undefined;
     const calls = new Map<string, { name: string; args: Record<string, unknown>; timestamp: number }>();
     const purposes = restoredToolPurposes(session);
     let order = 0;
@@ -3718,6 +3784,10 @@ export class SuoCodeRuntime {
       });
       const restoredPlan = normalizeTodoPlan(isRecord(rawMessage.details) ? rawMessage.details.plan : undefined);
       if (name === "todo" && restoredPlan) plan = restoredPlan;
+      if (name === "plan") {
+        const restoredApproval = planApprovalState(isRecord(rawMessage.details) ? rawMessage.details.plan ?? rawMessage.details : undefined);
+        if (restoredApproval) planApproval = restoredApproval;
+      }
       if (name === "subagent") {
         const activity = subagentActivityFromDetails(rawMessage.details, id);
         if (activity) subagents.set(activity.id, restoredSubagentActivity(activity));
@@ -3741,6 +3811,11 @@ export class SuoCodeRuntime {
         subagents.set(activity.id, restoredSubagentActivity(activity));
       }
     }
+    for (const entry of session.sessionManager.getBranch()) {
+      if (entry.type !== "custom" || entry.customType !== PLAN_ENTRY_TYPE) continue;
+      const restored = planApprovalState(entry.data);
+      if (restored) planApproval = restored;
+    }
     const responseMetricsHistory = restoredResponseMetrics(session);
     return {
       messages,
@@ -3751,6 +3826,7 @@ export class SuoCodeRuntime {
       nextTimelineOrder: order,
       responseMetrics: responseMetricsHistory.at(-1),
       responseMetricsHistory,
+      planApproval,
     };
   }
 
@@ -3769,6 +3845,7 @@ export class SuoCodeRuntime {
     if (name === "grep") return `搜索 ${stringValue(args.pattern) || "项目"}`;
     if (name === "ls") return `查看 ${stringValue(args.path) || "目录"}`;
     if (name === "todo") return "更新 Todo";
+    if (name === "plan") return "创建执行计划";
     if (name === "terminal") return `运行 ${stringValue(args.command) || stringValue(args.action) || "终端命令"}`;
     return `调用 ${name.replace(/[_-]+/g, " ")}`;
   }
@@ -3851,6 +3928,71 @@ export class SuoCodeRuntime {
         source: { client: "suocode-desktop" },
       });
     });
+  }
+
+  private planRpc(method: "approve" | "reject", params: { planId: string; target?: PlanExecutionTarget; agent?: string }): Promise<unknown> {
+    const active = this.requireActive();
+    const requestId = `suocode-plan-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `suocode:plan:rpc:v1:reply:${requestId}`;
+    return new Promise((resolvePromise, rejectPromise) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        callback();
+      };
+      const unsubscribe = active.eventBus.on(replyChannel, (raw) => {
+        if (!isRecord(raw)) return;
+        if (raw.success === true) {
+          finish(() => resolvePromise(raw.data));
+          return;
+        }
+        const rpcError = isRecord(raw.error) ? stringValue(raw.error.message) : "计划操作失败。";
+        finish(() => rejectPromise(new Error(rpcError || "计划操作失败。")));
+      });
+      const timer = setTimeout(() => finish(() => rejectPromise(new Error("计划操作请求超时。"))), 20_000);
+      active.eventBus.emit(PLAN_RPC_REQUEST_CHANNEL, {
+        version: 1,
+        requestId,
+        method,
+        params,
+        source: { client: "suocode-desktop" },
+      });
+    });
+  }
+
+  async approvePlan(planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState> {
+    const normalized = planId.trim();
+    if (!normalized) throw new Error("缺少计划标识。");
+    const reply = await this.planRpc("approve", { planId: normalized, target, agent });
+    const plan = isRecord(reply) && isRecord(reply.plan) ? planApprovalState(reply.plan) : undefined;
+    if (!plan) throw new Error("计划审批响应缺少有效状态。");
+    const active = this.requireActive();
+    if (active.planApproval?.id !== plan.id || active.planApproval.revision !== plan.revision) {
+      active.planApproval = plan;
+      active.project = { ...active.project, planApproval: plan, refreshedAt: Date.now() };
+      this.emitEvent({ type: "plan_approval_updated", plan });
+      this.emitEvent({ type: "project_updated", project: active.project });
+    }
+    return plan;
+  }
+
+  async rejectPlan(planId: string): Promise<PlanApprovalState> {
+    const normalized = planId.trim();
+    if (!normalized) throw new Error("缺少计划标识。");
+    const reply = await this.planRpc("reject", { planId: normalized });
+    const plan = isRecord(reply) && isRecord(reply.plan) ? planApprovalState(reply.plan) : undefined;
+    if (!plan) throw new Error("计划拒绝响应缺少有效状态。");
+    const active = this.requireActive();
+    if (active.planApproval?.id !== plan.id || active.planApproval.revision !== plan.revision) {
+      active.planApproval = plan;
+      active.project = { ...active.project, planApproval: plan, refreshedAt: Date.now() };
+      this.emitEvent({ type: "plan_approval_updated", plan });
+      this.emitEvent({ type: "project_updated", project: active.project });
+    }
+    return plan;
   }
 
   async stopSubagent(id: string, _background: boolean): Promise<{ stopped: true }> {
@@ -4128,6 +4270,15 @@ export class SuoCodeRuntime {
               this.emitEvent({ type: "plan_updated", plan: [...plan] });
             }
           }
+          if (event.toolName === "plan") {
+            const details = isRecord(event.result) ? event.result.details : undefined;
+            const approval = planApprovalState(isRecord(details) ? details.plan ?? details : undefined);
+            if (approval) {
+              active.planApproval = approval;
+              active.project = { ...active.project, planApproval: approval, refreshedAt: Date.now() };
+              this.emitEvent({ type: "plan_approval_updated", plan: approval });
+            }
+          }
           if (event.toolName === "subagent") {
             const details = isRecord(event.result) ? event.result.details : undefined;
             const activity = subagentActivityFromDetails(details, tool.id);
@@ -4262,6 +4413,7 @@ export class SuoCodeRuntime {
       changes,
       terminals: [...active.terminals.values()].sort((a, b) => b.startedAt - a.startedAt),
       plan: [...active.plan],
+      planApproval: active.planApproval,
       refreshedAt: Date.now(),
     };
     this.emitEvent({ type: "project_updated", project: active.project });
@@ -4280,6 +4432,7 @@ export class SuoCodeRuntime {
       ...active.project,
       terminals: [...active.terminals.values()].sort((a, b) => b.startedAt - a.startedAt),
       plan: [...active.plan],
+      planApproval: active.planApproval,
       refreshedAt: Date.now(),
     };
     this.emitEvent({ type: "project_updated", project: active.project });

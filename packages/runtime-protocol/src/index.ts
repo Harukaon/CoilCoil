@@ -466,6 +466,44 @@ export interface TodoItem {
   status: "pending" | "in_progress" | "completed";
 }
 
+/** A durable, user-approvable execution plan created by the Agent. */
+export type PlanStepStatus = "pending" | "in_progress" | "completed";
+
+export interface PlanStep {
+  id: string;
+  text: string;
+  status: PlanStepStatus;
+}
+
+export type PlanApprovalStatus =
+  | "pending_approval"
+  | "running"
+  | "delegated"
+  | "completed"
+  | "rejected"
+  | "failed";
+
+export type PlanExecutionTarget = "main" | "subagent";
+
+export interface PlanApprovalState {
+  id: string;
+  title: string;
+  objective: string;
+  steps: PlanStep[];
+  acceptanceCriteria: string[];
+  notes?: string;
+  filePath: string;
+  revision: number;
+  status: PlanApprovalStatus;
+  createdAt: number;
+  updatedAt: number;
+  executionTarget?: PlanExecutionTarget;
+  agentProfile?: string;
+  subagentRunId?: string;
+  report?: string;
+  error?: string;
+}
+
 export type SubagentActivityStatus = "pending" | "running" | "completed" | "failed" | "stopped";
 
 export interface SubagentRecentTool {
@@ -534,6 +572,8 @@ export interface SubagentActivity {
   durationMs: number;
   error?: string;
   updatedAt: number;
+  /** Durable plan that dispatched this run, when applicable. */
+  planId?: string;
 }
 
 export interface ToolRun {
@@ -724,6 +764,7 @@ export interface ProjectSnapshot {
   changes: ChangedFile[];
   terminals: TerminalRun[];
   plan: TodoItem[];
+  planApproval?: PlanApprovalState;
   refreshedAt: number;
 }
 
@@ -797,6 +838,8 @@ export type RuntimeCommand =
   | { type: "set_session_system_prompt"; prompt?: string }
   | { type: "set_session_skill_enabled"; filePath: string; enabled: boolean }
   | { type: "set_session_mcp_server_enabled"; name: string; enabled: boolean }
+  | { type: "approve_plan"; planId: string; target: PlanExecutionTarget; agent?: string }
+  | { type: "reject_plan"; planId: string }
   | { type: "run_memory_now" }
   | { type: "remove_original_session_item"; entryId: string }
   | { type: "stop_subagent"; id: string; background: boolean }
@@ -831,6 +874,7 @@ export type RuntimeEvent =
   | { type: "tool_updated"; tool: ToolRun }
   | { type: "tool_finished"; tool: ToolRun }
   | { type: "plan_updated"; plan: TodoItem[] }
+  | { type: "plan_approval_updated"; plan?: PlanApprovalState }
   | { type: "subagents_updated"; subagents: SubagentActivity[] }
   | { type: "project_updated"; project: ProjectSnapshot }
   | {
