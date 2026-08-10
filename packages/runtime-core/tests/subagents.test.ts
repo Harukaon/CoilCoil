@@ -24,6 +24,7 @@ interface RuntimeInternals {
     session: { isStreaming: boolean };
     subagents: Map<string, SubagentActivity>;
   }): boolean;
+  mergeSubagentActivities(activities: SubagentActivity[]): void;
   active?: {
     eventBus: EventBusController;
     subagents: Map<string, SubagentActivity>;
@@ -116,6 +117,53 @@ test("historical live subagents restore as stopped and only advertise a usable s
   assert.equal(pending?.status, "stopped");
   assert.equal(pending?.controlReady, false);
   assert.equal(pending?.resumable, undefined);
+});
+
+test("status queries remain ordinary tools and never create fake child runs", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-subagent-status-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const manager = SessionManager.inMemory(root);
+  manager.appendMessage({
+    role: "assistant",
+    content: [{ type: "toolCall", id: "tool-status", name: "subagent", arguments: { action: "status" } }],
+    timestamp: Date.now(),
+  } as never);
+  manager.appendMessage({
+    role: "toolResult",
+    toolCallId: "tool-status",
+    toolName: "subagent",
+    content: [{ type: "text", text: "当前没有子 Agent。" }],
+    details: { error: "no-runs" },
+    isError: false,
+    timestamp: Date.now(),
+  } as never);
+
+  const runtime = createRuntime(root);
+  const reconstructed = (runtime as unknown as RuntimeInternals).reconstructState({ sessionManager: manager } as AgentSession);
+  assert.equal(reconstructed.subagents.size, 0);
+});
+
+test("terminal child updates clear stale current tool labels", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-subagent-current-tool-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const runtime = createRuntime(root) as unknown as RuntimeInternals;
+  const subagents = new Map<string, SubagentActivity>([["sa-live", activity({
+    id: "sa-live",
+    runId: "sa-live",
+    currentTool: "bash",
+    currentPath: "/tmp/task",
+  })]]);
+  runtime.active = { eventBus: createEventBus(), subagents };
+
+  runtime.mergeSubagentActivities([activity({
+    id: "sa-live",
+    runId: "sa-live",
+    status: "completed",
+    controlReady: false,
+  })]);
+
+  assert.equal(subagents.get("sa-live")?.currentTool, undefined);
+  assert.equal(subagents.get("sa-live")?.currentPath, undefined);
 });
 
 test("stopSubagent preserves a terminal activity returned by the RPC bridge", async (context) => {

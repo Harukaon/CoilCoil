@@ -396,7 +396,7 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const runtimeId = snapshot?.runtimeId;
-    if (inspectorView !== "runtime" || !runtimeId) return;
+    if (settingsOpen || workspaceSurface !== "conversation" || inspectorView !== "runtime" || !runtimeId) return;
     let cancelled = false;
     void window.suocode.request<SessionSnapshot["runtimeInspection"]>({ type: "get_runtime_inspection" }, runtimeId)
       .then((inspection) => {
@@ -413,7 +413,7 @@ export default function App(): React.JSX.Element {
         if (!cancelled) toastError(caught instanceof Error ? caught.message : String(caught));
       });
     return () => { cancelled = true; };
-  }, [inspectorView, snapshot?.runtimeId]);
+  }, [inspectorView, settingsOpen, snapshot?.runtimeId, workspaceSurface]);
 
   useEffect(() => {
     if (!snapshot?.running) return;

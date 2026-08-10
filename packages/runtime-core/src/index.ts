@@ -1119,7 +1119,8 @@ function subagentActivityStatusFrom(value: unknown): SubagentActivity["status"] 
 
 function subagentActivityFromDetails(details: unknown, parentToolId: string): SubagentActivity | undefined {
   if (!isRecord(details)) return undefined;
-  const runId = stringValue(details.runId) || parentToolId;
+  const runId = stringValue(details.runId);
+  if (!runId) return undefined;
   const usage = isRecord(details.usage) ? details.usage : undefined;
   const tokens = usage && typeof usage.total === "number" && Number.isFinite(usage.total) ? usage.total : 0;
   const turnCount = usage && typeof usage.turns === "number" && Number.isFinite(usage.turns) ? usage.turns : undefined;
@@ -2449,6 +2450,7 @@ export class SuoCodeRuntime {
         .then(async () => {
           if (this.active !== active) return;
           this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+          await this.refreshRuntimeInspectionSources(active);
         })
         .catch((error) => {
           this.emitEvent({ type: "runtime_error", message: `${errorLabel}：${errorMessage(error)}`, detail: errorDetail(error) });
@@ -2609,7 +2611,9 @@ export class SuoCodeRuntime {
       settingsManager.setSkillPaths(this.rewriteSkillOverridePaths(settingsManager.getSkillPaths(), pattern, enabled));
     }
     this.reloadActiveSessionResources("Skills 重新加载失败");
-    return this.getSkillConfiguration(resolvedCwd);
+    const next = await this.getSkillConfiguration(resolvedCwd);
+    this.updateActiveSkillConfiguration(resolvedCwd, next);
+    return next;
   }
 
   async addSkillPath(path: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
@@ -2625,7 +2629,9 @@ export class SuoCodeRuntime {
       settingsManager.setSkillPaths([...current, resolvedPath]);
       this.reloadActiveSessionResources("Skills 重新加载失败");
     }
-    return this.getSkillConfiguration(resolvedCwd);
+    const next = await this.getSkillConfiguration(resolvedCwd);
+    this.updateActiveSkillConfiguration(resolvedCwd, next);
+    return next;
   }
 
   async removeSkillPath(path: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
@@ -2642,7 +2648,9 @@ export class SuoCodeRuntime {
     });
     settingsManager.setSkillPaths(next);
     this.reloadActiveSessionResources("Skills 重新加载失败");
-    return this.getSkillConfiguration(resolvedCwd);
+    const snapshot = await this.getSkillConfiguration(resolvedCwd);
+    this.updateActiveSkillConfiguration(resolvedCwd, snapshot);
+    return snapshot;
   }
 
   async setEnableSkillCommands(enabled: boolean, cwd?: string): Promise<SkillConfigurationSnapshot> {
@@ -2650,7 +2658,16 @@ export class SuoCodeRuntime {
     const settingsManager = this.skillSettingsManager(resolvedCwd);
     settingsManager.setEnableSkillCommands(enabled);
     this.reloadActiveSessionResources("Skills 重新加载失败");
-    return this.getSkillConfiguration(resolvedCwd);
+    const snapshot = await this.getSkillConfiguration(resolvedCwd);
+    this.updateActiveSkillConfiguration(resolvedCwd, snapshot);
+    return snapshot;
+  }
+
+  private updateActiveSkillConfiguration(cwd: string, snapshot: SkillConfigurationSnapshot): void {
+    const active = this.active;
+    if (!active || safeRealPath(active.cwd) !== safeRealPath(cwd)) return;
+    active.skillConfiguration = snapshot;
+    this.publishRuntimeInspection(active);
   }
 
   private runtimeBridgeRpc(
@@ -3719,8 +3736,8 @@ export class SuoCodeRuntime {
         ...existing,
         ...activity,
         task: activity.task ?? existing.task,
-        currentTool: activity.currentTool ?? existing.currentTool,
-        currentPath: activity.currentPath ?? existing.currentPath,
+        currentTool: activity.currentTool,
+        currentPath: activity.currentPath,
         model: activity.model ?? existing.model,
         recentTools: activity.recentTools ?? existing.recentTools,
         recentOutput: activity.recentOutput ?? existing.recentOutput,
@@ -3960,7 +3977,7 @@ export class SuoCodeRuntime {
             startedAt: Date.now(),
           };
           active.tools.set(tool.id, tool);
-          if (event.toolName === "subagent") {
+          if (event.toolName === "subagent" && (!stringValue(args.action) || args.action === "run" || args.action === "resume")) {
             const task = stringValue(args.task);
             const agent = stringValue(args.agent) || "子 Agent";
             const background = args.background === true;

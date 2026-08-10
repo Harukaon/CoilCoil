@@ -68,8 +68,10 @@ export function SubagentCard({
       <span className="subagent-card-copy">
         <strong>{activity.agent}</strong>
         {activity.task ? <span>{activity.task}</span> : null}
-        <small>{activitySummary(activity)}{activity.currentTool ? ` · 正在调用 ${activity.currentTool}` : ""}</small>
       </span>
+      <small className="subagent-card-meta" title={`${activitySummary(activity)}${activity.currentTool ? ` · 正在调用 ${activity.currentTool}` : ""}`}>
+        {activitySummary(activity)}{activity.currentTool ? ` · 正在调用 ${activity.currentTool}` : ""}
+      </small>
       <ChevronRight size={15} />
     </button>
   );

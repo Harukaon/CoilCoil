@@ -101,13 +101,21 @@ export function ActivityPanel({
 
   const completed = todo.filter((item) => item.status === "completed").length;
   const runningAgents = subagents.filter((item) => item.status === "pending" || item.status === "running").length;
+  const failedAgents = subagents.filter((item) => item.status === "failed").length;
+  const stoppedAgents = subagents.filter((item) => item.status === "stopped").length;
   const showTabs = availableTabs.length > 1;
   const title = tab === "commands" ? "命令" : tab === "subagents" ? "代理" : "Todo";
   const toggleExpanded = (): void => setExpanded((value) => !value);
   const toggleLabel = tab === "commands"
     ? `${commandItems.length}`
     : tab === "subagents"
-      ? `${runningAgents}/${subagents.length}`
+      ? runningAgents
+        ? `${runningAgents} 个运行中`
+        : failedAgents
+          ? `${failedAgents} 个失败`
+          : stoppedAgents
+            ? "已结束"
+            : "全部完成"
       : `${completed}/${todo.length}`;
 
   return (
@@ -135,7 +143,7 @@ export function ActivityPanel({
               <button className={tab === "todo" ? "active" : ""} type="button" role="tab" aria-selected={tab === "todo"} onClick={() => { setTab("todo"); setExpanded(true); }}>Todo</button>
             ) : null}
             {permanentTabs.includes("subagents") ? (
-              <button className={tab === "subagents" ? "active" : ""} type="button" role="tab" aria-selected={tab === "subagents"} onClick={() => { setTab("subagents"); setExpanded(true); }}>代理 <small>{runningAgents || subagents.length}</small></button>
+              <button className={tab === "subagents" ? "active" : ""} type="button" role="tab" aria-selected={tab === "subagents"} onClick={() => { setTab("subagents"); setExpanded(true); }}>代理</button>
             ) : null}
             {commandsActive ? (
               <button className={tab === "commands" ? "active" : ""} type="button" role="tab" aria-selected={tab === "commands"} onClick={() => { setTab("commands"); setExpanded(true); }}>命令 <small>{commandItems.length}</small></button>
