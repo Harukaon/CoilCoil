@@ -2,6 +2,7 @@ import { FolderPlus, LoaderCircle, Power, RefreshCw, Sparkles, Trash2 } from "lu
 import { useCallback, useEffect, useState } from "react";
 import type { SkillConfigurationSnapshot, SkillEntry, SkillSource } from "@suocode/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
+import { managedSkills, skillCountLabel, skillToggleActionLabel, skillToggleLabel, skillToggleTarget } from "./skillPolicy";
 
 const sourceLabel: Record<SkillSource, string> = {
   user: "用户",
@@ -48,7 +49,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
       () => window.suocode.request<SkillConfigurationSnapshot>({
         type: "set_skill_enabled",
         filePath: skill.filePath,
-        enabled: !skill.enabled,
+        enabled: skillToggleTarget(skill),
         cwd,
       }, runtimeId),
       skill.enabled ? `已停用 ${skill.name}` : `已启用 ${skill.name}`,
@@ -71,8 +72,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
     );
   };
 
-  const enabledCount = configuration?.skills.filter((skill) => skill.enabled).length ?? 0;
-  const totalCount = configuration?.skills.length ?? 0;
+  const skills = managedSkills(configuration?.skills);
 
   return (
     <div className="skills-settings">
@@ -80,7 +80,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
         <div className="skills-header-copy">
           <div className="skills-header-title">
             <strong>已发现的技能</strong>
-            {configuration ? <small>{enabledCount}/{totalCount} 已启用</small> : null}
+            {configuration ? <small>{skillCountLabel(configuration.skills)}</small> : null}
           </div>
           <p>放到用户 skills、项目 <code>.pi/skills</code> / <code>.agents/skills</code>，或 <code>~/.agents/skills</code>。</p>
         </div>
@@ -114,7 +114,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
         {loading ? (
           <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载技能…</div>
         ) : null}
-        {!loading && configuration?.skills.map((skill) => (
+        {!loading && skills.map((skill) => (
           <article key={skill.filePath} className={skill.enabled ? "enabled" : "disabled"}>
             <span className="skills-list-icon"><Sparkles size={14} /></span>
             <div>
@@ -128,17 +128,17 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
             <button
               type="button"
               className={skill.enabled ? "active" : ""}
-              disabled={busy || skill.source === "bundled"}
-              aria-label={skill.enabled ? `停用 ${skill.name}` : `启用 ${skill.name}`}
-              title={skill.source === "bundled" ? "内置技能始终可用" : undefined}
+              disabled={busy}
+              aria-pressed={skill.enabled}
+              aria-label={skillToggleActionLabel(skill)}
               onClick={() => toggleSkill(skill)}
             >
               <Power size={13} />
-              {skill.source === "bundled" ? "始终可用" : skill.enabled ? "启用" : "停用"}
+              {skillToggleLabel(skill)}
             </button>
           </article>
         ))}
-        {!loading && !configuration?.skills.length ? (
+        {!loading && !skills.length ? (
           <p className="skills-empty">尚未发现技能。可将含 SKILL.md 的目录放到约定位置，或点击「添加技能目录」。</p>
         ) : null}
       </section>

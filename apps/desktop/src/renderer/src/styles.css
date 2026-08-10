@@ -616,14 +616,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .runtime-context-item > strong { overflow: hidden; color: #565650; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-context-item > small { color: #999993; font-size: 7px; white-space: nowrap; }
 .runtime-context-item > p { grid-column: 2 / -1; margin: 0; color: #81817b; font-size: 8px; line-height: 1.45; overflow-wrap: anywhere; }
-.runtime-context-ranking { display: grid; gap: 8px; }
-.runtime-context-ranking > div { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; }
-.runtime-context-rank-copy { display: flex; min-width: 0; align-items: center; gap: 6px; }
-.runtime-context-rank-copy small { flex: 0 0 auto; padding: 2px 4px; border-radius: 4px; color: #73776f; background: #eef1ec; font-size: 7px; }
-.runtime-context-rank-copy strong { overflow: hidden; color: #555550; font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-.runtime-context-rank-value { color: #888882; font-size: 8px; font-weight: 600; }
-.runtime-context-rank-bar { position: relative; grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 99px; background: #eeeeea; }
-.runtime-context-rank-bar i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: #879785; }
 .runtime-safety-note { display: flex; align-items: flex-start; gap: 6px; padding: 8px; border: 1px solid #ead7bd; border-radius: 7px; color: #7d633e; background: #fffaf0; font-size: 8px; line-height: 1.45; }
 .runtime-safety-note svg { flex: 0 0 auto; margin-top: 1px; }
 .runtime-definition-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 7px; padding: 8px; }
@@ -652,7 +644,7 @@ button.runtime-chip:hover:not(:disabled), .runtime-chip.mcp:hover { border-color
 .runtime-chip.mcp > button:first-child:disabled { cursor: default; }
 .runtime-chip-action { align-self: stretch; padding: 0 8px; border-left: 1px solid #e4e4df; color: #677164; background: transparent; font-size: 7px; cursor: pointer; }
 .runtime-chip-action:hover { background: #eef2ec; }
-.runtime-chip[data-tooltip]:hover::after, .runtime-chip[data-tooltip]:focus-visible::after { position: absolute; z-index: 20; bottom: calc(100% + 6px); left: 4px; width: max-content; max-width: min(250px, 70vw); padding: 6px 8px; border: 1px solid #d8d8d3; border-radius: 7px; color: #555550; background: #fffffd; box-shadow: 0 8px 24px rgb(30 30 28 / 12%); content: attr(data-tooltip); font-size: 8px; font-weight: 400; line-height: 1.45; pointer-events: none; white-space: normal; }
+.runtime-chip[data-tooltip]:hover::after, .runtime-chip[data-tooltip]:focus-visible::after { position: absolute; z-index: 20; bottom: calc(100% + 6px); left: 4px; width: max-content; max-width: min(250px, 70vw); padding: 6px 8px; border: 1px solid #d8d8d3; border-radius: 7px; color: #555550; background: #ffffff; box-shadow: 0 8px 24px rgb(30 30 28 / 14%); content: attr(data-tooltip); font-size: 8px; font-weight: 400; line-height: 1.45; pointer-events: none; white-space: normal; }
 .runtime-prompt-modal { margin-top: 16px; }
 .runtime-prompt-modal pre, .runtime-prompt-modal textarea { box-sizing: border-box; width: 100%; min-height: 330px; max-height: min(62vh, 560px); margin: 0; overflow: auto; padding: 12px; border: 1px solid #deded9; border-radius: 10px; color: #4d4d48; background: #f5f5f2; font: 10px/1.6 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .runtime-prompt-modal textarea { resize: vertical; outline: 0; background: #fff; }

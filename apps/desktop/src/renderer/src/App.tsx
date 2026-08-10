@@ -791,7 +791,7 @@ export default function App(): React.JSX.Element {
           <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span></button>; })}</nav>
           <section className="inspector-content">
             {inspectorView === "files" ? <FilesPanel key="agent-files" project={projectState} runtimeId={snapshot?.runtimeId} onOpen={openFilePreview} /> : null}
-            {inspectorView === "runtime" ? <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} /> : null}
+            {inspectorView === "runtime" ? <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} /> : null}
           </section>
         </aside>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}

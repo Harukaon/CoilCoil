@@ -1,7 +1,4 @@
-import type { RuntimeContextItem } from "@suocode/runtime-protocol";
-
-const toolNames: Record<string, string> = {
-  read: "读取文件",
+const toolNames: Record<string, string> = {  read: "读取文件",
   write: "写入文件",
   edit: "编辑文件",
   grep: "搜索内容",
@@ -26,11 +23,4 @@ export function tokenNumber(value: number): string {
 
 export function toolDisplayName(name: string): string {
   return toolNames[name] ?? name;
-}
-
-export function contextRanking(items: RuntimeContextItem[], limit = 6): RuntimeContextItem[] {
-  return items
-    .filter((item) => item.active && item.estimatedTokens > 0)
-    .sort((left, right) => right.estimatedTokens - left.estimatedTokens)
-    .slice(0, limit);
 }

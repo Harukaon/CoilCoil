@@ -1,0 +1,113 @@
+.context-galaxy {
+  /* Depth ramp on the existing house green. Colour carries depth only —
+     identity comes from position and direct labels, because this palette is a
+     single low-chroma family and cannot separate six categories. */
+  --galaxy-root: #4f5c4d;
+  --galaxy-branch: #788c75;
+  --galaxy-leaf: #abb8a9;
+  --galaxy-neutral: #9a9a94;
+  --galaxy-link: #dfe4dd;
+  --galaxy-surface: #fff;
+}
+
+.context-galaxy-figure {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+}
+.context-galaxy-figure svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.context-galaxy-link { stroke: var(--galaxy-link); stroke-width: .4; fill: none; }
+.context-galaxy-ring { fill: var(--galaxy-surface); }
+.context-galaxy-node { fill: var(--galaxy-branch); fill-opacity: .22; stroke: var(--galaxy-branch); stroke-width: .5; }
+.context-galaxy-node.depth-0 { fill: var(--galaxy-root); stroke: var(--galaxy-root); fill-opacity: .16; }
+.context-galaxy-node.depth-2 { fill: var(--galaxy-leaf); stroke: var(--galaxy-leaf); }
+/* The residual is grey against green, which is below the identity threshold on
+   hue alone — the dashed ring is what actually distinguishes it. */
+.context-galaxy-node.residual { fill: var(--galaxy-neutral); stroke: var(--galaxy-neutral); stroke-dasharray: 1.4 1.2; }
+.context-galaxy-label { fill: #45453f; font-size: 2.6px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+.context-galaxy-label.on-root { fill: #37372f; font-size: 3.4px; font-weight: 650; }
+.context-galaxy-value { fill: #7a7a72; font-size: 2.2px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+
+.context-galaxy-hit { fill: transparent; stroke: none; cursor: pointer; outline: none; }
+.context-galaxy-target.is-active .context-galaxy-node { fill-opacity: .42; stroke-width: .9; }
+.context-galaxy-target:focus-visible .context-galaxy-node { stroke: #45453f; stroke-width: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .context-galaxy-node { transition: fill-opacity 120ms ease, stroke-width 120ms ease; }
+}
+
+.context-galaxy-tip {
+  position: absolute;
+  z-index: 3;
+  width: max-content;
+  max-width: 240px;
+  padding: 7px 9px;
+  border: 1px solid #d8d8d3;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(30 30 28 / 14%);
+  pointer-events: none;
+}
+.context-galaxy-tip strong { display: block; color: #3c3c39; font-size: 11px; }
+.context-galaxy-tip small { display: block; margin-top: 2px; color: #8a8a85; font-size: 9px; }
+.context-galaxy-tip p { margin: 5px 0 0; color: #6a6a64; font-size: 9px; line-height: 1.45; overflow-wrap: anywhere; }
+
+/* Panel thumbnail: one button, no hover, nothing that could be clipped by
+   `.inspector-content { overflow: auto }`. */
+.runtime-galaxy-trigger {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e1e1dd;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+.runtime-galaxy-trigger:hover { border-color: #ccccc6; background: #f8f8f5; }
+.runtime-galaxy-trigger .context-galaxy-figure { pointer-events: none; }
+.runtime-galaxy-legend { display: grid; gap: 4px; }
+.runtime-galaxy-legend div { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.runtime-galaxy-legend i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--galaxy-branch); opacity: .55; }
+.runtime-galaxy-legend i.residual { background: var(--galaxy-neutral); }
+.runtime-galaxy-legend strong { min-width: 0; flex: 1; overflow: hidden; color: #55554f; font-size: 9px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-galaxy-legend small { flex: 0 0 auto; color: #92928d; font-size: 8px; font-variant-numeric: tabular-nums; }
+
+/* Fullscreen board */
+.context-galaxy-board {
+  display: grid;
+  width: min(1040px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid #d7d7d2;
+  border-radius: 16px;
+  background: #fafaf8;
+  box-shadow: 0 24px 80px rgb(28 28 25 / 24%), 0 4px 18px rgb(28 28 25 / 12%);
+}
+.context-galaxy-board > header { grid-column: 1 / -1; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.context-galaxy-board > header h2 { margin: 0; color: #30302d; font-size: 14px; font-weight: 650; }
+.context-galaxy-board > header p { margin: 4px 0 0; max-width: 62ch; color: #8a8a85; font-size: 10px; line-height: 1.5; }
+.context-galaxy-board > header button { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border-radius: 7px; color: #858580; background: transparent; cursor: pointer; }
+.context-galaxy-board > header button:hover { color: #30302d; background: #ebebe7; }
+.context-galaxy-canvas { position: relative; min-width: 0; }
+.context-galaxy-side { display: grid; align-content: start; gap: 10px; min-width: 0; min-height: 0; overflow-y: auto; }
+.context-galaxy-total { display: grid; gap: 3px; padding: 10px 11px; border: 1px solid #e1e1dd; border-radius: 10px; background: #fff; }
+.context-galaxy-total strong { color: #37372f; font-size: 17px; font-variant-numeric: tabular-nums; }
+.context-galaxy-total small { color: #92928d; font-size: 9px; line-height: 1.45; }
+.context-galaxy-table { display: grid; gap: 1px; overflow: hidden; border: 1px solid #e6e6e1; border-radius: 9px; background: #e6e6e1; }
+.context-galaxy-table > div { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 7px 9px; background: #fff; }
+.context-galaxy-table > div.is-active { background: #f3f6f2; }
+.context-galaxy-table i { width: 7px; height: 7px; border-radius: 50%; background: var(--galaxy-branch); opacity: .55; }
+.context-galaxy-table i.residual { background: var(--galaxy-neutral); }
+.context-galaxy-table strong { min-width: 0; overflow: hidden; color: #4b4b45; font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.context-galaxy-table em { color: #92928d; font-size: 9px; font-style: normal; font-variant-numeric: tabular-nums; }
+.context-galaxy-table b { color: #55554f; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.context-galaxy-note { margin: 0; color: #93938d; font-size: 9px; line-height: 1.5; }
+.context-galaxy-note.warn { padding: 8px 9px; border: 1px solid #ead7bd; border-radius: 8px; color: #7d633e; background: #fffaf0; }
+.context-galaxy-empty { display: grid; place-items: center; min-height: 140px; color: #a0a09b; font-size: 11px; }
+
+@media (max-width: 900px) {
+  .context-galaxy-board { grid-template-columns: minmax(0, 1fr); max-height: calc(100vh - 32px); overflow-y: auto; }
+}

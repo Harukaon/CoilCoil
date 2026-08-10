@@ -86,7 +86,10 @@ export function McpJsonEditor({
           </div>
           <button type="button" aria-label="关闭" disabled={saving} onClick={onClose}><X size={15} /></button>
         </header>
-        <p className="mcp-json-hint">格式与 Cursor 的 <code>mcp.json</code> 一致。保存前会校验 JSON，不合法则拒绝写入，避免 MCP 不可用。</p>
+        <p className="mcp-json-hint">
+          这是 SuoCode 自己的 <code>mcp.json</code>，格式与 Cursor 一致。<code>imports</code> 里列出的来源（Claude、Codex、opencode 等）中的服务器仍然保存在各自的应用里，这里只会留下对它们的覆盖，例如 <code>{"{ \"disabled\": true }"}</code>；所以本文件通常比左侧列表短。
+          新建服务器时用 <code>command</code>（stdio）或 <code>url</code>（HTTP）二选一，可搭配 <code>args</code>、<code>env</code>、<code>headers</code>、<code>auth</code>、<code>lifecycle</code> 等字段。保存前会校验 JSON，不合法则拒绝写入。
+        </p>
         {loading ? (
           <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载配置…</div>
         ) : (

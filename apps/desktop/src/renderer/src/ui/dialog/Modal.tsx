@@ -31,7 +31,7 @@ export function Modal({
   const autoDescriptionId = useId();
   const titleId = labelledBy ?? (title ? autoTitleId : undefined);
   const descriptionId = describedBy ?? (description ? autoDescriptionId : undefined);
-  const panelRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -61,6 +61,7 @@ export function Modal({
     <div
       className="suo-modal-backdrop"
       role="presentation"
+      ref={panelRef}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -69,7 +70,6 @@ export function Modal({
         children
       ) : (
         <section
-          ref={panelRef}
           className={`suo-modal suo-modal-${size}`}
           role="dialog"
           aria-modal="true"

@@ -223,6 +223,12 @@ export interface McpServerConfiguration {
   disabled: boolean;
   source?: string;
   sourceKind?: "user" | "project" | "import";
+  /**
+   * Which app an imported definition came from. For imports the adapter sets
+   * `source` to SuoCode's own config path (that is where overrides get written),
+   * so this is the only field that identifies the true origin.
+   */
+  importKind?: McpImportConfiguration["kind"];
 }
 
 export interface McpImportConfiguration {
@@ -232,11 +238,25 @@ export interface McpImportConfiguration {
   enabled: boolean;
 }
 
+/**
+ * A server the user removed that SuoCode could only tombstone. Imported and
+ * shared definitions live in files SuoCode does not own, so "delete" hides them
+ * locally instead — which means they must be restorable.
+ */
+export interface McpRemovedServer {
+  name: string;
+  /** Where the definition still lives, when it can still be resolved. */
+  source?: string;
+  sourceKind?: "user" | "project" | "import";
+  importKind?: McpImportConfiguration["kind"];
+}
+
 export interface McpConfigurationSnapshot {
   configPath: string;
   projectConfigPath?: string;
   servers: McpServerConfiguration[];
   imports: McpImportConfiguration[];
+  removed: McpRemovedServer[];
 }
 
 export interface McpJsonDocument {
@@ -291,7 +311,13 @@ export function validateMcpJsonText(text: string): McpJsonValidationResult {
     if (!isPlainObject(entry)) return { ok: false, error: `mcpServers.${name} 必须是对象。` };
     const hasCommand = typeof entry.command === "string" && entry.command.trim().length > 0;
     const hasUrl = typeof entry.url === "string" && entry.url.trim().length > 0;
-    if (!hasCommand && !hasUrl) {
+    // An entry may carry only overrides for a server that is defined elsewhere —
+    // an imported Cursor/Claude/Codex config, or a shared `.mcp.json`. Removing
+    // such a server can only tombstone it as `{ "disabled": true }` here, so
+    // demanding a transport would reject files SuoCode itself writes.
+    const overrideOnly = !hasCommand && !hasUrl
+      && Object.keys(entry).every((key) => key === "disabled" || key === "excludeTools");
+    if (!hasCommand && !hasUrl && !overrideOnly) {
       return { ok: false, error: `mcpServers.${name} 需要提供 command（stdio）或 url（HTTP）。` };
     }
     if (hasCommand && hasUrl) {
@@ -755,6 +781,7 @@ export type RuntimeCommand =
   | { type: "get_mcp_status" }
   | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
   | { type: "remove_mcp_server"; name: string; scope?: "global" | "project"; cwd?: string }
+  | { type: "restore_mcp_server"; name: string; cwd?: string }
   | { type: "set_mcp_server_enabled"; name: string; enabled: boolean; cwd: string }
   | { type: "enable_mcp_imports"; imports: McpImportConfiguration["kind"][]; cwd?: string }
   | { type: "connect_mcp_server"; name: string }

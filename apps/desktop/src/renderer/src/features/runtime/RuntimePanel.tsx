@@ -24,7 +24,17 @@ import type {
 } from "@suocode/runtime-protocol";
 import { Modal } from "../../ui/dialog";
 import { toastError, toastSuccess } from "../../ui/toast";
-import { contextRanking, tokenNumber, toolDisplayName } from "./runtimePresentation";
+import { tokenNumber, toolDisplayName } from "./runtimePresentation";
+import { ContextGalaxyBoard, ContextGalaxyThumbnail } from "./ContextGalaxy";
+import { buildContextGalaxy, contextGalaxySignature } from "./contextGalaxyModel";
+import {
+  mcpSectionBadge,
+  mcpTogglePlan,
+  mcpVisibility,
+  mcpVisibilityLabel,
+  toggledVisibility,
+  type McpVisibilityOverrides,
+} from "./mcpPolicy";
 
 const kindLabel: Record<RuntimeSummaryEvent["kind"], string> = {
   compaction: "上下文压缩",
@@ -35,15 +45,6 @@ const reasonLabel: Record<NonNullable<RuntimeSummaryEvent["reason"]>, string> = 
   manual: "手动触发",
   threshold: "达到阈值",
   overflow: "溢出恢复",
-};
-
-const contextKindLabel: Record<RuntimeContextItem["kind"], string> = {
-  user: "用户消息",
-  assistant: "模型回复",
-  reasoning: "思考内容",
-  tool_call: "工具调用",
-  tool_result: "工具结果",
-  custom: "运行时数据",
 };
 
 function percent(value: number): string {
@@ -112,35 +113,36 @@ function RuntimeSection({
   );
 }
 
-function mcpStatusLabel(server: McpServerRuntimeStatus): string {
-  if (server.disabled) return "设置中已停用";
-  if (server.sessionDisabled) return "仅当前会话停用";
-  if (server.status === "connected") return "当前会话可用";
-  if (server.status === "needs-auth") return "需要认证";
-  if (server.status === "failed") return "连接失败";
-  if (server.status === "cached") return "已缓存，待调用";
-  return "尚未连接";
-}
-
 export function RuntimePanel({
   inspection,
   contextUsage,
   tokenUsage,
   runtimeId,
+  cwd,
 }: {
   inspection?: RuntimeInspectionSnapshot;
   contextUsage?: ContextUsage;
   tokenUsage?: TokenUsage;
   runtimeId?: string;
+  cwd?: string;
 }): React.JSX.Element {
   const [promptOpen, setPromptOpen] = useState(false);
+  const [galaxyOpen, setGalaxyOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(inspection?.effectiveSystemPrompt ?? "");
   const [busyAction, setBusyAction] = useState<string>();
+  const [mcpOverrides, setMcpOverrides] = useState<McpVisibilityOverrides>({});
   const summaries = inspection?.summaryEvents ?? [];
   const activeTools = useMemo(() => inspection?.tools.filter((tool) => tool.active) ?? [], [inspection?.tools]);
-  const rankedContext = useMemo(() => contextRanking(inspection?.contextItems ?? []), [inspection?.contextItems]);
-  const maxContextTokens = rankedContext[0]?.estimatedTokens ?? 1;
+  const galaxyInput = inspection
+    ? { contextItems: inspection.contextItems, tools: inspection.tools, estimates: inspection.estimates }
+    : undefined;
+  const galaxySignature = contextGalaxySignature(inspection?.sessionRevision, galaxyInput);
+  // Keyed on the signature rather than on `inspection`: the panel re-renders on
+  // every streamed token, and `contextItems` is a fresh array on every genuine
+  // emission, so neither is a reliable signal that the composition moved.
+  const galaxy = useMemo(() => buildContextGalaxy(galaxyInput), [galaxySignature]);
+  const galaxyThumbnail = useMemo(() => buildContextGalaxy(galaxyInput, { depth: 1 }), [galaxySignature]);
   const tokenMetrics = useMemo(() => [
     tokenUsage?.input ? ["累计输入", tokenNumber(tokenUsage.input)] : undefined,
     tokenUsage?.output ? ["累计输出", tokenNumber(tokenUsage.output)] : undefined,
@@ -152,6 +154,20 @@ export function RuntimePanel({
   useEffect(() => {
     if (!editingPrompt) setPromptDraft(inspection?.effectiveSystemPrompt ?? "");
   }, [editingPrompt, inspection?.effectiveSystemPrompt]);
+
+  // Once the runtime reports a server in the state we optimistically rendered,
+  // drop the override so the panel follows the runtime again.
+  useEffect(() => {
+    const servers = inspection?.mcp?.servers;
+    if (!servers?.length) return;
+    setMcpOverrides((current) => {
+      const pending = Object.entries(current).filter(([name, visibility]) => {
+        const server = servers.find((candidate) => candidate.name === name);
+        return server ? mcpVisibility(server) !== visibility : true;
+      });
+      return pending.length === Object.keys(current).length ? current : Object.fromEntries(pending);
+    });
+  }, [inspection?.mcp?.servers]);
 
   const request = async <T,>(action: string, command: Parameters<typeof window.suocode.request>[0]): Promise<T | undefined> => {
     setBusyAction(action);
@@ -185,13 +201,45 @@ export function RuntimePanel({
     await request(`skill:${filePath}`, { type: "set_session_skill_enabled", filePath, enabled });
   };
 
-  const setMcpEnabled = async (server: McpServerRuntimeStatus, enabled: boolean): Promise<void> => {
-    await request(`mcp:${server.name}`, { type: "set_session_mcp_server_enabled", name: server.name, enabled });
-  };
-
-  const connectMcp = async (server: McpServerRuntimeStatus): Promise<void> => {
-    await request(`mcp:${server.name}`, { type: "connect_mcp_server", name: server.name });
-    await request(`inspection:mcp:${server.name}`, { type: "get_runtime_inspection" });
+  const toggleMcpVisibility = async (server: McpServerRuntimeStatus): Promise<void> => {
+    const next = toggledVisibility(mcpVisibility(server, mcpOverrides));
+    const action = `mcp:${server.name}`;
+    // Show the new state immediately: the workspace write below is durable, and
+    // the session sync may be slow or unavailable while the extension boots.
+    setMcpOverrides((current) => ({ ...current, [server.name]: next }));
+    setBusyAction(action);
+    try {
+      for (const step of mcpTogglePlan(server, next)) {
+        if (step.kind === "workspace") {
+          if (!cwd) throw new Error("请先打开一个项目，再调整 MCP 可见性。");
+          await window.suocode.request({
+            type: "set_mcp_server_enabled",
+            name: step.name,
+            enabled: step.enabled,
+            cwd,
+          }, runtimeId);
+        } else {
+          // Only syncs an already-running Pi session. A session that has not
+          // started yet, or an extension still booting, picks the workspace
+          // setting up on its own — so this must never fail the toggle.
+          await window.suocode.request({
+            type: "set_session_mcp_server_enabled",
+            name: step.name,
+            enabled: step.enabled,
+          }, runtimeId).catch(() => undefined);
+        }
+      }
+      toastSuccess(next === "visible" ? `${server.name} 已展示给 Agent` : `${server.name} 已对 Agent 停用`);
+    } catch (caught) {
+      setMcpOverrides((current) => {
+        const reverted = { ...current };
+        delete reverted[server.name];
+        return reverted;
+      });
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusyAction(undefined);
+    }
   };
 
   return (
@@ -220,15 +268,13 @@ export function RuntimePanel({
         <small>{inspection?.systemPromptOverride ? "当前会话已修改" : inspection?.estimates.systemPrompt ? `${tokenNumber(inspection.estimates.systemPrompt)} Token` : "等待捕获"}</small>
       </button>
 
-      <RuntimeSection title="上下文占用" icon={<BarChart3 size={14} />} badge={rankedContext.length ? `前 ${rankedContext.length} 项` : undefined}>
-        {rankedContext.length ? <div className="runtime-context-ranking">{rankedContext.map((item) => (
-          <div key={item.id} title={item.preview || item.label}>
-            <span className="runtime-context-rank-copy"><small>{contextKindLabel[item.kind]}</small><strong>{item.label}</strong></span>
-            <span className="runtime-context-rank-value">{tokenNumber(item.estimatedTokens)}</span>
-            <span className="runtime-context-rank-bar"><i style={{ width: `${Math.max(4, item.estimatedTokens / maxContextTokens * 100)}%` }} /></span>
-          </div>
-        ))}</div> : <p className="runtime-muted">当前上下文还没有可估算的内容。</p>}
-        <p className="runtime-section-footnote">只显示占用最大的内容，用于定位上下文中的大体积消息和工具结果。</p>
+      <RuntimeSection title="上下文构成" icon={<BarChart3 size={14} />} badge={galaxy.degenerate ? undefined : `${galaxy.nodes.filter((node) => node.depth === 1).length} 类`} open>
+        {galaxy.degenerate ? (
+          <p className="runtime-muted">当前上下文还没有可估算的内容。</p>
+        ) : (
+          <ContextGalaxyThumbnail galaxy={galaxyThumbnail} onOpen={() => setGalaxyOpen(true)} />
+        )}
+        <p className="runtime-section-footnote">圆面积表示 Token 占用。点击展开完整画板，可按具体工具查看。</p>
       </RuntimeSection>
 
       <RuntimeSection title="工具" icon={<Wrench size={14} />} badge={inspection?.tools.length ? `${activeTools.length}/${inspection.tools.length} 启用` : undefined}>
@@ -258,22 +304,24 @@ export function RuntimePanel({
         <p className="runtime-section-footnote">设置页控制工作区是否启用；这里的开关只影响当前会话。</p>
       </RuntimeSection>
 
-      <RuntimeSection title="MCP" icon={<PlugZap size={14} />} badge={inspection?.mcp ? `${inspection.mcp.servers.filter((server) => !server.disabled && !server.sessionDisabled).length}/${inspection.mcp.servers.length} 可用` : undefined}>
-        {inspection?.mcp?.servers.length ? <div className="runtime-chip-grid">{inspection.mcp.servers.map((server) => (
-          <div className={`runtime-chip mcp ${!server.disabled && !server.sessionDisabled ? "active" : "inactive"}`} key={server.name}>
+      <RuntimeSection title="MCP" icon={<PlugZap size={14} />} badge={mcpSectionBadge(inspection?.mcp?.servers, mcpOverrides)}>
+        {inspection?.mcp?.servers.length ? <div className="runtime-chip-grid">{inspection.mcp.servers.map((server) => {
+          const visibility = mcpVisibility(server, mcpOverrides);
+          return (
             <button
+              key={server.name}
+              className={`runtime-chip toggle ${visibility === "visible" ? "active" : "inactive"}`}
               type="button"
-              disabled={server.disabled || busyAction === `mcp:${server.name}`}
-              title={server.disabled ? "请先在设置中启用这个 MCP Server" : undefined}
-              onClick={() => { void setMcpEnabled(server, server.sessionDisabled); }}
+              disabled={busyAction === `mcp:${server.name}`}
+              aria-pressed={visibility === "visible"}
+              onClick={() => { void toggleMcpVisibility(server); }}
             >
               <strong>{server.name}</strong>
-              <small>{mcpStatusLabel(server)}{server.toolCount ? ` · ${server.toolCount} 工具` : ""}</small>
+              <small>{mcpVisibilityLabel(visibility, server.toolCount)}</small>
             </button>
-            {!server.disabled && !server.sessionDisabled && server.status !== "connected" ? <button className="runtime-chip-action" type="button" disabled={busyAction === `mcp:${server.name}`} onClick={() => { void connectMcp(server); }}>连接</button> : null}
-          </div>
-        ))}</div> : <p className="runtime-muted">{inspection?.mcp?.diagnostic || "当前工作区没有 MCP Server。"}</p>}
-        <p className="runtime-section-footnote">设置页控制工作区配置；这里控制当前会话是否允许 Agent 使用。</p>
+          );
+        })}</div> : <p className="runtime-muted">{inspection?.mcp?.diagnostic || "当前工作区没有 MCP Server。"}</p>}
+        <p className="runtime-section-footnote">只有「展示给 Agent」的 MCP，其工具才会出现在 Agent 面前；停用即永不展示。</p>
       </RuntimeSection>
 
       <RuntimeSection title="项目记忆" icon={<Sparkles size={14} />} badge={inspection?.memory ? ({ idle: "就绪", running: "整理中", busy: "正忙", succeeded: "已完成", failed: "失败", disabled: "已停用" }[inspection.memory.state]) : undefined} open={inspection?.memory?.state === "running" || inspection?.memory?.state === "failed"}>
@@ -301,6 +349,14 @@ export function RuntimePanel({
           <div className="runtime-summary-empty"><History size={18} /><p>当前会话尚未发生上下文压缩或分支总结。</p></div>
         )}
       </section>
+
+      <Modal open={galaxyOpen} bare onClose={() => setGalaxyOpen(false)}>
+        <ContextGalaxyBoard
+          galaxy={galaxy}
+          contextWindow={contextUsage?.contextWindow}
+          onClose={() => setGalaxyOpen(false)}
+        />
+      </Modal>
 
       <Modal
         open={promptOpen}
