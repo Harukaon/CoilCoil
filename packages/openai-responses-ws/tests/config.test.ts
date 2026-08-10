@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readOpenAIResponsesWsConfig, resolveOpenAIResponsesWsEndpoints, writeOpenAIResponsesWsConfig } from "../src/config.ts";
 import { mapOpenAIResponsesWsCatalog } from "../src/models.ts";
 import { adaptPiCodexTransportSource, loadOpenAIResponsesWsStream } from "../src/transport.ts";
+
+test("publishes only compiled JavaScript as production entry points", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    exports: Record<string, string | { import?: string }>;
+    pi?: { extensions?: string[] };
+  };
+  const productionEntries = [
+    ...Object.values(manifest.exports).map((entry) => typeof entry === "string" ? entry : entry.import),
+    ...(manifest.pi?.extensions ?? []),
+  ].filter((entry): entry is string => Boolean(entry));
+  assert.ok(productionEntries.length > 0);
+  assert.ok(productionEntries.every((entry) => entry.endsWith(".js") || entry.endsWith(".json")));
+  assert.ok(productionEntries.every((entry) => !entry.includes("/src/")));
+});
 
 test("normalizes compatible service roots into model and inference endpoints", () => {
   assert.deepEqual(resolveOpenAIResponsesWsEndpoints("http://127.0.0.1:8317/v1"), {

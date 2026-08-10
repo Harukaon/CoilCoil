@@ -11,9 +11,9 @@ import {
   OPENAI_RESPONSES_WS_PROVIDER_NAME,
   readOpenAIResponsesWsConfig,
   resolveOpenAIResponsesWsEndpoints,
-} from "./config.ts";
-import { fetchOpenAIResponsesWsCatalog, type OpenAIResponsesWsCatalog } from "./models.ts";
-import { loadOpenAIResponsesWsStream } from "./transport.ts";
+} from "./config.js";
+import { fetchOpenAIResponsesWsCatalog, type OpenAIResponsesWsCatalog } from "./models.js";
+import { loadOpenAIResponsesWsStream } from "./transport.js";
 
 interface CatalogCache extends OpenAIResponsesWsCatalog {
   modelsUrl: string;

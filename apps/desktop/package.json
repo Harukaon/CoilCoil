@@ -12,8 +12,8 @@
     "preview": "electron-vite preview",
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "package": "npm run build && electron-builder",
-    "package:dir": "npm run build && electron-builder --dir"
+    "package": "npm run build --workspace @suocode/openai-responses-ws && npm run build && electron-builder",
+    "package:dir": "npm run build --workspace @suocode/openai-responses-ws && npm run build && electron-builder --dir"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Api, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { OPENAI_RESPONSES_WS_API, OPENAI_RESPONSES_WS_PROVIDER_ID } from "./config.ts";
+import { OPENAI_RESPONSES_WS_API, OPENAI_RESPONSES_WS_PROVIDER_ID } from "./config.js";
 
 export type OpenAIResponsesWsStream = (
   model: Model<Api>,

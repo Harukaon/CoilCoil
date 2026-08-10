@@ -172,7 +172,7 @@ async function clickInspector(client, label) {
 async function dismissFirstRunSettings(client, required) {
   if (!required) return;
   await client.waitFor(`Boolean(document.querySelector('.settings-screen'))`, "The first-run settings screen did not appear after reload.", 45_000);
-  await client.evaluate(`document.querySelector('.settings-screen button[aria-label="关闭设置"]')?.click()`);
+  await client.evaluate(`document.querySelector('.settings-screen button[aria-label="返回工作区"]')?.click()`);
   await client.waitFor(`Boolean(document.querySelector('.conversation-pane'))`, "The workspace did not return after closing first-run settings.", 10_000);
 }
 
@@ -402,8 +402,8 @@ async function main() {
       return configuration.configuredProviders.length > 0;
     })()`);
     if (!hasConfiguredProvider) {
-      await client.waitFor(`Boolean(document.querySelector('button[aria-label="关闭设置"]'))`, "The first-run model settings dialog did not open.");
-      await client.evaluate(`document.querySelector('button[aria-label="关闭设置"]')?.click()`);
+      await client.waitFor(`Boolean(document.querySelector('button[aria-label="返回工作区"]'))`, "The first-run model settings screen did not open.");
+      await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
       await client.waitFor(`Boolean(document.querySelector('.conversation-pane'))`, "The workspace did not return after closing first-run settings.", 10_000);
     }
     const homeState = await client.evaluate(`(async () => {
@@ -765,7 +765,7 @@ async function main() {
       await window.suocode.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp-project", scope: "project", cwd: ${JSON.stringify(homeState.home.path)} });
       await window.suocode.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp", scope: "global", cwd: ${JSON.stringify(homeState.home.path)} });
     })()`);
-    await client.evaluate(`document.querySelector('button[aria-label="关闭设置"]')?.click()`);
+    await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
 
     const openedArchive = await client.evaluate(`(() => {
       const button = document.querySelector('button[aria-label="归档会话"]');

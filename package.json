@@ -23,7 +23,7 @@
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build:pi": "npm run build:offline --prefix vendor/pi",
-    "build": "npm run build:pi && npm run build --workspace @suocode/cli && npm run build --workspace @suocode/desktop",
+    "build": "npm run build:pi && npm run build --workspace @suocode/openai-responses-ws && npm run build --workspace @suocode/cli && npm run build --workspace @suocode/desktop",
     "dev": "npm run dev --workspace @suocode/desktop",
     "cli": "npm run dev --workspace @suocode/cli --",
     "package:desktop": "npm run build:pi && npm run package --workspace @suocode/desktop",
