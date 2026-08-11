@@ -1,7 +1,12 @@
-import type { ChatMessage, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, PlanApprovalState, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
 import type { ConversationTimelineItem, TimelineItem } from "./ConversationTimeline";
 
-export function buildConversationTimeline(messages: ChatMessage[], tools: ToolRun[], subagents: SubagentActivity[] = []): ConversationTimelineItem[] {
+export function buildConversationTimeline(
+  messages: ChatMessage[],
+  tools: ToolRun[],
+  subagents: SubagentActivity[] = [],
+  planApproval?: PlanApprovalState,
+): ConversationTimelineItem[] {
   const subagentsByParent = new Map<string, SubagentActivity[]>();
   for (const activity of subagents) {
     const parent = activity.parentToolId ?? activity.runId;
@@ -12,13 +17,19 @@ export function buildConversationTimeline(messages: ChatMessage[], tools: ToolRu
   type OrderedItem =
     | { kind: "message"; order: number; message: ChatMessage }
     | { kind: "tool"; order: number; tool: ToolRun }
+    | { kind: "plan"; order: number; plan: PlanApprovalState }
     | { kind: "subagent"; order: number; activity: SubagentActivity };
   const ordered: OrderedItem[] = [
     ...messages
       .filter((message) => message.role !== "tool" && (message.text || message.thinking || message.images?.length))
       .map((message) => ({ kind: "message" as const, order: message.order, message })),
   ];
+  const latestPlanTool = [...tools].filter((tool) => tool.name === "plan").sort((left, right) => right.order - left.order)[0];
   for (const tool of tools) {
+    if (planApproval && latestPlanTool?.id === tool.id) {
+      ordered.push({ kind: "plan", order: tool.order, plan: planApproval });
+      continue;
+    }
     const activities = tool.name === "subagent" ? subagentsByParent.get(tool.id) ?? [] : [];
     if (!activities.length) {
       ordered.push({ kind: "tool", order: tool.order, tool });

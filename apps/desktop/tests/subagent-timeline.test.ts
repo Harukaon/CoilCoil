@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChatMessage, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, PlanApprovalState, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
 import { buildConversationTimeline } from "../src/renderer/src/features/conversation/buildConversationTimeline.ts";
 
 const messages: ChatMessage[] = [
@@ -72,4 +72,38 @@ test("ordinary tools remain grouped when no subagent activity owns the tool call
   assert.equal(agentTurn?.kind, "agent");
   if (agentTurn?.kind !== "agent") return;
   assert.deepEqual(agentTurn.items.map((item) => item.kind), ["message", "tools", "message"]);
+});
+
+test("an approved plan occupies the original plan tool position in chat", () => {
+  const planTool: ToolRun = {
+    id: "plan-call-1",
+    order: 3,
+    name: "plan",
+    label: "创建执行计划",
+    args: {},
+    output: "",
+    status: "succeeded",
+    startedAt: 3,
+    endedAt: 3,
+  };
+  const plan: PlanApprovalState = {
+    id: "plan-1",
+    title: "完成调研",
+    objective: "得到可靠结论",
+    steps: [{ id: "step-1", text: "读取资料", status: "pending" }],
+    acceptanceCriteria: ["输出结论"],
+    filePath: "/tmp/plan-1.md",
+    revision: 1,
+    status: "pending_approval",
+    createdAt: 3,
+    updatedAt: 3,
+  };
+  const timeline = buildConversationTimeline(messages, [planTool], [], plan);
+  const agentTurn = timeline[1];
+  assert.equal(agentTurn?.kind, "agent");
+  if (agentTurn?.kind !== "agent") return;
+  assert.deepEqual(agentTurn.items.map((item) => item.kind), ["message", "plan", "message"]);
+  const projected = agentTurn.items[1];
+  assert.equal(projected?.kind, "plan");
+  if (projected?.kind === "plan") assert.equal(projected.plan.id, "plan-1");
 });

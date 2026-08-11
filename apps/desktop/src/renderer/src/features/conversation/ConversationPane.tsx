@@ -25,6 +25,7 @@ import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
+import { PlanApprovalCard } from "../plans/PlanApprovalCard";
 import { SubagentCard, SubagentDetailDialog } from "../subagents/SubagentActivity";
 
 function truncateTitle(value: string, maximum = 10): string {
@@ -221,6 +222,7 @@ export function ConversationPane({
                   running={running && index === timeline.length - 1}
                   modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")}
                   renderSubagent={(activity) => <SubagentCard activity={activity} onOpen={(selected) => setSelectedSubagentId(selected.id)} />}
+                  renderPlan={(plan) => <PlanApprovalCard plan={plan} onApprove={onApprovePlan} onReject={onRejectPlan} />}
                 />
               ))}
               {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}
@@ -243,14 +245,11 @@ export function ConversationPane({
           <div className="composer-overlays">
             <ActivityPanel
               todo={projectState.plan}
-              planApproval={projectState.planApproval}
               subagents={subagents}
               commands={slashMenu.slashActive ? slashMenu.filteredItems : undefined}
               commandIndex={slashMenu.itemIndex}
               onSelectCommand={slashMenu.selectItem}
               onOpenSubagent={(activity) => setSelectedSubagentId(activity.id)}
-              onApprovePlan={onApprovePlan}
-              onRejectPlan={onRejectPlan}
             />
           </div>
           <ConversationComposer

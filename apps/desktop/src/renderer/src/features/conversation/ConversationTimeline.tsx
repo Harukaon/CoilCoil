@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import type {
   ChatMessage,
   ModelOption,
+  PlanApprovalState,
   ProjectSelection,
   PromptImage,
   RuntimeConfiguration,
@@ -22,6 +23,7 @@ import { ConfirmDialog } from "../../ui/dialog";
 export type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
   | { kind: "tools"; order: number; tools: ToolRun[] }
+  | { kind: "plan"; order: number; plan: PlanApprovalState }
   | { kind: "subagent"; order: number; activity: SubagentActivity };
 
 export type ConversationTimelineItem =
@@ -357,11 +359,13 @@ export function AgentTurnView({
   modelName,
   running,
   renderSubagent,
+  renderPlan,
 }: {
   items: TimelineItem[];
   modelName: string;
   running: boolean;
   renderSubagent?: (activity: SubagentActivity) => ReactNode;
+  renderPlan?: (plan: PlanApprovalState) => ReactNode;
 }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -399,6 +403,11 @@ export function AgentTurnView({
     if (item.kind === "subagent") {
       flushActivity();
       rendered.push(<Fragment key={`subagent-${item.activity.id}`}>{renderSubagent?.(item.activity)}</Fragment>);
+      continue;
+    }
+    if (item.kind === "plan") {
+      flushActivity();
+      rendered.push(<Fragment key={`plan-${item.plan.id}`}>{renderPlan?.(item.plan)}</Fragment>);
       continue;
     }
     if (item.kind === "tools") {

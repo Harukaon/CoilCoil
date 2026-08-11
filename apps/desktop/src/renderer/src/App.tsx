@@ -456,7 +456,10 @@ export default function App(): React.JSX.Element {
   const modelConfigured = Boolean(
     selectedModel && configuration?.configuredProviders.includes(selectedModel.provider),
   );
-  const timeline = useMemo(() => buildConversationTimeline(messages, tools, subagents), [messages, subagents, tools]);
+  const timeline = useMemo(
+    () => buildConversationTimeline(messages, tools, subagents, projectState.planApproval),
+    [messages, projectState.planApproval, subagents, tools],
+  );
 
   const openProject = async (): Promise<void> => {
     const selection = await window.suocode.selectProject();
