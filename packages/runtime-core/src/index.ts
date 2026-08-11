@@ -636,6 +636,11 @@ interface ActiveSession {
   plan: TodoItem[];
   project: ProjectSnapshot;
   messageIds: WeakMap<object, string>;
+  messageRevision: number;
+  pendingUserMessageIds: string[];
+  activeUserId?: string;
+  activeUserOrder?: number;
+  lastUserId?: string;
   activeAssistantId?: string;
   activeAssistantOrder?: number;
   nextTimelineOrder: number;
@@ -3713,6 +3718,8 @@ export class SuoCodeRuntime {
       plan: reconstructed.plan,
       project,
       messageIds: new WeakMap(),
+      messageRevision: 0,
+      pendingUserMessageIds: [],
       nextTimelineOrder: reconstructed.nextTimelineOrder,
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
@@ -3763,7 +3770,8 @@ export class SuoCodeRuntime {
     for (const [index, entry] of branchMessages.entries()) {
       const rawMessage = entry.message;
       if (!isRecord(rawMessage)) continue;
-      const mapped = mapMessage(rawMessage, `history-${entry.id}`, order, entry.id);
+      const liveMessageId = this.active?.messageIds.get(rawMessage);
+      const mapped = mapMessage(rawMessage, liveMessageId ?? `history-${entry.id}`, order, entry.id);
       if (mapped && mapped.role !== "tool" && (mapped.role === "user" || mapped.text || mapped.thinking)) {
         messages.push(mapped);
         order += 1;
@@ -3870,6 +3878,18 @@ export class SuoCodeRuntime {
     const id = `${prefix}-${messageTimestamp(message)}-${Math.random().toString(36).slice(2, 8)}`;
     active.messageIds.set(message, id);
     return id;
+  }
+
+  private queueClientMessage(active: ActiveSession, clientMessageId?: string): void {
+    if (!clientMessageId || active.pendingUserMessageIds.includes(clientMessageId)) return;
+    active.pendingUserMessageIds.push(clientMessageId);
+  }
+
+  private rejectClientMessage(active: ActiveSession, clientMessageId?: string): void {
+    if (!clientMessageId) return;
+    const index = active.pendingUserMessageIds.indexOf(clientMessageId);
+    if (index >= 0) active.pendingUserMessageIds.splice(index, 1);
+    this.emitEvent({ type: "message_rejected", id: clientMessageId, revision: ++active.messageRevision });
   }
 
   private publishSubagents(): void {
@@ -4119,6 +4139,11 @@ export class SuoCodeRuntime {
           this.publishRuntimeInspection(active);
           break;
         case "entry_appended":
+          if (event.entry.type === "message" && isRecord(event.entry.message) && event.entry.message.role === "user") {
+            const correlatedId = active.activeUserId ?? active.lastUserId;
+            if (correlatedId) active.messageIds.set(event.entry.message, correlatedId);
+            active.lastUserId = undefined;
+          }
           if (event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE) {
             const metrics = responseMetricsFromData(event.entry.data);
             if (metrics) {
@@ -4148,14 +4173,21 @@ export class SuoCodeRuntime {
         case "message_start": {
           const raw = event.message as unknown;
           const role = isRecord(raw) ? stringValue(raw.role) : "message";
-          const id = this.messageId(raw, role || "message");
+          const clientMessageId = role === "user" ? active.pendingUserMessageIds.shift() : undefined;
+          const id = clientMessageId || this.messageId(raw, role || "message");
+          if (clientMessageId && isRecord(raw)) active.messageIds.set(raw, clientMessageId);
           const order = active.nextTimelineOrder++;
-          if (role === "assistant") {
+          if (role === "user") {
+            active.activeUserId = id;
+            active.activeUserOrder = order;
+          } else if (role === "assistant") {
             active.activeAssistantId = id;
             active.activeAssistantOrder = order;
           }
           const mapped = mapMessage(raw, id, order);
-          if (mapped && mapped.role !== "tool") this.emitEvent({ type: "message_started", message: mapped });
+          if (mapped && mapped.role !== "tool") {
+            this.emitEvent({ type: "message_started", message: mapped, revision: ++active.messageRevision });
+          }
           if (role === "user") void this.listSessions(active.cwd);
           break;
         }
@@ -4164,23 +4196,34 @@ export class SuoCodeRuntime {
           const id = active.activeAssistantId ?? this.messageId(event.message as unknown, "assistant");
           active.activeAssistantId = id;
           if (update.type === "text_delta") {
-            this.emitEvent({ type: "message_delta", id, field: "text", delta: update.delta });
+            this.emitEvent({ type: "message_delta", id, field: "text", delta: update.delta, revision: ++active.messageRevision });
           } else if (update.type === "thinking_delta") {
-            this.emitEvent({ type: "message_delta", id, field: "thinking", delta: update.delta });
+            this.emitEvent({ type: "message_delta", id, field: "thinking", delta: update.delta, revision: ++active.messageRevision });
           }
           break;
         }
         case "message_end": {
           const raw = event.message as unknown;
           const role = isRecord(raw) ? stringValue(raw.role) : "message";
-          const id = role === "assistant" && active.activeAssistantId
-            ? active.activeAssistantId
-            : this.messageId(raw, role || "message");
-          const order = role === "assistant" && active.activeAssistantOrder !== undefined
-            ? active.activeAssistantOrder
-            : active.nextTimelineOrder++;
+          const id = role === "user" && active.activeUserId
+            ? active.activeUserId
+            : role === "assistant" && active.activeAssistantId
+              ? active.activeAssistantId
+              : this.messageId(raw, role || "message");
+          const order = role === "user" && active.activeUserOrder !== undefined
+            ? active.activeUserOrder
+            : role === "assistant" && active.activeAssistantOrder !== undefined
+              ? active.activeAssistantOrder
+              : active.nextTimelineOrder++;
           const mapped = mapMessage(raw, id, order);
-          if (mapped && mapped.role !== "tool") this.emitEvent({ type: "message_finished", message: mapped });
+          if (mapped && mapped.role !== "tool") {
+            this.emitEvent({ type: "message_finished", message: mapped, revision: ++active.messageRevision });
+          }
+          if (role === "user") {
+            active.lastUserId = id;
+            active.activeUserId = undefined;
+            active.activeUserOrder = undefined;
+          }
           break;
         }
         case "tool_execution_start": {
@@ -4341,27 +4384,29 @@ export class SuoCodeRuntime {
     }
   }
 
-  async prompt(text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
+  async prompt(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
     await this.refreshActiveSessionModel();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (prompt === "/memory" && !images?.length) return this.runMemoryNow();
-    if (active.session.isStreaming) return this.steer(prompt, images);
+    if (active.session.isStreaming) return this.steer(prompt, images, clientMessageId);
     const prepared = await preparePromptImages(images);
     const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
 
     const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
     if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
 
+    this.queueClientMessage(active, clientMessageId);
     void active.session.prompt(expandedPrompt, { images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined }).catch((error) => {
+      this.rejectClientMessage(active, clientMessageId);
       this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       this.emitEvent({ type: "run_state", running: false });
     });
     return { accepted: true };
   }
 
-  async rewindPrompt(entryId: string, text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
+  async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
     await this.refreshActiveSessionModel();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
@@ -4380,26 +4425,34 @@ export class SuoCodeRuntime {
     // Pi branch. Rewinding changes that branch, so refresh the right-hand
     // runtime inspector without blocking the new prompt on MCP discovery.
     void this.refreshRuntimeInspectionSources(active);
+    this.queueClientMessage(active, clientMessageId);
     void active.session.prompt(expandedPrompt, {
       images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
     }).catch((error) => {
+      this.rejectClientMessage(active, clientMessageId);
       this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       this.emitEvent({ type: "run_state", running: false });
     });
     return { accepted: true };
   }
 
-  async steer(text: string, images?: PromptImage[]): Promise<{ accepted: true }> {
+  async steer(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
     this.refreshSessionModelFromRegistry();
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     const prepared = await preparePromptImages(images);
     const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-    await active.session.prompt(expandedPrompt, {
-      images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
-      streamingBehavior: "steer",
-    });
+    this.queueClientMessage(active, clientMessageId);
+    try {
+      await active.session.prompt(expandedPrompt, {
+        images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
+        streamingBehavior: "steer",
+      });
+    } catch (error) {
+      this.rejectClientMessage(active, clientMessageId);
+      throw error;
+    }
     return { accepted: true };
   }
 
@@ -4501,6 +4554,7 @@ export class SuoCodeRuntime {
     active.responseMetrics = reconstructed.responseMetrics ?? active.responseMetrics;
     active.responseMetricsHistory = reconstructed.responseMetricsHistory;
     return {
+      messageRevision: active.messageRevision,
       session: summary,
       messages,
       tools: [...reconstructed.tools.values()].sort((a, b) => a.order - b.order),

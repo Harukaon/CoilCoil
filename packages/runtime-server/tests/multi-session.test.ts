@@ -29,6 +29,7 @@ class FakeRuntime {
   private readonly emit: (event: RuntimeEvent) => void;
   private snapshotValue?: SessionSnapshot;
   readonly promptGate = deferred();
+  readonly promptClientMessageIds: Array<string | undefined> = [];
   disposed = false;
 
   constructor(
@@ -109,8 +110,9 @@ class FakeRuntime {
     return this.snapshotValue;
   }
 
-  async prompt(text: string): Promise<{ accepted: true }> {
+  async prompt(text: string, _images?: unknown[], clientMessageId?: string): Promise<{ accepted: true }> {
     if (!this.snapshotValue) throw new Error("No active session");
+    this.promptClientMessageIds.push(clientMessageId);
     this.snapshotValue = { ...this.snapshotValue, running: true };
     this.emit({ type: "run_state", running: true });
     void this.promptGate.promise.then(() => {
@@ -123,7 +125,7 @@ class FakeRuntime {
           { id: `assistant-${this.ordinal}`, order: 0, role: "assistant", text, timestamp: Date.now(), status: "succeeded" },
         ],
       };
-      this.emit({ type: "message_finished", message: this.snapshotValue.messages.at(-1)! });
+      this.emit({ type: "message_finished", message: this.snapshotValue.messages.at(-1)!, revision: 1 });
       this.emit({ type: "run_state", running: false });
       this.emit({ type: "session_snapshot", snapshot: this.snapshotValue });
     });
@@ -229,12 +231,14 @@ test("one runtime server keeps multiple Agent sessions alive and independently s
   const firstResponse = await server.handle({ id: "create-a", command: { type: "create_session", cwd: "/project-a" } });
   const first = firstResponse.result as SessionSnapshot;
   assert.equal(first.runtimeId, "runtime-1");
-  await server.handle({ id: "prompt-a", runtimeId: first.runtimeId, command: { type: "prompt", text: "A 完成", images: [] } });
+  await server.handle({ id: "prompt-a", runtimeId: first.runtimeId, command: { type: "prompt", text: "A 完成", images: [], clientMessageId: "client-a" } });
 
   const secondResponse = await server.handle({ id: "create-b", command: { type: "create_session", cwd: "/project-b" } });
   const second = secondResponse.result as SessionSnapshot;
   assert.equal(second.runtimeId, "runtime-2");
-  await server.handle({ id: "prompt-b", runtimeId: second.runtimeId, command: { type: "prompt", text: "B 完成", images: [] } });
+  await server.handle({ id: "prompt-b", runtimeId: second.runtimeId, command: { type: "prompt", text: "B 完成", images: [], clientMessageId: "client-b" } });
+  assert.deepEqual(runtimes[1].promptClientMessageIds, ["client-a"]);
+  assert.deepEqual(runtimes[2].promptClientMessageIds, ["client-b"]);
 
   const reopenedResponse = await server.handle({
     id: "reopen-a",

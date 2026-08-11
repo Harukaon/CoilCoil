@@ -759,6 +759,8 @@ export interface ProjectSnapshot {
 
 export interface SessionSnapshot {
   runtimeId?: string;
+  /** Monotonic within one live runtime; prevents an older async snapshot from replacing newer message events. */
+  messageRevision?: number;
   session: SessionSummary;
   messages: ChatMessage[];
   tools: ToolRun[];
@@ -843,9 +845,9 @@ export type RuntimeCommand =
   | { type: "create_session"; cwd: string }
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "open_workspace"; cwd: string }
-  | { type: "prompt"; text: string; images?: PromptImage[] }
-  | { type: "rewind_prompt"; entryId: string; text: string; images?: PromptImage[] }
-  | { type: "steer"; text: string; images?: PromptImage[] }
+  | { type: "prompt"; text: string; images?: PromptImage[]; clientMessageId?: string }
+  | { type: "rewind_prompt"; entryId: string; text: string; images?: PromptImage[]; clientMessageId?: string }
+  | { type: "steer"; text: string; images?: PromptImage[]; clientMessageId?: string }
   | { type: "abort" }
   | { type: "refresh_project" }
   | { type: "list_directory"; path: string }
@@ -856,9 +858,10 @@ export type RuntimeEvent =
   | { type: "configuration_updated"; configuration: RuntimeConfiguration }
   | { type: "sessions_updated"; cwd: string; sessions: SessionSummary[] }
   | { type: "session_snapshot"; snapshot: SessionSnapshot }
-  | { type: "message_started"; message: ChatMessage }
-  | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string }
-  | { type: "message_finished"; message: ChatMessage }
+  | { type: "message_started"; message: ChatMessage; revision: number }
+  | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; revision: number }
+  | { type: "message_finished"; message: ChatMessage; revision: number }
+  | { type: "message_rejected"; id: string; revision: number }
   | { type: "tool_started"; tool: ToolRun }
   | { type: "tool_updated"; tool: ToolRun }
   | { type: "tool_finished"; tool: ToolRun }

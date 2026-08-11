@@ -439,11 +439,11 @@ export class RuntimeServer {
       case "fork_session":
         return runtime.forkSession(command.cwd, command.sessionPath);
       case "prompt":
-        return runtime.prompt(command.text, command.images);
+        return runtime.prompt(command.text, command.images, command.clientMessageId);
       case "rewind_prompt":
-        return runtime.rewindPrompt(command.entryId, command.text, command.images);
+        return runtime.rewindPrompt(command.entryId, command.text, command.images, command.clientMessageId);
       case "steer":
-        return runtime.steer(command.text, command.images);
+        return runtime.steer(command.text, command.images, command.clientMessageId);
       case "abort":
         return runtime.abort();
       case "refresh_project":

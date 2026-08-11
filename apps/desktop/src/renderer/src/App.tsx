@@ -5,7 +5,7 @@ import {
   PanelRight,
   RefreshCw,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import type {
   ChatMessage,
@@ -27,7 +27,11 @@ import type {
 import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
 import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
 import { ConversationPane } from "./features/conversation/ConversationPane";
-import { reconcileOptimisticMessage, type PendingOptimisticMessage } from "./features/conversation/optimisticMessage";
+import {
+  conversationMessagesReducer,
+  EMPTY_CONVERSATION_MESSAGES,
+  selectConversationMessages,
+} from "./features/conversation/conversationMessages";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { SkillsWorkspace } from "./features/settings/SkillsWorkspace";
 import { WorkspaceSidebar, type SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
@@ -85,14 +89,6 @@ function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
 }
 
 
-function upsertMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  const index = messages.findIndex((item) => item.id === message.id);
-  if (index < 0) return [...messages, message];
-  const next = [...messages];
-  next[index] = message;
-  return next;
-}
-
 function upsertTool(tools: ToolRun[], tool: ToolRun): ToolRun[] {
   const index = tools.findIndex((item) => item.id === tool.id);
   if (index < 0) return [...tools, tool];
@@ -107,7 +103,11 @@ export default function App(): React.JSX.Element {
   const projectRef = useRef<ProjectSelection | null>(project);
   const [sessionsByProject, setSessionsByProject] = useState<Record<string, SessionSummary[]>>({});
   const [snapshot, setSnapshot] = useState<SessionSnapshot>();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversationMessages, dispatchConversationMessages] = useReducer(
+    conversationMessagesReducer,
+    EMPTY_CONVERSATION_MESSAGES,
+  );
+  const messages = useMemo(() => selectConversationMessages(conversationMessages), [conversationMessages]);
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [subagents, setSubagents] = useState<SubagentActivity[]>([]);
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
@@ -151,7 +151,6 @@ export default function App(): React.JSX.Element {
   const runtimeSessionRef = useRef(new Map<string, string>());
   const optimisticSessionsRef = useRef(new Map<string, SessionSummary>());
   const selectionRequestRef = useRef(0);
-  const optimisticMessageRef = useRef<PendingOptimisticMessage | undefined>(undefined);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
     onInsertPath: insertComposerPath,
     onError: (message) => { if (message) toastError(message); },
@@ -162,12 +161,12 @@ export default function App(): React.JSX.Element {
     if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
     if (next.runtimeId && next.session.path) runtimeSessionRef.current.set(next.runtimeId, next.session.path);
     setSnapshot(next);
-    setMessages((current) => reconcileOptimisticMessage(
-      next.messages,
-      current,
-      optimisticMessageRef.current,
-      next.session.path,
-    ));
+    dispatchConversationMessages({
+      type: "snapshot",
+      sessionPath: next.session.path,
+      messages: next.messages,
+      revision: next.messageRevision ?? 0,
+    });
     setTools(next.tools);
     setSubagents(next.subagents);
     setProjectState(next.project);
@@ -187,10 +186,9 @@ export default function App(): React.JSX.Element {
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(selection.path);
     setWorkspaceSurface("conversation");
-    optimisticMessageRef.current = undefined;
     snapshotRef.current = undefined;
     setSnapshot(undefined);
-    setMessages([]);
+    dispatchConversationMessages({ type: "reset" });
     setTools([]);
     setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
@@ -248,27 +246,14 @@ export default function App(): React.JSX.Element {
         break;
       case "message_started":
       case "message_finished":
-        setMessages((current) => {
-          const optimisticId = optimisticMessageRef.current?.id;
-          const base = optimisticId && event.message.role === "user"
-            ? current.filter((message) => message.id !== optimisticId)
-            : current;
-          if (optimisticId && event.message.role === "user") optimisticMessageRef.current = undefined;
-          return upsertMessage(base, event.message);
-        });
+        dispatchConversationMessages({ type: "runtime_message", message: event.message, revision: event.revision });
         break;
       case "message_delta":
         setAgentPhase(event.field === "thinking" ? "思考" : "回复");
-        setMessages((current) => {
-          const index = current.findIndex((message) => message.id === event.id);
-          if (index < 0) {
-            return [...current, { id: event.id, order: Date.now(), role: "assistant", text: event.field === "text" ? event.delta : "", thinking: event.field === "thinking" ? event.delta : undefined, timestamp: Date.now(), status: "running" }];
-          }
-          const next = [...current];
-          const message = next[index];
-          next[index] = { ...message, [event.field]: `${event.field === "thinking" ? message.thinking || "" : message.text}${event.delta}`, status: "running" };
-          return next;
-        });
+        dispatchConversationMessages({ ...event, timestamp: Date.now() });
+        break;
+      case "message_rejected":
+        dispatchConversationMessages({ type: "reject", id: event.id, revision: event.revision });
         break;
       case "tool_started":
         setAgentPhase("工具");
@@ -347,10 +332,9 @@ export default function App(): React.JSX.Element {
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(undefined);
-    optimisticMessageRef.current = undefined;
     setDraftImages([]);
     setLoading(true);
-    setMessages([]);
+    dispatchConversationMessages({ type: "reset" });
     setTools([]);
     setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
@@ -502,7 +486,6 @@ export default function App(): React.JSX.Element {
     setWorkspaceSurface("conversation");
     if (owner.path === project?.path && session.id === activeConversation?.id) return;
     const requestId = ++selectionRequestRef.current;
-    optimisticMessageRef.current = undefined;
     const cached = snapshotCacheRef.current.get(session.path);
     setLoading(!cached);
     setPendingProjectPath(undefined);
@@ -577,15 +560,26 @@ export default function App(): React.JSX.Element {
 
   const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[]): Promise<void> => {
     if (!message.entryId || !snapshot?.runtimeId) return;
-    const previousMessages = messages;
+    const previousConversationMessages = conversationMessages;
     const previousTools = tools;
-    setMessages((current) => current.filter((item) => item.order < message.order));
+    const clientMessageId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const pendingMessage: ChatMessage = {
+      id: clientMessageId,
+      order: message.order,
+      role: "user",
+      text,
+      images,
+      timestamp: Date.now(),
+      status: "succeeded",
+    };
+    dispatchConversationMessages({ type: "truncate", order: message.order });
+    dispatchConversationMessages({ type: "queue", message: pendingMessage, sessionPath: snapshot.session.path });
     setTools((current) => current.filter((item) => item.order < message.order));
     shouldAutoScrollRef.current = true;
     try {
-      await window.suocode.request({ type: "rewind_prompt", entryId: message.entryId, text, images }, snapshot.runtimeId);
+      await window.suocode.request({ type: "rewind_prompt", entryId: message.entryId, text, images, clientMessageId }, snapshot.runtimeId);
     } catch (caught) {
-      setMessages(previousMessages);
+      dispatchConversationMessages({ type: "restore", state: previousConversationMessages });
       setTools(previousTools);
       toastError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -642,14 +636,28 @@ export default function App(): React.JSX.Element {
       setRightOpen(true);
     }
     shouldAutoScrollRef.current = true;
-    const optimisticId = `local-${Date.now()}-${Math.random()}`;
+    const clientMessageId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const pendingMessage: ChatMessage | undefined = runtimeCommand ? undefined : {
+      id: clientMessageId,
+      order: Date.now(),
+      role: "user",
+      text: prompt,
+      images,
+      timestamp: Date.now(),
+      status: "succeeded",
+    };
+    if (pendingMessage) {
+      dispatchConversationMessages({
+        type: "queue",
+        message: pendingMessage,
+        sessionPath: snapshotRef.current?.session.path,
+      });
+    }
     let createdSessionPath: string | undefined;
     try {
       let target = snapshotRef.current;
       if (!target || pendingProjectPath === project.path) {
         setStartingSession(true);
-        optimisticMessageRef.current = runtimeCommand ? undefined : { id: optimisticId };
-        setMessages(runtimeCommand ? [] : [{ id: optimisticId, order: Date.now(), role: "user", text: prompt, images, timestamp: Date.now(), status: "succeeded" }]);
         const created = await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: project.path });
         const now = new Date().toISOString();
         const optimisticSession: SessionSummary = {
@@ -660,9 +668,7 @@ export default function App(): React.JSX.Element {
         };
         const activeSnapshot = { ...created, session: optimisticSession };
         createdSessionPath = optimisticSession.path;
-        if (optimisticMessageRef.current?.id === optimisticId) {
-          optimisticMessageRef.current = { id: optimisticId, sessionPath: optimisticSession.path };
-        }
+        if (pendingMessage) dispatchConversationMessages({ type: "bind_session", id: clientMessageId, sessionPath: optimisticSession.path });
         if (optimisticSession.path) optimisticSessionsRef.current.set(optimisticSession.path, optimisticSession);
         snapshotRef.current = activeSnapshot;
         if (created.runtimeId && created.session.path) runtimeSessionRef.current.set(created.runtimeId, created.session.path);
@@ -683,12 +689,11 @@ export default function App(): React.JSX.Element {
         target = activeSnapshot;
       }
       if (runtimeCommand) await window.suocode.request({ type: "run_memory_now" }, target.runtimeId);
-      else await window.suocode.request({ type: target.running ? "steer" : "prompt", text: prompt, images }, target.runtimeId);
+      else await window.suocode.request({ type: target.running ? "steer" : "prompt", text: prompt, images, clientMessageId }, target.runtimeId);
     } catch (caught) {
-      optimisticMessageRef.current = undefined;
       setDraft(prompt);
       setDraftImages(images);
-      setMessages((current) => current.filter((message) => message.id !== optimisticId));
+      dispatchConversationMessages({ type: "reject", id: clientMessageId });
       if (createdSessionPath) {
         const failedSessionPath = createdSessionPath;
         setSessionActivity((current) => ({
