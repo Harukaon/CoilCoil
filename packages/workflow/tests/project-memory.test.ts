@@ -430,6 +430,67 @@ test("memory command publishes immediate, completed, and injected runtime status
   assert.equal(injected.source, "prompt");
 });
 
+test("background memory completion never reads a stale extension context", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  const child = new FakeWorker();
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+    spawnWorker: () => child,
+  });
+
+  let stale = false;
+  const notices: string[] = [];
+  const assertActive = (): void => {
+    if (stale) throw new Error("STALE_EXTENSION_CONTEXT_ACCESSED");
+  };
+  const context = Object.defineProperties({}, {
+    cwd: { get: () => { assertActive(); return project; } },
+    hasUI: { get: () => { assertActive(); return true; } },
+    ui: {
+      get: () => {
+        assertActive();
+        return { notify: (message: string) => notices.push(message) };
+      },
+    },
+    model: {
+      get: () => {
+        assertActive();
+        return { provider: "pierce", id: "gpt-5.6-sol" };
+      },
+    },
+    sessionManager: {
+      get: () => {
+        assertActive();
+        return { getSessionFile: () => sessionFile };
+      },
+    },
+  });
+
+  await harness.commands.get("memory")?.handler("", context);
+  stale = true;
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  await writeFile(paths.memoryFile, "后台完成后的记忆", "utf8");
+  child.emit("exit", 0, null);
+
+  await waitFor(async () => {
+    const states = harness.emittedEvents
+      .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
+      .map((event) => (event.value as { state: string }).state);
+    return states.includes("succeeded") && await pathMissing(paths.workerLockFile);
+  });
+  assert.match(notices.join("\n"), /记忆整理已在后台启动/);
+  assert.equal(
+    (harness.emittedEvents.filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT).at(-1)?.value as { cwd: string }).cwd,
+    project,
+  );
+});
+
 test("failed workers do not mark their session as successfully processed", async (t) => {
   const root = await temporaryDirectory(t);
   const project = join(root, "A");
