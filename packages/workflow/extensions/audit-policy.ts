@@ -290,8 +290,9 @@ export default function auditPolicyExtension(pi: ExtensionAPI): void {
   };
 
   pi.on("session_start", (_event, ctx) => {
-    const registry = getPurposeRegistry();
-    registry.clear();
+    // toolCallId is already globally unique across sessions, and rememberPurpose()
+    // self-bounds via MAX_PURPOSE_RECORDS eviction — clearing here would wipe live
+    // entries belonging to any OTHER concurrently open session.
     for (const entry of ctx.sessionManager.getEntries()) {
       if (
         entry.type === "custom" &&
