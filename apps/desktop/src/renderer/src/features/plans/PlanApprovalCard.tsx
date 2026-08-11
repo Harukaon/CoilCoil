@@ -75,14 +75,14 @@ export function PlanApprovalCard({
               <button className={profile === agent ? "active" : ""} type="button" key={agent} disabled={Boolean(pendingAction)} onClick={() => setProfile(agent)}>{agent}</button>
             ))}
             <input
-              aria-label="子 Agent profile"
+              aria-label="其他子 Agent"
+              autoComplete="off"
               disabled={Boolean(pendingAction)}
-              list="plan-subagent-profiles"
               onChange={(event) => setProfile(event.target.value)}
-              placeholder="其他 profile"
+              placeholder="其他代理"
+              spellCheck={false}
               value={SUBAGENT_PROFILES.includes(profile as (typeof SUBAGENT_PROFILES)[number]) ? "" : profile}
             />
-            <datalist id="plan-subagent-profiles">{SUBAGENT_PROFILES.map((agent) => <option key={agent} value={agent} />)}</datalist>
           </div>
           <button type="button" disabled={Boolean(pendingAction) || !profile.trim()} onClick={() => void run("subagent")}>
             <Users size={14} />{pendingAction === "subagent" ? "正在派发…" : "派发给子 Agent"}

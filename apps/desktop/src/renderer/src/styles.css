@@ -404,7 +404,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .plan-agent-picker { display: inline-flex; min-width: 0; padding: 2px; border-radius: 9px; background: #ecece8; }
 .plan-agent-picker button { height: 27px; padding: 0 8px; border-radius: 7px; color: #85857f; background: transparent; font-size: 10px; cursor: pointer; }
 .plan-agent-picker button.active { color: #343431; background: #fff; box-shadow: 0 1px 3px rgb(23 23 20 / 8%); }
-.plan-agent-picker input { width: 96px; min-width: 0; height: 27px; padding: 0 8px; border-left: 1px solid #d6d6d0; border-radius: 0 7px 7px 0; color: #4f4f4a; background: #fff; font-size: 10px; outline: none; }
+.plan-agent-picker input { width: 96px; min-width: 0; height: 27px; padding: 0 8px; border-left: 1px solid #d6d6d0; border-radius: 0 7px 7px 0; color: #4f4f4a; background: #fff; font-size: 10px; outline: none; appearance: none; }
 .plan-agent-picker input::placeholder { color: #9a9a94; }
 .plan-execution-note { padding: 9px 11px; border-radius: 9px; color: #5f6e5d; background: #edf2eb; font-size: 11px; }
 .plan-execution-report { display: grid; gap: 5px; padding: 10px 12px; border-radius: 10px; background: #f0f0ed; font-size: 11px; }
