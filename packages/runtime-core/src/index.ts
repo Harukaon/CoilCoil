@@ -695,6 +695,7 @@ interface ActiveSession {
   lastUserId?: string;
   activeAssistantId?: string;
   activeAssistantOrder?: number;
+  activeAssistantMessage?: ChatMessage;
   nextTimelineOrder: number;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
@@ -4363,6 +4364,7 @@ export class SuoCodeRuntime {
         case "agent_settled":
           active.activeAssistantId = undefined;
           active.activeAssistantOrder = undefined;
+          active.activeAssistantMessage = undefined;
           this.emitEvent({ type: "run_state", running: false });
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
           this.scheduleProjectRefresh();
@@ -4496,6 +4498,9 @@ export class SuoCodeRuntime {
           if (mapped && mapped.role !== "tool") {
             this.emitEvent({ type: "message_started", message: mapped, revision: ++active.messageRevision });
           }
+          if (mapped && mapped.role === "assistant") {
+            active.activeAssistantMessage = { ...mapped, status: "running" };
+          }
           if (role === "user") void this.listSessions(active.cwd);
           break;
         }
@@ -4503,6 +4508,10 @@ export class SuoCodeRuntime {
           const update = event.assistantMessageEvent;
           const id = active.activeAssistantId ?? this.messageId(event.message as unknown, "assistant");
           active.activeAssistantId = id;
+          const mapped = mapMessage(event.message as unknown, id, active.activeAssistantOrder ?? active.nextTimelineOrder);
+          if (mapped && mapped.role === "assistant") {
+            active.activeAssistantMessage = { ...mapped, status: "running" };
+          }
           if (update.type === "text_delta") {
             this.emitEvent({ type: "message_delta", id, field: "text", delta: update.delta, revision: ++active.messageRevision });
           } else if (update.type === "thinking_delta") {
@@ -4531,6 +4540,8 @@ export class SuoCodeRuntime {
             active.lastUserId = id;
             active.activeUserId = undefined;
             active.activeUserOrder = undefined;
+          } else if (role === "assistant") {
+            active.activeAssistantMessage = undefined;
           }
           break;
         }
@@ -4857,6 +4868,10 @@ export class SuoCodeRuntime {
       messageCount: active.session.messages.length,
     };
     const messages = reconstructed.messages;
+    if (active.activeAssistantMessage && !messages.some((message) => message.id === active.activeAssistantMessage!.id)) {
+      const maxOrder = messages.reduce((max, message) => Math.max(max, message.order), -1);
+      messages.push({ ...active.activeAssistantMessage, order: maxOrder + 1 });
+    }
     const model = active.session.model;
     const usage = sessionUsage(active.session);
     active.responseMetrics = reconstructed.responseMetrics ?? active.responseMetrics;
