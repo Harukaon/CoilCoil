@@ -563,15 +563,20 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .performance-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: #999994; font-size: 9px; }
 .performance-legend i { width: 10px; height: 10px; border: 1px solid rgb(27 31 36 / 6%); border-radius: 2px; }
 
-.inspector-pane { display: grid; grid-template-rows: 44px auto minmax(0, 1fr); border-left: 1px solid rgb(225 225 222 / 70%); }
-.inspector-header { position: relative; display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; color: #777772; font-size: 12px; font-weight: 550; }
-.inspector-drag-surface { position: absolute; z-index: 0; inset: 0 82px 0 0; -webkit-app-region: drag; user-select: none; }
-.inspector-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; }
-.inspector-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 2px 10px 12px; }
-.inspector-nav button { position: relative; justify-content: center; gap: 6px; height: 34px; padding: 0 7px; border-radius: 8px; color: #696964; font-size: 11px; text-align: left; }
+.inspector-pane { display: grid; grid-template-rows: 44px minmax(0, 1fr); border-left: 1px solid rgb(225 225 222 / 70%); }
+.inspector-header { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 0 8px; color: #777772; font-size: 12px; font-weight: 550; }
+.inspector-drag-surface { min-width: 12px; align-self: stretch; flex: 1 1 auto; -webkit-app-region: drag; user-select: none; }
+.inspector-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
+.inspector-nav { display: flex; min-width: 0; flex: 0 1 auto; align-items: center; gap: 3px; }
+.inspector-nav button { position: relative; display: flex; min-width: 0; justify-content: center; align-items: center; gap: 5px; height: 30px; padding: 0 9px; border-radius: 7px; color: #696964; font-size: 10px; text-align: left; }
 .inspector-nav button:hover, .inspector-nav button.active { color: #282826; background: #ecece9; }
+.inspector-nav button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-nav small { position: absolute; top: -3px; right: 3px; min-width: 15px; padding: 1px 4px; border-radius: 8px; color: #777772; background: #deded9; font-size: 9px; text-align: center; }
-.inspector-content { min-height: 0; overflow: auto; border-top: 1px solid #ebebe8; }
+.inspector-content { min-width: 0; min-height: 0; overflow: hidden; border-top: 1px solid #ebebe8; }
+.inspector-tab-panel { display: none; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.inspector-tab-panel.active { display: block; }
+.files-tab-panel { overflow: hidden; }
+.runtime-tab-panel { overflow: auto; }
 .inspector-empty { display: flex; align-items: center; flex-direction: column; padding: 54px 18px 20px; text-align: center; }
 .inspector-empty-icon { display: grid; width: 32px; height: 32px; margin-bottom: 10px; place-items: center; border: 1px solid #ddddda; border-radius: 9px; color: #777772; background: #fff; }
 .inspector-empty strong { font-size: 12px; font-weight: 550; }
@@ -705,7 +710,10 @@ button.runtime-chip:hover:not(:disabled), .runtime-chip.mcp:hover { border-color
 .plan-list li.completed { color: #999994; text-decoration: line-through; }
 .plan-list li.completed svg { color: #768373; }
 .changes-panel { display: grid; min-height: 100%; grid-template-rows: auto minmax(180px, 1fr); }
-.files-panel { min-height: 100%; }
+.files-workspace { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+.files-workspace.has-preview { grid-template-columns: minmax(0, 1fr) minmax(116px, 34%); }
+.files-tree-region { min-width: 0; min-height: 0; overflow: hidden; }
+.files-workspace.has-preview .files-tree-region { border-left: 1px solid #e2e2de; }
 .change-list { display: grid; gap: 1px; padding: 8px; }
 .change-list button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; gap: 6px; align-items: center; min-height: 30px; padding: 5px 7px; border-radius: 6px; text-align: left; background: transparent; cursor: pointer; }
 .change-list button:hover, .change-list button.active { background: #ecece9; }
@@ -718,19 +726,15 @@ button.runtime-chip:hover:not(:disabled), .runtime-chip.mcp:hover { border-color
 .preview-heading span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preview-heading button { display: grid; padding: 3px; place-items: center; color: #777772; background: transparent; cursor: pointer; }
 .diff-preview pre { height: calc(100% - 32px); min-height: 180px; margin: 0; overflow: auto; padding: 10px; color: #50504c; background: #f3f3f0; font: 9px/1.55 "SFMono-Regular", Consolas, monospace; white-space: pre; }
-.file-tree { min-height: 0; overflow: auto; padding: 7px 5px; }
+.file-tree { height: 100%; min-height: 0; overflow: auto; padding: 7px 5px; }
 .file-tree-node > button, .file-leaf { display: flex; width: 100%; height: 27px; align-items: center; gap: 5px; padding-right: 7px; border-radius: 5px; color: #5b5b57; text-align: left; background: transparent; }
 .file-leaf[draggable="true"], .file-tree-node > button[draggable="true"] { cursor: grab; }
 .file-leaf[draggable="true"]:active, .file-tree-node > button[draggable="true"]:active { cursor: grabbing; }
 .file-tree-node > button { cursor: pointer; }
-.file-tree-node > button:hover, .file-leaf:hover { background: #ecece9; }
+.file-tree-node > button:hover, .file-leaf:hover, .file-leaf.active { background: #ecece9; }
 .file-tree-node span, .file-leaf span { min-width: 0; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-pane.file-drag-active::after { position: absolute; z-index: 30; inset: 10px; display: grid; content: "拖放到此处引用文件"; place-items: center; border: 1px dashed #8c9b88; border-radius: 14px; color: #657261; background: #f7f9f5; font-size: 12px; font-weight: 600; pointer-events: none; }
 
-
-@media (max-width: 1280px) {
-  .inspector-nav button span { display: none; }
-}
 
 @media (max-width: 1040px) {
   .conversation-body { padding-inline: 24px; }

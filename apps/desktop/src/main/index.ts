@@ -22,7 +22,7 @@ const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
-const PREVIEW_GET_CHANNEL = "preview:get";
+const PREVIEW_CLOSE_CHANNEL = "preview:close";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
@@ -47,7 +47,7 @@ interface PreviewRecord {
   root: string;
   path: string;
   forceText: boolean;
-  window: BrowserWindow;
+  owner: Electron.WebContents;
   watcher?: FSWatcher;
   document?: FilePreviewDocument;
 }
@@ -152,58 +152,58 @@ async function readPreview(record: PreviewRecord): Promise<FilePreviewDocument> 
 async function updatePreview(record: PreviewRecord): Promise<void> {
   try {
     record.document = await readPreview(record);
-    if (!record.window.isDestroyed()) record.window.webContents.send(PREVIEW_UPDATED_CHANNEL, record.document);
+    if (record.owner.isDestroyed()) {
+      closePreviewRecord(record.id);
+      return;
+    }
+    record.owner.send(PREVIEW_UPDATED_CHANNEL, record.document);
   } catch {
     // The file may be in the middle of an atomic replace; the next watch event retries it.
   }
 }
 
-async function createPreviewWindow(input: OpenFilePreviewInput): Promise<void> {
-  const target = await safePreviewPath(input);
-  const id = randomUUID();
-  const isMac = process.platform === "darwin";
-  const window = new BrowserWindow({
-    width: 900,
-    height: 680,
-    minWidth: 420,
-    minHeight: 320,
-    show: false,
-    title: basename(target.path),
-    backgroundColor: "#f8f8f6",
-    ...(isMac ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 16 } } : {}),
-    webPreferences: {
-      preload: join(__dirname, "../preload/index.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  const record: PreviewRecord = { id, root: target.root, path: target.path, forceText: Boolean(input.forceText), window };
-  previews.set(id, record);
-  record.document = await readPreview(record);
-  record.watcher = watch(dirname(record.path), { persistent: false }, (_event, filename) => {
-    if (!filename || filename.toString() === basename(record.path)) void updatePreview(record);
-  });
-  window.once("ready-to-show", () => window.show());
-  window.once("closed", () => {
-    record.watcher?.close();
-    previews.delete(id);
-  });
-  const query = `preview=${encodeURIComponent(id)}`;
-  if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${query}`);
-  else void window.loadFile(join(__dirname, "../renderer/index.html"), { query: { preview: id } });
+function closePreviewRecord(id: string): void {
+  const record = previews.get(id);
+  if (!record) return;
+  record.watcher?.close();
+  previews.delete(id);
 }
 
-async function openPreviewOrMenu(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<{ opened: boolean; actions?: Array<"reveal" | "force-text" | "trash"> }> {
+async function createPreviewRecord(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<FilePreviewDocument> {
+  const target = await safePreviewPath(input);
+  const id = randomUUID();
+  const record: PreviewRecord = {
+    id,
+    root: target.root,
+    path: target.path,
+    forceText: Boolean(input.forceText),
+    owner: event.sender,
+  };
+  previews.set(id, record);
+  try {
+    record.document = await readPreview(record);
+    record.watcher = watch(dirname(record.path), { persistent: false }, (_event, filename) => {
+      if (!filename || filename.toString() === basename(record.path)) void updatePreview(record);
+    });
+    event.sender.once("destroyed", () => closePreviewRecord(id));
+    return record.document;
+  } catch (error) {
+    closePreviewRecord(id);
+    throw error;
+  }
+}
+
+async function openPreviewOrMenu(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<{ opened: boolean; document?: FilePreviewDocument; actions?: Array<"reveal" | "force-text" | "trash"> }> {
   const target = await safePreviewPath(input);
   if (previewKind(target.path, Boolean(input.forceText))) {
-    await createPreviewWindow(input);
-    return { opened: true };
+    return { opened: true, document: await createPreviewRecord(event, input) };
   }
   const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   Menu.buildFromTemplate([
     { label: "在访达中显示", click: () => shell.showItemInFolder(target.path) },
-    { label: "作为文本尝试预览", click: () => void createPreviewWindow({ ...input, forceText: true }) },
+    { label: "作为文本尝试预览", click: () => void createPreviewRecord(event, { ...input, forceText: true }).then((document) => {
+      if (!event.sender.isDestroyed()) event.sender.send(PREVIEW_UPDATED_CHANNEL, document);
+    }).catch((error) => console.error("Unable to open file as text preview", error)) },
     { type: "separator" },
     { label: "移到废纸篓", role: "delete", click: () => void (async () => {
       const options = { type: "warning" as const, title: "移到废纸篓", message: `确定要将“${basename(target.path)}”移到废纸篓吗？`, buttons: ["取消", "移到废纸篓"], defaultId: 0, cancelId: 0 };
@@ -418,13 +418,12 @@ app.whenReady().then(() => {
     clipboard.writeText(text);
   });
   ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openPreviewOrMenu(event, input));
-  ipcMain.handle(PROJECT_FILE_ACTION_CHANNEL, (event, input: ProjectFileActionInput) => performProjectFileAction(event, input));
-  ipcMain.handle(PREVIEW_GET_CHANNEL, async (_event, id: string): Promise<FilePreviewDocument> => {
+  ipcMain.handle(PREVIEW_CLOSE_CHANNEL, (event, id: string): void => {
     const record = previews.get(id);
-    if (!record) throw new Error("文件预览窗口已失效。");
-    record.document = await readPreview(record);
-    return record.document;
+    if (!record || record.owner.id !== event.sender.id) return;
+    closePreviewRecord(id);
   });
+  ipcMain.handle(PROJECT_FILE_ACTION_CHANNEL, (event, input: ProjectFileActionInput) => performProjectFileAction(event, input));
   ipcMain.handle(PROJECT_DIRECTORY_LIST_CHANNEL, (_event, root: string, path?: string) => listProjectDirectory(root, path));
   ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (_event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
     try {
@@ -441,8 +440,7 @@ app.whenReady().then(() => {
 
 app.on("before-quit", () => {
   isQuitting = true;
-  for (const preview of previews.values()) preview.watcher?.close();
-  previews.clear();
+  for (const id of [...previews.keys()]) closePreviewRecord(id);
   runtime.stop();
 });
 

@@ -77,17 +77,6 @@ async function waitForPage(port, timeout = 30_000) {
   throw new Error("Packaged SuoCode did not expose its renderer in time.");
 }
 
-async function waitForPreviewPage(port, timeout = 30_000) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeout) {
-    const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json()).catch(() => []);
-    const page = pages.find((item) => item.type === "page" && String(item.url).includes("preview="));
-    if (page?.webSocketDebuggerUrl) return page;
-    await delay(100);
-  }
-  throw new Error("The independent file preview window did not open.");
-}
-
 class DevToolsClient {
   constructor(url) {
     this.socket = new WebSocket(url);
@@ -1271,26 +1260,37 @@ async function main() {
       editor.dispatchEvent(new Event("input", { bubbles: true }));
     })()`);
     await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"))?.click()`);
-    const previewPage = await waitForPreviewPage(port);
-    const previewClient = new DevToolsClient(previewPage.webSocketDebuggerUrl);
-    await previewClient.open();
-    await previewClient.waitFor(
-      `document.querySelector(".text-preview")?.textContent.includes("lazy")`,
-      "The text preview window did not render the selected file.",
+    await client.waitFor(
+      `document.querySelector(".files-workspace.has-preview .text-preview")?.textContent.includes("lazy")`,
+      "The inline text preview did not render the selected file.",
     );
-    const previewLayout = await previewClient.evaluate(`(() => {
-      const content = document.querySelector(".preview-window-content")?.getBoundingClientRect();
-      const footer = document.querySelector(".preview-window-status")?.getBoundingClientRect();
-      return { contentBottom: content?.bottom ?? 0, footerTop: footer?.top ?? 0, footerBottom: footer?.bottom ?? 0, viewport: window.innerHeight };
+    const previewLayout = await client.evaluate(`(() => {
+      const workspace = document.querySelector(".files-workspace.has-preview")?.getBoundingClientRect();
+      const preview = document.querySelector(".inline-file-preview")?.getBoundingClientRect();
+      const tree = document.querySelector(".files-tree-region")?.getBoundingClientRect();
+      const footer = document.querySelector(".inline-preview-status")?.getBoundingClientRect();
+      return {
+        workspaceLeft: workspace?.left ?? 0,
+        workspaceRight: workspace?.right ?? 0,
+        previewLeft: preview?.left ?? 0,
+        previewRight: preview?.right ?? 0,
+        treeLeft: tree?.left ?? 0,
+        treeRight: tree?.right ?? 0,
+        footerBottom: footer?.bottom ?? 0,
+        workspaceBottom: workspace?.bottom ?? 0,
+      };
     })()`);
-    assert.ok(Math.abs(previewLayout.contentBottom - previewLayout.footerTop) <= 1);
-    assert.ok(Math.abs(previewLayout.footerBottom - previewLayout.viewport) <= 1);
+    assert.ok(Math.abs(previewLayout.workspaceLeft - previewLayout.previewLeft) <= 1);
+    assert.ok(Math.abs(previewLayout.previewRight - previewLayout.treeLeft) <= 1);
+    assert.ok(Math.abs(previewLayout.workspaceRight - previewLayout.treeRight) <= 1);
+    assert.ok(Math.abs(previewLayout.footerBottom - previewLayout.workspaceBottom) <= 1);
     await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "live preview update\n", "utf8");
-    await previewClient.waitFor(
-      `document.querySelector(".text-preview")?.textContent.includes("live preview update")`,
-      "The preview window did not update after the file changed on disk.",
+    await client.waitFor(
+      `document.querySelector(".files-workspace.has-preview .text-preview")?.textContent.includes("live preview update")`,
+      "The inline preview did not update after the file changed on disk.",
     );
-    previewClient.close();
+    await client.evaluate(`document.querySelector('button[aria-label="关闭文件预览"]')?.click()`);
+    await client.waitFor(`!document.querySelector(".files-workspace.has-preview")`, "The inline file preview did not close.");
     await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
 
     if (!live) {

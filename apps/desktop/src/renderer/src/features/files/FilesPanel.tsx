@@ -1,136 +1,77 @@
-import * as ContextMenu from "@radix-ui/react-context-menu";
-import { toastError } from "../../ui/toast";
-import { ChevronDown, ChevronRight, File, Files, Folder, LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { DragEvent as ReactDragEvent } from "react";
+import { Files } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileNode, ProjectSnapshot } from "@suocode/runtime-protocol";
-import { quotePath, SUOCODE_PATH_TYPE } from "../composer/pathInsert";
+import type { FilePreviewDocument } from "../../../../shared/desktop-api";
+import { toastError } from "../../ui/toast";
+import { FilePreviewPane } from "./FilePreviewPane";
+import { FileTree } from "./FileTree";
+import { absoluteProjectPath, removeTreeNode, replaceDirectoryChildren } from "./filePaths";
 
-function absoluteProjectPath(root: string, value: string): string {
-  if (/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value)) return value;
-  const separator = root.includes("\\") ? "\\" : "/";
-  return `${root.replace(/[\\/]+$/, "")}${separator}${value.replace(/^[\\/]+/, "")}`;
-}
-
-function relativeProjectPath(root: string, value: string): string {
-  const normalizedRoot = root.replaceAll("\\", "/").replace(/\/$/, "");
-  const normalizedValue = value.replaceAll("\\", "/");
-  return normalizedValue === normalizedRoot ? "." : normalizedValue.startsWith(`${normalizedRoot}/`) ? normalizedValue.slice(normalizedRoot.length + 1) : value;
-}
-
-function replaceDirectoryChildren(nodes: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return nodes.map((node) => {
-    if (node.path === path && node.kind === "directory") return { ...node, children };
-    if (!node.children) return node;
-    return { ...node, children: replaceDirectoryChildren(node.children, path, children) };
-  });
-}
-
-function removeTreeNode(nodes: FileNode[], path: string): FileNode[] {
-  return nodes
-    .filter((node) => node.path !== path)
-    .map((node) => node.children ? { ...node, children: removeTreeNode(node.children, path) } : node);
-}
-
-function FileContextMenu({ node, root, onTrashed }: {
+interface PreviewSelection {
   node: FileNode;
-  root: string;
-  onTrashed: (path: string) => void;
-}): React.JSX.Element {
-  const copy = async (value: string): Promise<void> => {
-    try {
-      await window.suocode.copyText(value);
-    } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-  const run = async (action: "reveal" | "trash"): Promise<void> => {
-    try {
-      const result = await window.suocode.performProjectFileAction({ root, path: node.path, action });
-      if (result.trashed) onTrashed(node.path);
-    } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-  return (
-    <ContextMenu.Portal>
-      <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
-        <ContextMenu.Item className="conversation-context-item" onSelect={() => void copy(absoluteProjectPath(root, node.path))}>复制绝对路径</ContextMenu.Item>
-        <ContextMenu.Item className="conversation-context-item" onSelect={() => void copy(relativeProjectPath(root, node.path))}>复制相对路径</ContextMenu.Item>
-        <ContextMenu.Separator className="file-context-separator" />
-        <ContextMenu.Item className="conversation-context-item" onSelect={() => void run("reveal")}>在访达中显示</ContextMenu.Item>
-        <ContextMenu.Separator className="file-context-separator" />
-        <ContextMenu.Item className="conversation-context-item file-context-danger" onSelect={() => void run("trash")}>移到废纸篓</ContextMenu.Item>
-      </ContextMenu.Content>
-    </ContextMenu.Portal>
-  );
+  document?: FilePreviewDocument;
+  loading: boolean;
+  error?: string;
 }
 
-function FileTreeNode({ node, root, depth, onLoad, onOpen, onTrashed }: {
-  node: FileNode;
-  root: string;
-  depth: number;
-  onLoad: (path: string) => Promise<void>;
-  onOpen: (node: FileNode) => void;
-  onTrashed: (path: string) => void;
-}): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const startPathDrag = (event: ReactDragEvent<HTMLButtonElement>): void => {
-    const absolutePath = absoluteProjectPath(root, node.path);
-    event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData(SUOCODE_PATH_TYPE, JSON.stringify({ path: absolutePath }));
-    event.dataTransfer.setData("text/plain", quotePath(absolutePath));
-  };
-
-  if (node.kind === "directory") {
-    const toggle = async (): Promise<void> => {
-      const nextOpen = !open;
-      setOpen(nextOpen);
-      if (nextOpen && node.children === undefined && !loading) {
-        setLoading(true);
-        try {
-          await onLoad(node.path);
-        } finally {
-          setLoading(false);
-        }
-      }
-    };
-    return (
-      <div className="file-tree-node">
-        <ContextMenu.Root>
-          <ContextMenu.Trigger asChild>
-            <button type="button" draggable style={{ paddingLeft: 8 + depth * 13 }} onClick={() => void toggle()} onDragStart={startPathDrag}>
-              {loading ? <LoaderCircle className="spin" size={12} /> : open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              <Folder size={14} />
-              <span>{node.name}</span>
-            </button>
-          </ContextMenu.Trigger>
-          <FileContextMenu node={node} root={root} onTrashed={onTrashed} />
-        </ContextMenu.Root>
-        {open ? node.children?.map((child) => <FileTreeNode key={child.path} node={child} root={root} depth={depth + 1} onLoad={onLoad} onOpen={onOpen} onTrashed={onTrashed} />) : null}
-      </div>
-    );
-  }
-  return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger asChild>
-        <button className="file-leaf" type="button" draggable style={{ paddingLeft: 21 + depth * 13 }} onClick={() => onOpen(node)} onDragStart={startPathDrag}>
-          <File size={13} /><span>{node.name}</span>
-        </button>
-      </ContextMenu.Trigger>
-      <FileContextMenu node={node} root={root} onTrashed={onTrashed} />
-    </ContextMenu.Root>
-  );
+function samePreviewPath(root: string, node: FileNode, document: FilePreviewDocument): boolean {
+  const expected = absoluteProjectPath(root, node.path).replaceAll("\\", "/");
+  const actual = document.path.replaceAll("\\", "/");
+  return actual === expected || actual.endsWith(`/${node.path.replaceAll("\\", "/")}`);
 }
 
-export function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSnapshot; runtimeId?: string; onOpen: (node: FileNode) => void }): React.JSX.Element {
+export function FilesPanel({ project, runtimeId }: {
+  project: ProjectSnapshot;
+  runtimeId?: string;
+}): React.JSX.Element {
   const [tree, setTree] = useState<FileNode[]>(project.files);
+  const [selection, setSelection] = useState<PreviewSelection>();
+  const previewIdRef = useRef<string | undefined>(undefined);
+  const requestIdRef = useRef(0);
+  const selectedNodeRef = useRef<FileNode | undefined>(undefined);
+
+  const releasePreview = useCallback((id?: string): void => {
+    if (!id) return;
+    void window.suocode.closeFilePreview(id).catch(() => undefined);
+  }, []);
+
+  const closePreview = useCallback((): void => {
+    requestIdRef.current += 1;
+    selectedNodeRef.current = undefined;
+    const id = previewIdRef.current;
+    previewIdRef.current = undefined;
+    setSelection(undefined);
+    releasePreview(id);
+  }, [releasePreview]);
+
   useEffect(() => {
     setTree(project.files);
     if (!project.cwd || project.files.length) return;
-    void window.suocode.listProjectDirectory(project.cwd).then(setTree).catch((caught) => toastError(caught instanceof Error ? caught.message : String(caught)));
+    void window.suocode.listProjectDirectory(project.cwd).then(setTree).catch((caught) => {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    });
   }, [project.cwd, project.files]);
+
+  useEffect(() => {
+    closePreview();
+  }, [project.cwd, closePreview]);
+
+  useEffect(() => window.suocode.onFilePreviewUpdated((document) => {
+    const selectedNode = selectedNodeRef.current;
+    if (!selectedNode || !project.cwd) return;
+    if (document.id !== previewIdRef.current && !samePreviewPath(project.cwd, selectedNode, document)) return;
+    const previousId = previewIdRef.current;
+    previewIdRef.current = document.id;
+    if (previousId && previousId !== document.id) releasePreview(previousId);
+    setSelection((current) => current && current.node.path === selectedNode.path
+      ? { node: current.node, document, loading: false }
+      : current);
+  }), [project.cwd, releasePreview]);
+
+  useEffect(() => () => {
+    requestIdRef.current += 1;
+    releasePreview(previewIdRef.current);
+  }, [releasePreview]);
 
   const loadDirectory = async (path: string): Promise<void> => {
     try {
@@ -142,16 +83,63 @@ export function FilesPanel({ project, runtimeId, onOpen }: { project: ProjectSna
       toastError(caught instanceof Error ? caught.message : String(caught));
     }
   };
-  const removeNode = (path: string): void => setTree((current) => removeTreeNode(current, path));
+
+  const openPreview = async (node: FileNode): Promise<void> => {
+    if (!project.cwd || node.kind !== "file") return;
+    const requestId = ++requestIdRef.current;
+    selectedNodeRef.current = node;
+    const previousId = previewIdRef.current;
+    previewIdRef.current = undefined;
+    releasePreview(previousId);
+    setSelection({ node, loading: true });
+    try {
+      const result = await window.suocode.openFilePreview({ root: project.cwd, path: node.path });
+      if (requestId !== requestIdRef.current) {
+        releasePreview(result.document?.id);
+        return;
+      }
+      if (result.document) {
+        previewIdRef.current = result.document.id;
+        setSelection({ node, document: result.document, loading: false });
+        return;
+      }
+      setSelection({ node, loading: false, error: "此文件类型暂不支持直接预览，可从弹出的菜单选择其他打开方式。" });
+    } catch (caught) {
+      if (requestId !== requestIdRef.current) return;
+      setSelection({ node, loading: false, error: caught instanceof Error ? caught.message : String(caught) });
+    }
+  };
+
+  const removeNode = (path: string): void => {
+    setTree((current) => removeTreeNode(current, path));
+    const selectedPath = selectedNodeRef.current?.path;
+    if (selectedPath === path || selectedPath?.startsWith(`${path}/`) || selectedPath?.startsWith(`${path}\\`)) closePreview();
+  };
 
   if (!project.cwd) {
     return <div className="inspector-empty"><span className="inspector-empty-icon"><Files size={16} strokeWidth={1.7} /></span><strong>未打开项目</strong><p>打开项目后即可查看文件。</p></div>;
   }
+
   return (
-    <div className="files-panel">
-      <div className="file-tree">
-        {tree.length ? tree.map((node) => <FileTreeNode key={node.path} node={node} root={project.cwd} depth={0} onLoad={loadDirectory} onOpen={onOpen} onTrashed={removeNode} />) : <p className="panel-note">此文件夹为空。</p>}
-      </div>
+    <div className={`files-workspace ${selection ? "has-preview" : ""}`}>
+      {selection ? (
+        <FilePreviewPane
+          preview={selection.document}
+          loading={selection.loading}
+          error={selection.error}
+          onClose={closePreview}
+        />
+      ) : null}
+      <aside className="files-tree-region" aria-label="项目文件目录">
+        <FileTree
+          nodes={tree}
+          root={project.cwd}
+          selectedPath={selection?.node.path}
+          onLoad={loadDirectory}
+          onOpen={(node) => void openPreview(node)}
+          onTrashed={removeNode}
+        />
+      </aside>
     </div>
   );
 }

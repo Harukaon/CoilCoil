@@ -32,6 +32,7 @@ export type FileFallbackAction = "reveal" | "force-text" | "trash";
 
 export interface OpenFilePreviewResult {
   opened: boolean;
+  document?: FilePreviewDocument;
   actions?: FileFallbackAction[];
 }
 
@@ -57,8 +58,8 @@ export interface SuoCodeDesktopApi {
   openExternal(url: string): Promise<void>;
   copyText(text: string): Promise<void>;
   openFilePreview(input: OpenFilePreviewInput): Promise<OpenFilePreviewResult>;
+  closeFilePreview(id: string): Promise<void>;
   performProjectFileAction(input: ProjectFileActionInput): Promise<ProjectFileActionResult>;
-  getFilePreview(id: string): Promise<FilePreviewDocument>;
   onFilePreviewUpdated(listener: (document: FilePreviewDocument) => void): () => void;
   listProjectDirectory(root: string, path?: string): Promise<FileNode[]>;
   request<T = unknown>(command: RuntimeCommand, runtimeId?: string): Promise<T>;

@@ -2,14 +2,11 @@ import {
   BrainCircuit,
   Files,
   PanelLeft,
-  PanelRight,
-  RefreshCw,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import type {
   ChatMessage,
-  FileNode,
   PlanApprovalState,
   PlanExecutionTarget,
   ProjectSelection,
@@ -37,6 +34,7 @@ import { SkillsWorkspace } from "./features/settings/SkillsWorkspace";
 import { WorkspaceSidebar, type SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
 import { FilesPanel } from "./features/files/FilesPanel";
+import { InspectorPane } from "./features/inspector/InspectorPane";
 import { RuntimePanel } from "./features/runtime/RuntimePanel";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
@@ -599,13 +597,6 @@ export default function App(): React.JSX.Element {
     return plan;
   };
 
-  const openFilePreview = (node: FileNode): void => {
-    if (!projectState.cwd || node.kind !== "file") return;
-    void window.suocode.openFilePreview({ root: projectState.cwd, path: node.path }).catch((caught) => {
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    });
-  };
-
   const submitPrompt = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     const prompt = draft.trim();
@@ -834,14 +825,21 @@ export default function App(): React.JSX.Element {
           onRejectPlan={rejectPlan}
         />
 
-        <aside className="inspector-pane">
-          <div className="inspector-header"><div className="inspector-drag-surface" aria-hidden="true" /><div className="inspector-actions no-drag"><button className="icon-button" type="button" aria-label="刷新项目" disabled={!snapshot} onClick={() => void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}><RefreshCw size={15} /></button><button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => setRightOpen(false)}><PanelRight size={17} /></button></div></div>
-          <nav className="inspector-nav">{inspectorItems.map((item) => { const Icon = item.icon; return <button className={item.id === inspectorView ? "active" : ""} type="button" key={item.id} onClick={() => setInspectorView(item.id)}><Icon size={17} strokeWidth={1.7} /><span>{item.label}</span></button>; })}</nav>
-          <section className="inspector-content">
-            {inspectorView === "files" ? <FilesPanel key="agent-files" project={projectState} runtimeId={snapshot?.runtimeId} onOpen={openFilePreview} /> : null}
-            {inspectorView === "runtime" ? <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} /> : null}
-          </section>
-        </aside>
+        <InspectorPane
+          tabs={inspectorItems}
+          activeTab={inspectorView}
+          onSelectTab={setInspectorView}
+          onRefresh={() => void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}
+          refreshDisabled={!snapshot}
+          onClose={() => setRightOpen(false)}
+        >
+          <div className={`inspector-tab-panel files-tab-panel ${inspectorView === "files" ? "active" : ""}`}>
+            <FilesPanel key={`agent-files:${projectState.cwd}`} project={projectState} runtimeId={snapshot?.runtimeId} />
+          </div>
+          <div className={`inspector-tab-panel runtime-tab-panel ${inspectorView === "runtime" ? "active" : ""}`}>
+            <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} />
+          </div>
+        </InspectorPane>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
         </>}
       </main>

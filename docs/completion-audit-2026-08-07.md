@@ -64,7 +64,7 @@
 | 文件树逐层懒加载 | 已验证 | Runtime 与 Desktop smoke 使用 1205 项目录 fixture。 |
 | 文件树右键复制绝对路径与相对路径 | 已验证 | Typed IPC 使用 Electron 系统剪贴板；打包 Desktop smoke 打开文件右键菜单并通过 `pbpaste` 验证两种路径。 |
 | 右侧只保留文件面板 | 已验证 | Desktop smoke。 |
-| 文本、Markdown、HTML、PDF 独立非模态预览 | 已验证 | 打包应用预览 smoke。 |
+| 文本、Markdown、HTML、PDF 右栏分栏预览 | 已验证 | 文件树保持可操作，预览内容实时更新。 |
 | 预览磁盘实时更新 | 已验证 | Desktop smoke 修改文件后检查窗口内容。 |
 | 未知格式操作菜单及移到废纸篓确认 | 已验证 | 打包 Desktop smoke 通过 typed preload 触发未知格式路径，并验证“在访达中显示 / 作为文本尝试预览 / 移到废纸篓”三项原生菜单动作；删除仍由主进程确认框保护。 |
 

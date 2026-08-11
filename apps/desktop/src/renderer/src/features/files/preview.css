@@ -1,17 +1,20 @@
-.preview-window { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: 58px minmax(0, 1fr) 26px; background: #f8f8f6; }
-.preview-window.has-warning { grid-template-rows: 58px auto minmax(0, 1fr) 26px; }
-.preview-window-header { display: flex; min-width: 0; align-items: center; gap: 16px; padding: 0 16px 0 84px; border-bottom: 1px solid #e1e1de; }
-.preview-window-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; }
-.preview-window-title strong { flex: 0 1 auto; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.preview-window-title span { min-width: 0; overflow: hidden; color: #969691; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.preview-mode { display: flex; flex: 0 0 auto; gap: 2px; padding: 3px; border-radius: 8px; background: #ecece8; }
-.preview-mode button { display: flex; height: 27px; align-items: center; gap: 5px; padding: 0 8px; border-radius: 6px; color: #777772; background: transparent; font-size: 10px; cursor: pointer; }
+.inline-file-preview { display: grid; min-width: 0; min-height: 0; grid-template-rows: 40px minmax(0, 1fr); overflow: hidden; background: #f8f8f6; }
+.inline-file-preview.has-document { grid-template-rows: 40px minmax(0, 1fr) 23px; }
+.inline-file-preview.has-warning { grid-template-rows: 40px auto minmax(0, 1fr) 23px; }
+.inline-preview-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 10px; border-bottom: 1px solid #e4e4e0; }
+.inline-preview-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; color: #62625d; }
+.inline-preview-title strong { min-width: 0; overflow: hidden; color: #41413d; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.inline-preview-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.preview-mode { display: flex; flex: 0 0 auto; gap: 2px; padding: 2px; border-radius: 7px; background: #ecece8; }
+.preview-mode button, .inline-preview-close { display: grid; width: 25px; height: 25px; padding: 0; place-items: center; border-radius: 6px; color: #777772; background: transparent; cursor: pointer; }
+.preview-mode button:hover, .inline-preview-close:hover { color: #323230; background: #e5e5e1; }
 .preview-mode button.active { color: #292927; background: #fff; box-shadow: 0 1px 2px rgb(20 20 18 / 8%); }
-.preview-warning { padding: 7px 14px; border-bottom: 1px solid #eadcbf; color: #8b682d; background: #fff8e8; font-size: 10px; }
-.preview-window-content { min-width: 0; min-height: 0; overflow: auto; }
-.text-preview { min-width: max-content; min-height: 100%; margin: 0; padding: 20px 22px; color: #353532; background: #f8f8f6; font: 12px/1.65 "SFMono-Regular", Consolas, monospace; tab-size: 2; white-space: pre; }
-.preview-markdown { width: min(820px, calc(100% - 48px)); margin: 0 auto; padding: 28px 0 60px; font-size: 14px; }
-.html-preview, .pdf-preview { width: 100%; height: 100%; border: 0; background: #fff; }
-.preview-window-status { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 0 10px; border-top: 1px solid #e5e5e2; color: #999994; font-size: 9px; }
-.preview-loading, .preview-error { display: grid; width: 100%; height: 100%; place-items: center; color: #858580; background: #f8f8f6; font-size: 12px; }
-.preview-error { color: #a45149; }
+.preview-warning { padding: 6px 9px; border-bottom: 1px solid #eadcbf; color: #8b682d; background: #fff8e8; font-size: 9px; }
+.inline-preview-content { min-width: 0; min-height: 0; overflow: auto; }
+.preview-placeholder { display: flex; height: 100%; min-height: 180px; align-items: center; justify-content: center; flex-direction: column; gap: 8px; padding: 16px; color: #92928d; font-size: 10px; line-height: 1.5; text-align: center; }
+.preview-placeholder.error { color: #9c5a54; }
+.text-preview { min-width: max-content; min-height: 100%; margin: 0; padding: 14px 16px; color: #353532; background: #f8f8f6; font: 10px/1.65 "SFMono-Regular", Consolas, monospace; tab-size: 2; white-space: pre; }
+.preview-markdown { width: min(760px, calc(100% - 28px)); margin: 0 auto; padding: 18px 0 44px; font-size: 11px; }
+.preview-markdown table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
+.html-preview, .pdf-preview { width: 100%; height: 100%; min-height: 240px; border: 0; background: #fff; }
+.inline-preview-status { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 8px; border-top: 1px solid #e5e5e2; color: #999994; font-size: 8px; white-space: nowrap; }
