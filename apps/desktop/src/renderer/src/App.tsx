@@ -244,11 +244,20 @@ export default function App(): React.JSX.Element {
         break;
       case "message_started":
       case "message_finished":
-        dispatchConversationMessages({ type: "runtime_message", message: event.message, revision: event.revision });
+        dispatchConversationMessages({
+          type: "runtime_message",
+          message: event.message,
+          revision: event.revision,
+          sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
+        });
         break;
       case "message_delta":
         setAgentPhase(event.field === "thinking" ? "思考" : "回复");
-        dispatchConversationMessages({ ...event, timestamp: Date.now() });
+        dispatchConversationMessages({
+          ...event,
+          timestamp: Date.now(),
+          sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
+        });
         break;
       case "message_rejected":
         dispatchConversationMessages({ type: "reject", id: event.id, revision: event.revision });

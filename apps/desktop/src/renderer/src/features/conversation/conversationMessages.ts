@@ -17,8 +17,8 @@ export type ConversationMessagesAction =
   | { type: "queue"; message: ChatMessage; sessionPath?: string }
   | { type: "bind_session"; id: string; sessionPath: string }
   | { type: "snapshot"; sessionPath: string; messages: ChatMessage[]; revision: number }
-  | { type: "runtime_message"; message: ChatMessage; revision: number }
-  | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; timestamp: number; revision: number }
+  | { type: "runtime_message"; message: ChatMessage; revision: number; sessionPath?: string }
+  | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; timestamp: number; revision: number; sessionPath?: string }
   | { type: "reject"; id: string; revision?: number }
   | { type: "truncate"; order: number }
   | { type: "restore"; state: ConversationMessagesState };
@@ -82,6 +82,7 @@ export function conversationMessagesReducer(
       };
     }
     case "runtime_message":
+      if (action.sessionPath && state.sessionPath && action.sessionPath !== state.sessionPath) return state;
       if (action.revision < state.revision) return state;
       return {
         ...state,
@@ -90,6 +91,7 @@ export function conversationMessagesReducer(
         pending: state.pending.filter((item) => item.message.id !== action.message.id),
       };
     case "message_delta": {
+      if (action.sessionPath && state.sessionPath && action.sessionPath !== state.sessionPath) return state;
       if (action.revision < state.revision) return state;
       const current = state.committed.find((message) => message.id === action.id);
       const message: ChatMessage = current
