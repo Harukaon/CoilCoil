@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Api } from "@earendil-works/pi-ai";
+import { registerApiProvider, unregisterApiProviders } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
@@ -13,7 +14,7 @@ import {
   resolveOpenAIResponsesWsEndpoints,
 } from "./config.js";
 import { fetchOpenAIResponsesWsCatalog, type OpenAIResponsesWsCatalog } from "./models.js";
-import { loadOpenAIResponsesWsStream } from "./transport.js";
+import { loadOpenAIResponsesWsApiProvider, loadOpenAIResponsesWsStream } from "./transport.js";
 
 interface CatalogCache extends OpenAIResponsesWsCatalog {
   modelsUrl: string;
@@ -41,6 +42,16 @@ function writeCatalogCache(agentDir: string, modelsUrl: string, catalog: OpenAIR
   renameSync(temporaryPath, path);
 }
 
+async function registerGenericProtocol(): Promise<void> {
+  try {
+    const provider = await loadOpenAIResponsesWsApiProvider();
+    unregisterApiProviders(OPENAI_RESPONSES_WS_PROVIDER_ID);
+    registerApiProvider(provider, OPENAI_RESPONSES_WS_PROVIDER_ID);
+  } catch (error) {
+    console.warn(`[OpenAI Response (WS)] 通用协议注册失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function register(pi: ExtensionAPI, options: {
   apiKey: string;
   baseUrl: string;
@@ -61,6 +72,8 @@ async function register(pi: ExtensionAPI, options: {
 }
 
 export default async function openAIResponsesWsExtension(pi: ExtensionAPI): Promise<void> {
+  await registerGenericProtocol();
+
   const agentDir = getAgentDir();
   const config = readOpenAIResponsesWsConfig(agentDir);
   const apiKey = config.apiKey?.trim();

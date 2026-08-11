@@ -90,6 +90,7 @@ import { buildRuntimeInspection, summaryEventFromEntry } from "./runtime-inspect
 import {
   DEFAULT_OPENAI_RESPONSES_WS_BASE_URL,
   LEGACY_CLIPROXYAPI_CONFIG_FILE,
+  OPENAI_RESPONSES_WS_API,
   OPENAI_RESPONSES_WS_CONFIG_FILE,
   OPENAI_RESPONSES_WS_PROVIDER_ID,
   OPENAI_RESPONSES_WS_PROVIDER_NAME,
@@ -233,6 +234,7 @@ const MODEL_PROVIDER_APIS: ModelProviderConfigurationSnapshot["supportedApis"] =
   { id: "mistral-conversations", label: "Mistral Conversations", description: "Mistral 原生 Conversations API。" },
   { id: "bedrock-converse-stream", label: "Amazon Bedrock Converse", description: "Amazon Bedrock Converse Stream API。" },
   { id: "pi-messages", label: "Messages", description: "原生 Messages 流协议，适用于实现该协议的私有服务。" },
+  { id: OPENAI_RESPONSES_WS_API, label: OPENAI_RESPONSES_WS_PROVIDER_NAME, description: "SuoCode 的 WebSocket 协议扩展；任何实现该协议的服务都可以直接作为自定义服务商接入，无需 ChatGPT 账号。" },
 ];
 
 type CredentialFieldDefinition = Omit<ModelProviderCredentialField, "configured" | "value">;

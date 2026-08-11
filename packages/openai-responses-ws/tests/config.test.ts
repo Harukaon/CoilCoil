@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readOpenAIResponsesWsConfig, resolveOpenAIResponsesWsEndpoints, writeOpenAIResponsesWsConfig } from "../src/config.ts";
+import { OPENAI_RESPONSES_WS_API, readOpenAIResponsesWsConfig, resolveOpenAIResponsesWsEndpoints, writeOpenAIResponsesWsConfig } from "../src/config.ts";
 import { mapOpenAIResponsesWsCatalog } from "../src/models.ts";
-import { adaptPiCodexTransportSource, loadOpenAIResponsesWsStream } from "../src/transport.ts";
+import { adaptPiCodexTransportSource, loadOpenAIResponsesWsApiProvider, loadOpenAIResponsesWsStream } from "../src/transport.ts";
 
 test("publishes only compiled JavaScript as production entry points", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -78,4 +78,11 @@ break;
 test("loads the adapted transport from the bundled Pi build", async () => {
   const stream = await loadOpenAIResponsesWsStream(new Set());
   assert.equal(typeof stream, "function");
+});
+
+test("exposes the WS transport as a generic api provider", async () => {
+  const provider = await loadOpenAIResponsesWsApiProvider();
+  assert.equal(provider.api, OPENAI_RESPONSES_WS_API);
+  assert.equal(typeof provider.stream, "function");
+  assert.equal(typeof provider.streamSimple, "function");
 });

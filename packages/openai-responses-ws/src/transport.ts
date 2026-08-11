@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { Api, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessageEventStream, Context, Model, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
+import type { ApiProvider } from "@earendil-works/pi-ai/compat";
 import { OPENAI_RESPONSES_WS_API, OPENAI_RESPONSES_WS_PROVIDER_ID } from "./config.js";
 
 export type OpenAIResponsesWsStream = (
@@ -11,6 +12,11 @@ export type OpenAIResponsesWsStream = (
   context: Context,
   options?: SimpleStreamOptions,
 ) => AssistantMessageEventStream;
+
+interface OpenAIResponsesWsTransport {
+  stream: (model: Model<Api>, context: Context, options?: StreamOptions) => AssistantMessageEventStream;
+  streamSimple: OpenAIResponsesWsStream;
+}
 
 function resolvePiCodexTransport(): { path: string; directory: string } {
   const candidates: string[] = [];
@@ -70,22 +76,51 @@ function withFastPayload(payload: unknown, onPayload: SimpleStreamOptions["onPay
   return onPayload?.(next, model) ?? next;
 }
 
-export async function loadOpenAIResponsesWsStream(fastModelIds: ReadonlySet<string>): Promise<OpenAIResponsesWsStream> {
-  const original = resolvePiCodexTransport();
-  const adapted = rewriteRelativeImports(adaptPiCodexTransportSource(readFileSync(original.path, "utf8")), original.directory);
-  const hash = createHash("sha256").update(adapted).digest("hex").slice(0, 16);
-  const directory = join(tmpdir(), "suocode-openai-responses-ws");
-  const path = join(directory, `transport-${hash}.mjs`);
-  mkdirSync(directory, { recursive: true });
-  if (!existsSync(path)) writeFileSync(path, adapted, "utf8");
+let cachedTransport: Promise<OpenAIResponsesWsTransport> | undefined;
 
-  const module = await import(pathToFileURL(path).href) as { streamSimple?: OpenAIResponsesWsStream };
-  if (typeof module.streamSimple !== "function") throw new Error("SuoCode WS transport 没有导出 streamSimple。");
-  return (model, context, options) => module.streamSimple!(model, context, {
+async function loadOpenAIResponsesWsTransport(): Promise<OpenAIResponsesWsTransport> {
+  cachedTransport ??= (async () => {
+    const original = resolvePiCodexTransport();
+    const adapted = rewriteRelativeImports(adaptPiCodexTransportSource(readFileSync(original.path, "utf8")), original.directory);
+    const hash = createHash("sha256").update(adapted).digest("hex").slice(0, 16);
+    const directory = join(tmpdir(), "suocode-openai-responses-ws");
+    const path = join(directory, `transport-${hash}.mjs`);
+    mkdirSync(directory, { recursive: true });
+    if (!existsSync(path)) writeFileSync(path, adapted, "utf8");
+
+    const module = await import(pathToFileURL(path).href) as Partial<OpenAIResponsesWsTransport>;
+    if (typeof module.stream !== "function") throw new Error("SuoCode WS transport 没有导出 stream。");
+    if (typeof module.streamSimple !== "function") throw new Error("SuoCode WS transport 没有导出 streamSimple。");
+    return { stream: module.stream, streamSimple: module.streamSimple };
+  })().catch((error: unknown) => {
+    cachedTransport = undefined;
+    throw error;
+  });
+  return cachedTransport;
+}
+
+export async function loadOpenAIResponsesWsStream(fastModelIds: ReadonlySet<string>): Promise<OpenAIResponsesWsStream> {
+  const { streamSimple } = await loadOpenAIResponsesWsTransport();
+  return (model, context, options) => streamSimple(model, context, {
     ...options,
     transport: "websocket-cached",
     ...(fastModelIds.has(model.id)
       ? { onPayload: (payload, payloadModel) => withFastPayload(payload, options?.onPayload, payloadModel) }
       : {}),
   });
+}
+
+/**
+ * Registers the WS transport as a generic Pi api provider (`registerApiProvider`
+ * from "@earendil-works/pi-ai/compat") rather than a single named provider, so
+ * any custom/override provider can select it as a request protocol and supply
+ * its own baseUrl/apiKey/models.
+ */
+export async function loadOpenAIResponsesWsApiProvider(): Promise<ApiProvider> {
+  const { stream, streamSimple } = await loadOpenAIResponsesWsTransport();
+  return {
+    api: OPENAI_RESPONSES_WS_API as Api,
+    stream: (model, context, options) => stream(model, context, { ...options, transport: "websocket-cached" }),
+    streamSimple: (model, context, options) => streamSimple(model, context, { ...options, transport: "websocket-cached" }),
+  };
 }
