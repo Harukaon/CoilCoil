@@ -19,23 +19,13 @@ export const PLAN_RPC_REQUEST_CHANNEL = "suocode:plan:rpc:v1:request";
 export const PLAN_RPC_REPLY_PREFIX = "suocode:plan:rpc:v1:reply:";
 export const PLAN_ENTRY_TYPE = "suocode-plan";
 
-type PlanStepStatus = "pending" | "in_progress" | "completed";
 type PlanStatus = "pending_approval" | "running" | "delegated" | "completed" | "rejected" | "failed";
 type ExecutionTarget = "main" | "subagent";
-
-export interface PlanStep {
-  id: string;
-  text: string;
-  status: PlanStepStatus;
-}
 
 export interface PlanState {
   id: string;
   title: string;
-  objective: string;
-  steps: PlanStep[];
-  acceptanceCriteria: string[];
-  notes?: string;
+  markdown: string;
   filePath: string;
   revision: number;
   status: PlanStatus;
@@ -49,11 +39,7 @@ export interface PlanState {
 }
 
 interface PlanInput {
-  title: string;
-  objective: string;
-  steps: Array<{ text: string }>;
-  acceptanceCriteria: string[];
-  notes?: string;
+  markdown: string;
 }
 
 interface PlanRpcRequest {
@@ -69,17 +55,7 @@ interface PlanDetails {
 }
 
 const PlanParams = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: 160, description: "计划标题" }),
-  objective: Type.String({ minLength: 1, maxLength: 4_000, description: "要达成的目标" }),
-  steps: Type.Array(
-    Type.Object({ text: Type.String({ minLength: 1, maxLength: 240, description: "执行步骤" }) }),
-    { minItems: 1, maxItems: 40, description: "按顺序排列的执行步骤" },
-  ),
-  acceptanceCriteria: Type.Array(
-    Type.String({ minLength: 1, maxLength: 240, description: "验收标准" }),
-    { minItems: 1, maxItems: 20, description: "用于判断计划是否完成的明确验收标准" },
-  ),
-  notes: Type.Optional(Type.String({ maxLength: 4_000, description: "补充说明" })),
+  markdown: Type.String({ minLength: 1, description: "完整的 Markdown 计划文档正文" }),
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,36 +79,61 @@ function cleanMultiline(value: unknown, maxChars: number): string {
     .slice(0, maxChars);
 }
 
+function cleanMarkdown(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const markdown = value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+  if (!markdown.trim()) return "";
+  return markdown.endsWith("\n") ? markdown : `${markdown}\n`;
+}
+
+function titleFromMarkdown(markdown: string): string {
+  const heading = markdown.match(/^\s*#\s+(.+?)\s*$/m)?.[1]?.trim();
+  if (heading) return cleanText(heading.replace(/\s+#+\s*$/, ""), 160) || "执行计划";
+  const firstLine = markdown.split("\n").find((line) => line.trim());
+  return cleanText(firstLine?.replace(/^#+\s*/, ""), 160) || "执行计划";
+}
+
 function isPlanStatus(value: unknown): value is PlanStatus {
   return value === "pending_approval" || value === "running" || value === "delegated"
     || value === "completed" || value === "rejected" || value === "failed";
 }
 
-function isStepStatus(value: unknown): value is PlanStepStatus {
-  return value === "pending" || value === "in_progress" || value === "completed";
+function legacyMarkdown(value: Record<string, unknown>): string {
+  const title = cleanText(value.title, 160);
+  const objective = cleanMultiline(value.objective, 4_000);
+  if (!title || !objective) return "";
+  const steps = Array.isArray(value.steps)
+    ? value.steps.flatMap((raw) => {
+      if (!isRecord(raw)) return [];
+      const text = cleanText(raw.text, 240);
+      if (!text) return [];
+      return [`- [${raw.status === "completed" ? "x" : raw.status === "in_progress" ? " " : " "}] ${text}`];
+    })
+    : [];
+  const criteria = Array.isArray(value.acceptanceCriteria)
+    ? value.acceptanceCriteria.map((item) => cleanText(item, 240)).filter(Boolean)
+    : [];
+  const notes = cleanMultiline(value.notes, 4_000);
+  return cleanMarkdown([
+    `# ${title}`,
+    "",
+    "## 目标",
+    objective,
+    ...(steps.length ? ["", "## 执行步骤", ...steps] : []),
+    ...(criteria.length ? ["", "## 验收标准", ...criteria.map((item) => `- ${item}`)] : []),
+    ...(notes ? ["", "## 备注", notes] : []),
+  ].join("\n"));
 }
 
-/** Parse only the durable, intentionally small plan shape from an extension entry/file. */
+/** Parse the session-owned plan metadata while keeping its document as Markdown. */
 export function parsePlanState(value: unknown): PlanState | undefined {
   if (!isRecord(value)) return undefined;
   const id = cleanText(value.id, 120);
-  const title = cleanText(value.title, 160);
-  const objective = cleanMultiline(value.objective, 4_000);
+  const markdown = cleanMarkdown(value.markdown) || legacyMarkdown(value);
   const filePath = cleanText(value.filePath, 4_000);
-  if (!id || !title || !objective || !filePath || !isPlanStatus(value.status)) return undefined;
-  if (!Array.isArray(value.steps) || value.steps.length > 40) return undefined;
-  const steps: PlanStep[] = [];
-  for (let index = 0; index < value.steps.length; index += 1) {
-    const raw = value.steps[index];
-    if (!isRecord(raw)) return undefined;
-    const text = cleanText(raw.text, 240);
-    const stepId = cleanText(raw.id, 120) || `${id}-${index + 1}`;
-    if (!text || !isStepStatus(raw.status)) return undefined;
-    steps.push({ id: stepId, text, status: raw.status });
-  }
-  const acceptanceCriteria = Array.isArray(value.acceptanceCriteria)
-    ? value.acceptanceCriteria.map((item) => cleanText(item, 240)).filter(Boolean).slice(0, 20)
-    : [];
+  if (!id || !markdown || !filePath || !isPlanStatus(value.status)) return undefined;
   const number = (key: string, fallback: number): number => (
     typeof value[key] === "number" && Number.isFinite(value[key]) ? value[key] as number : fallback
   );
@@ -140,11 +141,8 @@ export function parsePlanState(value: unknown): PlanState | undefined {
     ? value.executionTarget : undefined;
   return {
     id,
-    title,
-    objective,
-    steps,
-    acceptanceCriteria,
-    notes: cleanMultiline(value.notes, 4_000) || undefined,
+    title: titleFromMarkdown(markdown),
+    markdown,
     filePath,
     revision: Math.max(1, Math.floor(number("revision", 1))),
     status: value.status,
@@ -158,100 +156,14 @@ export function parsePlanState(value: unknown): PlanState | undefined {
   };
 }
 
-function normaliseInput(input: PlanInput): Pick<PlanState, "title" | "objective" | "steps" | "acceptanceCriteria" | "notes"> {
-  const title = cleanText(input.title, 160);
-  const objective = cleanMultiline(input.objective, 4_000);
-  const steps = input.steps
-    .map((step, index) => ({ id: `step-${index + 1}`, text: cleanText(step.text, 240), status: "pending" as const }))
-    .filter((step) => step.text);
-  if (!title) throw new Error("计划标题不能为空。");
-  if (!objective) throw new Error("计划目标不能为空。");
-  if (!steps.length) throw new Error("计划至少需要一个执行步骤。");
-  const acceptanceCriteria = input.acceptanceCriteria
-    .map((item) => cleanText(item, 240))
-    .filter(Boolean)
-    .slice(0, 20);
-  if (!acceptanceCriteria.length) throw new Error("计划至少需要一条验收标准。");
-  return {
-    title,
-    objective,
-    steps,
-    acceptanceCriteria,
-    notes: cleanMultiline(input.notes, 4_000) || undefined,
-  };
-}
-
-function escapeHeading(value: string): string {
-  return value.replace(/[\r\n]/g, " ").replace(/^#+/, "").trim();
+function normaliseInput(input: PlanInput): Pick<PlanState, "title" | "markdown"> {
+  const markdown = cleanMarkdown(input.markdown);
+  if (!markdown) throw new Error("计划 Markdown 不能为空。");
+  return { title: titleFromMarkdown(markdown), markdown };
 }
 
 export function serializePlanFile(plan: PlanState): string {
-  const metadata = JSON.stringify(plan);
-  const lines = [
-    "<!-- suocode-plan:v1",
-    metadata,
-    "-->",
-    `# ${escapeHeading(plan.title)}`,
-    "",
-    "## 目标",
-    plan.objective,
-    "",
-    "## 执行步骤",
-    ...plan.steps.map((step) => `${step.status === "completed" ? "- [x]" : step.status === "in_progress" ? "- [~]" : "- [ ]"} ${step.text}`),
-    "",
-    "## 验收标准",
-    ...(plan.acceptanceCriteria.length ? plan.acceptanceCriteria.map((item) => `- ${item}`) : ["- （待补充）"]),
-  ];
-  if (plan.notes) lines.push("", "## 备注", plan.notes);
-  lines.push("");
-  return lines.join("\n");
-}
-
-function markdownSection(text: string, heading: string): string | undefined {
-  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(new RegExp(`(?:^|\\n)##\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, "i"));
-  return match?.[1]?.trim();
-}
-
-function parseVisiblePlan(text: string, base: PlanState): PlanState {
-  const heading = text.match(/(?:^|\n)#\s+([^\n]+)/)?.[1];
-  const objective = markdownSection(text, "目标");
-  const stepSection = markdownSection(text, "执行步骤");
-  const criteriaSection = markdownSection(text, "验收标准");
-  const notes = markdownSection(text, "备注");
-
-  const parsedSteps: PlanStep[] = [];
-  if (stepSection) {
-    const lines = stepSection.split(/\r?\n/);
-    for (const line of lines) {
-      const match = line.match(/^\s*-\s*\[([ xX~])\]\s+(.+?)\s*$/);
-      if (!match) continue;
-      const stepText = cleanText(match[2], 240);
-      if (!stepText) continue;
-      const marker = match[1].toLowerCase();
-      parsedSteps.push({
-        id: base.steps[parsedSteps.length]?.id ?? `step-${parsedSteps.length + 1}`,
-        text: stepText,
-        status: marker === "x" ? "completed" : marker === "~" ? "in_progress" : "pending",
-      });
-    }
-  }
-
-  const parsedCriteria = criteriaSection
-    ?.split(/\r?\n/)
-    .map((line) => line.match(/^\s*-\s+(.+?)\s*$/)?.[1] ?? "")
-    .map((line) => cleanText(line, 240))
-    .filter((line) => line && line !== "（待补充）")
-    .slice(0, 20);
-
-  return {
-    ...base,
-    title: cleanText(heading, 160) || base.title,
-    objective: cleanMultiline(objective, 4_000) || base.objective,
-    steps: parsedSteps.length ? parsedSteps : base.steps,
-    acceptanceCriteria: parsedCriteria?.length ? parsedCriteria : base.acceptanceCriteria,
-    notes: notes === undefined ? base.notes : cleanMultiline(notes, 4_000) || undefined,
-  };
+  return cleanMarkdown(plan.markdown);
 }
 
 /**
@@ -270,7 +182,9 @@ export function parsePlanFile(text: string, fallback?: PlanState): PlanState | u
     }
   }
   const base = metadata ?? fallback;
-  return base ? parseVisiblePlan(text, base) : undefined;
+  if (!base) return undefined;
+  const markdown = cleanMarkdown(match ? text.replace(match[0], "") : text) || base.markdown;
+  return { ...base, title: titleFromMarkdown(markdown), markdown };
 }
 
 function planDetails(value: unknown): PlanDetails | undefined {
@@ -327,16 +241,11 @@ function stateWith(plan: PlanState, patch: Partial<PlanState>): PlanState {
 function executionPrompt(plan: PlanState, delegated: boolean): string {
   return [
     delegated ? "你正在执行一个由主 Agent 审批后派发的计划。" : "用户已批准执行下面的计划。",
-    "请先读取计划文件，再严格按步骤推进；必要时使用原生 read/write/edit 工具更新计划文件中的复选框和步骤状态。",
+    "请先使用原生 read 工具读取计划文件。计划文件正文是唯一的计划来源，不要假设它必须包含固定标题、步骤或验收标准章节。",
+    "请按 Markdown 文档表达的计划执行；需要更新进度时，使用原生 write/edit 工具直接修改同一份 Markdown 文件。",
     "不要重新设计计划，也不要只给出建议；完成后汇报实际改动、验证结果和未完成项。",
     `计划文件：${plan.filePath}`,
     `计划 ID：${plan.id}`,
-    "",
-    `标题：${plan.title}`,
-    `目标：${plan.objective}`,
-    "步骤：",
-    ...plan.steps.map((step, index) => `${index + 1}. ${step.text}`),
-    ...(plan.acceptanceCriteria.length ? ["验收标准：", ...plan.acceptanceCriteria.map((item) => `- ${item}`)] : []),
   ].join("\n");
 }
 
@@ -546,11 +455,12 @@ export default function planExtension(pi: ExtensionAPI): void {
     name: "plan",
     label: "Plan",
     description: "为复杂任务创建一个写入磁盘的、等待用户审批的执行计划。计划文件可用原生 read/write/edit 工具查看和修改；用户批准后才执行。",
-    promptSnippet: "plan: 创建需要用户审批的执行计划",
+    promptSnippet: "plan: 以完整 Markdown 创建需要用户审批的执行计划",
     promptGuidelines: [
       "当任务包含多个明确步骤、需要用户先确认方案时使用 plan；不要把普通的 Todo 进度更新当作 plan。",
-      "计划必须包含可执行步骤和验收标准，创建后停止等待用户在界面中选择主 Agent 或指定子 Agent 执行。",
-      "计划文件是持久化 Markdown，不要把计划只写在回复文本里。",
+      "plan 只接收一个 markdown 参数；直接提交完整 Markdown 文档，不要把计划拆成额外的标题、目标、步骤或验收字段。",
+      "Markdown 的结构由任务本身决定，不要求固定章节。创建后停止等待用户在界面中选择主 Agent 或指定子 Agent 执行。",
+      "计划文件是纯 Markdown，可由原生 read/write/edit 工具继续修改；不要把计划只写在回复文本里。",
     ],
     parameters: PlanParams,
     executionMode: "sequential",
@@ -573,12 +483,13 @@ export default function planExtension(pi: ExtensionAPI): void {
       };
       await persist(plan);
       return {
-        content: [{ type: "text", text: `计划已保存，等待用户审批。\n文件：${filePath}\n\n${plan.title}\n${plan.steps.map((step, index) => `${index + 1}. ${step.text}`).join("\n")}` }],
+        content: [{ type: "text", text: `计划已保存，等待用户审批。\n文件：${filePath}\n\n${plan.title}` }],
         details: { plan, filePath } satisfies PlanDetails,
       };
     },
     renderCall(args, theme: Theme) {
-      return new Text(theme.fg("toolTitle", theme.bold("plan")) + theme.fg("muted", ` · ${args.steps.length} 步`), 0, 0);
+      const title = titleFromMarkdown(cleanMarkdown(args.markdown));
+      return new Text(theme.fg("toolTitle", theme.bold("plan")) + theme.fg("muted", ` · ${title}`), 0, 0);
     },
     renderResult(result, _options, theme: Theme) {
       const details = planDetails(result.details);

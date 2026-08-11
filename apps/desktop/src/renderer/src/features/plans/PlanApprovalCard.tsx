@@ -1,7 +1,4 @@
 import {
-  CheckCircle2,
-  Circle,
-  CircleDot,
   FileText,
   Play,
   Users,
@@ -9,6 +6,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type { PlanApprovalState, PlanExecutionTarget } from "@suocode/runtime-protocol";
+import { Markdown } from "../conversation/ConversationTimeline";
 
 const SUBAGENT_PROFILES = ["explore", "reviewer", "worker"] as const;
 
@@ -58,30 +56,9 @@ export function PlanApprovalCard({
         </span>
       </div>
 
-      <div className="plan-approval-block">
-        <strong>目标</strong>
-        <p className="plan-approval-objective">{plan.objective}</p>
+      <div className="plan-markdown">
+        <Markdown>{plan.markdown}</Markdown>
       </div>
-
-      <div className="plan-approval-block">
-        <strong>执行步骤</strong>
-        <ol className="plan-approval-steps">
-          {plan.steps.map((step) => (
-            <li className={step.status} key={step.id}>
-              {step.status === "completed" ? <CheckCircle2 size={15} /> : step.status === "in_progress" ? <CircleDot size={15} /> : <Circle size={15} />}
-              <span>{step.text}</span>
-            </li>
-          ))}
-        </ol>
-      </div>
-
-      <section className="plan-approval-section">
-        <strong>验收标准</strong>
-        <ul>
-          {plan.acceptanceCriteria.map((criterion, index) => <li key={`${index}-${criterion}`}>{criterion}</li>)}
-        </ul>
-      </section>
-      {plan.notes ? <section className="plan-approval-section"><strong>补充说明</strong><p>{plan.notes}</p></section> : null}
 
       <div className="plan-file-path" title={plan.filePath}>
         <FileText size={13} />

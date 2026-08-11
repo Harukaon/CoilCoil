@@ -134,9 +134,7 @@ class FakeRuntime {
     return {
       id: planId,
       title: "测试计划",
-      objective: "验证运行时路由",
-      steps: [{ id: "step-1", text: "执行", status: "pending" }],
-      acceptanceCriteria: [],
+      markdown: "# 测试计划\n\n验证运行时路由。\n",
       filePath: "/tmp/plan.md",
       revision: 2,
       status: target === "main" ? "running" : "delegated",
@@ -151,9 +149,7 @@ class FakeRuntime {
     return {
       id: planId,
       title: "测试计划",
-      objective: "验证运行时路由",
-      steps: [{ id: "step-1", text: "执行", status: "pending" }],
-      acceptanceCriteria: [],
+      markdown: "# 测试计划\n\n验证运行时路由。\n",
       filePath: "/tmp/plan.md",
       revision: 2,
       status: "rejected",

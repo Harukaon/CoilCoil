@@ -42,7 +42,7 @@ const MARKDOWN_COMPONENTS: Components = {
 
 export { imageDataUrl, clipboardImage };
 
-const Markdown = memo(function Markdown({ children }: { children: string }): React.JSX.Element {
+export const Markdown = memo(function Markdown({ children }: { children: string }): React.JSX.Element {
   return (
     <div className="markdown">
       <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>

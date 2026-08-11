@@ -89,9 +89,7 @@ test("an approved plan occupies the original plan tool position in chat", () => 
   const plan: PlanApprovalState = {
     id: "plan-1",
     title: "完成调研",
-    objective: "得到可靠结论",
-    steps: [{ id: "step-1", text: "读取资料", status: "pending" }],
-    acceptanceCriteria: ["输出结论"],
+    markdown: "# 完成调研\n\n得到可靠结论。\n\n- [ ] 读取资料\n",
     filePath: "/tmp/plan-1.md",
     revision: 1,
     status: "pending_approval",

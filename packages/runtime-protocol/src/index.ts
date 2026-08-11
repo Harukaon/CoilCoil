@@ -466,15 +466,6 @@ export interface TodoItem {
   status: "pending" | "in_progress" | "completed";
 }
 
-/** A durable, user-approvable execution plan created by the Agent. */
-export type PlanStepStatus = "pending" | "in_progress" | "completed";
-
-export interface PlanStep {
-  id: string;
-  text: string;
-  status: PlanStepStatus;
-}
-
 export type PlanApprovalStatus =
   | "pending_approval"
   | "running"
@@ -488,10 +479,8 @@ export type PlanExecutionTarget = "main" | "subagent";
 export interface PlanApprovalState {
   id: string;
   title: string;
-  objective: string;
-  steps: PlanStep[];
-  acceptanceCriteria: string[];
-  notes?: string;
+  /** The complete plan document. It is persisted to file without extra metadata. */
+  markdown: string;
   filePath: string;
   revision: number;
   status: PlanApprovalStatus;

@@ -64,6 +64,7 @@ function createHarness() {
     emissions,
     entries,
     sentUserMessages,
+    parameters: tool.parameters as { properties?: Record<string, unknown>; required?: string[] },
     execute: tool.execute as (
       id: string,
       params: Record<string, unknown>,
@@ -101,33 +102,43 @@ async function createPlanFixture(t: test.TestContext) {
   const harness = createHarness();
   await harness.handlers.get("session_start")?.[0]({}, context);
   const result = await harness.execute("tool-plan", {
-    title: "实现计划审批",
-    objective: "让用户审批后再执行",
-    steps: [
-      { text: "写入计划文件" },
-      { text: "等待用户审批" },
-      { text: "执行并验证" },
-    ],
-    acceptanceCriteria: ["计划可以恢复", "执行结果可以回传"],
+    markdown: [
+      "# 实现计划审批",
+      "",
+      "让用户审批后再执行。",
+      "",
+      "- [ ] 写入计划文件",
+      "- [ ] 等待用户审批",
+      "- [ ] 执行并验证",
+      "",
+      "| 验证项 | 预期 |",
+      "| --- | --- |",
+      "| 恢复 | 计划可以恢复 |",
+      "| 回传 | 执行结果可以回传 |",
+    ].join("\n"),
   }, undefined, undefined, context);
   return { root, branch, context, harness, plan: result.details.plan };
 }
 
-test("plan Markdown round-trips and treats the visible checklist as editable state", async (t) => {
-  const { plan } = await createPlanFixture(t);
-  const serialized = serializePlanFile(plan)
-    .replace("- [ ] 写入计划文件", "- [x] 持久化计划文件")
-    .replace("- [ ] 等待用户审批", "- [~] 等待界面审批");
-  const parsed = parsePlanFile(serialized);
-  assert.equal(parsed?.steps[0].text, "持久化计划文件");
-  assert.equal(parsed?.steps[0].status, "completed");
-  assert.equal(parsed?.steps[1].text, "等待界面审批");
-  assert.equal(parsed?.steps[1].status, "in_progress");
+test("plan exposes exactly one model-facing Markdown parameter", () => {
+  const harness = createHarness();
+  assert.deepEqual(Object.keys(harness.parameters.properties ?? {}), ["markdown"]);
+  assert.deepEqual(harness.parameters.required, ["markdown"]);
+});
 
-  const withoutMetadata = serialized.replace(/<!--\s*suocode-plan:v1[\s\S]*?-->\s*/i, "");
-  const recovered = parsePlanFile(withoutMetadata, plan);
+test("plan Markdown round-trips without imposing a document schema", async (t) => {
+  const { plan } = await createPlanFixture(t);
+  const raw = serializePlanFile(plan);
+  assert.equal(raw, plan.markdown, "the persisted file must be the Markdown document itself");
+  assert.doesNotMatch(raw, /suocode-plan:v1/);
+  const serialized = raw
+    .replace("- [ ] 写入计划文件", "- [x] 持久化计划文件")
+    .replace("- [ ] 等待用户审批", "> 等待界面审批");
+  const recovered = parsePlanFile(serialized, plan);
   assert.equal(recovered?.id, plan.id);
-  assert.equal(recovered?.steps[0].status, "completed");
+  assert.match(recovered?.markdown ?? "", /- \[x\] 持久化计划文件/);
+  assert.match(recovered?.markdown ?? "", /> 等待界面审批/);
+  assert.match(recovered?.markdown ?? "", /\| 验证项 \| 预期 \|/);
 });
 
 test("plan tool persists a private session file and syncs native edits", async (t) => {
@@ -135,7 +146,7 @@ test("plan tool persists a private session file and syncs native edits", async (
   assert.match(plan.filePath, /sessions[/\\]plans[/\\]parent-session[/\\]plan-.+\.md$/);
   const source = await readFile(plan.filePath, "utf8");
   assert.match(source, /# 实现计划审批/);
-  assert.match(source, /## 执行步骤/);
+  assert.equal(source, plan.markdown);
   assert.ok(harness.entries.some((entry) => entry.customType === PLAN_ENTRY_TYPE));
   assert.ok(harness.emissions.some((entry) => entry.channel === PLAN_STATE_CHANNEL));
 
@@ -147,8 +158,7 @@ test("plan tool persists a private session file and syncs native edits", async (
   const updated = harness.emissions
     .filter((entry) => entry.channel === PLAN_STATE_CHANNEL)
     .at(-1)?.value as PlanState;
-  assert.equal(updated.steps[0].text, "已写入计划文件");
-  assert.equal(updated.steps[0].status, "completed");
+  assert.match(updated.markdown, /- \[x\] 已写入计划文件/);
   assert.ok(updated.revision > plan.revision);
 });
 
@@ -156,10 +166,7 @@ test("an active plan must be resolved or edited instead of being silently replac
   const { context, harness } = await createPlanFixture(t);
   await assert.rejects(
     harness.execute("tool-plan-2", {
-      title: "第二份计划",
-      objective: "不应覆盖仍待审批的计划",
-      steps: [{ text: "尝试覆盖" }],
-      acceptanceCriteria: ["原计划仍然存在"],
+      markdown: "# 第二份计划\n\n不应覆盖仍待审批的计划。",
     }, undefined, undefined, context),
     /当前已有计划/,
   );
@@ -185,7 +192,7 @@ test("approving for the main Agent starts execution and records its final report
   assert.equal((approved.value as any).data.plan.status, "running");
   assert.equal(harness.sentUserMessages.length, 1);
   assert.match(String(harness.sentUserMessages[0].content), new RegExp(plan.id));
-  assert.match(String(harness.sentUserMessages[0].content), /请先读取计划文件/);
+  assert.match(String(harness.sentUserMessages[0].content), /请先使用原生 read 工具读取计划文件/);
 
   branch.push({
     type: "message",

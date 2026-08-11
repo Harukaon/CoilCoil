@@ -66,7 +66,6 @@ import type {
   ProjectMemoryRuntimeStatus,
   PlanApprovalState,
   PlanExecutionTarget,
-  PlanStep,
   ResponseMetrics,
   SessionSnapshot,
   SessionSummary,
@@ -716,28 +715,41 @@ function planApprovalState(value: unknown): PlanApprovalState | undefined {
   ]);
   if (!statuses.has(value.status as PlanApprovalState["status"])) return undefined;
   const id = optionalString(value, "id");
-  const title = optionalString(value, "title");
-  const objective = optionalString(value, "objective");
   const filePath = optionalString(value, "filePath");
-  if (!id || !title || !objective || !filePath || !Array.isArray(value.steps)) return undefined;
-  const stepStatuses = new Set<PlanStep["status"]>(["pending", "in_progress", "completed"]);
-  const steps: PlanStep[] = [];
-  for (const raw of value.steps) {
-    if (!isRecord(raw) || !stepStatuses.has(raw.status as PlanStep["status"])) return undefined;
-    const stepId = optionalString(raw, "id");
-    const text = optionalString(raw, "text");
-    if (!stepId || !text) return undefined;
-    steps.push({ id: stepId, text, status: raw.status as PlanStep["status"] });
-  }
+  const legacyMarkdown = (() => {
+    const title = optionalString(value, "title");
+    const objective = optionalString(value, "objective");
+    if (!title || !objective) return undefined;
+    const steps = Array.isArray(value.steps)
+      ? value.steps.flatMap((raw) => isRecord(raw) && optionalString(raw, "text")
+        ? [`- [${raw.status === "completed" ? "x" : " "}] ${optionalString(raw, "text")}`]
+        : [])
+      : [];
+    const criteria = stringArray(value.acceptanceCriteria);
+    return [
+      `# ${title}`,
+      "",
+      "## 目标",
+      objective,
+      ...(steps.length ? ["", "## 执行步骤", ...steps] : []),
+      ...(criteria.length ? ["", "## 验收标准", ...criteria.map((item) => `- ${item}`)] : []),
+      ...(optionalString(value, "notes") ? ["", "## 备注", optionalString(value, "notes")!] : []),
+    ].join("\n");
+  })();
+  const markdown = (optionalString(value, "markdown") ?? legacyMarkdown)
+    ?.replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+  if (!id || !markdown || !filePath) return undefined;
+  const title = optionalString(value, "title")
+    ?? markdown.match(/^\s*#\s+(.+?)\s*$/m)?.[1]?.trim()
+    ?? markdown.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").trim()
+    ?? "执行计划";
   const number = (key: string, fallback: number): number => typeof value[key] === "number" && Number.isFinite(value[key]) ? value[key] as number : fallback;
   const target = value.executionTarget === "main" || value.executionTarget === "subagent" ? value.executionTarget : undefined;
   return {
     id,
     title,
-    objective,
-    steps,
-    acceptanceCriteria: stringArray(value.acceptanceCriteria),
-    notes: optionalString(value, "notes"),
+    markdown,
     filePath,
     revision: Math.max(1, Math.floor(number("revision", 1))),
     status: value.status as PlanApprovalState["status"],

@@ -32,9 +32,7 @@ function plan(overrides: Partial<PlanApprovalState> = {}): PlanApprovalState {
   return {
     id: "plan-test",
     title: "实现计划审批",
-    objective: "审批后执行",
-    steps: [{ id: "step-1", text: "完成实现", status: "pending" }],
-    acceptanceCriteria: ["测试通过"],
+    markdown: "# 实现计划审批\n\n审批后执行。\n\n- [ ] 完成实现\n",
     filePath: "/tmp/sessions/plans/session/plan-test.md",
     revision: 1,
     status: "pending_approval",
