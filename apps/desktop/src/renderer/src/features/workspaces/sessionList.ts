@@ -1,5 +1,11 @@
 import type { SessionSummary } from "@suocode/runtime-protocol";
 
+export const DEFAULT_VISIBLE_SESSION_ROWS = 4;
+
+export function collapsedSessionLimit(hasPendingConversation: boolean): number {
+  return DEFAULT_VISIBLE_SESSION_ROWS - (hasPendingConversation ? 1 : 0);
+}
+
 export function titleFromPrompt(text: string, hasImages: boolean): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
   if (!oneLine) return hasImages ? "图片对话" : "新建对话";

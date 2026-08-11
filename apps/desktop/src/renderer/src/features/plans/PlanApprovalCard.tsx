@@ -1,4 +1,5 @@
 import {
+  Check,
   FileText,
   Play,
   Users,
@@ -6,6 +7,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type { PlanApprovalState, PlanExecutionTarget } from "@suocode/runtime-protocol";
+import { Modal } from "../../ui/dialog";
 import { Markdown } from "../conversation/ConversationTimeline";
 
 const SUBAGENT_PROFILES = ["explore", "reviewer", "worker"] as const;
@@ -29,21 +31,29 @@ export function PlanApprovalCard({
   onReject: (planId: string) => Promise<PlanApprovalState>;
 }): React.JSX.Element {
   const [profile, setProfile] = useState<string>("worker");
+  const [customProfile, setCustomProfile] = useState("");
+  const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<"main" | "subagent" | "reject">();
   const [error, setError] = useState<string>();
 
-  const run = async (action: "main" | "subagent" | "reject"): Promise<void> => {
-    if (pendingAction) return;
+  const run = async (action: "main" | "subagent" | "reject"): Promise<boolean> => {
+    if (pendingAction) return false;
     setPendingAction(action);
     setError(undefined);
     try {
       if (action === "reject") await onReject(plan.id);
       else await onApprove(plan.id, action, action === "subagent" ? profile : undefined);
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+      return false;
     } finally {
       setPendingAction(undefined);
     }
+  };
+
+  const dispatchToSubagent = async (): Promise<void> => {
+    if (await run("subagent")) setAgentDialogOpen(false);
   };
 
   return (
@@ -70,21 +80,7 @@ export function PlanApprovalCard({
           <button className="plan-primary-action" type="button" disabled={Boolean(pendingAction)} onClick={() => void run("main")}>
             <Play size={14} />{pendingAction === "main" ? "正在启动…" : "主 Agent 执行"}
           </button>
-          <div className="plan-agent-picker" aria-label="选择子 Agent">
-            {SUBAGENT_PROFILES.map((agent) => (
-              <button className={profile === agent ? "active" : ""} type="button" key={agent} disabled={Boolean(pendingAction)} onClick={() => setProfile(agent)}>{agent}</button>
-            ))}
-            <input
-              aria-label="其他子 Agent"
-              autoComplete="off"
-              disabled={Boolean(pendingAction)}
-              onChange={(event) => setProfile(event.target.value)}
-              placeholder="其他代理"
-              spellCheck={false}
-              value={SUBAGENT_PROFILES.includes(profile as (typeof SUBAGENT_PROFILES)[number]) ? "" : profile}
-            />
-          </div>
-          <button type="button" disabled={Boolean(pendingAction) || !profile.trim()} onClick={() => void run("subagent")}>
+          <button type="button" disabled={Boolean(pendingAction)} onClick={() => { setError(undefined); setAgentDialogOpen(true); }}>
             <Users size={14} />{pendingAction === "subagent" ? "正在派发…" : "派发给子 Agent"}
           </button>
           <button className="plan-reject-action" type="button" disabled={Boolean(pendingAction)} onClick={() => void run("reject")}>
@@ -95,6 +91,53 @@ export function PlanApprovalCard({
       {plan.status === "delegated" && plan.agentProfile ? <div className="plan-execution-note">由 {plan.agentProfile} 执行{plan.subagentRunId ? ` · ${plan.subagentRunId}` : ""}</div> : null}
       {plan.report ? <div className="plan-execution-report"><strong>执行报告</strong><p>{plan.report}</p></div> : null}
       {plan.error || error ? <div className="plan-approval-error">{error ?? plan.error}</div> : null}
+      <Modal
+        open={agentDialogOpen && plan.status === "pending_approval"}
+        title="选择子 Agent"
+        description="选择负责执行当前计划的代理。派发后可以在对话和代理面板中查看执行过程。"
+        size="sm"
+        onClose={() => { if (!pendingAction) setAgentDialogOpen(false); }}
+        footer={<>
+          <button className="suo-modal-button" type="button" disabled={Boolean(pendingAction)} onClick={() => setAgentDialogOpen(false)}>取消</button>
+          <button className="suo-modal-button primary" type="button" disabled={Boolean(pendingAction) || !profile.trim()} onClick={() => void dispatchToSubagent()}>
+            {pendingAction === "subagent" ? "正在派发…" : "确认派发"}
+          </button>
+        </>}
+      >
+        <div className="plan-agent-dialog-options" role="radiogroup" aria-label="子 Agent profile">
+          {SUBAGENT_PROFILES.map((agent) => (
+            <button
+              className={`plan-agent-dialog-option ${profile === agent ? "active" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={profile === agent}
+              key={agent}
+              disabled={Boolean(pendingAction)}
+              onClick={() => setProfile(agent)}
+            >
+              <span><Users size={15} />{agent}</span>
+              {profile === agent ? <Check size={15} /> : null}
+            </button>
+          ))}
+        </div>
+        <label className={`plan-agent-dialog-custom ${!SUBAGENT_PROFILES.includes(profile as (typeof SUBAGENT_PROFILES)[number]) ? "active" : ""}`}>
+          <span>其他代理</span>
+          <input
+            aria-label="其他子 Agent"
+            autoComplete="off"
+            disabled={Boolean(pendingAction)}
+            onChange={(event) => {
+              setCustomProfile(event.target.value);
+              setProfile(event.target.value);
+            }}
+            onFocus={() => setProfile(customProfile)}
+            placeholder="输入 profile 名称"
+            spellCheck={false}
+            value={customProfile}
+          />
+        </label>
+        {error ? <div className="plan-agent-dialog-error">{error}</div> : null}
+      </Modal>
     </section>
   );
 }

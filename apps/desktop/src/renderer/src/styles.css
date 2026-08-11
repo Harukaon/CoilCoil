@@ -401,11 +401,18 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .plan-approval-actions > button.plan-primary-action { border-color: #353531; color: #fff; background: #353531; }
 .plan-approval-actions > button.plan-primary-action:hover:not(:disabled) { background: #1f1f1d; }
 .plan-approval-actions > button.plan-reject-action { color: #8b5d58; }
-.plan-agent-picker { display: inline-flex; min-width: 0; padding: 2px; border-radius: 9px; background: #ecece8; }
-.plan-agent-picker button { height: 27px; padding: 0 8px; border-radius: 7px; color: #85857f; background: transparent; font-size: 10px; cursor: pointer; }
-.plan-agent-picker button.active { color: #343431; background: #fff; box-shadow: 0 1px 3px rgb(23 23 20 / 8%); }
-.plan-agent-picker input { width: 96px; min-width: 0; height: 27px; padding: 0 8px; border-left: 1px solid #d6d6d0; border-radius: 0 7px 7px 0; color: #4f4f4a; background: #fff; font-size: 10px; outline: none; appearance: none; }
-.plan-agent-picker input::placeholder { color: #9a9a94; }
+.plan-agent-dialog-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 18px; }
+.plan-agent-dialog-option { display: flex; min-width: 0; height: 42px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 11px; border: 1px solid #deded8; border-radius: 10px; color: #565651; background: #fff; font-size: 11px; font-weight: 620; cursor: pointer; }
+.plan-agent-dialog-option > span { display: flex; min-width: 0; align-items: center; gap: 7px; overflow: hidden; }
+.plan-agent-dialog-option:hover:not(:disabled) { border-color: #bdbdb6; background: #f5f5f2; }
+.plan-agent-dialog-option.active { border-color: #777770; color: #2f2f2c; background: #eeeeea; }
+.plan-agent-dialog-option:disabled { cursor: default; opacity: .55; }
+.plan-agent-dialog-custom { display: grid; gap: 7px; margin-top: 12px; padding: 11px; border: 1px solid #deded8; border-radius: 10px; color: #777771; background: #fff; font-size: 10px; font-weight: 600; }
+.plan-agent-dialog-custom.active { border-color: #777770; }
+.plan-agent-dialog-custom input { min-width: 0; height: 34px; padding: 0 10px; border: 1px solid #deded8; border-radius: 8px; color: #353532; background: #fafaf8; font-size: 11px; outline: none; }
+.plan-agent-dialog-custom input:focus { border-color: #92928b; box-shadow: 0 0 0 2px rgb(80 80 75 / 8%); }
+.plan-agent-dialog-custom input::placeholder { color: #a0a09a; }
+.plan-agent-dialog-error { margin-top: 12px; padding: 9px 10px; border: 1px solid #e4b8b4; border-radius: 9px; color: #a64842; background: #fff7f6; font-size: 10px; overflow-wrap: anywhere; }
 .plan-execution-note { padding: 9px 11px; border-radius: 9px; color: #5f6e5d; background: #edf2eb; font-size: 11px; }
 .plan-execution-report { display: grid; gap: 5px; padding: 10px 12px; border-radius: 10px; background: #f0f0ed; font-size: 11px; }
 .plan-execution-report strong { color: #4b4b47; }

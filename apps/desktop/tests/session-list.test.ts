@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionSummary } from "@suocode/runtime-protocol";
-import { titleFromPrompt, upsertSessionSummary } from "../src/renderer/src/features/workspaces/sessionList.ts";
+import {
+  collapsedSessionLimit,
+  titleFromPrompt,
+  upsertSessionSummary,
+} from "../src/renderer/src/features/workspaces/sessionList.ts";
 
 function session(overrides: Partial<SessionSummary>): SessionSummary {
   return {
@@ -50,4 +54,9 @@ test("置顶会话仍保持在普通新会话之前", () => {
   });
 
   assert.deepEqual(upsertSessionSummary([pinned], created).map((item) => item.id), ["pinned", "new"]);
+});
+
+test("工作区默认展示四行会话", () => {
+  assert.equal(collapsedSessionLimit(false), 4);
+  assert.equal(collapsedSessionLimit(true), 3);
 });

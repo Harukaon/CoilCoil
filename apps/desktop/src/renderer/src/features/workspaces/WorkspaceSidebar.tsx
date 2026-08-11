@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { ArchivedSessionsPopover } from "./ArchivedSessionsPopover";
+import { collapsedSessionLimit } from "./sessionList";
 
 export interface SessionActivityState {
   runtimeId?: string;
@@ -132,7 +133,8 @@ export function WorkspaceSidebar({
           const sessions = sessionsByProject[project.path] ?? [];
           const hasPending = pendingProjectPath === project.path;
           const showAll = expandedSessionLists.has(project.path);
-          const visibleSessions = showAll ? sessions : sessions.slice(0, hasPending ? 2 : 3);
+          const collapsedLimit = collapsedSessionLimit(hasPending);
+          const visibleSessions = showAll ? sessions : sessions.slice(0, collapsedLimit);
           const hiddenCount = sessions.length - visibleSessions.length;
           return (
             <div className={`project-tree ${project.path === activeProject?.path ? "active" : ""}`} key={project.path}>
@@ -250,7 +252,7 @@ export function WorkspaceSidebar({
                     </ContextMenu.Root>;
                   })}
                   {hiddenCount > 0 ? <button className="more-conversations" type="button" aria-label={`显示另外 ${hiddenCount} 个对话`} onClick={() => onShowAllSessions(project.path)}><MoreHorizontal size={15} /></button> : null}
-                  {showAll && sessions.length > 3 ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => onCollapseSessions(project.path)}><ChevronUp size={14} /></button> : null}
+                  {showAll && sessions.length > collapsedLimit ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => onCollapseSessions(project.path)}><ChevronUp size={14} /></button> : null}
                   {!sessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
                 </div>
               </div>
