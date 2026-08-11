@@ -84,6 +84,36 @@ export interface ModelProviderCredentialConfiguration {
   };
 }
 
+export type ModelProviderAuthPrompt =
+  | { id: string; type: "text" | "secret" | "manual_code"; message: string; placeholder?: string }
+  | {
+      id: string;
+      type: "select";
+      message: string;
+      options: Array<{ id: string; label: string; description?: string }>;
+    };
+
+export interface ModelProviderAuthState {
+  flowId: string;
+  provider: string;
+  providerName: string;
+  loginLabel: string;
+  status: "starting" | "waiting_for_user" | "authorizing" | "succeeded" | "failed" | "cancelled";
+  message?: string;
+  prompt?: ModelProviderAuthPrompt;
+  authUrl?: {
+    url: string;
+    instructions?: string;
+  };
+  deviceCode?: {
+    userCode: string;
+    verificationUri: string;
+    expiresInSeconds?: number;
+  };
+  links?: Array<{ url: string; label?: string }>;
+  error?: string;
+}
+
 export interface ModelCostConfiguration {
   input: number;
   output: number;
@@ -134,6 +164,8 @@ export interface ModelProviderConfiguration {
   /** A literal `models.json` API key exists but is intentionally redacted. */
   hasPrivateApiKeyReference: boolean;
   apiKeyConfigured: boolean;
+  /** The active stored/resolved credential kind. No secret material is exposed. */
+  authType?: "api_key" | "oauth";
   /** Soft-disable: keep config but hide models from the picker. */
   disabled: boolean;
   credential: ModelProviderCredentialConfiguration;
@@ -146,7 +178,7 @@ export interface ModelProviderConfiguration {
 
 /** Editable provider input. `apiKey` is write-only and never returned. */
 export interface ModelProviderConfigurationInput {
-  provider: Omit<ModelProviderConfiguration, "apiKeyConfigured" | "hasPrivateApiKeyReference" | "source" | "credential">;
+  provider: Omit<ModelProviderConfiguration, "apiKeyConfigured" | "authType" | "hasPrivateApiKeyReference" | "source" | "credential">;
   credential?: {
     method: string;
     values: Record<string, string>;
@@ -805,6 +837,9 @@ export type RuntimeCommand =
       apiKey?: string;
     }
   | { type: "remove_provider_auth"; provider: string }
+  | { type: "start_model_provider_oauth"; provider: string }
+  | { type: "respond_model_provider_oauth"; flowId: string; promptId: string; value: string }
+  | { type: "cancel_model_provider_oauth"; flowId: string }
   | { type: "fetch_provider_models"; input: FetchProviderModelsInput }
   | { type: "test_provider_connection"; input: TestProviderConnectionInput }
   | { type: "get_mcp_configuration"; cwd?: string }
@@ -856,6 +891,7 @@ export type RuntimeCommand =
 export type RuntimeEvent =
   | { type: "runtime_ready"; configuration: RuntimeConfiguration }
   | { type: "configuration_updated"; configuration: RuntimeConfiguration }
+  | { type: "model_provider_auth_updated"; state: ModelProviderAuthState }
   | { type: "sessions_updated"; cwd: string; sessions: SessionSummary[] }
   | { type: "session_snapshot"; snapshot: SessionSnapshot }
   | { type: "message_started"; message: ChatMessage; revision: number }

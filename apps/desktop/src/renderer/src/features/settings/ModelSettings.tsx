@@ -1,9 +1,10 @@
-import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, Plus, RefreshCw, Search, Trash2, Zap } from "lucide-react";
+import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Search, Trash2, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   OpenAIResponsesWsConfiguration,
   FetchProviderModelsResult,
   ModelProviderConfiguration,
+  ModelProviderAuthState,
   ModelProviderConfigurationInput,
   ModelProviderConfigurationSnapshot,
   ModelProviderCredentialConfiguration,
@@ -18,6 +19,7 @@ import { toastError, toastSuccess } from "../../ui/toast";
 import { loadModelCatalog, mergeSelectedUpstreamModels, type ModelCatalogMeta } from "./modelCatalog";
 import { SettingsSelect } from "./SettingsSelect";
 import { UpstreamModelPicker, type UpstreamModelOption } from "./UpstreamModelPicker";
+import { ProviderOAuthDialog } from "./ProviderOAuthDialog";
 
 type EditableModel = ModelProviderModelConfiguration & { uid: string };
 type ProviderDraft = Omit<ModelProviderConfigurationInput["provider"], "models"> & { models: EditableModel[] };
@@ -146,7 +148,7 @@ function initialAdvancedText(models: EditableModel[]): Record<string, ModelAdvan
 }
 
 function draftFromProvider(provider: ModelProviderConfiguration): ProviderDraft {
-  const { source: _source, apiKeyConfigured: _configured, hasPrivateApiKeyReference: _privateReference, models, ...draft } = provider;
+  const { source: _source, apiKeyConfigured: _configured, authType: _authType, credential: _credential, hasPrivateApiKeyReference: _privateReference, models, ...draft } = provider;
   return { ...clone(draft), disabled: Boolean(provider.disabled), models: models.map(toEditableModel) };
 }
 
@@ -222,17 +224,26 @@ function ProviderCredentialEditor({
   method,
   values,
   configured,
+  oauthConfigured,
+  oauthBusy,
   onMethodChange,
   onValueChange,
+  onOAuthLogin,
+  onOAuthLogout,
 }: {
   configuration: ModelProviderCredentialConfiguration;
   method: string;
   values: Record<string, string>;
   configured: boolean;
+  oauthConfigured: boolean;
+  oauthBusy: boolean;
   onMethodChange: (method: string) => void;
   onValueChange: (field: string, value: string) => void;
+  onOAuthLogin: () => void;
+  onOAuthLogout: () => void;
 }): React.JSX.Element {
   const active = configuration.methods.find((item) => item.id === method) ?? configuration.methods[0];
+  const authConfigured = configured || oauthConfigured;
   const simpleKeyOnly = configuration.methods.length === 1
     && (active?.fields.length ?? 0) === 1
     && active?.fields[0]?.input === "secret"
@@ -262,9 +273,18 @@ function ProviderCredentialEditor({
     <section className="provider-credential-editor">
       <header>
         <strong>连接与认证</strong>
-        <span className={configured ? "configured" : ""}>{configured ? "已配置" : "未配置"}</span>
+        <span className={authConfigured ? "configured" : ""}>{oauthConfigured ? "订阅已登录" : configured ? "API 凭据已配置" : "未配置"}</span>
       </header>
-      {configuration.methods.length > 1 ? <label>认证方式<SettingsSelect value={active?.id ?? ""} options={configuration.methods.map((item) => ({ value: item.id, label: item.label, detail: item.description }))} ariaLabel="服务商认证方式" onChange={onMethodChange} /></label> : null}
+      {configuration.oauth ? <div className={`provider-oauth-action ${oauthConfigured ? "configured" : ""}`}>
+        <div>
+          <strong>{configuration.oauth.label}</strong>
+          <span>{oauthConfigured ? "当前使用订阅凭据" : "由 SuoCode 打开浏览器并保存授权凭据"}</span>
+        </div>
+        {oauthConfigured
+          ? <button type="button" disabled={oauthBusy} onClick={onOAuthLogout}><LogOut size={13} />退出登录</button>
+          : <button className="primary" type="button" disabled={oauthBusy} onClick={onOAuthLogin}>{oauthBusy ? <LoaderCircle className="spin" size={13} /> : <LogIn size={13} />}订阅登录</button>}
+      </div> : null}
+      {configuration.methods.length > 1 ? <label>API 凭据方式<SettingsSelect value={active?.id ?? ""} options={configuration.methods.map((item) => ({ value: item.id, label: item.label, detail: item.description }))} ariaLabel="服务商 API 凭据方式" onChange={onMethodChange} /></label> : null}
       {active ? <>
         {active.description && configuration.methods.length > 1 ? <p className="provider-credential-description">{active.description}</p> : null}
         {active.fields.length ? <div className="provider-credential-fields">{active.fields.map((field) => <label className={field.input === "textarea" ? "wide" : ""} key={field.id}>
@@ -272,8 +292,8 @@ function ProviderCredentialEditor({
           {field.input === "textarea" ? <textarea value={values[field.id] ?? ""} placeholder={field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} /> : field.input === "secret" ? <span className="secret-input"><KeyRound size={13} /><input type="password" value={values[field.id] ?? ""} autoComplete="off" placeholder={field.configured ? "已配置；留空即可保留" : field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} /></span> : <input value={values[field.id] ?? ""} placeholder={field.placeholder} onChange={(event) => onValueChange(field.id, event.target.value)} />}
           {field.description ? <small>{field.description}</small> : null}
         </label>)}</div> : <p className="provider-credential-description">此方式使用应用运行环境中已经存在的凭据，不需要在这里填写密钥。</p>}
-      </> : <div className="provider-oauth-only"><strong>{configuration.oauth?.label ?? "订阅登录"}</strong><p>此服务商由 OAuth 登录流程认证，不使用 API Key。</p></div>}
-      {configuration.oauth && configuration.methods.length ? <div className="provider-oauth-note">同时支持 <strong>{configuration.oauth.label}</strong> 订阅登录；订阅凭据与 API 密钥是两种独立的登录方式，后一次登录会替换前一次凭据。</div> : null}
+      </> : configuration.oauth ? null : <div className="provider-oauth-only"><strong>运行环境凭据</strong><p>此服务商使用应用运行环境中已经存在的认证信息。</p></div>}
+      {configuration.oauth && configuration.methods.length ? <div className="provider-oauth-note">订阅登录与 API 凭据是两种独立方式；由于 Pi 每个服务商只保存一份当前凭据，完成其中一种登录会替换另一种。</div> : null}
     </section>
   );
 }
@@ -409,8 +429,13 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const [testing, setTesting] = useState(false);
   const [removeArmed, setRemoveArmed] = useState(false);
   const [upstreamPickerModels, setUpstreamPickerModels] = useState<UpstreamModelOption[]>();
+  const [oauthFlow, setOAuthFlow] = useState<ModelProviderAuthState>();
 
   const selectedProvider = snapshot?.providers.find((provider) => provider.id === selectedId);
+  const oauthBusy = Boolean(oauthFlow && oauthFlow.provider === (selectedId ?? draft?.id)
+    && oauthFlow.status !== "succeeded"
+    && oauthFlow.status !== "failed"
+    && oauthFlow.status !== "cancelled");
   const canRemove = Boolean(selectedId && (selectedSource !== "built-in" || selectedProvider?.apiKeyConfigured));
   const removeLabel = selectedSource === "built-in" ? "清除配置" : "移除";
 
@@ -456,6 +481,16 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   };
 
   useEffect(() => { void load(); }, [runtimeId]);
+
+  useEffect(() => window.suocode.onRuntimeEvent((event, eventRuntimeId) => {
+    if (event.type !== "model_provider_auth_updated") return;
+    if (eventRuntimeId && runtimeId && eventRuntimeId !== runtimeId) return;
+    setOAuthFlow(event.state.status === "cancelled" ? undefined : event.state);
+    if (event.state.status === "succeeded") {
+      toastSuccess(`${event.state.providerName} 订阅登录成功。`);
+      void load(event.state.provider);
+    }
+  }), [runtimeId]);
 
   const providerOptions = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -596,6 +631,52 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     }
   };
 
+  const startOAuthLogin = async (): Promise<void> => {
+    const provider = selectedId ?? draft?.id;
+    if (!provider || !credentialConfiguration.oauth) return;
+    try {
+      const state = await window.suocode.request<ModelProviderAuthState>({ type: "start_model_provider_oauth", provider }, runtimeId);
+      setOAuthFlow((current) => current?.flowId === state.flowId ? current : state);
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const respondOAuthLogin = async (promptId: string, value: string): Promise<void> => {
+    if (!oauthFlow) return;
+    try {
+      await window.suocode.request({ type: "respond_model_provider_oauth", flowId: oauthFlow.flowId, promptId, value }, runtimeId);
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+      throw caught;
+    }
+  };
+
+  const closeOAuthLogin = (): void => {
+    const flow = oauthFlow;
+    setOAuthFlow(undefined);
+    if (!flow || flow.status === "succeeded" || flow.status === "failed" || flow.status === "cancelled") return;
+    void window.suocode.request({ type: "cancel_model_provider_oauth", flowId: flow.flowId }, runtimeId).catch((caught) => {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    });
+  };
+
+  const logoutOAuth = async (): Promise<void> => {
+    const provider = selectedId ?? draft?.id;
+    if (!provider) return;
+    setSaving(true);
+    try {
+      const next = await window.suocode.request<RuntimeConfiguration>({ type: "remove_provider_auth", provider }, runtimeId);
+      onSaved(next);
+      await load(provider, next);
+      toastSuccess("已退出订阅登录。");
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const draftApiKey = (): string | undefined => {
     const key = credentialValues.key?.trim();
     return key || undefined;
@@ -688,6 +769,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
 
   return (
     <div className="model-provider-settings">
+      {oauthFlow ? <ProviderOAuthDialog key={oauthFlow.flowId} state={oauthFlow} onRespond={respondOAuthLogin} onClose={closeOAuthLogin} /> : null}
       {upstreamPickerModels && draft ? <UpstreamModelPicker
         models={upstreamPickerModels}
         configuredIds={new Set(draft.models.map((model) => model.id).filter(Boolean))}
@@ -706,7 +788,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           <h2>{title}</h2>
           {providers.map((provider) => <button className={(selectedId === provider.id || (!selectedId && draft?.id === provider.id)) ? "active" : ""} type="button" key={provider.id} onClick={() => selectProvider(provider)}>
             <span><strong>{provider.name ?? provider.id}</strong><small>{provider.id}</small></span>
-            <em className={provider.disabled ? "disabled" : provider.apiKeyConfigured ? "configured" : ""}>{provider.disabled ? "已禁用" : provider.apiKeyConfigured ? "已配置" : sourceLabel(provider.source)}</em>
+            <em className={provider.disabled ? "disabled" : provider.apiKeyConfigured ? "configured" : ""}>{provider.disabled ? "已禁用" : provider.authType === "oauth" ? "订阅已登录" : provider.apiKeyConfigured ? "已配置" : sourceLabel(provider.source)}</em>
           </button>)}
         </section> : null)}
       </aside>
@@ -735,7 +817,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           {draft.disabled ? <div className="provider-action-message">已禁用：保存后该服务商不会出现在模型列表中，配置与凭据仍会保留。</div> : null}
           {isBuiltinProvider ? <>
             <div className="provider-native-summary"><strong>内置服务商</strong><p>“内置”只表示请求实现和模型目录由产品内置提供，并不表示只填一把密钥。Azure、Vertex、Bedrock 和 Cloudflare 会在下方显示各自真实需要的参数。</p></div>
-            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(snapshot?.providers.find((provider) => provider.id === draft.id)?.apiKeyConfigured)} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} />
+            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
               <p>这些选项直接对应 <code>models.json</code> 的服务商覆盖。普通配置不需要填写；“密钥引用”用于通过环境变量或命令延迟取得密钥，不是另一把 API 密钥。</p>
@@ -746,7 +828,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           </> : <>
             <div className="settings-grid"><label>服务商 ID<input value={draft.id} disabled={Boolean(selectedId)} placeholder="例如 dog-provider" onChange={(event) => setDraft((current) => current ? { ...current, id: event.target.value } : current)} /></label><label>显示名称<input value={draft.name ?? ""} placeholder="例如 DogProvider" onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label></div>
             <div className="settings-grid"><label>请求协议<SettingsSelect value={draft.api ?? ""} options={protocolOptions.filter((option) => option.value)} ariaLabel="请求协议" placeholder="选择协议" onChange={(api) => setDraft((current) => current ? { ...current, api } : current)} searchable /></label><label>Base URL<input value={draft.baseUrl ?? ""} placeholder={draft.api === "anthropic-messages" ? "https://api.anthropic.com" : "https://api.example.com/v1"} onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></label></div>
-            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(snapshot?.providers.find((provider) => provider.id === draft.id)?.apiKeyConfigured)} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} />
+            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
               <p>密钥引用、Radius OAuth、请求头与兼容性参数都属于高级配置。普通 API 密钥请填写上方输入框。</p>

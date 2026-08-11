@@ -145,6 +145,9 @@ export class RuntimeServer {
         this.retireExcessIdleRuntimes(runtimeId);
       }
     }
+    if (event.type === "model_provider_auth_updated" && event.state.status === "succeeded") {
+      this.refreshAllSessionModels(runtimeId ? this.runtimes.get(runtimeId) : this.runtime);
+    }
     const scopedEvent = runtimeId && event.type === "session_snapshot"
       ? { ...event, snapshot: this.decorateSnapshot(runtimeId, event.snapshot) }
       : event;
@@ -320,7 +323,10 @@ export class RuntimeServer {
       || command.type === "list_sessions"
       || command.type === "list_archived_sessions"
       || command.type === "archive_session"
-      || command.type === "restore_session";
+      || command.type === "restore_session"
+      || command.type === "start_model_provider_oauth"
+      || command.type === "respond_model_provider_oauth"
+      || command.type === "cancel_model_provider_oauth";
     const runtime = alwaysControl ? this.runtime : this.selectedRuntime(runtimeId);
     const result = await this.dispatchTo(runtime, command);
     if (command.type === "archive_session") await this.releaseSession(command.sessionPath);
@@ -364,6 +370,12 @@ export class RuntimeServer {
         return runtime.configureModel(command);
       case "remove_provider_auth":
         return runtime.removeProviderAuth(command.provider);
+      case "start_model_provider_oauth":
+        return runtime.startModelProviderOAuth(command.provider);
+      case "respond_model_provider_oauth":
+        return runtime.respondModelProviderOAuth(command.flowId, command.promptId, command.value);
+      case "cancel_model_provider_oauth":
+        return runtime.cancelModelProviderOAuth(command.flowId);
       case "fetch_provider_models":
         return runtime.fetchProviderModels(command.input);
       case "test_provider_connection":

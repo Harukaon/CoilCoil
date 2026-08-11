@@ -21,6 +21,8 @@ import {
 import {
   clampThinkingLevel,
   getSupportedThinkingLevels,
+  type AuthEvent,
+  type AuthPrompt,
   type ApiKeyCredential,
   type Provider,
 } from "@earendil-works/pi-ai";
@@ -41,6 +43,8 @@ import type {
   McpServerConfiguration,
   McpServerRuntimeStatus,
   ModelProviderConfiguration,
+  ModelProviderAuthPrompt,
+  ModelProviderAuthState,
   ModelProviderConfigurationInput,
   ModelProviderConfigurationSnapshot,
   ModelProviderCredentialConfiguration,
@@ -91,6 +95,7 @@ import {
   OPENAI_RESPONSES_WS_PROVIDER_NAME,
 } from "@suocode/openai-responses-ws/config";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -361,6 +366,18 @@ function credentialConfiguration(
 
 interface PrivateModelsConfiguration {
   providers: Record<string, Record<string, unknown>>;
+}
+
+interface ProviderAuthFlow {
+  state: ModelProviderAuthState;
+  controller: AbortController;
+  pendingPrompt?: {
+    id: string;
+    resolve: (value: string) => void;
+    reject: (error: Error) => void;
+    signal?: AbortSignal;
+    onAbort?: () => void;
+  };
 }
 
 function cloneJson<T>(value: T): T {
@@ -1715,6 +1732,7 @@ export class SuoCodeRuntime {
   private mcpReloadTimer?: ReturnType<typeof setTimeout>;
   private resourceReloadTimer?: ReturnType<typeof setTimeout>;
   private runtimeInspectionRefresh?: Promise<void>;
+  private readonly providerAuthFlows = new Map<string, ProviderAuthFlow>();
 
   constructor(options: SuoCodeRuntimeOptions) {
     // The Pi CLI configures its Undici dispatcher before provider SDKs run.
@@ -2024,6 +2042,12 @@ export class SuoCodeRuntime {
     const apiKeyReference = apiKey?.startsWith("$") || apiKey?.startsWith("!") ? apiKey : undefined;
     const storedCredential = readStoredCredential(providerId, join(this.agentDir, "auth.json"));
     const storedApiKeyCredential = storedCredential?.type === "api_key" ? storedCredential : undefined;
+    const authType = storedCredential?.type
+      ?? (modelRuntime.isUsingOAuth(providerId)
+        ? "oauth"
+        : modelRuntime.hasConfiguredAuth(providerId) || Boolean(apiKey)
+          ? "api_key"
+          : undefined);
     const providerName = runtimeProvider?.name;
     const fallbackName = providerId === OPENAI_RESPONSES_WS_PROVIDER_ID ? OPENAI_RESPONSES_WS_PROVIDER_NAME : providerId;
     return {
@@ -2038,6 +2062,7 @@ export class SuoCodeRuntime {
       apiKeyReference,
       hasPrivateApiKeyReference: Boolean(apiKey && !apiKeyReference),
       apiKeyConfigured: modelRuntime.hasConfiguredAuth(providerId) || Boolean(apiKey),
+      authType,
       disabled: provider?.disabled === true,
       credential: credentialConfiguration(runtimeProvider, storedApiKeyCredential),
       replaceModels: Array.isArray(provider?.models),
@@ -2341,6 +2366,207 @@ export class SuoCodeRuntime {
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
     return configuration;
+  }
+
+  private publishProviderAuth(flow: ProviderAuthFlow): void {
+    this.emitEvent({
+      type: "model_provider_auth_updated",
+      state: {
+        ...flow.state,
+        prompt: flow.state.prompt
+          ? flow.state.prompt.type === "select"
+            ? { ...flow.state.prompt, options: flow.state.prompt.options.map((option) => ({ ...option })) }
+            : { ...flow.state.prompt }
+          : undefined,
+        authUrl: flow.state.authUrl ? { ...flow.state.authUrl } : undefined,
+        deviceCode: flow.state.deviceCode ? { ...flow.state.deviceCode } : undefined,
+        links: flow.state.links?.map((link) => ({ ...link })),
+      },
+    });
+  }
+
+  private updateProviderAuth(flow: ProviderAuthFlow, patch: Partial<ModelProviderAuthState>): void {
+    flow.state = { ...flow.state, ...patch };
+    this.publishProviderAuth(flow);
+  }
+
+  private clearProviderAuthPrompt(flow: ProviderAuthFlow): ProviderAuthFlow["pendingPrompt"] {
+    const pending = flow.pendingPrompt;
+    if (!pending) return undefined;
+    if (pending.signal && pending.onAbort) pending.signal.removeEventListener("abort", pending.onAbort);
+    flow.pendingPrompt = undefined;
+    return pending;
+  }
+
+  private waitForProviderAuthPrompt(flow: ProviderAuthFlow, prompt: AuthPrompt): Promise<string> {
+    if (flow.controller.signal.aborted) return Promise.reject(new Error("订阅登录已取消。"));
+    if (flow.pendingPrompt) return Promise.reject(new Error("订阅登录正在等待上一个输入。"));
+    const id = randomUUID();
+    const projected: ModelProviderAuthPrompt = prompt.type === "select"
+      ? {
+          id,
+          type: "select",
+          message: prompt.message,
+          options: prompt.options.map((option) => ({ ...option })),
+        }
+      : {
+          id,
+          type: prompt.type,
+          message: prompt.message,
+          placeholder: prompt.placeholder,
+        };
+    return new Promise<string>((resolve, reject) => {
+      const onAbort = (): void => {
+        if (flow.pendingPrompt?.id !== id) return;
+        flow.pendingPrompt = undefined;
+        reject(new Error("当前授权输入已失效。"));
+      };
+      flow.pendingPrompt = { id, resolve, reject, signal: prompt.signal, onAbort };
+      prompt.signal?.addEventListener("abort", onAbort, { once: true });
+      this.updateProviderAuth(flow, {
+        status: "waiting_for_user",
+        message: prompt.message,
+        prompt: projected,
+        error: undefined,
+      });
+    });
+  }
+
+  private handleProviderAuthNotification(flow: ProviderAuthFlow, event: AuthEvent): void {
+    if (flow.controller.signal.aborted) return;
+    switch (event.type) {
+      case "auth_url":
+        this.updateProviderAuth(flow, {
+          status: flow.pendingPrompt ? "waiting_for_user" : "authorizing",
+          message: event.instructions ?? "请在浏览器中完成订阅登录。",
+          authUrl: { url: event.url, instructions: event.instructions },
+          error: undefined,
+        });
+        break;
+      case "device_code":
+        this.updateProviderAuth(flow, {
+          status: "authorizing",
+          message: "请在浏览器中输入设备验证码，SuoCode 会自动等待授权完成。",
+          deviceCode: {
+            userCode: event.userCode,
+            verificationUri: event.verificationUri,
+            expiresInSeconds: event.expiresInSeconds,
+          },
+          error: undefined,
+        });
+        break;
+      case "info":
+        this.updateProviderAuth(flow, {
+          status: flow.pendingPrompt ? "waiting_for_user" : "authorizing",
+          message: event.message,
+          links: event.links?.map((link) => ({ ...link })),
+          error: undefined,
+        });
+        break;
+      case "progress":
+        this.updateProviderAuth(flow, {
+          status: flow.pendingPrompt ? "waiting_for_user" : "authorizing",
+          message: event.message,
+          error: undefined,
+        });
+        break;
+    }
+  }
+
+  async startModelProviderOAuth(providerId: string): Promise<ModelProviderAuthState> {
+    const modelRuntime = await this.ready();
+    const provider = modelRuntime.getProvider(providerId);
+    const oauth = provider?.auth.oauth;
+    if (!provider || !oauth) throw new Error("此服务商不支持订阅登录。");
+    const existing = [...this.providerAuthFlows.values()].find((flow) => flow.state.provider === providerId);
+    if (existing) return existing.state;
+
+    const flow: ProviderAuthFlow = {
+      controller: new AbortController(),
+      state: {
+        flowId: randomUUID(),
+        provider: providerId,
+        providerName: provider.name,
+        loginLabel: oauth.loginLabel ?? oauth.name,
+        status: "starting",
+        message: "正在准备订阅登录…",
+      },
+    };
+    this.providerAuthFlows.set(flow.state.flowId, flow);
+    this.publishProviderAuth(flow);
+
+    void modelRuntime.login(providerId, "oauth", {
+      signal: flow.controller.signal,
+      prompt: (prompt) => this.waitForProviderAuthPrompt(flow, prompt),
+      notify: (event) => this.handleProviderAuthNotification(flow, event),
+    }).then(async () => {
+      if (this.providerAuthFlows.get(flow.state.flowId) !== flow) return;
+      this.clearProviderAuthPrompt(flow);
+      this.updateProviderAuth(flow, {
+        status: "succeeded",
+        message: `${flow.state.providerName} 订阅登录成功。`,
+        prompt: undefined,
+        error: undefined,
+      });
+      this.providerAuthFlows.delete(flow.state.flowId);
+      try {
+        const configuration = await this.getConfiguration();
+        this.emitEvent({ type: "configuration_updated", configuration });
+        this.refreshSessionModelFromRegistry();
+      } catch (error) {
+        this.emitEvent({ type: "runtime_error", message: "订阅登录已保存，但模型目录刷新失败。", detail: errorDetail(error) });
+      }
+    }).catch((error) => {
+      if (this.providerAuthFlows.get(flow.state.flowId) !== flow) return;
+      this.clearProviderAuthPrompt(flow);
+      if (flow.controller.signal.aborted) {
+        this.updateProviderAuth(flow, {
+          status: "cancelled",
+          message: "订阅登录已取消。",
+          prompt: undefined,
+          error: undefined,
+        });
+      } else {
+        this.updateProviderAuth(flow, {
+          status: "failed",
+          message: "订阅登录失败。",
+          prompt: undefined,
+          error: errorMessage(error),
+        });
+      }
+      this.providerAuthFlows.delete(flow.state.flowId);
+    });
+    return { ...flow.state };
+  }
+
+  async respondModelProviderOAuth(flowId: string, promptId: string, value: string): Promise<void> {
+    const flow = this.providerAuthFlows.get(flowId);
+    if (!flow) throw new Error("这次订阅登录已经结束，请重新发起登录。");
+    const pending = flow.pendingPrompt;
+    if (!pending || pending.id !== promptId) throw new Error("授权步骤已经变化，请按当前界面继续。");
+    this.clearProviderAuthPrompt(flow);
+    this.updateProviderAuth(flow, {
+      status: "authorizing",
+      message: "正在验证授权信息…",
+      prompt: undefined,
+      error: undefined,
+    });
+    pending.resolve(value);
+  }
+
+  async cancelModelProviderOAuth(flowId: string): Promise<void> {
+    const flow = this.providerAuthFlows.get(flowId);
+    if (!flow) return;
+    const pending = this.clearProviderAuthPrompt(flow);
+    flow.controller.abort();
+    pending?.reject(new Error("订阅登录已取消。"));
+    this.updateProviderAuth(flow, {
+      status: "cancelled",
+      message: "订阅登录已取消。",
+      prompt: undefined,
+      error: undefined,
+    });
+    this.providerAuthFlows.delete(flowId);
   }
 
   async removeProviderAuth(provider: string): Promise<RuntimeConfiguration> {
@@ -4669,6 +4895,12 @@ export class SuoCodeRuntime {
     if (this.projectRefreshTimer) clearTimeout(this.projectRefreshTimer);
     if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
     if (this.resourceReloadTimer) clearTimeout(this.resourceReloadTimer);
+    for (const flow of this.providerAuthFlows.values()) {
+      const pending = this.clearProviderAuthPrompt(flow);
+      flow.controller.abort();
+      pending?.reject(new Error("运行时已关闭，订阅登录已取消。"));
+    }
+    this.providerAuthFlows.clear();
     if (this.active) {
       const active = this.active;
       this.active = undefined;
