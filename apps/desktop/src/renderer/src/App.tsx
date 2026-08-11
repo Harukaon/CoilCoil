@@ -27,6 +27,7 @@ import type {
 import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
 import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
 import { ConversationPane } from "./features/conversation/ConversationPane";
+import { reconcileOptimisticMessage, type PendingOptimisticMessage } from "./features/conversation/optimisticMessage";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { SkillsWorkspace } from "./features/settings/SkillsWorkspace";
 import { WorkspaceSidebar, type SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
@@ -150,7 +151,7 @@ export default function App(): React.JSX.Element {
   const runtimeSessionRef = useRef(new Map<string, string>());
   const optimisticSessionsRef = useRef(new Map<string, SessionSummary>());
   const selectionRequestRef = useRef(0);
-  const optimisticMessageIdRef = useRef<string | undefined>(undefined);
+  const optimisticMessageRef = useRef<PendingOptimisticMessage | undefined>(undefined);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
     onInsertPath: insertComposerPath,
     onError: (message) => { if (message) toastError(message); },
@@ -161,7 +162,12 @@ export default function App(): React.JSX.Element {
     if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
     if (next.runtimeId && next.session.path) runtimeSessionRef.current.set(next.runtimeId, next.session.path);
     setSnapshot(next);
-    setMessages(next.messages);
+    setMessages((current) => reconcileOptimisticMessage(
+      next.messages,
+      current,
+      optimisticMessageRef.current,
+      next.session.path,
+    ));
     setTools(next.tools);
     setSubagents(next.subagents);
     setProjectState(next.project);
@@ -181,6 +187,7 @@ export default function App(): React.JSX.Element {
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(selection.path);
     setWorkspaceSurface("conversation");
+    optimisticMessageRef.current = undefined;
     snapshotRef.current = undefined;
     setSnapshot(undefined);
     setMessages([]);
@@ -242,11 +249,11 @@ export default function App(): React.JSX.Element {
       case "message_started":
       case "message_finished":
         setMessages((current) => {
-          const optimisticId = optimisticMessageIdRef.current;
+          const optimisticId = optimisticMessageRef.current?.id;
           const base = optimisticId && event.message.role === "user"
             ? current.filter((message) => message.id !== optimisticId)
             : current;
-          if (optimisticId && event.message.role === "user") optimisticMessageIdRef.current = undefined;
+          if (optimisticId && event.message.role === "user") optimisticMessageRef.current = undefined;
           return upsertMessage(base, event.message);
         });
         break;
@@ -340,6 +347,7 @@ export default function App(): React.JSX.Element {
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(undefined);
+    optimisticMessageRef.current = undefined;
     setDraftImages([]);
     setLoading(true);
     setMessages([]);
@@ -494,6 +502,7 @@ export default function App(): React.JSX.Element {
     setWorkspaceSurface("conversation");
     if (owner.path === project?.path && session.id === activeConversation?.id) return;
     const requestId = ++selectionRequestRef.current;
+    optimisticMessageRef.current = undefined;
     const cached = snapshotCacheRef.current.get(session.path);
     setLoading(!cached);
     setPendingProjectPath(undefined);
@@ -639,7 +648,7 @@ export default function App(): React.JSX.Element {
       let target = snapshotRef.current;
       if (!target || pendingProjectPath === project.path) {
         setStartingSession(true);
-        optimisticMessageIdRef.current = runtimeCommand ? undefined : optimisticId;
+        optimisticMessageRef.current = runtimeCommand ? undefined : { id: optimisticId };
         setMessages(runtimeCommand ? [] : [{ id: optimisticId, order: Date.now(), role: "user", text: prompt, images, timestamp: Date.now(), status: "succeeded" }]);
         const created = await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: project.path });
         const now = new Date().toISOString();
@@ -651,6 +660,9 @@ export default function App(): React.JSX.Element {
         };
         const activeSnapshot = { ...created, session: optimisticSession };
         createdSessionPath = optimisticSession.path;
+        if (optimisticMessageRef.current?.id === optimisticId) {
+          optimisticMessageRef.current = { id: optimisticId, sessionPath: optimisticSession.path };
+        }
         if (optimisticSession.path) optimisticSessionsRef.current.set(optimisticSession.path, optimisticSession);
         snapshotRef.current = activeSnapshot;
         if (created.runtimeId && created.session.path) runtimeSessionRef.current.set(created.runtimeId, created.session.path);
@@ -673,7 +685,7 @@ export default function App(): React.JSX.Element {
       if (runtimeCommand) await window.suocode.request({ type: "run_memory_now" }, target.runtimeId);
       else await window.suocode.request({ type: target.running ? "steer" : "prompt", text: prompt, images }, target.runtimeId);
     } catch (caught) {
-      optimisticMessageIdRef.current = undefined;
+      optimisticMessageRef.current = undefined;
       setDraft(prompt);
       setDraftImages(images);
       setMessages((current) => current.filter((message) => message.id !== optimisticId));

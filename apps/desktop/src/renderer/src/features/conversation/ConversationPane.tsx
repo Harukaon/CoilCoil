@@ -196,7 +196,7 @@ export function ConversationPane({
 
       <div className="conversation-scroll">
         <div className="conversation-body" ref={timelineRef} onScroll={handleBodyScroll}>
-          {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running ? (
+          {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running || startingSession ? (
             <div className="timeline">
               {timeline.map((item, index) => item.kind === "user" ? (
                 <MessageView
