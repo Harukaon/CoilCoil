@@ -270,25 +270,11 @@ export interface McpImportConfiguration {
   enabled: boolean;
 }
 
-/**
- * A server the user removed that SuoCode could only tombstone. Imported and
- * shared definitions live in files SuoCode does not own, so "delete" hides them
- * locally instead — which means they must be restorable.
- */
-export interface McpRemovedServer {
-  name: string;
-  /** Where the definition still lives, when it can still be resolved. */
-  source?: string;
-  sourceKind?: "user" | "project" | "import";
-  importKind?: McpImportConfiguration["kind"];
-}
-
 export interface McpConfigurationSnapshot {
   configPath: string;
   projectConfigPath?: string;
   servers: McpServerConfiguration[];
   imports: McpImportConfiguration[];
-  removed: McpRemovedServer[];
 }
 
 export interface McpJsonDocument {
@@ -848,7 +834,6 @@ export type RuntimeCommand =
   | { type: "get_mcp_status" }
   | { type: "save_mcp_server"; server: McpServerConfiguration; previousName?: string; cwd?: string }
   | { type: "remove_mcp_server"; name: string; scope?: "global" | "project"; cwd?: string }
-  | { type: "restore_mcp_server"; name: string; cwd?: string }
   | { type: "set_mcp_server_enabled"; name: string; enabled: boolean; cwd: string }
   | { type: "enable_mcp_imports"; imports: McpImportConfiguration["kind"][]; cwd?: string }
   | { type: "connect_mcp_server"; name: string }

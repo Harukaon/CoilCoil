@@ -134,6 +134,7 @@ const PLAN_STATE_CHANNEL = "suocode:plan:state:v1";
 const PLAN_RPC_REQUEST_CHANNEL = "suocode:plan:rpc:v1:request";
 const PLAN_ENTRY_TYPE = "suocode-plan";
 const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
+const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("suocode-workflow.mcp-agent-config-registry");
 const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
   ".git",
@@ -151,6 +152,12 @@ const IGNORED_DIRECTORIES = new Set([
 
 type EventSink = (event: RuntimeEvent) => void;
 
+export interface McpAdapterEffectiveConfig {
+  imports?: McpImportConfiguration["kind"][];
+  mcpServers: Record<string, Record<string, unknown>>;
+  settings?: Record<string, unknown>;
+}
+
 interface McpAdapterConfigModule {
   ensureCompatibilityImports(imports: McpImportConfiguration["kind"][], overridePath?: string): { path: string; added: McpImportConfiguration["kind"][] };
   getMcpDiscoverySummary(overridePath?: string, cwd?: string): {
@@ -159,12 +166,40 @@ interface McpAdapterConfigModule {
   getPiGlobalConfigPath(overridePath?: string): string;
   getProjectPiConfigPath(cwd?: string): string;
   getServerProvenance(overridePath?: string, cwd?: string): Map<string, { path: string; kind: "user" | "project" | "import"; importKind?: string }>;
-  loadMcpConfig(overridePath?: string, cwd?: string): {
-    imports?: McpImportConfiguration["kind"][];
-    mcpServers: Record<string, Record<string, unknown>>;
-  };
+  loadMcpConfig(overridePath?: string, cwd?: string): McpAdapterEffectiveConfig;
   writeSharedServerEntry(path: string, serverName: string, entry: Record<string, unknown>): string;
   writeProjectServerDisabledOverride(overridePath: string | undefined, cwd: string, serverName: string, disabled: boolean): { path: string; changed: boolean };
+}
+
+function mcpAgentConfigRegistry(): WeakMap<object, McpAdapterEffectiveConfig> {
+  const globals = globalThis as Record<PropertyKey, unknown>;
+  const existing = globals[MCP_AGENT_CONFIG_REGISTRY];
+  if (existing instanceof WeakMap) return existing as WeakMap<object, McpAdapterEffectiveConfig>;
+  const registry = new WeakMap<object, McpAdapterEffectiveConfig>();
+  globals[MCP_AGENT_CONFIG_REGISTRY] = registry;
+  return registry;
+}
+
+/**
+ * The Settings UI owns the complete MCP configuration. Pi receives a separate
+ * capability view containing enabled servers only, so a disabled or deleted
+ * server cannot leak through the proxy-tool description, status, search, or
+ * direct-tool registration surface.
+ */
+export function mcpConfigurationForAgent(
+  configuration: McpAdapterEffectiveConfig,
+  hiddenNames: ReadonlySet<string>,
+): McpAdapterEffectiveConfig {
+  return {
+    ...configuration,
+    ...(configuration.imports ? { imports: [...configuration.imports] } : {}),
+    ...(configuration.settings ? { settings: { ...configuration.settings } } : {}),
+    mcpServers: Object.fromEntries(
+      Object.entries(configuration.mcpServers)
+        .filter(([name, definition]) => !hiddenNames.has(name) && definition.disabled !== true)
+        .map(([name, definition]) => [name, { ...definition }]),
+    ),
+  };
 }
 
 let mcpAdapterConfigModule: Promise<McpAdapterConfigModule> | undefined;
@@ -1950,7 +1985,10 @@ export class SuoCodeRuntime {
     try { chmodSync(path, 0o600); } catch { /* Non-POSIX filesystems can ignore private modes. */ }
 
     if (this.active) {
-      if (this.canReloadActiveSession(this.active)) await this.active.session.reload();
+      if (this.canReloadActiveSession(this.active)) {
+        await this.refreshAgentMcpConfiguration(this.active.eventBus, this.active.cwd);
+        await this.active.session.reload();
+      }
       else this.reloadActiveSessionResources("OpenAI Response (WS) 配置重新加载失败");
     }
     const configuration = await this.getConfiguration();
@@ -2732,6 +2770,39 @@ export class SuoCodeRuntime {
     this.reloadActiveSessionResources("MCP 扩展重新加载失败");
   }
 
+  private async refreshAgentMcpConfiguration(eventBus: EventBusController, cwd: string): Promise<void> {
+    const adapter = await loadMcpAdapterConfigModule();
+    const resolvedCwd = this.mcpCwd(cwd);
+    this.cleanRemovedMcpServerState(adapter, resolvedCwd);
+    const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    const configuration = adapter.loadMcpConfig(configPath, resolvedCwd);
+    const hiddenNames = new Set([
+      ...this.readRemovedMcpServers(),
+      ...this.readDisabledMcpServers(),
+    ]);
+    mcpAgentConfigRegistry().set(eventBus, mcpConfigurationForAgent(configuration, hiddenNames));
+  }
+
+  private async reloadActiveSessionNow(active: ActiveSession): Promise<void> {
+    await this.refreshAgentMcpConfiguration(active.eventBus, active.cwd);
+    await active.session.reload();
+    if (this.active !== active) return;
+    this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+    await this.refreshRuntimeInspectionSources(active);
+  }
+
+  private async reloadMcpExtensionNow(): Promise<void> {
+    const active = this.active;
+    if (!active) return;
+    if (!this.canReloadActiveSession(active)) {
+      this.reloadMcpExtension();
+      return;
+    }
+    if (this.resourceReloadTimer) clearTimeout(this.resourceReloadTimer);
+    this.resourceReloadTimer = undefined;
+    await this.reloadActiveSessionNow(active);
+  }
+
   private canReloadActiveSession(active: ActiveSession): boolean {
     if (active.session.isStreaming) return false;
     return ![...active.subagents.values()].some((subagent) =>
@@ -2752,12 +2823,7 @@ export class SuoCodeRuntime {
         this.resourceReloadTimer = setTimeout(attemptReload, 750);
         return;
       }
-      void active.session.reload()
-        .then(async () => {
-          if (this.active !== active) return;
-          this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
-          await this.refreshRuntimeInspectionSources(active);
-        })
+      void this.reloadActiveSessionNow(active)
         .catch((error) => {
           this.emitEvent({ type: "runtime_error", message: `${errorLabel}：${errorMessage(error)}`, detail: errorDetail(error) });
         });
@@ -3240,11 +3306,10 @@ export class SuoCodeRuntime {
    * The configured server list is the single source of truth for *membership*;
    * the extension only enriches each entry with live tool counts and auth state.
    *
-   * The extension still reports servers the user removed — a removed import can
-   * only be tombstoned, never deleted from the file that supplies it — and it
-   * reports nothing at all while booting. Deriving membership from it therefore
-   * makes the list grow and shrink under the user, so every assignment to
-   * `mcpStatus` must come through here.
+   * The Agent-facing adapter intentionally omits disabled and deleted servers,
+   * and it reports nothing at all while booting. Deriving GUI membership from
+   * that capability view would make the list grow and shrink under the user, so
+   * every assignment to `mcpStatus` must come through here.
    */
   private async normalizeMcpStatus(
     reported: McpRuntimeStatus | undefined,
@@ -3399,7 +3464,10 @@ export class SuoCodeRuntime {
     const removed = this.readRemovedMcpServers();
     removed.add(name);
     this.writeRemovedMcpServers(removed);
-    this.setMcpServerOptOut(name, true);
+    // Deletion and disablement are different product states. A deleted import
+    // stays in this private exclusion set, but must not linger in the user-
+    // visible disabled set or in Pi's effective configuration.
+    this.setMcpServerOptOut(name, false);
   }
 
   private clearMcpServerRemovedLocally(name: string): void {
@@ -3413,6 +3481,45 @@ export class SuoCodeRuntime {
     if (disabled) optOut.add(name);
     else optOut.delete(name);
     this.writeDisabledMcpServers(optOut);
+  }
+
+  private removeBareMcpServerTombstone(configPath: string, name: string): boolean {
+    if (!existsSync(configPath)) return false;
+    try {
+      const parsed = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
+      if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) return false;
+      const entry = parsed.mcpServers[name];
+      if (!isRecord(entry) || entry.disabled !== true || Object.keys(entry).some((key) => key !== "disabled")) return false;
+      delete parsed.mcpServers[name];
+      const temporaryPath = `${configPath}.${process.pid}.tmp`;
+      writeFileSync(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+      renameSync(temporaryPath, configPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Migrates the old reversible-removal representation. Removed names remain
+   * in SuoCode's private exclusion set, while stale `{ disabled: true }`
+   * shadows and disabled-list entries are erased so Pi never receives them.
+   */
+  private cleanRemovedMcpServerState(adapter: McpAdapterConfigModule, cwd?: string): boolean {
+    const removed = this.readRemovedMcpServers();
+    if (removed.size === 0) return false;
+    let changed = false;
+    const disabled = this.readDisabledMcpServers();
+    for (const name of removed) if (disabled.delete(name)) changed = true;
+    if (changed) this.writeDisabledMcpServers(disabled);
+
+    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    const projectConfigPath = cwd ? adapter.getProjectPiConfigPath(cwd) : undefined;
+    for (const name of removed) {
+      if (this.removeBareMcpServerTombstone(globalConfigPath, name)) changed = true;
+      if (projectConfigPath && this.removeBareMcpServerTombstone(projectConfigPath, name)) changed = true;
+    }
+    return changed;
   }
 
   /**
@@ -3442,7 +3549,9 @@ export class SuoCodeRuntime {
     const adapter = await loadMcpAdapterConfigModule();
     const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     const resolvedCwd = this.mcpCwd(cwd);
-    if (await this.syncMcpOptOutDisabledState(cwd)) this.reloadMcpExtension();
+    const cleaned = this.cleanRemovedMcpServerState(adapter, resolvedCwd);
+    const synchronized = await this.syncMcpOptOutDisabledState(cwd);
+    if (cleaned || synchronized) this.reloadMcpExtension();
     const projectConfigPath = cwd ? adapter.getProjectPiConfigPath(resolvedCwd) : undefined;
     const config = adapter.loadMcpConfig(configPath, resolvedCwd);
     const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
@@ -3455,13 +3564,6 @@ export class SuoCodeRuntime {
       configPath,
       projectConfigPath,
       imports: discovery.imports.map((entry) => ({ ...entry, enabled: enabledImports.has(entry.kind) })),
-      // Tombstoned servers are hidden from `servers` but must stay recoverable:
-      // an imported definition cannot be deleted from the app that supplies it,
-      // so removal here is reversible by design.
-      removed: [...removed].sort((left, right) => left.localeCompare(right)).map((name) => {
-        const source = provenance.get(name);
-        return { name, source: source?.path, sourceKind: source?.kind, importKind: mcpImportKind(source?.importKind) };
-      }),
       servers: Object.entries(config.mcpServers).filter(([name]) => !removed.has(name)).map(([name, raw]) => {
         const source = provenance.get(name);
         return {
@@ -3516,7 +3618,11 @@ export class SuoCodeRuntime {
     const temporaryPath = `${path}.${process.pid}.tmp`;
     writeFileSync(temporaryPath, normalized, { encoding: "utf8", mode: 0o600 });
     renameSync(temporaryPath, path);
-    this.reloadMcpExtension();
+    const removed = this.readRemovedMcpServers();
+    let removedChanged = false;
+    for (const name of mcpServerDefinitions(path)) if (removed.delete(name)) removedChanged = true;
+    if (removedChanged) this.writeRemovedMcpServers(removed);
+    await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(cwd);
   }
 
@@ -3560,7 +3666,7 @@ export class SuoCodeRuntime {
     if (cwd) {
       adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, name, server.disabled === true);
     }
-    this.reloadMcpExtension();
+    await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(cwd);
   }
 
@@ -3603,43 +3709,18 @@ export class SuoCodeRuntime {
       tryRemove(source.path);
     }
 
-    // If the server still comes from an external/shared layer, hide it inside SuoCode only:
-    // disable in our private config (so runtime won't connect) and tombstone it out of the UI list.
+    // External/shared definitions belong to another application, so SuoCode
+    // does not mutate their source file. The private exclusion is permanent
+    // from SuoCode's perspective and is never exposed to Pi or the Settings UI.
     const stillPresent = Boolean(adapter.loadMcpConfig(globalConfigPath, resolvedCwd ?? process.cwd()).mcpServers[normalizedName]);
     if (stillPresent) {
-      adapter.writeSharedServerEntry(globalConfigPath, normalizedName, { disabled: true });
       this.markMcpServerRemovedLocally(normalizedName);
     } else {
       this.clearMcpServerRemovedLocally(normalizedName);
       this.setMcpServerOptOut(normalizedName, false);
     }
 
-    this.reloadMcpExtension();
-    return this.getMcpConfiguration(cwd);
-  }
-
-  /**
-   * Undo a tombstoned removal. The definition was never deleted — it still
-   * lives in the importing app or a shared file — so restoring means dropping
-   * our local tombstone and the `{ disabled: true }` entry that shadowed it.
-   */
-  async restoreMcpServer(name: string, cwd?: string): Promise<McpConfigurationSnapshot> {
-    const normalizedName = name.trim();
-    if (!normalizedName) throw new Error("缺少 MCP Server 名称。");
-    if (!this.readRemovedMcpServers().has(normalizedName)) {
-      throw new Error(`${normalizedName} 不在已移除列表中。`);
-    }
-    const adapter = await loadMcpAdapterConfigModule();
-    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    // Drop the shadowing entry only when it is a bare tombstone; a restored name
-    // may since have been given a real local definition worth keeping.
-    // `mcpServerDefinitions` already excludes `{ disabled: … }`-only entries.
-    if (!mcpServerDefinitions(globalConfigPath).has(normalizedName)) {
-      this.removeMcpServerFromFile(globalConfigPath, normalizedName);
-    }
-    this.clearMcpServerRemovedLocally(normalizedName);
-    this.setMcpServerOptOut(normalizedName, false);
-    this.reloadMcpExtension();
+    await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(cwd);
   }
 
@@ -3653,14 +3734,14 @@ export class SuoCodeRuntime {
     if (!effective.mcpServers[normalizedName]) throw new Error(`MCP Server 不存在：${normalizedName}`);
     this.setMcpServerOptOut(normalizedName, !enabled);
     adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, normalizedName, !enabled);
-    this.reloadMcpExtension();
+    await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(resolvedCwd);
   }
 
   async enableMcpImports(imports: McpImportConfiguration["kind"][], cwd?: string): Promise<McpConfigurationSnapshot> {
     const adapter = await loadMcpAdapterConfigModule();
     adapter.ensureCompatibilityImports(imports, join(this.agentDir, "mcp.json"));
-    this.reloadMcpExtension();
+    await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(cwd);
   }
 
@@ -3872,6 +3953,7 @@ export class SuoCodeRuntime {
       noExtensions: true,
       noThemes: true,
     });
+    await this.refreshAgentMcpConfiguration(eventBus, cwd);
     const resourceLoaderStartedAt = Date.now();
     const resourceLoaderPromise = loader.reload().then(() => {
       if (timingEnabled) timings.resourceLoader = Date.now() - resourceLoaderStartedAt;

@@ -9,7 +9,18 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 const jiti = createJiti(import.meta.url);
-const mcpAdapter = (jiti("pi-mcp-adapter") as { default: (pi: ExtensionAPI) => void }).default;
+interface McpAdapterConfiguration {
+  imports?: string[];
+  mcpServers: Record<string, Record<string, unknown>>;
+  settings?: Record<string, unknown>;
+}
+
+const adapterModule = jiti("pi-mcp-adapter") as {
+  default: (pi: ExtensionAPI) => void;
+  createMcpAdapter: (options?: { config?: McpAdapterConfiguration }) => (pi: ExtensionAPI) => void;
+};
+const defaultMcpAdapter = adapterModule.default;
+const createMcpAdapter = adapterModule.createMcpAdapter;
 const adapterDirectory = dirname(createRequire(import.meta.url).resolve("pi-mcp-adapter"));
 const { loadMcpConfig } = jiti(join(adapterDirectory, "config.ts")) as {
   loadMcpConfig: (overridePath?: string, cwd?: string) => unknown;
@@ -23,6 +34,7 @@ const { resolveDirectTools } = jiti(join(adapterDirectory, "direct-tools.ts")) a
 const MCP_STATUS_EVENT = "pi-mcp-adapter/status/v1";
 const MCP_TOOL_APPROVAL_REQUEST_EVENT = "pi-mcp-adapter:tool-approval-request";
 const MCP_SESSION_POLICY_ENTRY = "suocode-mcp-session-policy";
+const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("suocode-workflow.mcp-agent-config-registry");
 
 interface McpStatusSnapshot {
   version: 1;
@@ -64,6 +76,13 @@ type McpProxyTool = ToolDefinition<any, unknown, unknown>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function registeredMcpConfiguration(events: object): McpAdapterConfiguration | undefined {
+  const registry = (globalThis as Record<PropertyKey, unknown>)[MCP_AGENT_CONFIG_REGISTRY];
+  if (!(registry instanceof WeakMap)) return undefined;
+  const configuration = registry.get(events) as McpAdapterConfiguration | undefined;
+  return configuration && isRecord(configuration.mcpServers) ? configuration : undefined;
 }
 
 function requestId(raw: unknown): string {
@@ -159,6 +178,10 @@ function disabledServersFromSession(context: ExtensionContext): string[] {
 }
 
 export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
+  const suppliedConfiguration = registeredMcpConfiguration(pi.events);
+  const installMcpAdapter = suppliedConfiguration
+    ? createMcpAdapter({ config: suppliedConfiguration })
+    : defaultMcpAdapter;
   let proxyTool: McpProxyTool | undefined;
   let rawProxyTool: McpProxyTool | undefined;
   let mcpCommand: { handler: (args: string, context: ExtensionCommandContext) => Promise<void> } | undefined;
@@ -194,7 +217,7 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
 
   const refreshDirectToolOwnership = (): void => {
     try {
-      const config = loadMcpConfig(undefined, context?.cwd ?? process.cwd());
+      const config = suppliedConfiguration ?? loadMcpConfig(undefined, context?.cwd ?? process.cwd());
       const cache = loadMetadataCache();
       const settings = isRecord(config) && isRecord(config.settings) ? config.settings : undefined;
       const prefix = settings && typeof settings.toolPrefix === "string" ? settings.toolPrefix : "server";
@@ -281,7 +304,7 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
     if (name === "mcp") mcpCommand = command;
     registerCommand(name, command);
   }) as ExtensionAPI["registerCommand"];
-  mcpAdapter(pi);
+  installMcpAdapter(pi);
   pi.registerCommand = registerCommand as ExtensionAPI["registerCommand"];
 
   const unsubscribeStatus = pi.events.on(MCP_STATUS_EVENT, (raw) => {

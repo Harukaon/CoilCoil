@@ -1,5 +1,4 @@
-import * as Popover from "@radix-ui/react-popover";
-import { ArrowLeft, ExternalLink, FileJson, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, RotateCcw, Settings, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileJson, LoaderCircle, LogOut, Network, Plus, Power, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
@@ -85,7 +84,6 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   const [saving, setSaving] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
-  const [trashOpen, setTrashOpen] = useState(false);
   const [removeArmed, setRemoveArmed] = useState(false);
   const [listRemoveArmed, setListRemoveArmed] = useState<string>();
   const [runtimeStatus, setRuntimeStatus] = useState<McpRuntimeStatus>();
@@ -309,21 +307,6 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     }
   };
 
-  const restore = async (name: string): Promise<void> => {
-    setSaving(true);
-    try {
-      const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "restore_mcp_server", name, cwd }, runtimeId);
-      setConfiguration(next);
-      if (!next.removed.length) setTrashOpen(false);
-      void loadStatus();
-      toastSuccess(`已恢复 ${name}`);
-    } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const selectedStatus = runtimeStatus?.servers.find((server) => server.name === selectedName);
   const mounted = Boolean(selectedName) && isMountedMcpServer(draft);
   const supportsAuth = draft.transport === "http" && draft.auth !== false;
@@ -331,7 +314,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   return (
     <div className="mcp-settings">
       <aside className="mcp-server-list">
-        <div className="mcp-list-toolbar"><button className="mcp-add-button" type="button" disabled={loading} onClick={() => selectServer(undefined, true)}><Plus size={13} />添加服务器</button>{configuration?.removed.length ? <Popover.Root open={trashOpen} onOpenChange={setTrashOpen}><Popover.Trigger asChild><button className="mcp-trash-button" type="button" aria-label={`已移除的 MCP（${configuration.removed.length}）`} title="已移除的 MCP"><Trash2 size={13} /><b>{configuration.removed.length}</b></button></Popover.Trigger><Popover.Portal><Popover.Content className="mcp-removed-popover" side="bottom" align="end" sideOffset={7} collisionPadding={12}><header><div><strong>已移除的 MCP</strong><small>来自导入或共享配置，无法真正删除，只是对 SuoCode 隐藏。</small></div></header><div className="mcp-removed-groups">{configuration.removed.map((entry) => <div className="mcp-removed-row" key={entry.name}><span><strong>{entry.name}</strong>{mcpMountBadge(entry) ? <small title={entry.source}>{mcpOriginLabel(entry)}</small> : null}</span><button type="button" disabled={saving || actionBusy} onClick={() => { void restore(entry.name); }}><RotateCcw size={12} />恢复</button></div>)}</div><Popover.Arrow className="model-popover-arrow" width={12} height={6} /></Popover.Content></Popover.Portal></Popover.Root> : null}<button className="mcp-refresh-button" type="button" aria-label="刷新 MCP 状态" disabled={statusLoading || !runtimeId} onClick={() => void loadStatus(true)}>{statusLoading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button></div>
+        <div className="mcp-list-toolbar"><button className="mcp-add-button" type="button" disabled={loading} onClick={() => selectServer(undefined, true)}><Plus size={13} />添加服务器</button><button className="mcp-refresh-button" type="button" aria-label="刷新 MCP 状态" disabled={statusLoading || !runtimeId} onClick={() => void loadStatus(true)}>{statusLoading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button></div>
         {runtimeStatus ? <p className="mcp-status-summary">{runtimeStatus.state === "initializing" ? "MCP 扩展初始化中" : runtimeStatus.state === "unavailable" ? "MCP 扩展暂不可用" : `${runtimeStatus.servers.length - runtimeStatus.disabledCount} 个已启用 · ${runtimeStatus.totalTools} 个工具 · ${runtimeStatus.totalResources} 个资源${runtimeStatus.disabledCount ? ` · ${runtimeStatus.disabledCount} 个已停用` : ""}`}</p> : null}
         {loading ? <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载 MCP 配置…</div> : configuration?.servers.map((server) => {
           const status = runtimeStatus?.servers.find((item) => item.name === server.name);

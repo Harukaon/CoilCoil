@@ -2,8 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   decorateMcpStatusForSession,
+  registeredMcpConfiguration,
   requestedMcpServer,
 } from "../extensions/mcp-adapter.ts";
+
+test("MCP adapter receives the Agent-only configuration registered for this session", () => {
+  const symbol = Symbol.for("suocode-workflow.mcp-agent-config-registry");
+  const globals = globalThis as Record<PropertyKey, unknown>;
+  const previous = globals[symbol];
+  const events = {};
+  const configuration = { mcpServers: { enabled: { command: "server" } } };
+  const registry = new WeakMap<object, typeof configuration>();
+  registry.set(events, configuration);
+  globals[symbol] = registry;
+  try {
+    assert.equal(registeredMcpConfiguration(events), configuration);
+    assert.equal(registeredMcpConfiguration({}), undefined);
+  } finally {
+    if (previous === undefined) delete globals[symbol];
+    else globals[symbol] = previous;
+  }
+});
 
 test("session MCP policy resolves explicit and direct-tool server targets", () => {
   const tools = new Map<string, ReadonlySet<string>>([
