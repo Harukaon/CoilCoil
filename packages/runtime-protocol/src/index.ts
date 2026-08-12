@@ -628,6 +628,44 @@ export interface TokenUsage {
   total: number;
 }
 
+export interface CacheUsageSummary {
+  /** Full prompt volume. Pi exposes input/cacheRead/cacheWrite as non-overlapping buckets. */
+  promptTokens: number;
+  /** Tokens billed as fresh input, including tokens written into the prompt cache. */
+  uncachedTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Read share of the full prompt. Undefined when the prompt is empty. */
+  hitRate?: number;
+}
+
+/**
+ * Normalize Pi's provider-independent cache buckets for display.
+ *
+ * Pi deliberately stores `input`, `cacheRead`, and `cacheWrite` as mutually
+ * exclusive buckets, even for providers such as OpenAI that report cached
+ * tokens as a subset of their input total. Do not display `input` alone as the
+ * full prompt size and do not add output tokens to the cache denominator.
+ */
+export function summarizeCacheUsage(
+  inputTokens: number | null | undefined,
+  cacheReadTokens: number | null | undefined,
+  cacheWriteTokens: number | null | undefined,
+): CacheUsageSummary {
+  const safe = (value: number | null | undefined): number => Number.isFinite(value) ? Math.max(0, value ?? 0) : 0;
+  const input = safe(inputTokens);
+  const cacheRead = safe(cacheReadTokens);
+  const cacheWrite = safe(cacheWriteTokens);
+  const promptTokens = input + cacheRead + cacheWrite;
+  return {
+    promptTokens,
+    uncachedTokens: input + cacheWrite,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
+    hitRate: promptTokens > 0 ? cacheRead / promptTokens : undefined,
+  };
+}
+
 export type RuntimeSummaryKind = "compaction" | "branch_summary";
 export type RuntimeSummaryStatus = "running" | "succeeded" | "failed" | "aborted";
 
@@ -673,6 +711,7 @@ export interface RuntimeInspectionSnapshot {
     messages?: number;
     total?: number;
   };
+  /** Cache-read share of the latest completed model request, not a lifetime average. */
   cacheHitRate?: number;
   tools: RuntimeToolDefinition[];
   skills: RuntimeSkillState[];

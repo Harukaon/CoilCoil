@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { RuntimeSummaryEvent } from "@suocode/runtime-protocol";
+import { summarizeCacheUsage } from "@suocode/runtime-protocol";
 import { buildRuntimeInspection } from "../src/runtime-inspection.js";
 
 test("projects persisted Pi summaries and follows the active session branch", () => {
@@ -58,4 +59,16 @@ test("merges a live compaction into the inspection snapshot", () => {
   const inspection = buildRuntimeInspection(manager, 4, live);
   assert.equal(inspection.sessionRevision, 4);
   assert.deepEqual(inspection.summaryEvents, [live]);
+});
+
+test("latest request cache rate is not diluted by earlier cache-building requests", () => {
+  const first = summarizeCacheUsage(12_000, 0, 10_000);
+  const latest = summarizeCacheUsage(1_000, 11_000, 0);
+
+  // Lifetime aggregation is useful for billing, but it would report 32.4%
+  // here and hide that the current request reused almost all of its prompt.
+  const lifetime = summarizeCacheUsage(13_000, 11_000, 10_000);
+  assert.equal(first.hitRate, 0);
+  assert.equal(latest.hitRate, 11 / 12);
+  assert.ok((lifetime.hitRate ?? 0) < 0.4);
 });

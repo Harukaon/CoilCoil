@@ -2,6 +2,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { FileCode2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
+import { summarizeCacheUsage } from "@suocode/runtime-protocol";
 import type { ContextUsage, ProjectSelection, ResponseMetrics, TokenUsage } from "@suocode/runtime-protocol";
 
 function pathLabel(path: string): string {
@@ -47,6 +48,7 @@ export function WorkspaceStatus({
   const speedText = responseMetrics?.averageTokensPerSecond === undefined ? undefined : `${responseMetrics.averageTokensPerSecond.toFixed(1)} tok/s`;
   const metricSummary = [firstTokenText, speedText].filter(Boolean).join(" · ");
   const hasPerformanceHistory = responseMetricsHistory.length > 0;
+  const cumulativeCache = summarizeCacheUsage(tokenUsage.input, tokenUsage.cacheRead, tokenUsage.cacheWrite);
   return (
     <div className="workspace-status">
       <Popover.Root open={pathOpen} onOpenChange={setPathOpen}>
@@ -77,9 +79,9 @@ export function WorkspaceStatus({
               {responseMetricsHistory.length ? (
                 <>
                   <div className="performance-grid">{responseMetricsHistory.slice(-60).map((item, index) => {
-                    const promptTokens = (item.inputTokens ?? 0) + (item.cacheReadTokens ?? 0) + (item.cacheWriteTokens ?? 0);
-                    const cacheRate = promptTokens > 0 ? ((item.cacheReadTokens ?? 0) / promptTokens) * 100 : undefined;
-                    return <span className={`performance-cell ${performanceGrade(item)}`} key={`${item.timestamp}-${index}`}><span className="performance-tooltip"><strong>{new Date(item.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</strong>{item.firstTokenMs === undefined ? null : <span>首字 {formatMetricDuration(item.firstTokenMs)}</span>}{item.averageTokensPerSecond === undefined ? null : <span>{item.averageTokensPerSecond.toFixed(1)} tok/s</span>}{item.outputTokens === undefined ? null : <span>输出 {formatTokens(item.outputTokens)} tok</span>}{item.cacheReadTokens === undefined ? null : <span>缓存读取 {formatTokens(item.cacheReadTokens)}</span>}{item.cacheWriteTokens === undefined ? null : <span>缓存写入 {formatTokens(item.cacheWriteTokens)}</span>}{cacheRate === undefined ? null : <span>缓存命中 {cacheRate.toFixed(1)}%</span>}</span></span>;
+                    const cache = summarizeCacheUsage(item.inputTokens, item.cacheReadTokens, item.cacheWriteTokens);
+                    const reportsCache = (item.cacheReadTokens ?? 0) > 0 || (item.cacheWriteTokens ?? 0) > 0;
+                    return <span className={`performance-cell ${performanceGrade(item)}`} key={`${item.timestamp}-${index}`}><span className="performance-tooltip"><strong>{new Date(item.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</strong>{item.firstTokenMs === undefined ? null : <span>首字 {formatMetricDuration(item.firstTokenMs)}</span>}{item.averageTokensPerSecond === undefined ? null : <span>{item.averageTokensPerSecond.toFixed(1)} tok/s</span>}{item.outputTokens === undefined ? null : <span>输出 {formatTokens(item.outputTokens)} tok</span>}{cache.promptTokens ? <span>输入 {formatTokens(cache.promptTokens)} tok</span> : null}{reportsCache ? <span>未缓存 {formatTokens(cache.uncachedTokens)}</span> : null}{item.cacheReadTokens === undefined ? null : <span>缓存读取 {formatTokens(item.cacheReadTokens)}</span>}{item.cacheWriteTokens === undefined ? null : <span>缓存写入 {formatTokens(item.cacheWriteTokens)}</span>}{reportsCache && cache.hitRate !== undefined ? <span>缓存命中 {(cache.hitRate * 100).toFixed(1)}%</span> : null}</span></span>;
                   })}</div>
                   <div className="performance-legend"><span>较慢</span><i className="slow" /><i className="fair" /><i className="good" /><i className="excellent" /><span>较快</span></div>
                 </>
@@ -100,9 +102,11 @@ export function WorkspaceStatus({
               <dl>
                 <div><dt>当前上下文</dt><dd>{formatTokens(contextUsage?.tokens)} / {formatTokens(contextUsage?.contextWindow)}</dd></div>
                 <div><dt>上下文占用</dt><dd>{contextUsage?.percent === null || contextUsage?.percent === undefined ? "—" : `${contextUsage.percent.toFixed(1)}%`}</dd></div>
-                <div><dt>累计输入</dt><dd>{formatTokens(tokenUsage.input)}</dd></div>
+                <div><dt>累计输入</dt><dd>{formatTokens(cumulativeCache.promptTokens)}</dd></div>
+                <div><dt>未缓存输入</dt><dd>{formatTokens(cumulativeCache.uncachedTokens)}</dd></div>
                 <div><dt>累计输出</dt><dd>{formatTokens(tokenUsage.output)}</dd></div>
                 <div><dt>缓存读取</dt><dd>{formatTokens(tokenUsage.cacheRead)}</dd></div>
+                <div><dt>缓存写入</dt><dd>{formatTokens(tokenUsage.cacheWrite)}</dd></div>
                 <div><dt>本次输出</dt><dd>{formatTokens(responseMetrics?.outputTokens)}</dd></div>
               </dl>
               <Popover.Arrow className="model-popover-arrow" />

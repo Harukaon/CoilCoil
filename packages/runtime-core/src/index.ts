@@ -85,7 +85,7 @@ import type {
   TodoItem,
   ToolRun,
 } from "@suocode/runtime-protocol";
-import { validateMcpJsonText } from "@suocode/runtime-protocol";
+import { summarizeCacheUsage, validateMcpJsonText } from "@suocode/runtime-protocol";
 import { buildRuntimeInspection, summaryEventFromEntry } from "./runtime-inspection.js";
 import {
   DEFAULT_OPENAI_RESPONSES_WS_BASE_URL,
@@ -1114,6 +1114,14 @@ function sessionUsage(session: AgentSession): { contextUsage?: ContextUsage; tok
     contextUsage: stats.contextUsage,
     tokenUsage: { ...stats.tokens },
   };
+}
+
+function usageIncludingPendingResponse(usage: TokenUsage, metrics: ResponseMetrics): TokenUsage {
+  const input = usage.input + (metrics.inputTokens ?? 0);
+  const output = usage.output + metrics.outputTokens;
+  const cacheRead = usage.cacheRead + (metrics.cacheReadTokens ?? 0);
+  const cacheWrite = usage.cacheWrite + (metrics.cacheWriteTokens ?? 0);
+  return { input, output, cacheRead, cacheWrite, total: input + output + cacheRead + cacheWrite };
 }
 
 function contentParts(content: unknown): { text: string; thinking: string; images: PromptImage[] } {
@@ -4442,13 +4450,20 @@ export class SuoCodeRuntime {
               active.responseMetricsHistory = [...active.responseMetricsHistory, metrics].slice(-60);
             }
             const usage = sessionUsage(active.session);
+            // Pi emits this custom entry from message_end immediately before it
+            // persists the assistant message. Include that just-finished response
+            // so the UI is live without double-counting later session snapshots.
+            const tokenUsage = metrics
+              ? usageIncludingPendingResponse(usage.tokenUsage, metrics)
+              : usage.tokenUsage;
             this.emitEvent({
               type: "metrics_updated",
               responseMetrics: active.responseMetrics,
               responseMetricsHistory: active.responseMetricsHistory,
               contextUsage: usage.contextUsage,
-              tokenUsage: usage.tokenUsage,
+              tokenUsage,
             });
+            this.publishRuntimeInspection(active);
           }
           if (event.entry.type === "compaction" || event.entry.type === "branch_summary") {
             active.sessionRevision += 1;
@@ -4956,9 +4971,18 @@ export class SuoCodeRuntime {
     const systemPromptTokens = effectiveSystemPrompt ? estimatedTextTokens(effectiveSystemPrompt) : undefined;
     const toolDefinitionTokens = tools.filter((tool) => tool.active).reduce((total, tool) => total + tool.estimatedTokens, 0);
     const usage = sessionUsage(active.session);
-    const cacheDenominator = usage.tokenUsage.input + usage.tokenUsage.cacheRead + usage.tokenUsage.cacheWrite;
-    const cacheHitRate = usage.tokenUsage.cacheRead > 0 && cacheDenominator > 0
-      ? usage.tokenUsage.cacheRead / cacheDenominator
+    // A lifetime average permanently penalizes a healthy session for its first
+    // cache-building request. Pi's own footer reports the latest request, while
+    // billing totals below continue to include every provider response.
+    const latestCache = active.responseMetrics
+      ? summarizeCacheUsage(
+          active.responseMetrics.inputTokens,
+          active.responseMetrics.cacheReadTokens,
+          active.responseMetrics.cacheWriteTokens,
+        )
+      : undefined;
+    const cacheHitRate = latestCache && (latestCache.cacheReadTokens > 0 || latestCache.cacheWriteTokens > 0)
+      ? latestCache.hitRate
       : undefined;
     const sharedMemoryStatus = projectMemoryStatusByCwd.get(safeRealPath(active.cwd));
     const memoryStatus = memoryStatusForInspection(active.memoryStatus, sharedMemoryStatus);

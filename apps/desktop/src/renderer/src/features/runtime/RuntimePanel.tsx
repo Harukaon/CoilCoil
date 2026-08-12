@@ -20,6 +20,7 @@ import type {
   RuntimeSummaryEvent,
   TokenUsage,
 } from "@suocode/runtime-protocol";
+import { summarizeCacheUsage } from "@suocode/runtime-protocol";
 import { Modal } from "../../ui/dialog";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { tokenNumber, toolDisplayName } from "./runtimePresentation";
@@ -129,13 +130,17 @@ export function RuntimePanel({
   const [mcpOverrides, setMcpOverrides] = useState<McpVisibilityOverrides>({});
   const summaries = inspection?.summaryEvents ?? [];
   const activeTools = useMemo(() => inspection?.tools.filter((tool) => tool.active) ?? [], [inspection?.tools]);
+  const cumulativeCache = useMemo(
+    () => summarizeCacheUsage(tokenUsage?.input, tokenUsage?.cacheRead, tokenUsage?.cacheWrite),
+    [tokenUsage?.cacheRead, tokenUsage?.cacheWrite, tokenUsage?.input],
+  );
   const tokenMetrics = useMemo(() => [
-    tokenUsage?.input ? ["累计输入", tokenNumber(tokenUsage.input)] : undefined,
+    cumulativeCache.promptTokens ? ["累计输入", tokenNumber(cumulativeCache.promptTokens)] : undefined,
     tokenUsage?.output ? ["累计输出", tokenNumber(tokenUsage.output)] : undefined,
     tokenUsage?.cacheRead ? ["缓存读取", tokenNumber(tokenUsage.cacheRead)] : undefined,
     tokenUsage?.cacheWrite ? ["缓存写入", tokenNumber(tokenUsage.cacheWrite)] : undefined,
-    inspection?.cacheHitRate !== undefined ? ["缓存命中", percent(inspection.cacheHitRate)] : undefined,
-  ].filter((item): item is string[] => Boolean(item)), [inspection?.cacheHitRate, tokenUsage]);
+    inspection?.cacheHitRate !== undefined ? ["最近命中", percent(inspection.cacheHitRate)] : undefined,
+  ].filter((item): item is string[] => Boolean(item)), [cumulativeCache.promptTokens, inspection?.cacheHitRate, tokenUsage]);
 
   useEffect(() => {
     if (!editingPrompt) setPromptDraft(inspection?.effectiveSystemPrompt ?? "");
