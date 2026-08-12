@@ -3,9 +3,10 @@ import { Check, ChevronDown, CircleDot, Search, Settings, SlidersHorizontal } fr
 import { useEffect, useMemo, useState } from "react";
 import type { ModelOption, RuntimeConfiguration, SessionSnapshot, ThinkingLevel } from "@suocode/runtime-protocol";
 
-export function ModelPicker({ configuration, currentModel, open, busy, side = "top", onOpenChange, onSelect, onConfigureOptions, onOpenSettings }: {
+export function ModelPicker({ configuration, currentModel, currentThinkingLevel, open, busy, side = "top", onOpenChange, onSelect, onConfigureOptions, onOpenSettings }: {
   configuration?: RuntimeConfiguration;
   currentModel?: SessionSnapshot["model"];
+  currentThinkingLevel?: ThinkingLevel;
   open: boolean;
   busy: boolean;
   side?: "top" | "bottom";
@@ -16,7 +17,7 @@ export function ModelPicker({ configuration, currentModel, open, busy, side = "t
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [editingKey, setEditingKey] = useState<string>();
-  const [quickThinking, setQuickThinking] = useState<ThinkingLevel>(configuration?.thinkingLevel ?? "off");
+  const [quickThinking, setQuickThinking] = useState<ThinkingLevel>(currentThinkingLevel ?? configuration?.thinkingLevel ?? "off");
   const [quickContext, setQuickContext] = useState("");
 
   useEffect(() => {
@@ -28,7 +29,7 @@ export function ModelPicker({ configuration, currentModel, open, busy, side = "t
 
   const beginEditing = (model: ModelOption): void => {
     const supported: ThinkingLevel[] = model.supportedThinkingLevels.length ? model.supportedThinkingLevels : ["off"];
-    const currentThinking = configuration?.thinkingLevel ?? "off";
+    const currentThinking = currentThinkingLevel ?? configuration?.thinkingLevel ?? "off";
     setQuickThinking(supported.includes(currentThinking) ? currentThinking : supported[0]!);
     setQuickContext(model.contextWindow === undefined ? "" : String(model.contextWindow));
     setEditingKey(`${model.provider}/${model.id}`);

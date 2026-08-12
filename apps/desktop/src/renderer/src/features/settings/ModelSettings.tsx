@@ -596,11 +596,11 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
       await load(result.provider.id, result.configuration);
       if (applyDefault) {
         const modelId = defaultModelId || result.provider.models[0]?.id;
-        if (!modelId) throw new Error("请先添加至少一个模型，再将其设为当前模型。");
+        if (!modelId) throw new Error("请先添加至少一个模型，再将其设为新会话默认模型。");
         const next = await window.suocode.request<RuntimeConfiguration>({ type: "configure_model", provider: result.provider.id, modelId, thinkingLevel }, runtimeId);
         onSaved(next);
         await load(result.provider.id, next);
-        toastSuccess("已保存并设为当前模型。");
+        toastSuccess("已保存并设为新会话默认模型。");
       } else {
         toastSuccess(isBuiltinProvider ? "已保存设置。" : "已保存服务商。");
       }
@@ -853,11 +853,11 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
             </> : <><div className="provider-builtins-summary">当前内置目录包含 {defaultModels.length} 个模型。启用“自定义目录”后，你可以只保留需要展示的模型。</div><details className="provider-advanced"><summary>按模型覆盖参数 <ChevronRight size={14} /></summary><p>保留内置目录时，使用 <code>modelOverrides</code> 为任意内置模型配置上下文、输出上限、图片能力、采样或兼容性参数。</p><label>modelOverrides JSON<textarea value={overridesText} placeholder={'{\n  "gpt-5.6": { "contextWindow": 128000, "maxTokens": 16384 }\n}'} onChange={(event) => setOverridesText(event.target.value)} /></label></details></>}
           </section>
           <section className="provider-default-model">
-            <div><strong>当前使用的模型</strong><small>{isBuiltinProvider ? "保存配置后可直接将一个模型设为 SuoCode 当前默认模型。" : "先选择模型，再保存为默认或发送测试请求。"}</small></div>
+            <div><strong>新会话默认模型</strong><small>{isBuiltinProvider ? "这里设置以后新建会话使用的模型；已有会话请在输入框的模型菜单中切换。" : "先选择模型，再保存为新会话默认或发送测试请求。"}</small></div>
             <div className="settings-grid"><label>模型<SettingsSelect value={defaultModelId} options={defaultModels.map((model) => ({ value: model.id, label: model.name || model.id, detail: model.id }))} ariaLabel="当前默认模型" placeholder="请选择模型" onChange={(modelId) => { setDefaultModelId(modelId); const selected = defaultModels.find((model) => model.id === modelId); const levels: ThinkingLevel[] = selected ? modelThinkingLevels(selected, configuration, draft.id) : ["off"]; setThinkingLevel((current) => levels.includes(current) ? current : levels[0]); }} searchable /></label><label>Thinking<SettingsSelect value={thinkingLevel} options={thinkingOptions} ariaLabel="Thinking 强度" onChange={(value) => setThinkingLevel(value as ThinkingLevel)} disabled={thinkingOptions.length <= 1} /></label></div>
             <div className="provider-default-actions">
               {!isBuiltinProvider ? <button className="secondary-button" type="button" disabled={saving || testing || !defaultModelId} onClick={() => void testConnection()}>{testing ? <LoaderCircle className="spin" size={15} /> : <Zap size={15} />}{testing ? "测试中…" : "测试此模型"}</button> : null}
-              <button className="secondary-button" type="button" disabled={saving || !defaultModelId} onClick={() => void save(true)}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存并设为当前模型</button>
+              <button className="secondary-button" type="button" disabled={saving || !defaultModelId} onClick={() => void save(true)}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存为新会话默认</button>
             </div>
           </section>
           <footer><span>{snapshot?.configPath}</span><span className="provider-runtime-note">内置协议、模型覆盖和凭据都在 SuoCode 私有运行时中处理。</span></footer>

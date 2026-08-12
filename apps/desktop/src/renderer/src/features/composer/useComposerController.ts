@@ -36,11 +36,13 @@ export interface ComposerController {
 export function useComposerController({
   configuration,
   runtimeId,
+  sessionThinkingLevel,
   onConfigurationChange,
   onError,
 }: {
   configuration?: RuntimeConfiguration;
   runtimeId?: string;
+  sessionThinkingLevel?: RuntimeConfiguration["thinkingLevel"];
   onConfigurationChange: (configuration: RuntimeConfiguration) => void;
   onError: (message?: string) => void;
 }): ComposerController {
@@ -93,21 +95,21 @@ export function useComposerController({
     if (!configuration || modelChanging) return;
     setModelChanging(true);
     onError(undefined);
+    setModelMenuOpen(false);
     try {
       const next = await window.suocode.request<RuntimeConfiguration>({
-        type: "configure_model",
+        type: runtimeId ? "set_session_model" : "configure_model",
         provider: model.provider,
         modelId: model.id,
-        thinkingLevel: configuration.thinkingLevel,
+        thinkingLevel: runtimeId ? (sessionThinkingLevel ?? configuration.thinkingLevel) : configuration.thinkingLevel,
       }, runtimeId);
       onConfigurationChange(next);
-      setModelMenuOpen(false);
     } catch (caught) {
       onError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setModelChanging(false);
     }
-  }, [configuration, modelChanging, onConfigurationChange, onError, runtimeId]);
+  }, [configuration, modelChanging, onConfigurationChange, onError, runtimeId, sessionThinkingLevel]);
 
   const configureModelOptions = useCallback(async (
     model: ModelOption,
@@ -119,7 +121,7 @@ export function useComposerController({
     onError(undefined);
     try {
       const next = await window.suocode.request<RuntimeConfiguration>({
-        type: "configure_model",
+        type: runtimeId ? "set_session_model" : "configure_model",
         provider: model.provider,
         modelId: model.id,
         thinkingLevel,

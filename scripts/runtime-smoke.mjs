@@ -100,23 +100,26 @@ child.on("message", (message) => {
   else callback.reject(new Error(message.error || "Runtime command failed"));
 });
 
-function request(command) {
+function request(command, runtimeId) {
   const id = `smoke-${++nextId}`;
   return new Promise((resolveRequest, rejectRequest) => {
     pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
-    child.send({ id, command });
+    child.send({ id, runtimeId, command });
   });
 }
 
-function chooseLiveSmokeModel(configuration) {
+function chooseLiveSmokeModel(configuration, currentModel) {
   const configured = configuration.models.filter((model) => model.configured);
-  const minimaxM3 = configured.find((model) => {
+  const isCurrent = (model) => model.provider === currentModel?.provider && model.id === currentModel?.id;
+  const alternatives = configured.filter((model) => !isCurrent(model));
+  const minimaxM3 = alternatives.find((model) => {
     const identity = `${model.provider} ${model.id} ${model.name}`.toLowerCase();
     return identity.includes("minimax") && /(^|[^a-z0-9])m3([^a-z0-9]|$)/i.test(identity);
   });
   return minimaxM3
-    ?? configured.find((model) => model.provider === configuration.provider && model.id === "gpt-5.6-sol")
-    ?? configured.find((model) => model.provider === configuration.provider && model.id === configuration.modelId)
+    ?? alternatives.find((model) => model.provider === configuration.provider && model.id === "gpt-5.6-sol")
+    ?? alternatives.find((model) => model.provider === configuration.provider && model.id === configuration.modelId)
+    ?? alternatives[0]
     ?? configured[0];
 }
 
@@ -666,20 +669,36 @@ try {
     if (!configuration.configuredProviders.includes(configuration.provider)) {
       throw new Error(`Live smoke test has no credential for ${configuration.provider}.`);
     }
-    const liveModel = chooseLiveSmokeModel(configuration);
+    const liveModel = chooseLiveSmokeModel(configuration, snapshot.model);
     if (!liveModel) throw new Error("Live smoke test has no configured model.");
+    if (snapshot.model && liveModel.provider === snapshot.model.provider && liveModel.id === snapshot.model.id) {
+      throw new Error("Live model-switch smoke requires at least two configured models.");
+    }
     await request({
-      type: "configure_model",
+      type: "set_session_model",
       provider: liveModel.provider,
       modelId: liveModel.id,
       thinkingLevel: "low",
-    });
+    }, snapshot.runtimeId);
+    const switchedSnapshot = events.findLast((event) => event.type === "session_snapshot")?.snapshot;
+    if (switchedSnapshot?.model.provider !== liveModel.provider || switchedSnapshot.model.id !== liveModel.id) {
+      throw new Error("The live runtime did not commit the selected model to the addressed conversation.");
+    }
+    const livePromptEventStart = events.length;
     const settled = waitForEvent((event) => event.type === "run_state" && event.running === false);
     await request({
       type: "prompt",
       text: "Use the write tool to create runtime-proof.txt containing exactly SUOCODE_RUNTIME_OK followed by a newline. Then reply with a brief confirmation.",
-    });
+    }, snapshot.runtimeId);
     await settled;
+    const liveAssistant = events.slice(livePromptEventStart).findLast(
+      (event) => event.type === "message_finished" && event.message.role === "assistant",
+    )?.message;
+    if (liveAssistant?.model?.provider !== liveModel.provider || liveAssistant.model.id !== liveModel.id) {
+      throw new Error(
+        `The provider response used ${liveAssistant?.model?.provider ?? "<unknown>"}/${liveAssistant?.model?.id ?? "<unknown>"} after selecting ${liveModel.provider}/${liveModel.id}.`,
+      );
+    }
     const proofPath = join(projectDir, "runtime-proof.txt");
     if (!existsSync(proofPath) || readFileSync(proofPath, "utf8").trim() !== "SUOCODE_RUNTIME_OK") {
       console.error(JSON.stringify({
@@ -733,18 +752,25 @@ try {
     await request({
       type: "prompt",
       text: `Call the smoke_server_echo tool exactly once with text ${mcpEchoToken}. Do not call any other tool. Then reply exactly ${mcpEchoToken}.`,
-    });
+    }, snapshot.runtimeId);
     await mcpSettled;
-    const mcpToolEvent = events.slice(mcpEventStart).find((event) => event.type === "tool_finished" && event.tool.name === "smoke_server_echo");
-    if (!mcpToolEvent || !mcpToolEvent.tool.output.includes(`MCP_ECHO:${mcpEchoToken}`)) {
-      throw new Error(`The live Agent did not execute the direct tool supplied by pi-mcp-adapter: ${JSON.stringify(events.slice(mcpEventStart))}`);
+    const mcpToolEvent = events.slice(mcpEventStart).find(
+      (event) => event.type === "tool_finished"
+        && ["smoke_server_echo", "mcp"].includes(event.tool.name)
+        && event.tool.output.includes(`MCP_ECHO:${mcpEchoToken}`),
+    );
+    if (!mcpToolEvent) {
+      throw new Error(`The live Agent did not execute the MCP echo through either the direct tool or gateway: ${JSON.stringify(events.slice(mcpEventStart))}`);
     }
     const rewindTarget = restored.messages.find((message) => message.role === "user");
     if (!rewindTarget?.entryId) throw new Error("Historical user messages did not expose a Pi session entry ID.");
     const rewindToken = `SUOCODE_REWIND_OK_${Date.now()}`;
     const rewindEventStart = events.length;
     const rewindSettled = waitForEvent((event) => event.type === "run_state" && event.running === false);
-    await request({ type: "rewind_prompt", entryId: rewindTarget.entryId, text: `Reply exactly ${rewindToken}.` });
+    await request(
+      { type: "rewind_prompt", entryId: rewindTarget.entryId, text: `Reply exactly ${rewindToken}.` },
+      snapshot.runtimeId,
+    );
     const immediateRewindSnapshot = events.slice(rewindEventStart).find((event) => event.type === "session_snapshot");
     if (!immediateRewindSnapshot) {
       throw new Error("Rewinding did not publish the cleaned Pi branch before starting the replacement request.");

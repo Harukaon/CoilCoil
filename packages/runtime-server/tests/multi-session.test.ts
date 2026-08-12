@@ -11,6 +11,7 @@ import type {
   RuntimeEvent,
   RuntimeWireMessage,
   SessionSnapshot,
+  SessionModelSelection,
 } from "@suocode/runtime-protocol";
 import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
 import { RuntimeServer } from "../src/index.js";
@@ -30,6 +31,8 @@ class FakeRuntime {
   private snapshotValue?: SessionSnapshot;
   readonly promptGate = deferred();
   readonly promptClientMessageIds: Array<string | undefined> = [];
+  readonly createdWithModels: Array<SessionModelSelection | undefined> = [];
+  readonly sessionModelChanges: SessionModelSelection[] = [];
   disposed = false;
 
   constructor(
@@ -62,8 +65,26 @@ class FakeRuntime {
 
   refreshSessionModelFromRegistry(): void {}
 
-  async createSession(cwd: string): Promise<SessionSnapshot> {
+  async createSession(cwd: string, model?: SessionModelSelection): Promise<SessionSnapshot> {
+    this.createdWithModels.push(model);
     return this.install(cwd, `${cwd}/session-${this.ordinal}.jsonl`);
+  }
+
+  async configureModel(input: SessionModelSelection): Promise<RuntimeBootstrap["configuration"]> {
+    return {
+      provider: input.provider,
+      modelId: input.modelId,
+      thinkingLevel: input.thinkingLevel,
+      configuredProviders: [input.provider],
+      models: [],
+      migratedLegacyCredentials: false,
+    };
+  }
+
+  async setSessionModel(input: SessionModelSelection & { type?: string }): Promise<RuntimeBootstrap["configuration"]> {
+    const { provider, modelId, thinkingLevel } = input;
+    this.sessionModelChanges.push({ provider, modelId, thinkingLevel });
+    return this.configureModel({ provider, modelId, thinkingLevel });
   }
 
   async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
@@ -271,6 +292,79 @@ test("one runtime server keeps multiple Agent sessions alive and independently s
 
   await server.dispose();
   assert.ok(runtimes.every((runtime) => runtime.disposed));
+});
+
+test("model selection is explicit at session creation and later switches only the addressed runtime", async () => {
+  const runtimes: FakeRuntime[] = [];
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options);
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  const firstChoice: SessionModelSelection = { provider: "pierce", modelId: "gpt-5.6-sol", thinkingLevel: "high" };
+  const firstResponse = await server.handle({
+    id: "create-model-a",
+    command: { type: "create_session", cwd: "/project-a", model: firstChoice },
+  });
+  const first = firstResponse.result as SessionSnapshot;
+  assert.deepEqual(runtimes[1].createdWithModels, [firstChoice]);
+
+  const secondResponse = await server.handle({ id: "create-model-b", command: { type: "create_session", cwd: "/project-b" } });
+  const second = secondResponse.result as SessionSnapshot;
+  const switched: SessionModelSelection = { provider: "xai", modelId: "grok-4.5", thinkingLevel: "off" };
+  const switchResponse = await server.handle({
+    id: "switch-model-a",
+    runtimeId: first.runtimeId,
+    command: { type: "set_session_model", ...switched },
+  });
+
+  assert.equal(switchResponse.ok, true);
+  assert.deepEqual(runtimes[1].sessionModelChanges, [switched]);
+  assert.deepEqual(runtimes[2].sessionModelChanges, [], "another live conversation must keep its own model");
+  assert.notEqual(first.runtimeId, second.runtimeId);
+
+  const missingRuntime = await server.handle({
+    id: "switch-without-runtime",
+    command: { type: "set_session_model", ...firstChoice },
+  });
+  assert.equal(missingRuntime.ok, false);
+  assert.match(missingRuntime.error ?? "", /缺少会话标识/);
+
+  await server.dispose();
+});
+
+test("changing the future-session default never falls back to the last active conversation", async () => {
+  const runtimes: FakeRuntime[] = [];
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options);
+        runtimes.push(runtime);
+        return runtime as unknown as SuoCodeRuntime;
+      },
+      createRuntimeId: () => "runtime-default-routing",
+    },
+  );
+
+  await server.handle({ id: "create-active", command: { type: "create_session", cwd: "/project" } });
+  const defaultChoice: SessionModelSelection = { provider: "pierce", modelId: "gpt-5.6-terra", thinkingLevel: "medium" };
+  const response = await server.handle({ id: "configure-default", command: { type: "configure_model", ...defaultChoice } });
+  assert.equal(response.ok, true);
+  assert.deepEqual(runtimes[0].sessionModelChanges, []);
+  assert.deepEqual(runtimes[1].sessionModelChanges, [], "the active conversation must not be mutated by a default-only command");
+
+  await server.dispose();
 });
 
 test("plan approval commands are routed to the selected live session runtime", async () => {

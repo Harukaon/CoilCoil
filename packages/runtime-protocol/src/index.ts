@@ -27,6 +27,13 @@ export interface RuntimeConfiguration {
   migratedLegacyCredentials: boolean;
 }
 
+/** An explicit model choice carried across a session boundary. */
+export interface SessionModelSelection {
+  provider: string;
+  modelId: string;
+  thinkingLevel: ThinkingLevel;
+}
+
 /** Configuration for SuoCode's own OpenAI Responses WebSocket Pi extension. */
 export interface OpenAIResponsesWsConfiguration {
   configPath: string;
@@ -814,6 +821,7 @@ export type RuntimeCommand =
   | { type: "save_model_provider_configuration"; input: ModelProviderConfigurationInput }
   | { type: "remove_model_provider_configuration"; provider: string }
   | {
+      /** Update the default used by future sessions. This never mutates a live session. */
       type: "configure_model";
       provider: string;
       modelId: string;
@@ -821,6 +829,14 @@ export type RuntimeCommand =
       /** SuoCode-private context limit override for this provider/model. */
       contextWindow?: number;
       apiKey?: string;
+    }
+  | {
+      /** Switch one existing, idle session. A runtimeId is required by the server. */
+      type: "set_session_model";
+      provider: string;
+      modelId: string;
+      thinkingLevel: ThinkingLevel;
+      contextWindow?: number;
     }
   | { type: "remove_provider_auth"; provider: string }
   | { type: "start_model_provider_oauth"; provider: string }
@@ -862,7 +878,7 @@ export type RuntimeCommand =
   | { type: "rename_session"; cwd: string; sessionPath: string; name: string }
   | { type: "pin_session"; cwd: string; sessionPath: string; pinned: boolean }
   | { type: "fork_session"; cwd: string; sessionPath: string }
-  | { type: "create_session"; cwd: string }
+  | { type: "create_session"; cwd: string; model?: SessionModelSelection }
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "open_workspace"; cwd: string }
   | { type: "prompt"; text: string; images?: PromptImage[]; clientMessageId?: string }

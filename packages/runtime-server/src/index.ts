@@ -234,7 +234,7 @@ export class RuntimeServer {
     return { sessions, snapshot };
   }
 
-  private async createSession(cwd: string): Promise<SessionSnapshot> {
+  private async createSession(cwd: string, model?: Extract<RuntimeCommand, { type: "create_session" }>["model"]): Promise<SessionSnapshot> {
     // Creating a blank conversation is a newer navigation intent than any
     // historical restore that may still be queued or running.
     this.desiredSessionPath = undefined;
@@ -242,7 +242,7 @@ export class RuntimeServer {
     const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
     this.runtimes.set(runtimeId, runtime);
     try {
-      const snapshot = this.decorateSnapshot(runtimeId, await runtime.createSession(cwd));
+      const snapshot = this.decorateSnapshot(runtimeId, await runtime.createSession(cwd, model));
       this.defaultRuntimeId = runtimeId;
       this.retireExcessIdleRuntimes(runtimeId);
       return snapshot;
@@ -315,7 +315,7 @@ export class RuntimeServer {
   }
 
   private async dispatch(command: RuntimeCommand, runtimeId?: string): Promise<unknown> {
-    if (command.type === "create_session") return this.createSession(command.cwd);
+    if (command.type === "create_session") return this.createSession(command.cwd, command.model);
     if (command.type === "open_session") return this.openSession(command.cwd, command.sessionPath);
     if (command.type === "open_workspace") return this.openWorkspace(command.cwd);
 
@@ -324,9 +324,13 @@ export class RuntimeServer {
       || command.type === "list_archived_sessions"
       || command.type === "archive_session"
       || command.type === "restore_session"
+      || command.type === "configure_model"
       || command.type === "start_model_provider_oauth"
       || command.type === "respond_model_provider_oauth"
       || command.type === "cancel_model_provider_oauth";
+    if (command.type === "set_session_model" && !runtimeId) {
+      throw new Error("切换当前会话模型时缺少会话标识，请重新打开会话后再试。");
+    }
     const runtime = alwaysControl ? this.runtime : this.selectedRuntime(runtimeId);
     const result = await this.dispatchTo(runtime, command);
     if (command.type === "archive_session") await this.releaseSession(command.sessionPath);
@@ -334,7 +338,6 @@ export class RuntimeServer {
       command.type === "save_openai_responses_ws_configuration"
       || command.type === "save_model_provider_configuration"
       || command.type === "remove_model_provider_configuration"
-      || command.type === "configure_model"
       || command.type === "remove_provider_auth"
     ) {
       this.refreshAllSessionModels(runtime);
@@ -368,6 +371,8 @@ export class RuntimeServer {
         return runtime.removeModelProviderConfiguration(command.provider);
       case "configure_model":
         return runtime.configureModel(command);
+      case "set_session_model":
+        return runtime.setSessionModel(command);
       case "remove_provider_auth":
         return runtime.removeProviderAuth(command.provider);
       case "start_model_provider_oauth":

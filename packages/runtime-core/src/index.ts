@@ -71,6 +71,7 @@ import type {
   PlanApprovalState,
   PlanExecutionTarget,
   ResponseMetrics,
+  SessionModelSelection,
   SessionSnapshot,
   SessionSummary,
   SkillConfigurationSnapshot,
@@ -1770,6 +1771,10 @@ export class SuoCodeRuntime {
   private mcpReloadTimer?: ReturnType<typeof setTimeout>;
   private resourceReloadTimer?: ReturnType<typeof setTimeout>;
   private runtimeInspectionRefresh?: Promise<void>;
+  /** Serializes model mutations with prompts so a request can never observe a half-applied switch. */
+  private modelTransition?: Promise<void>;
+  /** Covers Pi's async prompt preflight, before isStreaming becomes true. */
+  private promptStarting = false;
   private readonly providerAuthFlows = new Map<string, ProviderAuthFlow>();
 
   constructor(options: SuoCodeRuntimeOptions) {
@@ -1836,21 +1841,15 @@ export class SuoCodeRuntime {
   refreshSessionModelFromRegistry(): void {
     const active = this.active;
     if (!active) return;
+    const current = active.session.model;
+    if (!current) return;
+    // Context-window overrides are SuoCode runtime metadata rather than Pi
+    // registry data. Refreshing such a model would first discard the override
+    // and then require setModel(), which appends a false user model-change
+    // record. Keep the effective session object until an explicit switch or a
+    // reopen can apply both registry metadata and the override atomically.
+    if (this.readModelRuntimeOptions()[current.provider]?.[current.id]?.contextWindow) return;
     active.session.refreshModelFromRegistry();
-    const model = active.session.model;
-    if (!model) return;
-    const effective = this.modelWithRuntimeOptions(model);
-    if (effective !== model) void active.session.setModel(effective).catch(() => undefined);
-  }
-
-  private async refreshActiveSessionModel(): Promise<void> {
-    const active = this.active;
-    if (!active) return;
-    active.session.refreshModelFromRegistry();
-    const model = active.session.model;
-    if (!model) return;
-    const effective = this.modelWithRuntimeOptions(model);
-    if (effective !== model) await active.session.setModel(effective);
   }
 
   async getConfiguration(): Promise<RuntimeConfiguration> {
@@ -1942,7 +1941,7 @@ export class SuoCodeRuntime {
 
   private modelWithRuntimeOptions<T extends { provider: string; id: string; contextWindow: number }>(model: T): T {
     const contextWindow = this.readModelRuntimeOptions()[model.provider]?.[model.id]?.contextWindow;
-    return contextWindow ? { ...model, contextWindow } : model;
+    return contextWindow && contextWindow !== model.contextWindow ? { ...model, contextWindow } : model;
   }
 
   private readOpenAIResponsesWsConfigurationFile(): Record<string, unknown> {
@@ -2393,15 +2392,68 @@ export class SuoCodeRuntime {
     }
     const effectiveModel = this.modelWithRuntimeOptions(model);
     const effectiveThinkingLevel = clampThinkingLevel(effectiveModel, input.thinkingLevel) as ThinkingLevel;
-    const settings = this.active?.session.settingsManager ?? SettingsManager.create(this.active?.cwd ?? process.cwd(), this.agentDir);
+    const settings = SettingsManager.create(this.active?.cwd ?? process.cwd(), this.agentDir);
     settings.setDefaultModelAndProvider(input.provider, input.modelId);
     settings.setDefaultThinkingLevel(effectiveThinkingLevel);
     await settings.flush();
 
-    if (this.active) {
-      await this.active.session.setModel(effectiveModel);
-      this.active.session.setThinkingLevel(effectiveThinkingLevel);
+    const configuration = await this.getConfiguration();
+    this.emitEvent({ type: "configuration_updated", configuration });
+    return configuration;
+  }
+
+  /**
+   * Change the model owned by this live conversation.
+   *
+   * Pi captures a model when a provider request starts. Mutating it while an
+   * Agent run is active only changes the session log; it cannot retarget that
+   * already-started request. Refuse that ambiguous state instead of claiming a
+   * switch that did not actually happen.
+   */
+  async setSessionModel(input: {
+    provider: string;
+    modelId: string;
+    thinkingLevel: ThinkingLevel;
+    contextWindow?: number;
+  }): Promise<RuntimeConfiguration> {
+    const active = this.requireActive();
+    if (active.session.isStreaming || this.promptStarting) {
+      throw new Error("当前 Agent 正在运行。请等待回复结束或先停止，再切换模型。");
+    }
+    if (this.modelTransition) {
+      throw new Error("模型正在切换，请稍候。");
+    }
+
+    const transition = (async (): Promise<void> => {
+      const modelRuntime = await this.ready();
+      const model = modelRuntime.getModel(input.provider, input.modelId);
+      if (!model) throw new Error(`Unknown model: ${input.provider}/${input.modelId}`);
+      if (!(await modelRuntime.checkAuth(input.provider))) {
+        throw new Error(`No credential is configured for ${input.provider}.`);
+      }
+      if (input.contextWindow !== undefined) {
+        if (!Number.isFinite(input.contextWindow) || input.contextWindow < 1_024) {
+          throw new Error("上下文窗口必须是不小于 1024 的数字。");
+        }
+        this.writeModelRuntimeContextWindow(input.provider, input.modelId, Math.round(input.contextWindow));
+      }
+
+      const effectiveModel = this.modelWithRuntimeOptions(model);
+      const effectiveThinkingLevel = clampThinkingLevel(effectiveModel, input.thinkingLevel) as ThinkingLevel;
+      await active.session.setModel(effectiveModel);
+      active.session.setThinkingLevel(effectiveThinkingLevel);
+      await active.session.settingsManager.flush();
+
+      // setModel and setThinkingLevel are synchronous from the session's point
+      // of view; emit only after both are committed so the UI cannot display a
+      // mixed provider/model state.
       this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+    })();
+    this.modelTransition = transition;
+    try {
+      await transition;
+    } finally {
+      if (this.modelTransition === transition) this.modelTransition = undefined;
     }
 
     const configuration = await this.getConfiguration();
@@ -3168,11 +3220,13 @@ export class SuoCodeRuntime {
 
   async runMemoryNow(): Promise<{ accepted: true }> {
     const active = this.requireActive();
+    if (this.modelTransition) await this.modelTransition;
     if (active.session.isStreaming) {
       const message = "当前回复仍在运行，请结束后再整理项目记忆。";
       this.publishManualMemoryStatus(active, "busy", message);
       throw new Error(message);
     }
+    if (this.promptStarting) throw new Error("上一条消息正在启动，请稍候。");
     const sharedMemory = projectMemoryStatusByCwd.get(safeRealPath(active.cwd));
     if (sharedMemory?.state === "running") {
       const message = "当前工作区已有记忆整理正在运行。";
@@ -3194,9 +3248,13 @@ export class SuoCodeRuntime {
       throw new Error(message);
     }
     this.publishManualMemoryStatus(active, "running", "正在启动当前项目的记忆整理…");
+    this.promptStarting = true;
     try {
-      await active.session.prompt("/memory");
+      await active.session.prompt("/memory", {
+        preflightResult: () => { this.promptStarting = false; },
+      });
     } catch (error) {
+      this.promptStarting = false;
       const message = errorMessage(error);
       this.publishManualMemoryStatus(active, "failed", "项目记忆整理启动失败", message);
       throw error;
@@ -3860,12 +3918,12 @@ export class SuoCodeRuntime {
     return { sessions, snapshot };
   }
 
-  async createSession(cwd: string): Promise<SessionSnapshot> {
+  async createSession(cwd: string, selection?: SessionModelSelection): Promise<SessionSnapshot> {
     const resolvedCwd = safeRealPath(cwd);
     if (!existsSync(resolvedCwd) || !statSync(resolvedCwd).isDirectory()) {
       throw new Error(`Project directory does not exist: ${resolvedCwd}`);
     }
-    return this.installSession(resolvedCwd, SessionManager.create(resolvedCwd, this.sessionDir));
+    return this.installSession(resolvedCwd, SessionManager.create(resolvedCwd, this.sessionDir), selection);
   }
 
   async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
@@ -3875,7 +3933,11 @@ export class SuoCodeRuntime {
     return this.installSession(resolvedCwd, SessionManager.open(resolvedSession, this.sessionDir, resolvedCwd));
   }
 
-  private async installSession(cwd: string, sessionManager: SessionManager): Promise<SessionSnapshot> {
+  private async installSession(
+    cwd: string,
+    sessionManager: SessionManager,
+    initialModel?: SessionModelSelection,
+  ): Promise<SessionSnapshot> {
     const timingEnabled = process.env.SUOCODE_RUNTIME_TIMING === "1";
     const timingStartedAt = Date.now();
     const timings: Record<string, number> = {};
@@ -3963,6 +4025,19 @@ export class SuoCodeRuntime {
     });
     const [modelRuntime] = await Promise.all([modelRuntimePromise, resourceLoaderPromise]);
     timingCheckpoint = Date.now();
+    const selectedModel = initialModel
+      ? modelRuntime.getModel(initialModel.provider, initialModel.modelId)
+      : undefined;
+    if (initialModel && !selectedModel) {
+      throw new Error(`Unknown model: ${initialModel.provider}/${initialModel.modelId}`);
+    }
+    if (selectedModel && !(await modelRuntime.checkAuth(selectedModel.provider))) {
+      throw new Error(`No credential is configured for ${selectedModel.provider}.`);
+    }
+    const effectiveInitialModel = selectedModel ? this.modelWithRuntimeOptions(selectedModel) : undefined;
+    const effectiveInitialThinkingLevel = effectiveInitialModel && initialModel
+      ? clampThinkingLevel(effectiveInitialModel, initialModel.thinkingLevel) as ThinkingLevel
+      : undefined;
     const extensionErrors = loader.getExtensions().errors;
     if (extensionErrors.length > 0) {
       const message = extensionErrors.map((entry) => `${entry.path}: ${entry.error}`).join("\n");
@@ -3990,6 +4065,8 @@ export class SuoCodeRuntime {
       settingsManager,
       sessionManager,
       resourceLoader: loader,
+      model: effectiveInitialModel,
+      thinkingLevel: effectiveInitialThinkingLevel,
     });
     markTiming("createAgentSession");
     await created.session.bindExtensions({});
@@ -4707,59 +4784,81 @@ export class SuoCodeRuntime {
 
   async prompt(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    await this.refreshActiveSessionModel();
+    if (this.modelTransition) await this.modelTransition;
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (prompt === "/memory" && !images?.length) return this.runMemoryNow();
+    if (!active.session.isStreaming) {
+      if (this.promptStarting) throw new Error("上一条消息正在启动，请稍候。");
+      this.promptStarting = true;
+    }
     if (active.session.isStreaming) return this.steer(prompt, images, clientMessageId);
-    const prepared = await preparePromptImages(images);
-    const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
+    try {
+      const prepared = await preparePromptImages(images);
+      const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
 
-    const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
-    if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
+      const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
+      if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
 
-    this.queueClientMessage(active, clientMessageId);
-    void active.session.prompt(expandedPrompt, { images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined }).catch((error) => {
-      this.rejectClientMessage(active, clientMessageId);
-      this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
-      this.emitEvent({ type: "run_state", running: false });
-    });
-    return { accepted: true };
+      this.queueClientMessage(active, clientMessageId);
+      void active.session.prompt(expandedPrompt, {
+        images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
+        preflightResult: () => { this.promptStarting = false; },
+      }).catch((error) => {
+        this.promptStarting = false;
+        this.rejectClientMessage(active, clientMessageId);
+        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+        this.emitEvent({ type: "run_state", running: false });
+      });
+      return { accepted: true };
+    } catch (error) {
+      this.promptStarting = false;
+      throw error;
+    }
   }
 
   async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    await this.refreshActiveSessionModel();
+    if (this.modelTransition) await this.modelTransition;
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");
-    const result = await active.session.navigateTree(entryId, { summarize: false });
-    if (result.cancelled) throw new Error("未能回溯到所选消息。");
-    active.sessionRevision += 1;
-    active.summaryActivity = undefined;
-    const prepared = await preparePromptImages(images);
-    const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-    const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
-    if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
-    this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
-    // Session-scoped System Prompt, Skill, and MCP policies live on the active
-    // Pi branch. Rewinding changes that branch, so refresh the right-hand
-    // runtime inspector without blocking the new prompt on MCP discovery.
-    void this.refreshRuntimeInspectionSources(active);
-    this.queueClientMessage(active, clientMessageId);
-    void active.session.prompt(expandedPrompt, {
-      images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
-    }).catch((error) => {
-      this.rejectClientMessage(active, clientMessageId);
-      this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
-      this.emitEvent({ type: "run_state", running: false });
-    });
-    return { accepted: true };
+    if (this.promptStarting) throw new Error("上一条消息正在启动，请稍候。");
+    this.promptStarting = true;
+    try {
+      const result = await active.session.navigateTree(entryId, { summarize: false });
+      if (result.cancelled) throw new Error("未能回溯到所选消息。");
+      active.sessionRevision += 1;
+      active.summaryActivity = undefined;
+      const prepared = await preparePromptImages(images);
+      const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
+      const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
+      if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
+      this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+      // Session-scoped System Prompt, Skill, and MCP policies live on the active
+      // Pi branch. Rewinding changes that branch, so refresh the right-hand
+      // runtime inspector without blocking the new prompt on MCP discovery.
+      void this.refreshRuntimeInspectionSources(active);
+      this.queueClientMessage(active, clientMessageId);
+      void active.session.prompt(expandedPrompt, {
+        images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
+        preflightResult: () => { this.promptStarting = false; },
+      }).catch((error) => {
+        this.promptStarting = false;
+        this.rejectClientMessage(active, clientMessageId);
+        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+        this.emitEvent({ type: "run_state", running: false });
+      });
+      return { accepted: true };
+    } catch (error) {
+      this.promptStarting = false;
+      throw error;
+    }
   }
 
   async steer(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
-    this.refreshSessionModelFromRegistry();
+    if (this.modelTransition) await this.modelTransition;
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     const prepared = await preparePromptImages(images);

@@ -207,6 +207,7 @@ export function ConversationPane({
                   project={project}
                   configuration={configuration}
                   selectedModel={selectedModel}
+                  thinkingLevel={snapshot?.thinkingLevel}
                   modelChanging={modelChanging}
                   runtimeId={snapshot?.runtimeId}
                   onEditingChange={(next) => setEditingMessageId(next ? item.message.id : undefined)}
@@ -263,6 +264,7 @@ export function ConversationPane({
             inputRef={inputRef}
             configuration={configuration}
             selectedModel={selectedModel}
+            thinkingLevel={snapshot?.thinkingLevel}
             modelMenuOpen={modelMenuOpen}
             modelChanging={modelChanging}
             onSubmit={onSubmit}

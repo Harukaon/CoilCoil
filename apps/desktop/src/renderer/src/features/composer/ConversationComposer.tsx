@@ -25,6 +25,7 @@ export function ConversationComposer({
   inputRef,
   configuration,
   selectedModel,
+  thinkingLevel,
   modelMenuOpen,
   modelChanging,
   autoFocus,
@@ -54,6 +55,7 @@ export function ConversationComposer({
   inputRef: RefObject<HTMLTextAreaElement | null>;
   configuration?: RuntimeConfiguration;
   selectedModel?: SessionSnapshot["model"];
+  thinkingLevel?: RuntimeConfiguration["thinkingLevel"];
   modelMenuOpen: boolean;
   modelChanging: boolean;
   autoFocus?: boolean;
@@ -183,7 +185,7 @@ export function ConversationComposer({
               ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…")
               : "请先打开项目"
         }
-        disabled={!project || loading || startingSession}
+        disabled={!project || loading || startingSession || modelChanging}
         onChange={(event) => onDraftChange(event.target.value)}
         onPaste={onPaste}
         onCompositionStart={onCompositionStart}
@@ -196,6 +198,7 @@ export function ConversationComposer({
         <ModelPicker
           configuration={configuration}
           currentModel={selectedModel}
+          currentThinkingLevel={thinkingLevel}
           open={modelMenuOpen}
           busy={modelChanging}
           side={inline ? "bottom" : "top"}
@@ -213,7 +216,7 @@ export function ConversationComposer({
           className="send-button"
           type="submit"
           aria-label={inline ? "从这里重新开始" : running ? "补充指令" : "发送消息"}
-          disabled={!project || startingSession || (!draft.trim() && !images.length)}
+          disabled={!project || startingSession || modelChanging || (!draft.trim() && !images.length)}
         >
           <ArrowUp size={17} strokeWidth={2.2} />
         </button>

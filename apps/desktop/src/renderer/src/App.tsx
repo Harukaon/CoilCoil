@@ -126,6 +126,7 @@ export default function App(): React.JSX.Element {
   const composer = useComposerController({
     configuration,
     runtimeId: snapshot?.runtimeId,
+    sessionThinkingLevel: snapshot?.thinkingLevel,
     onConfigurationChange: setConfiguration,
     onError: (message) => { if (message) toastError(message); },
   });
@@ -217,7 +218,7 @@ export default function App(): React.JSX.Element {
         });
       }
       if (runtimeId !== snapshotRef.current?.runtimeId) return;
-    } else if (runtimeId && runtimeId !== snapshotRef.current?.runtimeId && event.type !== "sessions_updated" && event.type !== "configuration_updated") {
+    } else if (runtimeId && runtimeId !== snapshotRef.current?.runtimeId && event.type !== "sessions_updated") {
       return;
     }
     switch (event.type) {
@@ -658,7 +659,15 @@ export default function App(): React.JSX.Element {
       let target = snapshotRef.current;
       if (!target || pendingProjectPath === project.path) {
         setStartingSession(true);
-        const created = await window.suocode.request<SessionSnapshot>({ type: "create_session", cwd: project.path });
+        const created = await window.suocode.request<SessionSnapshot>({
+          type: "create_session",
+          cwd: project.path,
+          model: selectedModel && configuration ? {
+            provider: selectedModel.provider,
+            modelId: selectedModel.id,
+            thinkingLevel: configuration.thinkingLevel,
+          } : undefined,
+        });
         const now = new Date().toISOString();
         const optimisticSession: SessionSummary = {
           ...created.session,

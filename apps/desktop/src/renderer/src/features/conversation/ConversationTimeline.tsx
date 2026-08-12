@@ -90,6 +90,7 @@ export function MessageView({
   project,
   configuration,
   selectedModel,
+  thinkingLevel,
   modelChanging,
   runtimeId,
   onEditingChange,
@@ -104,6 +105,7 @@ export function MessageView({
   project: ProjectSelection | null;
   configuration?: RuntimeConfiguration;
   selectedModel?: SessionSnapshot["model"];
+  thinkingLevel?: RuntimeConfiguration["thinkingLevel"];
   modelChanging: boolean;
   runtimeId?: string;
   onEditingChange: (editing: boolean) => void;
@@ -180,6 +182,7 @@ export function MessageView({
               inputRef={textareaRef}
               configuration={configuration}
               selectedModel={selectedModel}
+              thinkingLevel={thinkingLevel}
               modelMenuOpen={modelMenuOpen}
               modelChanging={modelChanging}
               autoFocus
