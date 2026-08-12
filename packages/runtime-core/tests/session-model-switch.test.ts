@@ -69,7 +69,6 @@ function snapshot(session: ModelSessionDouble): SessionSnapshot {
       summaryEvents: [],
       systemPromptOverride: false,
       estimates: {},
-      contextItems: [],
       tools: [],
       skills: [],
       capabilities: {

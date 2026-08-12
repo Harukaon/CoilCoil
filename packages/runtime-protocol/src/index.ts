@@ -674,7 +674,6 @@ export interface RuntimeInspectionSnapshot {
     total?: number;
   };
   cacheHitRate?: number;
-  contextItems: RuntimeContextItem[];
   tools: RuntimeToolDefinition[];
   skills: RuntimeSkillState[];
   mcp?: McpRuntimeStatus;
@@ -684,20 +683,6 @@ export interface RuntimeInspectionSnapshot {
     removeOriginalSessionItems: false;
     removeOriginalSessionItemsReason: string;
   };
-}
-
-export type RuntimeContextItemKind = "user" | "assistant" | "reasoning" | "tool_call" | "tool_result" | "custom";
-
-export interface RuntimeContextItem {
-  id: string;
-  entryId?: string;
-  kind: RuntimeContextItemKind;
-  label: string;
-  preview: string;
-  estimatedTokens: number;
-  active: boolean;
-  toolName?: string;
-  timestamp?: number;
 }
 
 export interface RuntimeToolDefinition {

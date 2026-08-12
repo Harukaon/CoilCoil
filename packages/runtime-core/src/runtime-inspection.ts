@@ -101,7 +101,6 @@ export function buildRuntimeInspection(
     summaryEvents: projected,
     systemPromptOverride: false,
     estimates: {},
-    contextItems: [],
     tools: [],
     skills: [],
     capabilities: {

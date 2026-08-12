@@ -18,6 +18,7 @@ export function FilePreviewPane({ preview, loading, error, onClose }: {
   }, [preview?.id]);
 
   const canRender = preview?.kind === "markdown" || preview?.kind === "html";
+  const embeddedPreview = !loading && !error && (preview?.kind === "pdf" || (preview?.kind === "html" && rendered));
   const kindLabel = preview?.kind === "text"
     ? "文本"
     : preview?.kind === "markdown"
@@ -42,7 +43,7 @@ export function FilePreviewPane({ preview, loading, error, onClose }: {
         </div>
       </header>
       {preview?.truncated ? <div className="preview-warning">文件较大，仅显示前一部分内容。</div> : null}
-      <div className="inline-preview-content">
+      <div className={`inline-preview-content ${embeddedPreview ? "embedded" : ""}`}>
         {loading ? <div className="preview-placeholder"><LoaderCircle className="spin" size={16} /><span>正在打开文件…</span></div> : null}
         {!loading && error ? <div className="preview-placeholder error"><FileText size={16} /><span>{error}</span></div> : null}
         {!loading && !error && preview?.kind === "pdf" ? <embed className="pdf-preview" src={preview.content} type="application/pdf" /> : null}

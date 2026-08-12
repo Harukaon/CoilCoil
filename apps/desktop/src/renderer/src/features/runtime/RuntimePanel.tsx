@@ -1,6 +1,5 @@
 import {
   AlertCircle,
-  BarChart3,
   BrainCircuit,
   CheckCircle2,
   CircleDashed,
@@ -17,7 +16,6 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   ContextUsage,
   McpServerRuntimeStatus,
-  RuntimeContextItem,
   RuntimeInspectionSnapshot,
   RuntimeSummaryEvent,
   TokenUsage,
@@ -25,8 +23,6 @@ import type {
 import { Modal } from "../../ui/dialog";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { tokenNumber, toolDisplayName } from "./runtimePresentation";
-import { ContextGalaxyBoard, ContextGalaxyThumbnail } from "./ContextGalaxy";
-import { buildContextGalaxy, contextGalaxySignature } from "./contextGalaxyModel";
 import {
   mcpSectionBadge,
   mcpTogglePlan,
@@ -127,22 +123,12 @@ export function RuntimePanel({
   cwd?: string;
 }): React.JSX.Element {
   const [promptOpen, setPromptOpen] = useState(false);
-  const [galaxyOpen, setGalaxyOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(inspection?.effectiveSystemPrompt ?? "");
   const [busyAction, setBusyAction] = useState<string>();
   const [mcpOverrides, setMcpOverrides] = useState<McpVisibilityOverrides>({});
   const summaries = inspection?.summaryEvents ?? [];
   const activeTools = useMemo(() => inspection?.tools.filter((tool) => tool.active) ?? [], [inspection?.tools]);
-  const galaxyInput = inspection
-    ? { contextItems: inspection.contextItems, tools: inspection.tools, estimates: inspection.estimates }
-    : undefined;
-  const galaxySignature = contextGalaxySignature(inspection?.sessionRevision, galaxyInput);
-  // Keyed on the signature rather than on `inspection`: the panel re-renders on
-  // every streamed token, and `contextItems` is a fresh array on every genuine
-  // emission, so neither is a reliable signal that the composition moved.
-  const galaxy = useMemo(() => buildContextGalaxy(galaxyInput), [galaxySignature]);
-  const galaxyThumbnail = useMemo(() => buildContextGalaxy(galaxyInput, { depth: 1 }), [galaxySignature]);
   const tokenMetrics = useMemo(() => [
     tokenUsage?.input ? ["累计输入", tokenNumber(tokenUsage.input)] : undefined,
     tokenUsage?.output ? ["累计输出", tokenNumber(tokenUsage.output)] : undefined,
@@ -268,15 +254,6 @@ export function RuntimePanel({
         <small>{inspection?.systemPromptOverride ? "当前会话已修改" : inspection?.estimates.systemPrompt ? `${tokenNumber(inspection.estimates.systemPrompt)} Token` : "等待捕获"}</small>
       </button>
 
-      <RuntimeSection title="上下文构成" icon={<BarChart3 size={14} />} badge={galaxy.degenerate ? undefined : `${galaxy.nodes.filter((node) => node.depth === 1).length} 类`} open>
-        {galaxy.degenerate ? (
-          <p className="runtime-muted">当前上下文还没有可估算的内容。</p>
-        ) : (
-          <ContextGalaxyThumbnail galaxy={galaxyThumbnail} onOpen={() => setGalaxyOpen(true)} />
-        )}
-        <p className="runtime-section-footnote">圆面积表示 Token 占用。点击展开完整画板，可按具体工具查看。</p>
-      </RuntimeSection>
-
       <RuntimeSection title="工具" icon={<Wrench size={14} />} badge={inspection?.tools.length ? `${activeTools.length}/${inspection.tools.length} 启用` : undefined}>
         {inspection?.tools.length ? <div className="runtime-chip-grid">{inspection.tools.map((tool) => (
           <div className={`runtime-chip ${tool.active ? "active" : "inactive"}`} data-tooltip={tool.description || undefined} title={tool.description || undefined} key={tool.name}>
@@ -349,14 +326,6 @@ export function RuntimePanel({
           <div className="runtime-summary-empty"><History size={18} /><p>当前会话尚未发生上下文压缩或分支总结。</p></div>
         )}
       </section>
-
-      <Modal open={galaxyOpen} bare onClose={() => setGalaxyOpen(false)}>
-        <ContextGalaxyBoard
-          galaxy={galaxy}
-          contextWindow={contextUsage?.contextWindow}
-          onClose={() => setGalaxyOpen(false)}
-        />
-      </Modal>
 
       <Modal
         open={promptOpen}

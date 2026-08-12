@@ -173,7 +173,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .conversation-title span { color: #8a8a85; font-size: 10px; }
 .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .conversation-scroll { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
-.conversation-body { min-width: 0; min-height: 0; height: 100%; overflow-x: hidden; overflow-y: auto; padding: 30px clamp(12px, 2vw, 28px) 190px; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.conversation-body { min-width: 0; min-height: 0; height: 100%; overflow-x: hidden; overflow-y: auto; padding: 30px clamp(12px, 2vw, 28px) 76px; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.conversation-pane.has-composer-activity .conversation-body { padding-bottom: 190px; }
 .conversation-body::-webkit-scrollbar { width: 8px; }
 .conversation-body::-webkit-scrollbar-track { background: transparent; }
 .conversation-body::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: #c9c9c4; background-clip: padding-box; }
@@ -567,8 +568,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .inspector-header { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 0 8px; color: #777772; font-size: 12px; font-weight: 550; }
 .inspector-drag-surface { min-width: 12px; align-self: stretch; flex: 1 1 auto; -webkit-app-region: drag; user-select: none; }
 .inspector-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
-.inspector-nav { display: flex; min-width: 0; flex: 0 1 auto; align-items: center; gap: 3px; }
-.inspector-nav button { position: relative; display: flex; min-width: 0; justify-content: center; align-items: center; gap: 5px; height: 30px; padding: 0 9px; border-radius: 7px; color: #696964; font-size: 10px; text-align: left; }
+.inspector-nav { display: flex; min-width: 0; flex: 0 0 auto; align-items: center; gap: 3px; }
+.inspector-nav button { position: relative; display: flex; width: auto; min-width: 0; flex: 0 0 auto; justify-content: center; align-items: center; gap: 5px; height: 30px; padding: 0 9px; border-radius: 7px; color: #696964; font-size: 10px; text-align: left; }
 .inspector-nav button:hover, .inspector-nav button.active { color: #282826; background: #ecece9; }
 .inspector-nav button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-nav small { position: absolute; top: -3px; right: 3px; min-width: 15px; padding: 1px 4px; border-radius: 8px; color: #777772; background: #deded9; font-size: 9px; text-align: center; }
@@ -651,13 +652,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .runtime-actions button:hover:not(:disabled), .runtime-mcp-list button:hover:not(:disabled) { background: #efefeb; }
 .runtime-actions button.primary { border-color: #4f514d; color: #fff; background: #4f514d; }
 .runtime-actions button:disabled, .runtime-mcp-list button:disabled { cursor: default; opacity: .5; }
-.runtime-context-list, .runtime-definition-list, .runtime-toggle-list, .runtime-mcp-list { display: grid; gap: 1px; overflow: hidden; border: 1px solid #e6e6e1; border-radius: 8px; background: #e6e6e1; }
-.runtime-context-item, .runtime-definition-list > div, .runtime-toggle-list > label, .runtime-mcp-list > div { min-width: 0; background: #fff; }
-.runtime-context-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 5px 7px; padding: 8px; }
-.runtime-context-item > span { align-self: start; padding: 2px 4px; border-radius: 4px; color: #6f746d; background: #eef1ec; font-size: 7px; }
-.runtime-context-item > strong { overflow: hidden; color: #565650; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.runtime-context-item > small { color: #999993; font-size: 7px; white-space: nowrap; }
-.runtime-context-item > p { grid-column: 2 / -1; margin: 0; color: #81817b; font-size: 8px; line-height: 1.45; overflow-wrap: anywhere; }
+.runtime-definition-list, .runtime-toggle-list, .runtime-mcp-list { display: grid; gap: 1px; overflow: hidden; border: 1px solid #e6e6e1; border-radius: 8px; background: #e6e6e1; }
+.runtime-definition-list > div, .runtime-toggle-list > label, .runtime-mcp-list > div { min-width: 0; background: #fff; }
 .runtime-safety-note { display: flex; align-items: flex-start; gap: 6px; padding: 8px; border: 1px solid #ead7bd; border-radius: 7px; color: #7d633e; background: #fffaf0; font-size: 8px; line-height: 1.45; }
 .runtime-safety-note svg { flex: 0 0 auto; margin-top: 1px; }
 .runtime-definition-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 7px; padding: 8px; }
@@ -711,9 +707,11 @@ button.runtime-chip:hover:not(:disabled), .runtime-chip.mcp:hover { border-color
 .plan-list li.completed svg { color: #768373; }
 .changes-panel { display: grid; min-height: 100%; grid-template-rows: auto minmax(180px, 1fr); }
 .files-workspace { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
-.files-workspace.has-preview { grid-template-columns: minmax(0, 1fr) minmax(116px, 34%); }
+.files-workspace.has-preview { grid-template-columns: minmax(0, 2fr) 7px minmax(0, 1fr); }
 .files-tree-region { min-width: 0; min-height: 0; overflow: hidden; }
-.files-workspace.has-preview .files-tree-region { border-left: 1px solid #e2e2de; }
+.files-split-resizer { position: relative; z-index: 4; width: 7px; min-height: 0; cursor: col-resize; touch-action: none; outline: 0; }
+.files-split-resizer::after { position: absolute; inset: 0 auto 0 3px; width: 1px; content: ""; background: #e2e2de; transition: background 120ms ease; }
+.files-split-resizer:hover::after, .files-split-resizer:focus-visible::after { background: #aaa9a3; }
 .change-list { display: grid; gap: 1px; padding: 8px; }
 .change-list button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; gap: 6px; align-items: center; min-height: 30px; padding: 5px 7px; border-radius: 6px; text-align: left; background: transparent; cursor: pointer; }
 .change-list button:hover, .change-list button.active { background: #ecece9; }

@@ -926,6 +926,20 @@ async function main() {
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not return to its regular test size.");
     await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
     await client.waitFor(`Boolean(document.querySelector(".right-resizer"))`, "The right panel did not open for resize priority testing.");
+    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
+    const inspectorTabLayout = await client.evaluate(`(() => {
+      const runtime = document.querySelector('.inspector-nav button[aria-label="运行时"]');
+      const label = runtime?.querySelector("span");
+      return {
+        width: runtime?.getBoundingClientRect().width ?? 0,
+        labelWidth: label?.getBoundingClientRect().width ?? 0,
+        labelScrollWidth: label?.scrollWidth ?? Infinity,
+        contextComposition: document.body.textContent.includes("上下文构成"),
+      };
+    })()`);
+    assert.ok(inspectorTabLayout.width > 45, `The runtime inspector tab was clipped to ${inspectorTabLayout.width}px.`);
+    assert.ok(inspectorTabLayout.labelWidth >= inspectorTabLayout.labelScrollWidth, "The runtime inspector label was ellipsized.");
+    assert.equal(inspectorTabLayout.contextComposition, false, "The removed context-composition panel is still visible.");
     const preferredPanelWidths = await client.evaluate(`({
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
@@ -1259,6 +1273,7 @@ async function main() {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(editor, "");
       editor.dispatchEvent(new Event("input", { bubbles: true }));
     })()`);
+    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="文件"]')?.click()`);
     await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"))?.click()`);
     await client.waitFor(
       `document.querySelector(".files-workspace.has-preview .text-preview")?.textContent.includes("lazy")`,
@@ -1284,6 +1299,40 @@ async function main() {
     assert.ok(Math.abs(previewLayout.previewRight - previewLayout.treeLeft) <= 1);
     assert.ok(Math.abs(previewLayout.workspaceRight - previewLayout.treeRight) <= 1);
     assert.ok(Math.abs(previewLayout.footerBottom - previewLayout.workspaceBottom) <= 1);
+    const splitBefore = await client.evaluate(`(() => {
+      const workspace = document.querySelector(".files-workspace.has-preview")?.getBoundingClientRect();
+      const handle = document.querySelector(".files-split-resizer")?.getBoundingClientRect();
+      const preview = document.querySelector(".inline-file-preview")?.getBoundingClientRect();
+      return workspace && handle && preview ? {
+        workspaceLeft: workspace.left,
+        workspaceWidth: workspace.width,
+        handleX: handle.left + handle.width / 2,
+        handleY: handle.top + handle.height / 2,
+        previewWidth: preview.width,
+      } : null;
+    })()`);
+    assert.ok(splitBefore, "The inline file preview did not expose its resize handle.");
+    const splitTargetX = splitBefore.workspaceLeft + splitBefore.workspaceWidth * 0.55;
+    await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x: splitBefore.handleX, y: splitBefore.handleY, button: "left", buttons: 1, clickCount: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: splitTargetX, y: splitBefore.handleY, button: "left", buttons: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: splitTargetX, y: splitBefore.handleY, button: "left", buttons: 0, clickCount: 1 });
+    await client.waitFor(
+      `Math.abs((document.querySelector(".inline-file-preview")?.getBoundingClientRect().width ?? 0) - ${splitBefore.previewWidth}) > 20`,
+      "Dragging the file preview divider did not resize the panes.",
+    );
+    const embeddedOverflow = await client.evaluate(`(() => {
+      const content = document.querySelector(".inline-preview-content");
+      if (!content) return null;
+      const originalClass = content.className;
+      content.classList.add("embedded");
+      const result = {
+        overflowX: getComputedStyle(content).overflowX,
+        overflowY: getComputedStyle(content).overflowY,
+      };
+      content.className = originalClass;
+      return result;
+    })()`);
+    assert.deepEqual(embeddedOverflow, { overflowX: "hidden", overflowY: "hidden" });
     await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "live preview update\n", "utf8");
     await client.waitFor(
       `document.querySelector(".files-workspace.has-preview .text-preview")?.textContent.includes("live preview update")`,

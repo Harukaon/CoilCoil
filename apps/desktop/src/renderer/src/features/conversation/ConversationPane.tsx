@@ -151,6 +151,7 @@ export function ConversationPane({
     onDraftChange,
     onOpenSettings,
   });
+  const hasComposerActivity = projectState.plan.length > 0 || subagents.length > 0 || slashMenu.slashActive;
 
   useEffect(() => {
     setEditingMessageId(undefined);
@@ -187,7 +188,7 @@ export function ConversationPane({
   }, [onError]);
 
   return (
-    <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+    <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""} ${hasComposerActivity ? "has-composer-activity" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <header className="conversation-header window-drag">
         {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
         <div className="conversation-title"><strong title={pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话"}>{truncateTitle(pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>

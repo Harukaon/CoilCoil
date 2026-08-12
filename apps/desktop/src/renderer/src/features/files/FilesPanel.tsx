@@ -6,6 +6,7 @@ import { toastError } from "../../ui/toast";
 import { FilePreviewPane } from "./FilePreviewPane";
 import { FileTree } from "./FileTree";
 import { absoluteProjectPath, removeTreeNode, replaceDirectoryChildren } from "./filePaths";
+import { useFilePanelSplit } from "./useFilePanelSplit";
 
 interface PreviewSelection {
   node: FileNode;
@@ -29,6 +30,7 @@ export function FilesPanel({ project, runtimeId }: {
   const previewIdRef = useRef<string | undefined>(undefined);
   const requestIdRef = useRef(0);
   const selectedNodeRef = useRef<FileNode | undefined>(undefined);
+  const { previewShare, beginResize, handleResizeKeyDown } = useFilePanelSplit();
 
   const releasePreview = useCallback((id?: string): void => {
     if (!id) return;
@@ -121,13 +123,30 @@ export function FilesPanel({ project, runtimeId }: {
   }
 
   return (
-    <div className={`files-workspace ${selection ? "has-preview" : ""}`}>
+    <div
+      className={`files-workspace ${selection ? "has-preview" : ""}`}
+      style={selection ? { gridTemplateColumns: `minmax(0, ${previewShare}fr) 7px minmax(0, ${1 - previewShare}fr)` } : undefined}
+    >
       {selection ? (
         <FilePreviewPane
           preview={selection.document}
           loading={selection.loading}
           error={selection.error}
           onClose={closePreview}
+        />
+      ) : null}
+      {selection ? (
+        <div
+          className="files-split-resizer"
+          role="separator"
+          tabIndex={0}
+          aria-label="调整文件预览与目录宽度"
+          aria-orientation="vertical"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(previewShare * 100)}
+          onPointerDown={beginResize}
+          onKeyDown={handleResizeKeyDown}
         />
       ) : null}
       <aside className="files-tree-region" aria-label="项目文件目录">

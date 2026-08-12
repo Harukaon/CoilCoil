@@ -63,7 +63,6 @@ import type {
   RuntimeConfiguration,
   RuntimeEvent,
   RuntimeInspectionSnapshot,
-  RuntimeContextItem,
   RuntimeSkillState,
   RuntimeToolDefinition,
   RuntimeSummaryEvent,
@@ -955,103 +954,6 @@ function estimatedTextTokens(value: unknown): number {
   } catch {
     return 0;
   }
-}
-
-function contentText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (!Array.isArray(value)) return "";
-  return value.map((item) => {
-    if (!isRecord(item)) return "";
-    if (typeof item.text === "string") return item.text;
-    if (typeof item.thinking === "string") return item.thinking;
-    if (item.type === "image") return "[图片]";
-    return "";
-  }).filter(Boolean).join("\n");
-}
-
-function contextPreview(value: unknown, maxLength = 180): string {
-  const text = typeof value === "string" ? value : contentText(value);
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function contextItemsFromMessages(messages: readonly unknown[]): RuntimeContextItem[] {
-  const items: RuntimeContextItem[] = [];
-  messages.forEach((raw, messageIndex) => {
-    if (!isRecord(raw)) return;
-    const role = stringValue(raw.role);
-    const timestamp = typeof raw.timestamp === "number" ? raw.timestamp : undefined;
-    const baseId = `context-${messageIndex}-${timestamp ?? messageIndex}`;
-    if (role === "assistant" && Array.isArray(raw.content)) {
-      raw.content.forEach((block, blockIndex) => {
-        if (!isRecord(block)) return;
-        if (block.type === "thinking") {
-          const thinking = stringValue(block.thinking);
-          items.push({
-            id: `${baseId}-thinking-${blockIndex}`,
-            kind: "reasoning",
-            label: "模型思考",
-            preview: contextPreview(thinking),
-            estimatedTokens: estimatedTextTokens(thinking),
-            active: true,
-            timestamp,
-          });
-        } else if (block.type === "toolCall") {
-          const toolName = stringValue(block.name) || "工具";
-          items.push({
-            id: `${baseId}-tool-${blockIndex}`,
-            kind: "tool_call",
-            label: `调用 ${toolName}`,
-            preview: contextPreview(block.arguments),
-            estimatedTokens: estimatedTextTokens({ name: toolName, arguments: block.arguments }),
-            active: true,
-            toolName,
-            timestamp,
-          });
-        } else if (block.type === "text") {
-          const text = stringValue(block.text);
-          if (!text) return;
-          items.push({
-            id: `${baseId}-text-${blockIndex}`,
-            kind: "assistant",
-            label: "模型回复",
-            preview: contextPreview(text),
-            estimatedTokens: estimatedTextTokens(text),
-            active: true,
-            timestamp,
-          });
-        }
-      });
-      return;
-    }
-    if (role === "toolResult") {
-      const toolName = stringValue(raw.toolName) || "工具";
-      items.push({
-        id: baseId,
-        kind: "tool_result",
-        label: `${toolName} 结果`,
-        preview: contextPreview(raw.content),
-        estimatedTokens: estimatedTextTokens(contentText(raw.content)),
-        active: true,
-        toolName,
-        timestamp,
-      });
-      return;
-    }
-    const text = contentText(raw.content);
-    const kind: RuntimeContextItem["kind"] = role === "user" ? "user" : role === "assistant" ? "assistant" : "custom";
-    items.push({
-      id: baseId,
-      kind,
-      label: role === "user" ? "用户消息" : role === "assistant" ? "模型回复" : "运行时消息",
-      preview: contextPreview(text || raw),
-      estimatedTokens: estimatedTextTokens(text || raw),
-      active: true,
-      timestamp,
-    });
-  });
-  return items;
 }
 
 async function shutdownAgentSession(
@@ -5006,7 +4908,6 @@ export class SuoCodeRuntime {
     const messages: readonly unknown[] = active.session.isStreaming && active.bridgeState?.contextMessages?.length
       ? active.bridgeState.contextMessages
       : active.session.messages;
-    const contextItems = contextItemsFromMessages(messages);
     const estimatedMessages = messages.reduce<number>((total, message) => {
       try {
         return total + estimateTokens(message as Parameters<typeof estimateTokens>[0]);
@@ -5072,7 +4973,6 @@ export class SuoCodeRuntime {
         total: usage.contextUsage?.tokens ?? (((systemPromptTokens ?? 0) + toolDefinitionTokens + estimatedMessages) || undefined),
       },
       cacheHitRate,
-      contextItems,
       tools,
       skills,
       mcp: active.mcpStatus,
