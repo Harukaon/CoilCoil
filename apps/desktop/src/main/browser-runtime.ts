@@ -15,6 +15,7 @@ interface BrowserTab {
   tabTargetId: string;
   pageTargetId: string;
   view: WebContentsView;
+  emulatedSize?: { width: number; height: number };
 }
 
 interface CdpRequest {
@@ -36,6 +37,7 @@ interface CdpClient {
   discover: boolean;
   autoAttach: boolean;
   sessions: Map<string, ClientTabSessions>;
+  directSessions: Map<string, string>;
   childSessions: Map<string, string>;
   debuggerListeners: Map<string, (...args: unknown[]) => void>;
 }
@@ -148,6 +150,21 @@ export class BrowserRuntimeManager {
   }
 
   async createTab(rawUrl?: string, activate = true): Promise<BrowserStateSnapshot> {
+    const tab = this.createTabRecord(activate);
+    const url = normalizedUrl(rawUrl);
+    await tab.view.webContents.loadURL(url);
+    this.finishTabCreation(tab);
+    return this.state();
+  }
+
+  /**
+   * Create and announce the target without waiting for navigation.
+   *
+   * A new Electron WebContents does not have a committed document yet. We keep
+   * it private until about:blank is ready so Puppeteer cannot issue Page/Runtime
+   * initialization commands against a half-created target.
+   */
+  private createTabRecord(activate: boolean): BrowserTab {
     const id = randomUUID();
     const view = new WebContentsView({
       webPreferences: {
@@ -168,11 +185,26 @@ export class BrowserRuntimeManager {
     this.installTabEvents(tab);
     this.attachDebugger(tab);
     if (activate || !this.activeTabId) this.activeTabId = id;
+    return tab;
+  }
+
+  private finishTabCreation(tab: BrowserTab): void {
     this.applyViewLayout();
     this.announceCreated(tab);
-    await view.webContents.loadURL(normalizedUrl(rawUrl));
     this.publish();
-    return this.state();
+  }
+
+  private async createCdpTab(rawUrl: string | undefined, activate: boolean): Promise<BrowserTab> {
+    const url = normalizedUrl(rawUrl);
+    const tab = this.createTabRecord(activate);
+    try {
+      await tab.view.webContents.loadURL(url);
+      this.finishTabCreation(tab);
+    } catch (error) {
+      this.closeTab(tab.id);
+      throw error;
+    }
+    return tab;
   }
 
   async ensureActiveTab(): Promise<BrowserTab> {
@@ -357,7 +389,7 @@ export class BrowserRuntimeManager {
   private acceptClient(socket: WebSocket): void {
     const client: CdpClient = {
       id: randomUUID(), socket, discover: false, autoAttach: false,
-      sessions: new Map(), childSessions: new Map(), debuggerListeners: new Map(),
+      sessions: new Map(), directSessions: new Map(), childSessions: new Map(), debuggerListeners: new Map(),
     };
     this.clients.set(client.id, client);
     this.onAgentActivated();
@@ -374,6 +406,7 @@ export class BrowserRuntimeManager {
       tab?.view.webContents.debugger.off("message", listener as never);
     }
     client.debuggerListeners.clear();
+    client.directSessions.clear();
     client.childSessions.clear();
   }
 
@@ -384,11 +417,18 @@ export class BrowserRuntimeManager {
       if (!sessions?.pageAttached) return;
       const payload = params && typeof params === "object" ? params as Record<string, unknown> : {};
       const childSessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
-      const outboundSessionId = sessionId && client.childSessions.get(sessionId) === tab.id
-        ? sessionId
-        : sessions.pageSessionId;
       if (method === "Target.attachedToTarget" && childSessionId) client.childSessions.set(childSessionId, tab.id);
-      this.send(client, { method, params: payload, sessionId: outboundSessionId });
+      if (sessionId && client.childSessions.get(sessionId) === tab.id) {
+        this.send(client, { method, params: payload, sessionId });
+      } else {
+        // Every flat CDP session attached to this target receives its own copy
+        // of page events. Lighthouse relies on those events while its
+        // short-lived session is active.
+        this.send(client, { method, params: payload, sessionId: sessions.pageSessionId });
+        for (const [directSessionId, tabId] of client.directSessions) {
+          if (tabId === tab.id) this.send(client, { method, params: payload, sessionId: directSessionId });
+        }
+      }
       if (method === "Target.detachedFromTarget" && childSessionId) client.childSessions.delete(childSessionId);
     };
     tab.view.webContents.debugger.on("message", listener);
@@ -422,11 +462,34 @@ export class BrowserRuntimeManager {
       if (request.method === "Runtime.runIfWaitingForDebugger") return {};
       if (request.method === "Target.detachFromTarget") return {};
     }
+    if (kind === "direct" && request.method === "Target.detachFromTarget") {
+      client.directSessions.delete(request.sessionId);
+      return {};
+    }
     if (request.method === "Browser.close") return {};
+    if (request.method === "Browser.getWindowForTarget") return this.windowForTab(tab);
+    if (request.method === "Browser.setContentsSize") return this.setContentsSize(tab, params);
+    if (request.method === "Emulation.clearDeviceMetricsOverride") delete tab.emulatedSize;
+    // Electron's page-level debugger does not currently expose Chrome's
+    // experimental WebMCP domain. Puppeteer initializes it optimistically and
+    // treats an unavailable domain as optional, but Electron can leave the
+    // command pending instead of returning a method-not-found response. Reply
+    // with an empty capability set so page initialization can finish.
+    if (request.method === "WebMCP.enable" || request.method === "WebMCP.disable") return {};
+    if (request.method === "WebMCP.invokeTool" || request.method === "WebMCP.cancelInvocation") {
+      throw new Error("内置浏览器暂不支持网页注册的 WebMCP 工具。");
+    }
     if (request.method === "Page.navigate" && typeof params.url === "string") normalizedUrl(params.url);
     this.attachDebugger(tab);
     const childSession = kind === "child" ? request.sessionId : undefined;
-    return tab.view.webContents.debugger.sendCommand(request.method, params, childSession);
+    try {
+      const result = await tab.view.webContents.debugger.sendCommand(request.method, params, childSession);
+      if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error("[browser-cdp] ✓", request.method, request.sessionId);
+      return result;
+    } catch (error) {
+      if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error("[browser-cdp] ✗", request.method, error);
+      throw error;
+    }
   }
 
   private async executeRootCommand(client: CdpClient, method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -455,11 +518,12 @@ export class BrowserRuntimeManager {
       return { targetInfo: this.findTargetInfo(requestedId) };
     }
     if (method === "Target.createTarget") {
-      const before = new Set(this.tabs.keys());
-      await this.createTab(typeof params.url === "string" ? params.url : undefined, params.background !== true);
-      const tab = [...this.tabs.values()].find((candidate) => !before.has(candidate.id));
-      if (!tab) throw new Error("创建浏览器标签页失败。");
-      return { targetId: tab.tabTargetId };
+      const tab = await this.createCdpTab(typeof params.url === "string" ? params.url : undefined, params.background !== true);
+      // CDP's Target.createTarget returns the page target. The synthetic `tab`
+      // target only exists to reproduce Chrome's parent/child auto-attach
+      // hierarchy; returning it makes Puppeteer wait for a PageTarget that can
+      // never be initialized and is the source of the 30 second new_page stall.
+      return { targetId: tab.pageTargetId };
     }
     if (method === "Target.activateTarget") {
       const tab = this.findTabByTarget(String(params.targetId ?? ""));
@@ -474,11 +538,50 @@ export class BrowserRuntimeManager {
     if (method === "Target.attachToTarget") {
       const tab = this.findTabByTarget(String(params.targetId ?? ""));
       if (!tab) throw new Error("目标标签页不存在。");
+      // Lighthouse and other consumers may open a temporary CDP session on a
+      // page that Puppeteer already owns. Reusing Puppeteer's persistent tab
+      // session means the temporary consumer's detach also invalidates the
+      // persistent session, after which restore-emulation commands never
+      // resolve. A real browser allocates a fresh flat session for every
+      // explicit page attachment, so mirror that behavior here.
+      if (params.targetId === tab.pageTargetId) {
+        const sessionId = `direct-session-${client.id.slice(0, 8)}-${randomUUID()}`;
+        client.directSessions.set(sessionId, tab.id);
+        this.send(client, {
+          method: "Target.attachedToTarget",
+          params: { sessionId, targetInfo: targetInfo(tab, "page"), waitingForDebugger: false },
+        });
+        return { sessionId };
+      }
       const sessions = this.ensureClientSessions(client, tab);
       this.attachTab(client, tab);
       return { sessionId: sessions.tabSessionId };
     }
+    if (method === "Target.detachFromTarget" && typeof params.sessionId === "string") {
+      client.directSessions.delete(params.sessionId);
+      return {};
+    }
     if (method === "Browser.close") return {};
+    if (method === "Browser.getWindowBounds") {
+      const tab = this.findTabByWindowId(params.windowId) ?? await this.ensureActiveTab();
+      return { bounds: this.windowBounds(tab) };
+    }
+    if (method === "Browser.setWindowBounds") {
+      const tab = this.findTabByWindowId(params.windowId) ?? await this.ensureActiveTab();
+      const bounds = params.bounds && typeof params.bounds === "object" ? params.bounds as Record<string, unknown> : {};
+      if (typeof bounds.width === "number" && typeof bounds.height === "number") {
+        await this.setContentsSize(tab, bounds);
+      }
+      return {};
+    }
+    if (method === "Browser.getWindowForTarget") {
+      const requested = typeof params.targetId === "string" ? this.findTabByTarget(params.targetId) : undefined;
+      return this.windowForTab(requested ?? await this.ensureActiveTab());
+    }
+    if (method === "Browser.setContentsSize") {
+      const tab = this.findTabByWindowId(params.windowId) ?? await this.ensureActiveTab();
+      return this.setContentsSize(tab, params);
+    }
     const tab = await this.ensureActiveTab();
     this.installDebuggerRelay(client, tab);
     this.attachDebugger(tab);
@@ -547,6 +650,9 @@ export class BrowserRuntimeManager {
       this.send(client, { method: "Target.targetDestroyed", params: { targetId: tab.tabTargetId } });
     }
     client.sessions.delete(tab.id);
+    for (const [sessionId, tabId] of client.directSessions) {
+      if (tabId === tab.id) client.directSessions.delete(sessionId);
+    }
     for (const [sessionId, tabId] of client.childSessions) {
       if (tabId === tab.id) client.childSessions.delete(sessionId);
     }
@@ -555,13 +661,17 @@ export class BrowserRuntimeManager {
     client.debuggerListeners.delete(tab.id);
   }
 
-  private tabForSession(client: CdpClient, sessionId: string): { tab: BrowserTab; sessions: ClientTabSessions; kind: "tab" | "page" | "child" } | undefined {
+  private tabForSession(client: CdpClient, sessionId: string): { tab: BrowserTab; sessions: ClientTabSessions; kind: "tab" | "page" | "direct" | "child" } | undefined {
     for (const [tabId, sessions] of client.sessions) {
       const tab = this.tabs.get(tabId);
       if (!tab) continue;
       if (sessions.tabSessionId === sessionId) return { tab, sessions, kind: "tab" };
       if (sessions.pageSessionId === sessionId) return { tab, sessions, kind: "page" };
     }
+    const directTabId = client.directSessions.get(sessionId);
+    const directTab = directTabId ? this.tabs.get(directTabId) : undefined;
+    const directSessions = directTabId ? client.sessions.get(directTabId) : undefined;
+    if (directTab && directSessions) return { tab: directTab, sessions: directSessions, kind: "direct" };
     const childTabId = client.childSessions.get(sessionId);
     const childTab = childTabId ? this.tabs.get(childTabId) : undefined;
     const childSessions = childTabId ? client.sessions.get(childTabId) : undefined;
@@ -584,6 +694,42 @@ export class BrowserRuntimeManager {
 
   private findTabByTarget(id: string): BrowserTab | undefined {
     return [...this.tabs.values()].find((tab) => tab.tabTargetId === id || tab.pageTargetId === id);
+  }
+
+  private findTabByWindowId(value: unknown): BrowserTab | undefined {
+    if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+    return [...this.tabs.values()].find((tab) => tab.view.webContents.id === value);
+  }
+
+  private windowBounds(tab: BrowserTab): Record<string, unknown> {
+    const visible = tab.emulatedSize ?? {
+      width: Math.max(1, this.browserCssBounds.width || BACKGROUND_VIEWPORT.width),
+      height: Math.max(1, this.browserCssBounds.height || BACKGROUND_VIEWPORT.height),
+    };
+    return { left: 0, top: 0, width: visible.width, height: visible.height, windowState: "normal" };
+  }
+
+  private windowForTab(tab: BrowserTab): Record<string, unknown> {
+    return { windowId: tab.view.webContents.id, bounds: this.windowBounds(tab) };
+  }
+
+  private async setContentsSize(tab: BrowserTab, params: Record<string, unknown>): Promise<Record<string, never>> {
+    const width = typeof params.width === "number" ? Math.round(params.width) : NaN;
+    const height = typeof params.height === "number" ? Math.round(params.height) : NaN;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1 || width > 16_384 || height > 16_384) {
+      throw new Error("浏览器视口尺寸无效。");
+    }
+    tab.emulatedSize = { width, height };
+    this.attachDebugger(tab);
+    await tab.view.webContents.debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
+      width,
+      height,
+      screenWidth: width,
+      screenHeight: height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    return {};
   }
 
   private send(client: CdpClient, value: Record<string, unknown>): void {

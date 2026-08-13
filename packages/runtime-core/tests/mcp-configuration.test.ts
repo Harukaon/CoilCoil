@@ -46,6 +46,7 @@ test("bundled browser MCP is injected only into the Agent capability view", () =
     args: ["/private/server.js", "--wsEndpoint", "ws://127.0.0.1/private"],
     env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1", ELECTRON_RUN_AS_NODE: "1" },
     lifecycle: "lazy-keep-alive",
+    requestTimeoutMs: 180_000,
     directTools: false,
     description: "控制 SuoCode 右侧面板中可见的内置浏览器。",
     builtin: true,

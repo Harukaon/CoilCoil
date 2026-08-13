@@ -271,6 +271,7 @@ class RuntimeHost {
             chromeDevtoolsMcpEntry(),
             "--wsEndpoint", primaryBrowserRuntime.endpoint(),
             "--wsHeaders", JSON.stringify({ Authorization: `Bearer ${primaryBrowserRuntime.token}` }),
+            "--allow-unrestricted-paths",
             "--no-usage-statistics",
             "--no-performance-crux",
           ]),

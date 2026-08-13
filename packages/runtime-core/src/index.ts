@@ -227,6 +227,7 @@ export function withBundledBrowserMcp(
           args,
           env,
           lifecycle: "lazy-keep-alive",
+          requestTimeoutMs: 180_000,
           directTools: false,
           description: "控制 SuoCode 右侧面板中可见的内置浏览器。",
           builtin: true,
