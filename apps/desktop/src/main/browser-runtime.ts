@@ -8,6 +8,7 @@ import { normalizeBrowserUrl } from "./browser-navigation";
 
 const DEFAULT_URL = "about:blank";
 const BROWSER_TARGET_ID = "suocode-browser";
+const BROWSER_CONTEXT_ID = "suocode-browser-context";
 const BACKGROUND_VIEWPORT: Rectangle = { x: 0, y: 0, width: 1280, height: 720 };
 const OFFSCREEN_VIEWPORT: Rectangle = { x: -16_384, y: -16_384, width: 1280, height: 720 };
 
@@ -16,6 +17,7 @@ interface BrowserTab {
   tabTargetId: string;
   pageTargetId: string;
   view: WebContentsView;
+  announced: boolean;
   emulatedSize?: { width: number; height: number };
 }
 
@@ -34,6 +36,7 @@ interface ClientTabSessions {
 
 interface CdpClient {
   id: string;
+  mode: "devtools" | "playwright";
   socket: WebSocket;
   discover: boolean;
   autoAttach: boolean;
@@ -52,7 +55,7 @@ function targetInfo(tab: BrowserTab, kind: "tab" | "page"): Record<string, unkno
     url: contents.getURL() || DEFAULT_URL,
     attached: true,
     canAccessOpener: false,
-    browserContextId: "",
+    browserContextId: BROWSER_CONTEXT_ID,
   };
 }
 
@@ -95,7 +98,9 @@ export class BrowserRuntimeManager {
     this.server.on("upgrade", (request, socket, head) => {
       const expected = Buffer.from(`Bearer ${this.token}`);
       const actual = Buffer.from(request.headers.authorization ?? "");
-      const authorized = request.url === `/devtools/browser/${this.pathToken}`
+      const authorizedPath = request.url === `/devtools/browser/${this.pathToken}`
+        || request.url === `/playwright/browser/${this.pathToken}`;
+      const authorized = authorizedPath
         && actual.length === expected.length
         && timingSafeEqual(actual, expected);
       if (!authorized) {
@@ -103,7 +108,8 @@ export class BrowserRuntimeManager {
         socket.destroy();
         return;
       }
-      this.socketServer.handleUpgrade(request, socket, head, (webSocket) => this.acceptClient(webSocket));
+      const mode = request.url?.startsWith(`/playwright/browser/${this.pathToken}`) ? "playwright" : "devtools";
+      this.socketServer.handleUpgrade(request, socket, head, (webSocket) => this.acceptClient(webSocket, mode));
     });
     this.window.on("resize", this.handleWindowLayoutChanged);
     this.window.webContents.on("zoom-changed", this.handleWindowLayoutChanged);
@@ -128,6 +134,11 @@ export class BrowserRuntimeManager {
     return `ws://127.0.0.1:${this.port}/devtools/browser/${this.pathToken}`;
   }
 
+  playwrightEndpoint(): string {
+    if (!this.port) throw new Error("内置浏览器 CDP 桥尚未启动。");
+    return `ws://127.0.0.1:${this.port}/playwright/browser/${this.pathToken}`;
+  }
+
   state(): BrowserStateSnapshot {
     return {
       tabs: [...this.tabs.values()].map((tab) => this.tabSnapshot(tab)),
@@ -139,7 +150,7 @@ export class BrowserRuntimeManager {
     const tab = this.createTabRecord(activate);
     const url = normalizeBrowserUrl(rawUrl);
     await tab.view.webContents.loadURL(url);
-    this.finishTabCreation(tab);
+    await this.finishTabCreation(tab);
     return this.state();
   }
 
@@ -165,7 +176,13 @@ export class BrowserRuntimeManager {
     view.setBounds(OFFSCREEN_VIEWPORT);
     view.setVisible(false);
     this.window.contentView.addChildView(view);
-    const tab: BrowserTab = { id, tabTargetId: `tab-${id}`, pageTargetId: `page-${id}`, view };
+    const tab: BrowserTab = {
+      id,
+      tabTargetId: `tab-${id}`,
+      pageTargetId: `pending-page-${id}`,
+      view,
+      announced: false,
+    };
     this.tabs.set(id, tab);
     this.installTabSecurity(tab);
     this.installTabEvents(tab);
@@ -174,10 +191,35 @@ export class BrowserRuntimeManager {
     return tab;
   }
 
-  private finishTabCreation(tab: BrowserTab): void {
+  private async finishTabCreation(tab: BrowserTab): Promise<void> {
+    await this.refreshPageTargetIdentity(tab);
+    tab.announced = true;
     this.applyViewLayout();
     this.announceCreated(tab);
     this.publish();
+  }
+
+  /**
+   * Use Chromium's real page target id instead of inventing one.
+   *
+   * Playwright correlates the page target, its main frame and execution
+   * contexts while constructing a Page. A synthetic target id lets the CDP
+   * connection open, but leaves the Page in a permanently half-initialized
+   * state (page.url() is empty and all semantic actions wait forever).
+   * Electron exposes the real identity through the debugger attached to this
+   * exact WebContents, so using it preserves both Playwright's invariants and
+   * SuoCode's single-WebContents isolation boundary.
+   */
+  private async refreshPageTargetIdentity(tab: BrowserTab): Promise<void> {
+    this.attachDebugger(tab);
+    const result = await tab.view.webContents.debugger.sendCommand("Target.getTargetInfo") as {
+      targetInfo?: { targetId?: unknown };
+    };
+    const targetId = result.targetInfo?.targetId;
+    if (typeof targetId !== "string" || targetId.length === 0) {
+      throw new Error("无法读取内置浏览器页面的真实 CDP target id。");
+    }
+    tab.pageTargetId = targetId;
   }
 
   private async createCdpTab(rawUrl: string | undefined, activate: boolean): Promise<BrowserTab> {
@@ -185,7 +227,7 @@ export class BrowserRuntimeManager {
     const tab = this.createTabRecord(activate);
     try {
       await tab.view.webContents.loadURL(url);
-      this.finishTabCreation(tab);
+      await this.finishTabCreation(tab);
     } catch (error) {
       this.closeTab(tab.id);
       throw error;
@@ -328,7 +370,9 @@ export class BrowserRuntimeManager {
     const contents = tab.view.webContents;
     const update = (): void => {
       this.publish();
-      for (const client of this.clients.values()) this.announceChanged(client, tab);
+      if (tab.announced) {
+        for (const client of this.clients.values()) this.announceChanged(client, tab);
+      }
     };
     contents.on("did-start-loading", update);
     contents.on("did-stop-loading", update);
@@ -372,9 +416,9 @@ export class BrowserRuntimeManager {
     }
   }
 
-  private acceptClient(socket: WebSocket): void {
+  private acceptClient(socket: WebSocket, mode: CdpClient["mode"]): void {
     const client: CdpClient = {
-      id: randomUUID(), socket, discover: false, autoAttach: false,
+      id: randomUUID(), mode, socket, discover: false, autoAttach: false,
       sessions: new Map(), directSessions: new Map(), childSessions: new Map(), debuggerListeners: new Map(),
     };
     this.clients.set(client.id, client);
@@ -481,7 +525,7 @@ export class BrowserRuntimeManager {
   }
 
   private async executeRootCommand(client: CdpClient, method: string, params: Record<string, unknown>): Promise<unknown> {
-    if (method === "Target.getBrowserContexts") return { browserContextIds: [] };
+    if (method === "Target.getBrowserContexts") return { browserContextIds: [BROWSER_CONTEXT_ID] };
     if (method === "Browser.getVersion") {
       const tab = await this.ensureActiveTab();
       this.installDebuggerRelay(client, tab);
@@ -500,7 +544,7 @@ export class BrowserRuntimeManager {
       if (client.autoAttach) for (const tab of this.tabs.values()) this.attachTab(client, tab);
       return {};
     }
-    if (method === "Target.getTargets") return { targetInfos: this.allTargetInfos() };
+    if (method === "Target.getTargets") return { targetInfos: this.allTargetInfos(client) };
     if (method === "Target.getTargetInfo") {
       const requestedId = typeof params.targetId === "string" ? params.targetId : BROWSER_TARGET_ID;
       return { targetInfo: this.findTargetInfo(requestedId) };
@@ -588,6 +632,15 @@ export class BrowserRuntimeManager {
 
   private attachTab(client: CdpClient, tab: BrowserTab): void {
     const sessions = this.ensureClientSessions(client, tab);
+    if (client.mode === "playwright") {
+      if (sessions.pageAttached) return;
+      sessions.pageAttached = true;
+      this.send(client, {
+        method: "Target.attachedToTarget",
+        params: { sessionId: sessions.pageSessionId, targetInfo: targetInfo(tab, "page"), waitingForDebugger: false },
+      });
+      return;
+    }
     this.send(client, {
       method: "Target.attachedToTarget",
       params: { sessionId: sessions.tabSessionId, targetInfo: targetInfo(tab, "tab"), waitingForDebugger: false },
@@ -607,16 +660,17 @@ export class BrowserRuntimeManager {
   private announceAllTargets(client: CdpClient): void {
     this.send(client, { method: "Target.targetCreated", params: { targetInfo: { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false } } });
     for (const tab of this.tabs.values()) {
-      this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
+      if (client.mode === "devtools") this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
       this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "page") } });
     }
   }
 
   private announceCreated(tab: BrowserTab): void {
+    if (!tab.announced) return;
     for (const client of this.clients.values()) {
       this.installDebuggerRelay(client, tab);
       if (client.discover) {
-        this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
+        if (client.mode === "devtools") this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
         this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "page") } });
       }
       if (client.autoAttach) this.attachTab(client, tab);
@@ -625,17 +679,17 @@ export class BrowserRuntimeManager {
 
   private announceChanged(client: CdpClient, tab: BrowserTab): void {
     if (!client.discover) return;
-    this.send(client, { method: "Target.targetInfoChanged", params: { targetInfo: targetInfo(tab, "tab") } });
+    if (client.mode === "devtools") this.send(client, { method: "Target.targetInfoChanged", params: { targetInfo: targetInfo(tab, "tab") } });
     this.send(client, { method: "Target.targetInfoChanged", params: { targetInfo: targetInfo(tab, "page") } });
   }
 
   private announceDestroyed(client: CdpClient, tab: BrowserTab): void {
     const sessions = client.sessions.get(tab.id);
     if (sessions?.pageAttached) this.send(client, { method: "Target.detachedFromTarget", sessionId: sessions.tabSessionId, params: { sessionId: sessions.pageSessionId, targetId: tab.pageTargetId } });
-    if (sessions) this.send(client, { method: "Target.detachedFromTarget", params: { sessionId: sessions.tabSessionId, targetId: tab.tabTargetId } });
+    if (sessions && client.mode === "devtools") this.send(client, { method: "Target.detachedFromTarget", params: { sessionId: sessions.tabSessionId, targetId: tab.tabTargetId } });
     if (client.discover) {
       this.send(client, { method: "Target.targetDestroyed", params: { targetId: tab.pageTargetId } });
-      this.send(client, { method: "Target.targetDestroyed", params: { targetId: tab.tabTargetId } });
+      if (client.mode === "devtools") this.send(client, { method: "Target.targetDestroyed", params: { targetId: tab.tabTargetId } });
     }
     client.sessions.delete(tab.id);
     for (const [sessionId, tabId] of client.directSessions) {
@@ -666,10 +720,12 @@ export class BrowserRuntimeManager {
     return childTab && childSessions ? { tab: childTab, sessions: childSessions, kind: "child" } : undefined;
   }
 
-  private allTargetInfos(): Array<Record<string, unknown>> {
+  private allTargetInfos(client?: CdpClient): Array<Record<string, unknown>> {
     return [
       { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false },
-      ...[...this.tabs.values()].flatMap((tab) => [targetInfo(tab, "tab"), targetInfo(tab, "page")]),
+      ...[...this.tabs.values()].flatMap((tab) => client?.mode === "playwright"
+        ? [targetInfo(tab, "page")]
+        : [targetInfo(tab, "tab"), targetInfo(tab, "page")]),
     ];
   }
 

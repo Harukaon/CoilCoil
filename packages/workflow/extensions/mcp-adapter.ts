@@ -6,9 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { createJiti } from "jiti";
 import { createRequire } from "node:module";
-import { existsSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join } from "node:path";
 
 const jiti = createJiti(import.meta.url);
 interface McpAdapterConfiguration {
@@ -78,58 +76,6 @@ type McpProxyTool = ToolDefinition<any, unknown, unknown>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function safeRealPath(path: string): string {
-  const missing: string[] = [];
-  let existing = resolve(path);
-  while (!existsSync(existing)) {
-    const parent = dirname(existing);
-    if (parent === existing) return resolve(path);
-    missing.unshift(existing.slice(parent.length + 1));
-    existing = parent;
-  }
-  try {
-    return resolve(realpathSync(existing), ...missing);
-  } catch {
-    return resolve(path);
-  }
-}
-
-function inside(root: string, candidate: string): boolean {
-  const path = safeRealPath(candidate);
-  const rel = relative(safeRealPath(root), path);
-  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`));
-}
-
-function filePaths(value: unknown, key = ""): string[] {
-  if (typeof value === "string") return /path$/i.test(key) ? [value] : [];
-  if (Array.isArray(value)) return value.flatMap((entry) => filePaths(entry, key));
-  if (!isRecord(value)) return [];
-  return Object.entries(value).flatMap(([nestedKey, nested]) => filePaths(nested, nestedKey));
-}
-
-function browserMcpArguments(params: unknown): unknown {
-  if (!isRecord(params)) return {};
-  if (isRecord(params.args)) return params.args;
-  if (typeof params.args !== "string") return {};
-  try {
-    return JSON.parse(params.args) as unknown;
-  } catch {
-    return {};
-  }
-}
-
-/** Keep Chrome DevTools MCP's unrestricted mode capability-scoped to this session. */
-export function browserMcpPathViolation(cwd: string, args: unknown): string | undefined {
-  const temporaryRoots = process.platform === "win32" ? [tmpdir()] : [tmpdir(), "/tmp"];
-  for (const path of filePaths(args)) {
-    if (!isAbsolute(path)) return `内置浏览器的文件路径必须是绝对路径：${path}`;
-    if (!inside(cwd, path) && !temporaryRoots.some((root) => inside(root, path))) {
-      return `内置浏览器只能访问当前工作区或临时目录：${path}`;
-    }
-  }
-  return undefined;
 }
 
 export function registeredMcpConfiguration(events: object): McpAdapterConfiguration | undefined {
@@ -342,10 +288,6 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
       execute: (async (...args: Parameters<McpProxyTool["execute"]>) => {
         const server = requestedMcpServer(args[1], serverProxyTools);
         if (server && sessionDisabledServers.has(server)) return blockedServerResult(server);
-        if (server === "suocode-browser" && context) {
-          const violation = browserMcpPathViolation(context.cwd, browserMcpArguments(args[1]));
-          if (violation) return { content: [{ type: "text", text: violation }], details: { mode: "path-policy", server, violation }, isError: true };
-        }
         const result = await tool.execute(...args) as McpProxyResult;
         if (server) rememberServerTools(server, result.details);
         if (isRecord(result.details) && result.details.mode === "status") {
@@ -377,9 +319,6 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
     if (sessionDisabledServers.has(raw.serverName)) {
       raw.claim(() => "deny");
       return;
-    }
-    if (raw.serverName === "suocode-browser" && context && browserMcpPathViolation(context.cwd, raw.args)) {
-      raw.claim(() => "deny");
     }
   });
 

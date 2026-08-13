@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  browserMcpPathViolation,
   decorateMcpStatusForSession,
   registeredMcpConfiguration,
   requestedMcpServer,
 } from "../extensions/mcp-adapter.ts";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 test("MCP adapter receives the Agent-only configuration registered for this session", () => {
   const symbol = Symbol.for("suocode-workflow.mcp-agent-config-registry");
@@ -37,16 +34,6 @@ test("session MCP policy resolves explicit and direct-tool server targets", () =
   assert.equal(requestedMcpServer({ connect: "browser" }, tools), "browser");
   assert.equal(requestedMcpServer({ tool: "docs_search" }, tools), "docs");
   assert.equal(requestedMcpServer({ tool: "unknown" }, tools), undefined);
-});
-
-test("bundled browser file access stays inside the current workspace or temporary directory", () => {
-  const cwd = join(tmpdir(), "suocode-workspace");
-  assert.equal(browserMcpPathViolation(cwd, { filePath: join(cwd, "trace.heapsnapshot") }), undefined);
-  assert.equal(browserMcpPathViolation(cwd, { outputDirPath: join(tmpdir(), "reports") }), undefined);
-  if (process.platform !== "win32") assert.equal(browserMcpPathViolation(cwd, { filePath: "/tmp/browser.heapsnapshot" }), undefined);
-  assert.match(browserMcpPathViolation(cwd, { filePath: "relative.heapsnapshot" }) ?? "", /必须是绝对路径/);
-  assert.match(browserMcpPathViolation(cwd, { filePath: "/etc/passwd" }) ?? "", /只能访问当前工作区或临时目录/);
-  assert.equal(browserMcpPathViolation(cwd, { url: "https://example.com/path" }), undefined);
 });
 
 test("session MCP status excludes only this session's disabled servers", () => {

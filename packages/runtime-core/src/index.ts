@@ -208,30 +208,71 @@ export function withBundledBrowserMcp(
   configuration: McpAdapterEffectiveConfig,
   environment: NodeJS.ProcessEnv = process.env,
 ): McpAdapterEffectiveConfig {
-  const command = environment.SUOCODE_BROWSER_MCP_COMMAND?.trim();
-  const rawArgs = environment.SUOCODE_BROWSER_MCP_ARGS;
-  if (!command || !rawArgs) return configuration;
-  try {
+  const parseServer = (
+    commandKey: string,
+    argsKey: string,
+    envKey: string,
+  ): { command: string; args: string[]; env: Record<string, string> } | undefined => {
+    const command = environment[commandKey]?.trim();
+    const rawArgs = environment[argsKey];
+    if (!command || !rawArgs) return undefined;
     const args = JSON.parse(rawArgs) as unknown;
-    const env = environment.SUOCODE_BROWSER_MCP_ENV
-      ? JSON.parse(environment.SUOCODE_BROWSER_MCP_ENV) as unknown
+    const env = environment[envKey]
+      ? JSON.parse(environment[envKey] as string) as unknown
       : {};
-    if (!Array.isArray(args) || !args.every((value) => typeof value === "string")) return configuration;
-    if (!env || typeof env !== "object" || Array.isArray(env) || !Object.values(env).every((value) => typeof value === "string")) return configuration;
+    if (!Array.isArray(args) || !args.every((value) => typeof value === "string")) return undefined;
+    if (!env || typeof env !== "object" || Array.isArray(env) || !Object.values(env).every((value) => typeof value === "string")) return undefined;
+    return { command, args, env: env as Record<string, string> };
+  };
+
+  try {
+    const semantic = parseServer("SUOCODE_BROWSER_MCP_COMMAND", "SUOCODE_BROWSER_MCP_ARGS", "SUOCODE_BROWSER_MCP_ENV");
+    const devtools = parseServer("SUOCODE_BROWSER_DEVTOOLS_MCP_COMMAND", "SUOCODE_BROWSER_DEVTOOLS_MCP_ARGS", "SUOCODE_BROWSER_DEVTOOLS_MCP_ENV");
+    if (!semantic && !devtools) return configuration;
     return {
       ...configuration,
       mcpServers: {
         ...configuration.mcpServers,
-        "suocode-browser": {
-          command,
-          args,
-          env,
+        ...(semantic ? { "suocode-browser": {
+          ...semantic,
           lifecycle: "lazy-keep-alive",
           requestTimeoutMs: 180_000,
-          directTools: false,
-          description: "控制 SuoCode 右侧面板中可见的内置浏览器。",
+          directTools: [
+            "browser_click",
+            "browser_console_messages",
+            "browser_drag",
+            "browser_evaluate",
+            "browser_file_upload",
+            "browser_fill_form",
+            "browser_find",
+            "browser_handle_dialog",
+            "browser_hover",
+            "browser_mouse_wheel",
+            "browser_navigate",
+            "browser_navigate_back",
+            "browser_network_request",
+            "browser_network_requests",
+            "browser_press_key",
+            "browser_resize",
+            "browser_select_option",
+            "browser_snapshot",
+            "browser_tabs",
+            "browser_take_screenshot",
+            "browser_type",
+            "browser_wait_for",
+          ],
+          toolPrefix: "none",
+          description: "以 Playwright 的语义化定位、自动等待和可执行性检查控制 SuoCode 右侧可见网页。",
           builtin: true,
-        },
+        } } : {}),
+        ...(devtools ? { "suocode-browser-devtools": {
+          ...devtools,
+          lifecycle: "lazy-keep-alive",
+          requestTimeoutMs: 300_000,
+          directTools: false,
+          description: "按需提供 SuoCode 内置浏览器的网络、性能、内存、Lighthouse 等高级调试能力。",
+          builtin: true,
+        } } : {}),
       },
     };
   } catch {

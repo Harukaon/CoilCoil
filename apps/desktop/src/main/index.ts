@@ -51,6 +51,14 @@ function chromeDevtoolsMcpEntry(): string {
   return existsSync(unpacked) ? unpacked : resolved;
 }
 
+function playwrightMcpEntry(): string {
+  const packageJson = moduleRequire.resolve("@playwright/mcp/package.json");
+  const resolved = join(dirname(packageJson), "cli.js");
+  if (!app.isPackaged) return resolved;
+  const unpacked = resolved.replace(`${join("app.asar", "node_modules")}`, `${join("app.asar.unpacked", "node_modules")}`);
+  return existsSync(unpacked) ? unpacked : resolved;
+}
+
 function backgroundNodeExecutable(): string {
   const executableName = basename(process.execPath);
   const macHelperExecutable = join(dirname(dirname(process.execPath)), "Frameworks", `${executableName} Helper.app`, "Contents", "MacOS", `${executableName} Helper`);
@@ -268,6 +276,20 @@ class RuntimeHost {
         ...(primaryBrowserRuntime ? {
           SUOCODE_BROWSER_MCP_COMMAND: nodeExecutable,
           SUOCODE_BROWSER_MCP_ARGS: JSON.stringify([
+            playwrightMcpEntry(),
+            "--cdp-endpoint", primaryBrowserRuntime.playwrightEndpoint(),
+            "--cdp-header", `Authorization: Bearer ${primaryBrowserRuntime.token}`,
+            "--allow-unrestricted-file-access",
+            "--output-dir", join(app.getPath("userData"), "browser-artifacts", "playwright"),
+            "--caps", "vision,pdf,devtools",
+            "--codegen", "none",
+          ]),
+          SUOCODE_BROWSER_MCP_ENV: JSON.stringify({
+            ELECTRON_RUN_AS_NODE: "1",
+            PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1",
+          }),
+          SUOCODE_BROWSER_DEVTOOLS_MCP_COMMAND: nodeExecutable,
+          SUOCODE_BROWSER_DEVTOOLS_MCP_ARGS: JSON.stringify([
             chromeDevtoolsMcpEntry(),
             "--wsEndpoint", primaryBrowserRuntime.endpoint(),
             "--wsHeaders", JSON.stringify({ Authorization: `Bearer ${primaryBrowserRuntime.token}` }),
@@ -275,7 +297,7 @@ class RuntimeHost {
             "--no-usage-statistics",
             "--no-performance-crux",
           ]),
-          SUOCODE_BROWSER_MCP_ENV: JSON.stringify({
+          SUOCODE_BROWSER_DEVTOOLS_MCP_ENV: JSON.stringify({
             CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1",
             CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
             ELECTRON_RUN_AS_NODE: "1",
@@ -413,6 +435,13 @@ async function createWindow(): Promise<void> {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL);
   });
   await browserRuntime.start();
+  if (process.env.SUOCODE_BROWSER_PROBE_LOG === "1") {
+    console.error("[browser-probe]", JSON.stringify({
+      devtoolsEndpoint: browserRuntime.endpoint(),
+      playwrightEndpoint: browserRuntime.playwrightEndpoint(),
+      token: browserRuntime.token,
+    }));
+  }
   const ownerWebContentsId = mainWindow.webContents.id;
   browserRuntimes.set(ownerWebContentsId, browserRuntime);
   primaryBrowserRuntime ??= browserRuntime;

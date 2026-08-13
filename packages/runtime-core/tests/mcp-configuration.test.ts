@@ -33,22 +33,42 @@ test("Agent MCP configuration contains enabled servers only", () => {
   ]);
 });
 
-test("bundled browser MCP is injected only into the Agent capability view", () => {
+test("bundled browser MCP layers are injected only into the Agent capability view", () => {
   const source: { mcpServers: Record<string, Record<string, unknown>> } = { mcpServers: { ordinary: { command: "ordinary" } } };
   const result = withBundledBrowserMcp(source, {
     SUOCODE_BROWSER_MCP_COMMAND: "/private/node",
-    SUOCODE_BROWSER_MCP_ARGS: JSON.stringify(["/private/server.js", "--wsEndpoint", "ws://127.0.0.1/private"]),
-    SUOCODE_BROWSER_MCP_ENV: JSON.stringify({ CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1", ELECTRON_RUN_AS_NODE: "1" }),
+    SUOCODE_BROWSER_MCP_ARGS: JSON.stringify(["/private/playwright.js", "--cdp-endpoint", "ws://127.0.0.1/playwright"]),
+    SUOCODE_BROWSER_MCP_ENV: JSON.stringify({ ELECTRON_RUN_AS_NODE: "1" }),
+    SUOCODE_BROWSER_DEVTOOLS_MCP_COMMAND: "/private/node",
+    SUOCODE_BROWSER_DEVTOOLS_MCP_ARGS: JSON.stringify(["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools"]),
+    SUOCODE_BROWSER_DEVTOOLS_MCP_ENV: JSON.stringify({ CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", ELECTRON_RUN_AS_NODE: "1" }),
   });
   assert.equal(source.mcpServers["suocode-browser"], undefined);
   assert.deepEqual(result.mcpServers["suocode-browser"], {
     command: "/private/node",
-    args: ["/private/server.js", "--wsEndpoint", "ws://127.0.0.1/private"],
-    env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1", ELECTRON_RUN_AS_NODE: "1" },
+    args: ["/private/playwright.js", "--cdp-endpoint", "ws://127.0.0.1/playwright"],
+    env: { ELECTRON_RUN_AS_NODE: "1" },
     lifecycle: "lazy-keep-alive",
     requestTimeoutMs: 180_000,
+    directTools: [
+      "browser_click", "browser_console_messages", "browser_drag", "browser_evaluate", "browser_file_upload",
+      "browser_fill_form", "browser_find", "browser_handle_dialog", "browser_hover", "browser_mouse_wheel",
+      "browser_navigate", "browser_navigate_back", "browser_network_request", "browser_network_requests",
+      "browser_press_key", "browser_resize", "browser_select_option", "browser_snapshot", "browser_tabs",
+      "browser_take_screenshot", "browser_type", "browser_wait_for",
+    ],
+    toolPrefix: "none",
+    description: "以 Playwright 的语义化定位、自动等待和可执行性检查控制 SuoCode 右侧可见网页。",
+    builtin: true,
+  });
+  assert.deepEqual(result.mcpServers["suocode-browser-devtools"], {
+    command: "/private/node",
+    args: ["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools"],
+    env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", ELECTRON_RUN_AS_NODE: "1" },
+    lifecycle: "lazy-keep-alive",
+    requestTimeoutMs: 300_000,
     directTools: false,
-    description: "控制 SuoCode 右侧面板中可见的内置浏览器。",
+    description: "按需提供 SuoCode 内置浏览器的网络、性能、内存、Lighthouse 等高级调试能力。",
     builtin: true,
   });
 });

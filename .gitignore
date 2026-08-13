@@ -10,6 +10,7 @@ apps/desktop/build/icon.iconset/
 coverage/
 apps/desktop/out/
 apps/desktop/release/
+.playwright-mcp/
 
 .env
 .env.*

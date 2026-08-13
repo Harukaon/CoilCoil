@@ -78,7 +78,7 @@ try {
       arguments: { mode: "snapshot", device: "desktop" },
     }, 180_000);
   }
-  const summary = (result) => result.content?.map((item) => item.type === "text"
+  const summary = (result) => result?.content?.map((item) => item.type === "text"
     ? { type: item.type, text: item.text.slice(0, 1_000) }
     : { type: item.type, mimeType: item.mimeType, bytes: item.data?.length ?? item.blob?.length ?? 0, keys: Object.keys(item) });
   process.stdout.write(`${JSON.stringify({

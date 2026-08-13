@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
+    "@playwright/mcp": "0.0.79",
     "@radix-ui/react-context-menu": "^2.3.7",
     "@radix-ui/react-popover": "^1.1.23",
     "@suocode/openai-responses-ws": "0.1.0",
@@ -54,6 +55,9 @@
     "asarUnpack": [
       "**/node-pty/**",
       "**/@silvia-odwyer/photon-node/**",
+      "**/@playwright/mcp/**",
+      "**/playwright/**",
+      "**/playwright-core/**",
       "**/chrome-devtools-mcp/**"
     ],
     "files": [
