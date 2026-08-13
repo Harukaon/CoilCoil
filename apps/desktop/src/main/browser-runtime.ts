@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { BrowserWindow, WebContentsView, type Rectangle, type WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import type { BrowserStateSnapshot, BrowserTabSnapshot, BrowserViewBounds } from "../shared/desktop-api";
+import { browserCssBoundsToDip } from "./browser-bounds";
 
 const DEFAULT_URL = "about:blank";
 const BROWSER_TARGET_ID = "suocode-browser";
@@ -89,8 +90,9 @@ export class BrowserRuntimeManager {
   private readonly socketServer: WebSocketServer;
   private port?: number;
   private activeTabId?: string;
-  private browserBounds: BrowserViewBounds = { x: 0, y: 0, width: 0, height: 0, visible: false };
+  private browserCssBounds: BrowserViewBounds = { x: 0, y: 0, width: 0, height: 0, visible: false };
   private disposed = false;
+  private readonly handleWindowLayoutChanged = (): void => this.applyViewLayout();
 
   constructor(
     private readonly window: BrowserWindow,
@@ -115,6 +117,8 @@ export class BrowserRuntimeManager {
       }
       this.socketServer.handleUpgrade(request, socket, head, (webSocket) => this.acceptClient(webSocket));
     });
+    this.window.on("resize", this.handleWindowLayoutChanged);
+    this.window.webContents.on("zoom-changed", this.handleWindowLayoutChanged);
   }
 
   async start(): Promise<void> {
@@ -235,7 +239,7 @@ export class BrowserRuntimeManager {
   setBounds(bounds: BrowserViewBounds): void {
     const finite = [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite);
     if (!finite) return;
-    this.browserBounds = {
+    this.browserCssBounds = {
       x: Math.max(0, Math.round(bounds.x)),
       y: Math.max(0, Math.round(bounds.y)),
       width: Math.max(0, Math.round(bounds.width)),
@@ -248,6 +252,10 @@ export class BrowserRuntimeManager {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    if (!this.window.isDestroyed()) {
+      this.window.off("resize", this.handleWindowLayoutChanged);
+      this.window.webContents.off("zoom-changed", this.handleWindowLayoutChanged);
+    }
     for (const client of this.clients.values()) client.socket.close(1001, "SuoCode 正在关闭");
     this.clients.clear();
     for (const tab of [...this.tabs.values()]) this.closeTab(tab.id);
@@ -318,14 +326,21 @@ export class BrowserRuntimeManager {
   }
 
   private applyViewLayout(): void {
+    if (this.window.isDestroyed()) return;
+    const [contentWidth, contentHeight] = this.window.getContentSize();
+    const nativeBounds = browserCssBoundsToDip(
+      this.browserCssBounds,
+      this.window.webContents.getZoomFactor(),
+      { width: contentWidth, height: contentHeight },
+    );
     const bounds: Rectangle = {
-      x: this.browserBounds.x,
-      y: this.browserBounds.y,
-      width: this.browserBounds.width,
-      height: this.browserBounds.height,
+      x: nativeBounds.x,
+      y: nativeBounds.y,
+      width: nativeBounds.width,
+      height: nativeBounds.height,
     };
     for (const tab of this.tabs.values()) {
-      const active = tab.id === this.activeTabId && this.browserBounds.visible && bounds.width > 0 && bounds.height > 0;
+      const active = tab.id === this.activeTabId && nativeBounds.visible && bounds.width > 0 && bounds.height > 0;
       if (active) {
         tab.view.setBounds(bounds);
         tab.view.setVisible(true);
