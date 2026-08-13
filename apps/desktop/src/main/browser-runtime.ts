@@ -4,6 +4,7 @@ import { BrowserWindow, WebContentsView, type Rectangle, type WebContents } from
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import type { BrowserStateSnapshot, BrowserTabSnapshot, BrowserViewBounds } from "../shared/desktop-api";
 import { browserCssBoundsToDip } from "./browser-bounds";
+import { normalizeBrowserUrl } from "./browser-navigation";
 
 const DEFAULT_URL = "about:blank";
 const BROWSER_TARGET_ID = "suocode-browser";
@@ -40,21 +41,6 @@ interface CdpClient {
   directSessions: Map<string, string>;
   childSessions: Map<string, string>;
   debuggerListeners: Map<string, (...args: unknown[]) => void>;
-}
-
-function normalizedUrl(raw: string | undefined): string {
-  const value = raw?.trim();
-  if (!value) return DEFAULT_URL;
-  if (/^about:blank$/i.test(value)) return DEFAULT_URL;
-  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)) {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("内置浏览器只允许 HTTP 或 HTTPS 地址。");
-    return parsed.toString();
-  }
-  const candidate = value.includes(".") && !value.includes(" ")
-    ? `https://${value}`
-    : `https://www.google.com/search?q=${encodeURIComponent(value)}`;
-  return new URL(candidate).toString();
 }
 
 function targetInfo(tab: BrowserTab, kind: "tab" | "page"): Record<string, unknown> {
@@ -151,7 +137,7 @@ export class BrowserRuntimeManager {
 
   async createTab(rawUrl?: string, activate = true): Promise<BrowserStateSnapshot> {
     const tab = this.createTabRecord(activate);
-    const url = normalizedUrl(rawUrl);
+    const url = normalizeBrowserUrl(rawUrl);
     await tab.view.webContents.loadURL(url);
     this.finishTabCreation(tab);
     return this.state();
@@ -195,7 +181,7 @@ export class BrowserRuntimeManager {
   }
 
   private async createCdpTab(rawUrl: string | undefined, activate: boolean): Promise<BrowserTab> {
-    const url = normalizedUrl(rawUrl);
+    const url = normalizeBrowserUrl(rawUrl);
     const tab = this.createTabRecord(activate);
     try {
       await tab.view.webContents.loadURL(url);
@@ -246,7 +232,7 @@ export class BrowserRuntimeManager {
 
   async navigate(rawUrl: string): Promise<BrowserStateSnapshot> {
     const tab = await this.ensureActiveTab();
-    await tab.view.webContents.loadURL(normalizedUrl(rawUrl));
+    await tab.view.webContents.loadURL(normalizeBrowserUrl(rawUrl));
     return this.state();
   }
 
@@ -320,7 +306,7 @@ export class BrowserRuntimeManager {
     contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     contents.setWindowOpenHandler(({ url }) => {
       try {
-        normalizedUrl(url);
+        normalizeBrowserUrl(url);
         void this.createTab(url).catch((error) => console.error("[browser] 打开新标签页失败", error));
       } catch {
         // Keep unsupported protocols inside the browser sandbox.
@@ -329,7 +315,7 @@ export class BrowserRuntimeManager {
     });
     const guardNavigation = (event: Electron.Event, url: string): void => {
       try {
-        normalizedUrl(url);
+        normalizeBrowserUrl(url);
       } catch {
         event.preventDefault();
       }
@@ -479,7 +465,9 @@ export class BrowserRuntimeManager {
     if (request.method === "WebMCP.invokeTool" || request.method === "WebMCP.cancelInvocation") {
       throw new Error("内置浏览器暂不支持网页注册的 WebMCP 工具。");
     }
-    if (request.method === "Page.navigate" && typeof params.url === "string") normalizedUrl(params.url);
+    if (request.method === "Page.navigate" && typeof params.url === "string") {
+      params.url = normalizeBrowserUrl(params.url);
+    }
     this.attachDebugger(tab);
     const childSession = kind === "child" ? request.sessionId : undefined;
     try {
