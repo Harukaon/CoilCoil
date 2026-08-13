@@ -1,6 +1,7 @@
 import {
   BrainCircuit,
   Files,
+  Globe2,
   PanelLeft,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -36,12 +37,13 @@ import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/ses
 import { FilesPanel } from "./features/files/FilesPanel";
 import { InspectorPane } from "./features/inspector/InspectorPane";
 import { RuntimePanel } from "./features/runtime/RuntimePanel";
+import { BrowserPanel } from "./features/browser/BrowserPanel";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
 import { toastError, toastInfo, toastSuccess } from "./ui/toast";
 
-type InspectorView = "files" | "runtime";
+type InspectorView = "files" | "browser" | "runtime";
 type WorkspaceSurface = "conversation" | "skills";
 
 const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
@@ -117,6 +119,11 @@ export default function App(): React.JSX.Element {
   const [startingSession, setStartingSession] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const { leftOpen, rightOpen, leftWidth, rightWidth, setLeftOpen, setRightOpen, beginResize } = usePanelLayout();
+
+  useEffect(() => window.suocode.onBrowserAgentActivated(() => {
+    setInspectorView("browser");
+    setRightOpen(true);
+  }), [setRightOpen]);
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
   const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -724,6 +731,7 @@ export default function App(): React.JSX.Element {
 
   const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof Files }> = [
     { id: "files", label: "文件", icon: Files },
+    { id: "browser", label: "浏览器", icon: Globe2 },
     { id: "runtime", label: "运行时", icon: BrainCircuit },
   ];
 
@@ -847,8 +855,10 @@ export default function App(): React.JSX.Element {
           tabs={inspectorItems}
           activeTab={inspectorView}
           onSelectTab={setInspectorView}
-          onRefresh={() => void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}
-          refreshDisabled={!snapshot}
+          onRefresh={() => inspectorView === "browser"
+            ? void window.suocode.reloadBrowser()
+            : void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}
+          refreshDisabled={inspectorView !== "browser" && !snapshot}
           onClose={() => setRightOpen(false)}
         >
           <div className={`inspector-tab-panel files-tab-panel ${inspectorView === "files" ? "active" : ""}`}>
@@ -856,6 +866,9 @@ export default function App(): React.JSX.Element {
           </div>
           <div className={`inspector-tab-panel runtime-tab-panel ${inspectorView === "runtime" ? "active" : ""}`}>
             <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} />
+          </div>
+          <div className={`inspector-tab-panel browser-tab-panel ${inspectorView === "browser" ? "active" : ""}`}>
+            <BrowserPanel active={rightOpen && inspectorView === "browser"} />
           </div>
         </InspectorPane>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}

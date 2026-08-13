@@ -3,6 +3,8 @@ import type { RuntimeCommand, RuntimeEvent } from "@suocode/runtime-protocol";
 import type { FileNode } from "@suocode/runtime-protocol";
 import type {
   DesktopPlatform,
+  BrowserStateSnapshot,
+  BrowserViewBounds,
   FilePreviewDocument,
   OpenFilePreviewInput,
   OpenFilePreviewResult,
@@ -28,6 +30,17 @@ const PREVIEW_CLOSE_CHANNEL = "preview:close";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
+const BROWSER_STATE_CHANNEL = "browser:state";
+const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
+const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
+const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
+const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
+const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
+const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
+const BROWSER_BACK_CHANNEL = "browser:back";
+const BROWSER_FORWARD_CHANNEL = "browser:forward";
+const BROWSER_RELOAD_CHANNEL = "browser:reload";
+const BROWSER_BOUNDS_CHANNEL = "browser:bounds";
 
 const platform = ((): DesktopPlatform => {
   if (process.platform === "darwin") return "darwin";
@@ -61,6 +74,25 @@ const api: SuoCodeDesktopApi = {
     return () => ipcRenderer.removeListener(PREVIEW_UPDATED_CHANNEL, handler);
   },
   listProjectDirectory: (root: string, path?: string) => ipcRenderer.invoke(PROJECT_DIRECTORY_LIST_CHANNEL, root, path) as Promise<FileNode[]>,
+  getBrowserState: () => ipcRenderer.invoke(BROWSER_GET_STATE_CHANNEL) as Promise<BrowserStateSnapshot>,
+  createBrowserTab: (url?: string) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, url) as Promise<BrowserStateSnapshot>,
+  selectBrowserTab: (id: string) => ipcRenderer.invoke(BROWSER_SELECT_TAB_CHANNEL, id) as Promise<BrowserStateSnapshot>,
+  closeBrowserTab: (id: string) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, id) as Promise<BrowserStateSnapshot>,
+  navigateBrowser: (url: string) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, url) as Promise<BrowserStateSnapshot>,
+  browserBack: () => ipcRenderer.invoke(BROWSER_BACK_CHANNEL) as Promise<BrowserStateSnapshot>,
+  browserForward: () => ipcRenderer.invoke(BROWSER_FORWARD_CHANNEL) as Promise<BrowserStateSnapshot>,
+  reloadBrowser: () => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL) as Promise<BrowserStateSnapshot>,
+  setBrowserViewBounds: (bounds: BrowserViewBounds) => ipcRenderer.invoke(BROWSER_BOUNDS_CHANNEL, bounds) as Promise<void>,
+  onBrowserStateUpdated: (listener: (state: BrowserStateSnapshot) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: BrowserStateSnapshot): void => listener(state);
+    ipcRenderer.on(BROWSER_STATE_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(BROWSER_STATE_CHANNEL, handler);
+  },
+  onBrowserAgentActivated: (listener: () => void) => {
+    const handler = (): void => listener();
+    ipcRenderer.on(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
+  },
   request: async <T>(command: RuntimeCommand, runtimeId?: string): Promise<T> => {
     const result = await ipcRenderer.invoke(
       RUNTIME_REQUEST_CHANNEL,

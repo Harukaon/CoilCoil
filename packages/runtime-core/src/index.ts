@@ -203,6 +203,41 @@ export function mcpConfigurationForAgent(
   };
 }
 
+/** Add SuoCode-owned capabilities to Pi without writing them to user MCP files. */
+export function withBundledBrowserMcp(
+  configuration: McpAdapterEffectiveConfig,
+  environment: NodeJS.ProcessEnv = process.env,
+): McpAdapterEffectiveConfig {
+  const command = environment.SUOCODE_BROWSER_MCP_COMMAND?.trim();
+  const rawArgs = environment.SUOCODE_BROWSER_MCP_ARGS;
+  if (!command || !rawArgs) return configuration;
+  try {
+    const args = JSON.parse(rawArgs) as unknown;
+    const env = environment.SUOCODE_BROWSER_MCP_ENV
+      ? JSON.parse(environment.SUOCODE_BROWSER_MCP_ENV) as unknown
+      : {};
+    if (!Array.isArray(args) || !args.every((value) => typeof value === "string")) return configuration;
+    if (!env || typeof env !== "object" || Array.isArray(env) || !Object.values(env).every((value) => typeof value === "string")) return configuration;
+    return {
+      ...configuration,
+      mcpServers: {
+        ...configuration.mcpServers,
+        "suocode-browser": {
+          command,
+          args,
+          env,
+          lifecycle: "lazy-keep-alive",
+          directTools: false,
+          description: "控制 SuoCode 右侧面板中可见的内置浏览器。",
+          builtin: true,
+        },
+      },
+    };
+  } catch {
+    return configuration;
+  }
+}
+
 let mcpAdapterConfigModule: Promise<McpAdapterConfigModule> | undefined;
 
 function loadMcpAdapterConfigModule(): Promise<McpAdapterConfigModule> {
@@ -2745,7 +2780,7 @@ export class SuoCodeRuntime {
       ...this.readRemovedMcpServers(),
       ...this.readDisabledMcpServers(),
     ]);
-    mcpAgentConfigRegistry().set(eventBus, mcpConfigurationForAgent(configuration, hiddenNames));
+    mcpAgentConfigRegistry().set(eventBus, withBundledBrowserMcp(mcpConfigurationForAgent(configuration, hiddenNames)));
   }
 
   private async reloadActiveSessionNow(active: ActiveSession): Promise<void> {

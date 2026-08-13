@@ -11,7 +11,9 @@ import { existsSync, watch, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
-import type { FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import { createRequire } from "node:module";
+import type { BrowserViewBounds, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import { BrowserRuntimeManager } from "./browser-runtime";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
@@ -26,7 +28,28 @@ const PREVIEW_CLOSE_CHANNEL = "preview:close";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
+const BROWSER_STATE_CHANNEL = "browser:state";
+const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
+const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
+const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
+const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
+const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
+const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
+const BROWSER_BACK_CHANNEL = "browser:back";
+const BROWSER_FORWARD_CHANNEL = "browser:forward";
+const BROWSER_RELOAD_CHANNEL = "browser:reload";
+const BROWSER_BOUNDS_CHANNEL = "browser:bounds";
 let isQuitting = false;
+const moduleRequire = createRequire(import.meta.url);
+const browserRuntimes = new Map<number, BrowserRuntimeManager>();
+let primaryBrowserRuntime: BrowserRuntimeManager | undefined;
+
+function chromeDevtoolsMcpEntry(): string {
+  const resolved = moduleRequire.resolve("chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js");
+  if (!app.isPackaged) return resolved;
+  const unpacked = resolved.replace(`${join("app.asar", "node_modules")}`, `${join("app.asar.unpacked", "node_modules")}`);
+  return existsSync(unpacked) ? unpacked : resolved;
+}
 
 function backgroundNodeExecutable(): string {
   const executableName = basename(process.execPath);
@@ -242,6 +265,21 @@ class RuntimeHost {
         SUOCODE_AGENT_DIR: join(app.getPath("userData"), "agent"),
         SUOCODE_SESSION_DIR: join(app.getPath("userData"), "sessions"),
         SUOCODE_NODE_EXEC_PATH: nodeExecutable,
+        ...(primaryBrowserRuntime ? {
+          SUOCODE_BROWSER_MCP_COMMAND: nodeExecutable,
+          SUOCODE_BROWSER_MCP_ARGS: JSON.stringify([
+            chromeDevtoolsMcpEntry(),
+            "--wsEndpoint", primaryBrowserRuntime.endpoint(),
+            "--wsHeaders", JSON.stringify({ Authorization: `Bearer ${primaryBrowserRuntime.token}` }),
+            "--no-usage-statistics",
+            "--no-performance-crux",
+          ]),
+          SUOCODE_BROWSER_MCP_ENV: JSON.stringify({
+            CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1",
+            CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
+            ELECTRON_RUN_AS_NODE: "1",
+          }),
+        } : {}),
       },
       stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
@@ -342,7 +380,7 @@ class RuntimeBridge {
 
 const runtime = new RuntimeBridge();
 
-function createWindow(): void {
+async function createWindow(): Promise<void> {
   const isMac = process.platform === "darwin";
   const mainWindow = new BrowserWindow({
     width: 1180,
@@ -368,6 +406,25 @@ function createWindow(): void {
     },
   });
 
+  const browserRuntime = new BrowserRuntimeManager(mainWindow, (state) => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_STATE_CHANNEL, state);
+  }, () => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL);
+  });
+  await browserRuntime.start();
+  const ownerWebContentsId = mainWindow.webContents.id;
+  browserRuntimes.set(ownerWebContentsId, browserRuntime);
+  primaryBrowserRuntime ??= browserRuntime;
+  mainWindow.once("closed", () => {
+    browserRuntimes.delete(ownerWebContentsId);
+    if (primaryBrowserRuntime === browserRuntime) {
+      runtime.stop();
+      primaryBrowserRuntime = browserRuntimes.values().next().value;
+      if (primaryBrowserRuntime && !isQuitting) runtime.start();
+    }
+    void browserRuntime.dispose().catch((error) => console.error("[browser] 关闭运行时失败", error));
+  });
+
   mainWindow.on("ready-to-show", () => mainWindow.show());
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -376,8 +433,7 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  runtime.start();
+app.whenReady().then(async () => {
   ipcMain.handle(PROJECT_HOME_CHANNEL, async (): Promise<ProjectSelection> => {
     const path = join(app.getPath("userData"), "Home");
     await mkdir(path, { recursive: true });
@@ -425,6 +481,23 @@ app.whenReady().then(() => {
   });
   ipcMain.handle(PROJECT_FILE_ACTION_CHANNEL, (event, input: ProjectFileActionInput) => performProjectFileAction(event, input));
   ipcMain.handle(PROJECT_DIRECTORY_LIST_CHANNEL, (_event, root: string, path?: string) => listProjectDirectory(root, path));
+  const browserFor = (event: Electron.IpcMainInvokeEvent): BrowserRuntimeManager => {
+    const value = browserRuntimes.get(event.sender.id);
+    if (!value) throw new Error("内置浏览器运行时不可用。");
+    return value;
+  };
+  ipcMain.handle(BROWSER_GET_STATE_CHANNEL, (event) => browserFor(event).state());
+  ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, url?: string) => browserFor(event).createTab(url));
+  ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, id: string) => browserFor(event).selectTab(id));
+  ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, id: string) => browserFor(event).closeTab(id));
+  ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, (event, url: string) => browserFor(event).navigate(url));
+  ipcMain.handle(BROWSER_BACK_CHANNEL, (event) => browserFor(event).back());
+  ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event) => browserFor(event).forward());
+  ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event) => browserFor(event).reload());
+  ipcMain.handle(BROWSER_BOUNDS_CHANNEL, (event, bounds: BrowserViewBounds): void => {
+    // Renderer cleanup can race the native window's closed event during dev reload/quit.
+    browserRuntimes.get(event.sender.id)?.setBounds(bounds);
+  });
   ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (_event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
     try {
       return { ok: true, value: await runtime.request(payload) };
@@ -432,15 +505,20 @@ app.whenReady().then(() => {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
-  createWindow();
+  await createWindow();
+  runtime.start();
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      void createWindow().then(() => runtime.start());
+    }
   });
 });
 
 app.on("before-quit", () => {
   isQuitting = true;
   for (const id of [...previews.keys()]) closePreviewRecord(id);
+  for (const browser of browserRuntimes.values()) void browser.dispose().catch(() => {});
+  browserRuntimes.clear();
   runtime.stop();
 });
 

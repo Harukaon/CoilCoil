@@ -49,6 +49,28 @@ export interface ProjectFileActionResult {
   trashed?: boolean;
 }
 
+export interface BrowserTabSnapshot {
+  id: string;
+  title: string;
+  url: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+export interface BrowserStateSnapshot {
+  tabs: BrowserTabSnapshot[];
+  activeTabId?: string;
+}
+
+export interface BrowserViewBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  visible: boolean;
+}
+
 export interface SuoCodeDesktopApi {
   platform: DesktopPlatform;
   homeProject(): Promise<ProjectSelection>;
@@ -62,6 +84,17 @@ export interface SuoCodeDesktopApi {
   performProjectFileAction(input: ProjectFileActionInput): Promise<ProjectFileActionResult>;
   onFilePreviewUpdated(listener: (document: FilePreviewDocument) => void): () => void;
   listProjectDirectory(root: string, path?: string): Promise<FileNode[]>;
+  getBrowserState(): Promise<BrowserStateSnapshot>;
+  createBrowserTab(url?: string): Promise<BrowserStateSnapshot>;
+  selectBrowserTab(id: string): Promise<BrowserStateSnapshot>;
+  closeBrowserTab(id: string): Promise<BrowserStateSnapshot>;
+  navigateBrowser(url: string): Promise<BrowserStateSnapshot>;
+  browserBack(): Promise<BrowserStateSnapshot>;
+  browserForward(): Promise<BrowserStateSnapshot>;
+  reloadBrowser(): Promise<BrowserStateSnapshot>;
+  setBrowserViewBounds(bounds: BrowserViewBounds): Promise<void>;
+  onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
+  onBrowserAgentActivated(listener: () => void): () => void;
   request<T = unknown>(command: RuntimeCommand, runtimeId?: string): Promise<T>;
   onRuntimeEvent(listener: (event: RuntimeEvent, runtimeId?: string) => void): () => void;
 }

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mcpConfigurationForAgent, SuoCodeRuntime } from "../src/index.js";
+import { mcpConfigurationForAgent, SuoCodeRuntime, withBundledBrowserMcp } from "../src/index.js";
 
 test("Agent MCP configuration contains enabled servers only", () => {
   const source = {
@@ -31,6 +31,25 @@ test("Agent MCP configuration contains enabled servers only", () => {
     "disabledBySuoCode",
     "permanentlyDeleted",
   ]);
+});
+
+test("bundled browser MCP is injected only into the Agent capability view", () => {
+  const source: { mcpServers: Record<string, Record<string, unknown>> } = { mcpServers: { ordinary: { command: "ordinary" } } };
+  const result = withBundledBrowserMcp(source, {
+    SUOCODE_BROWSER_MCP_COMMAND: "/private/node",
+    SUOCODE_BROWSER_MCP_ARGS: JSON.stringify(["/private/server.js", "--wsEndpoint", "ws://127.0.0.1/private"]),
+    SUOCODE_BROWSER_MCP_ENV: JSON.stringify({ CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1", ELECTRON_RUN_AS_NODE: "1" }),
+  });
+  assert.equal(source.mcpServers["suocode-browser"], undefined);
+  assert.deepEqual(result.mcpServers["suocode-browser"], {
+    command: "/private/node",
+    args: ["/private/server.js", "--wsEndpoint", "ws://127.0.0.1/private"],
+    env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1", ELECTRON_RUN_AS_NODE: "1" },
+    lifecycle: "lazy-keep-alive",
+    directTools: false,
+    description: "控制 SuoCode 右侧面板中可见的内置浏览器。",
+    builtin: true,
+  });
 });
 
 test("legacy removed-server tombstones are migrated out of Pi's configuration", async () => {

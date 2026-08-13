@@ -49,7 +49,7 @@ export function InspectorPane<T extends string>({
         </nav>
         <div className="inspector-drag-surface" aria-hidden="true" />
         <div className="inspector-actions no-drag">
-          <button className="icon-button" type="button" aria-label="刷新项目" disabled={refreshDisabled} onClick={onRefresh}><RefreshCw size={15} /></button>
+          <button className="icon-button" type="button" aria-label="刷新当前面板" disabled={refreshDisabled} onClick={onRefresh}><RefreshCw size={15} /></button>
           <button className="icon-button" type="button" aria-label="收起右侧栏" onClick={onClose}><PanelRight size={17} /></button>
         </div>
       </header>
