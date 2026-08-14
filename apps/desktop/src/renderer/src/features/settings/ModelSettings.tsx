@@ -32,6 +32,21 @@ interface ModelAdvancedText {
   costTiers: string;
 }
 
+interface ProviderFormState {
+  draft: ProviderDraft;
+  providerHeadersText: string;
+  providerCompatText: string;
+  overridesText: string;
+  modelAdvanced: Record<string, ModelAdvancedText>;
+  credentialMethod: string;
+  credentialValues: Record<string, string>;
+  credentialPreserveFields: string[];
+  credentialDirty: boolean;
+  preserveApiKeyReference: boolean;
+  defaultModelId: string;
+  thinkingLevel: ThinkingLevel;
+}
+
 const THINKING_OPTIONS: SettingsSelectOption[] = [
   { value: "off", label: "off" },
   { value: "minimal", label: "minimal" },
@@ -54,6 +69,10 @@ function uid(): string {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function providerFormFingerprint(state: ProviderFormState): string {
+  return JSON.stringify(state);
 }
 
 function jsonText(value: unknown): string {
@@ -430,6 +449,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const [removeArmed, setRemoveArmed] = useState(false);
   const [upstreamPickerModels, setUpstreamPickerModels] = useState<UpstreamModelOption[]>();
   const [oauthFlow, setOAuthFlow] = useState<ModelProviderAuthState>();
+  const [savedFingerprint, setSavedFingerprint] = useState<string>();
 
   const selectedProvider = snapshot?.providers.find((provider) => provider.id === selectedId);
   const oauthBusy = Boolean(oauthFlow && oauthFlow.provider === (selectedId ?? draft?.id)
@@ -438,29 +458,67 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     && oauthFlow.status !== "cancelled");
   const canRemove = Boolean(selectedId && (selectedSource !== "built-in" || selectedProvider?.apiKeyConfigured));
   const removeLabel = selectedSource === "built-in" ? "清除配置" : "移除";
+  const currentFingerprint = useMemo(() => draft ? providerFormFingerprint({
+    draft,
+    providerHeadersText,
+    providerCompatText,
+    overridesText,
+    modelAdvanced,
+    credentialMethod,
+    credentialValues,
+    credentialPreserveFields,
+    credentialDirty,
+    preserveApiKeyReference,
+    defaultModelId,
+    thinkingLevel,
+  }) : undefined, [credentialDirty, credentialMethod, credentialPreserveFields, credentialValues, defaultModelId, draft, modelAdvanced, overridesText, preserveApiKeyReference, providerCompatText, providerHeadersText, thinkingLevel]);
+  const hasUnsavedChanges = Boolean(currentFingerprint && currentFingerprint !== savedFingerprint);
 
   const applyProvider = (provider: ModelProviderConfiguration, nextConfiguration = configuration): void => {
     const nextDraft = draftFromProvider(provider);
+    const nextHeadersText = jsonText(provider.headers);
+    const nextCompatText = jsonText(provider.compat);
+    const nextOverridesText = jsonText(provider.modelOverrides);
+    const nextModelAdvanced = initialAdvancedText(nextDraft.models);
     setSelectedId(provider.id);
     setSelectedSource(provider.source);
     setDraft(nextDraft);
-    setProviderHeadersText(jsonText(provider.headers));
-    setProviderCompatText(jsonText(provider.compat));
-    setOverridesText(jsonText(provider.modelOverrides));
-    setModelAdvanced(initialAdvancedText(nextDraft.models));
+    setProviderHeadersText(nextHeadersText);
+    setProviderCompatText(nextCompatText);
+    setOverridesText(nextOverridesText);
+    setModelAdvanced(nextModelAdvanced);
     setCredentialConfiguration(provider.credential);
     const nextMethod = provider.credential.selectedMethod ?? provider.credential.methods[0]?.id ?? "";
     const fields = methodFields(provider.credential, nextMethod);
+    const nextCredentialValues = Object.fromEntries(fields.flatMap((field) => field.value === undefined ? [] : [[field.id, field.value]]));
+    const nextCredentialPreserveFields = fields.filter((field) => field.input === "secret" && field.configured).map((field) => field.id);
+    const nextPreserveApiKeyReference = provider.hasPrivateApiKeyReference || Boolean(provider.apiKeyReference);
     setCredentialMethod(nextMethod);
-    setCredentialValues(Object.fromEntries(fields.flatMap((field) => field.value === undefined ? [] : [[field.id, field.value]])));
-    setCredentialPreserveFields(fields.filter((field) => field.input === "secret" && field.configured).map((field) => field.id));
+    setCredentialValues(nextCredentialValues);
+    setCredentialPreserveFields(nextCredentialPreserveFields);
     setCredentialDirty(false);
-    setPreserveApiKeyReference(provider.hasPrivateApiKeyReference || Boolean(provider.apiKeyReference));
+    setPreserveApiKeyReference(nextPreserveApiKeyReference);
     const available = nextConfiguration?.models.filter((model) => model.provider === provider.id) ?? [];
     const current = nextConfiguration?.provider === provider.id ? nextConfiguration.modelId : undefined;
-    setDefaultModelId(current && available.some((model) => model.id === current) ? current : nextDraft.models[0]?.id ?? available[0]?.id ?? "");
-    setThinkingLevel(nextConfiguration?.provider === provider.id ? nextConfiguration.thinkingLevel : "medium");
+    const nextDefaultModelId = current && available.some((model) => model.id === current) ? current : nextDraft.models[0]?.id ?? available[0]?.id ?? "";
+    const nextThinkingLevel = nextConfiguration?.provider === provider.id ? nextConfiguration.thinkingLevel : "medium";
+    setDefaultModelId(nextDefaultModelId);
+    setThinkingLevel(nextThinkingLevel);
     setRemoveArmed(false);
+    setSavedFingerprint(providerFormFingerprint({
+      draft: nextDraft,
+      providerHeadersText: nextHeadersText,
+      providerCompatText: nextCompatText,
+      overridesText: nextOverridesText,
+      modelAdvanced: nextModelAdvanced,
+      credentialMethod: nextMethod,
+      credentialValues: nextCredentialValues,
+      credentialPreserveFields: nextCredentialPreserveFields,
+      credentialDirty: false,
+      preserveApiKeyReference: nextPreserveApiKeyReference,
+      defaultModelId: nextDefaultModelId,
+      thinkingLevel: nextThinkingLevel,
+    }));
   };
 
   const load = async (preferredId?: string, nextConfiguration = configuration): Promise<void> => {
@@ -533,6 +591,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setDefaultModelId(next.models[0]?.id ?? "");
     setThinkingLevel("medium");
     setRemoveArmed(false);
+    setSavedFingerprint(undefined);
   };
 
   const updateModel = (uidValue: string, next: EditableModel): void => setDraft((current) => current ? {
@@ -786,10 +845,13 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           ["内置服务商", builtinProviders],
         ] as const).map(([title, providers]) => providers.length ? <section className="provider-catalog-group" key={title}>
           <h2>{title}</h2>
-          {providers.map((provider) => <button className={(selectedId === provider.id || (!selectedId && draft?.id === provider.id)) ? "active" : ""} type="button" key={provider.id} onClick={() => selectProvider(provider)}>
-            <span><strong>{provider.name ?? provider.id}</strong><small>{provider.id}</small></span>
-            <em className={provider.disabled ? "disabled" : provider.apiKeyConfigured ? "configured" : ""}>{provider.disabled ? "已禁用" : provider.authType === "oauth" ? "订阅已登录" : provider.apiKeyConfigured ? "已配置" : sourceLabel(provider.source)}</em>
-          </button>)}
+          {providers.map((provider) => {
+            const selected = selectedId === provider.id || (!selectedId && draft?.id === provider.id);
+            return <button className={selected ? "active" : ""} type="button" key={provider.id} onClick={() => selectProvider(provider)}>
+              <span><strong>{provider.name ?? provider.id}</strong><small>{provider.id}</small></span>
+              <em className={selected && hasUnsavedChanges ? "unsaved" : provider.disabled ? "disabled" : provider.apiKeyConfigured ? "configured" : ""}>{selected && hasUnsavedChanges ? "未保存" : provider.disabled ? "已禁用" : provider.authType === "oauth" ? "订阅已登录" : provider.apiKeyConfigured ? "已配置" : sourceLabel(provider.source)}</em>
+            </button>;
+          })}
         </section> : null)}
       </aside>
       <section className="provider-editor">
@@ -797,7 +859,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
         {draft?.id === "openai-responses-ws" ? <OpenAIResponsesWsEditor runtimeId={runtimeId} onSaved={onSaved} onReload={(next) => load("openai-responses-ws", next)} /> : draft ? <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
           <header className="provider-editor-heading">
             <div>
-              <span className="provider-source-tag">{selectedId ? sourceLabel(selectedSource) : "新的自定义服务商"}</span>
+              <div className="provider-heading-tags"><span className="provider-source-tag">{selectedId ? sourceLabel(selectedSource) : "新的自定义服务商"}</span>{hasUnsavedChanges ? <span className="provider-unsaved-tag">未保存</span> : null}</div>
               <strong>{draft.name || draft.id || "未命名服务商"}</strong>
               {isBuiltinProvider ? <small>请求协议与内置模型由内置服务商决定；认证字段和运行参数按该服务商的真实实现配置。</small> : null}
             </div>

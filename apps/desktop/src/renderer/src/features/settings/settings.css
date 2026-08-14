@@ -207,6 +207,7 @@
 .provider-catalog-group em { flex: 0 0 auto; padding: 2px 4px; border-radius: 999px; color: #898984; background: #ededeb; font-size: 8px; font-style: normal; }
 .provider-catalog-group em.configured { color: #557753; background: #e4eee1; }
 .provider-catalog-group em.disabled { color: #8a6a3d; background: #f3ead8; }
+.provider-catalog-group em.unsaved, .provider-unsaved-tag { color: #a14740; background: #f7e4e1; }
 .provider-editor-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .provider-enable-toggle { display: inline-flex !important; min-height: 34px; align-items: center; gap: 7px !important; padding: 0 10px; border: 1px solid #d7d7d2; border-radius: 8px; color: #5d5d59; background: #fff; font-size: 10px; font-weight: 550; }
 .provider-enable-toggle input { width: 14px; height: 14px; flex: 0 0 auto; }
@@ -228,7 +229,9 @@
 .provider-editor-heading code, .provider-advanced code, .provider-editor-empty code, .provider-help code, .provider-builtins-summary code { padding: 1px 3px; border-radius: 4px; background: #ebebe7; font-family: "SFMono-Regular", Consolas, monospace; }
 .danger-text-button { display: inline-flex; height: 34px; align-items: center; gap: 6px; padding: 0 10px; border-radius: 8px; color: #a34d46; background: #f9ece9; font-size: 10px; cursor: pointer; }
 .danger-text-button.armed { color: #fff; background: #ae514a; }
-.provider-source-tag { justify-self: start; padding: 2px 6px; border-radius: 999px; color: #73736e; background: #ededeb; font-size: 8px; font-weight: 600; }
+.provider-heading-tags { display: flex; align-items: center; gap: 5px; }
+.provider-source-tag, .provider-unsaved-tag { padding: 2px 6px; border-radius: 999px; font-size: 8px; font-weight: 600; }
+.provider-source-tag { color: #73736e; background: #ededeb; }
 .provider-help { margin: 0; padding: 9px 10px; border: 1px solid #e5dfc9; border-radius: 8px; color: #756842; background: #fbf7e9; font-size: 10px; line-height: 1.5; }
 .provider-checkbox-row { display: flex; flex-wrap: wrap; gap: 8px 18px; }
 .provider-checkbox-row .checkbox-setting { min-height: 24px; align-self: auto; }

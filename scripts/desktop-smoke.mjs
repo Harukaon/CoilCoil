@@ -574,6 +574,39 @@ async function main() {
       return snapshot.providers.some((provider) => provider.id === "desktop-smoke-provider" && provider.models.some((model) => model.id === "desktop-smoke-model"));
     })()`, "The custom provider entered through the settings UI was not persisted in Pi models.json.");
     await client.waitFor(
+      `document.querySelector('.provider-catalog-group button.active small')?.textContent === "desktop-smoke-provider" && !document.querySelector('.provider-editor .primary-button')?.disabled`,
+      "The saved provider was not reloaded into the editor.",
+    );
+    await client.waitFor(`document.querySelector('.provider-catalog-group button.active em')?.textContent !== "未保存"`, "The saved provider remained marked as unsaved.");
+    const editedProviderName = await client.evaluate(`(() => {
+      const input = document.querySelector('input[placeholder="例如 DogProvider"]');
+      if (!(input instanceof HTMLInputElement)) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "Desktop Smoke Provider Edited");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    assert.equal(editedProviderName, true, "The saved provider name could not be edited for dirty-state verification.");
+    await client.waitFor(
+      `document.querySelector('input[placeholder="例如 DogProvider"]')?.value === "Desktop Smoke Provider Edited"`,
+      "React did not accept the edited provider name.",
+    );
+    await client.waitFor(
+      `document.querySelector('.provider-catalog-group button.active em.unsaved')?.textContent === "未保存" && document.querySelector('.provider-unsaved-tag')?.textContent === "未保存"`,
+      "Editing a provider did not expose its unsaved state in both navigation and editor.",
+    );
+    await client.evaluate(`(() => {
+      const input = document.querySelector('input[placeholder="例如 DogProvider"]');
+      if (!(input instanceof HTMLInputElement)) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "Desktop Smoke Provider");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await client.waitFor(
+      `!document.querySelector('.provider-catalog-group button.active em.unsaved') && !document.querySelector('.provider-unsaved-tag')`,
+      "Reverting the provider form to its saved values did not clear the unsaved state.",
+    );
+    await client.waitFor(
       `(() => { const button = [...document.querySelectorAll('.model-provider-settings button')].find((item) => item.textContent.includes("拉取上游模型列表")); return Boolean(button && !button.disabled); })()`,
       "The upstream model picker action did not become ready after saving the provider.",
     );
