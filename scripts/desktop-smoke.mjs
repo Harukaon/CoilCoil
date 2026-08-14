@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +61,32 @@ async function freePort() {
   await new Promise((resolveClose) => server.close(resolveClose));
   if (!port) throw new Error("Unable to reserve a DevTools port.");
   return port;
+}
+
+async function startModelFixture() {
+  const server = createHttpServer((request, response) => {
+    const path = (request.url ?? "").split("?", 1)[0];
+    if (request.method !== "GET" || (path !== "/models" && path !== "/v1/models")) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      data: [
+        { id: "desktop-smoke-id-model" },
+        { id: "desktop-smoke-display-model", name: "Desktop Smoke 可读名称" },
+      ],
+    }));
+  });
+  await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  if (!port) throw new Error("Unable to start the model catalog fixture.");
+  return { server, baseUrl: `http://127.0.0.1:${port}/v1` };
 }
 
 async function waitForPage(port, timeout = 30_000) {
@@ -337,6 +364,7 @@ async function main() {
   const projectDirectory = await mkdtemp(join(tmpdir(), "suocode-desktop-project-"));
   const concurrentDirectoryA = await mkdtemp(join(tmpdir(), "suocode-concurrent-a-"));
   const concurrentDirectoryB = await mkdtemp(join(tmpdir(), "suocode-concurrent-b-"));
+  const modelFixture = await startModelFixture();
   execFileSync("git", ["init", "--quiet", projectDirectory]);
   await mkdir(join(projectDirectory, "lazy-folder"));
   await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "lazy\n", "utf8");
@@ -530,7 +558,7 @@ async function main() {
       };
       return setValue('input[placeholder="例如 dog-provider"]', "desktop-smoke-provider")
         && setValue('input[placeholder="例如 DogProvider"]', "Desktop Smoke Provider")
-        && setValue('input[placeholder="https://api.example.com/v1"]', "http://127.0.0.1:40124/v1")
+        && setValue('input[placeholder="https://api.example.com/v1"]', ${JSON.stringify(modelFixture.baseUrl)})
         && setValue('input[placeholder="例如 dog-coder-v1"]', "desktop-smoke-model");
     })()`);
     assert.equal(filledCustomProvider, true, "The custom Pi provider editor did not accept editable provider/model fields.");
@@ -545,6 +573,42 @@ async function main() {
       const snapshot = await window.suocode.request({ type: "get_model_provider_configuration" });
       return snapshot.providers.some((provider) => provider.id === "desktop-smoke-provider" && provider.models.some((model) => model.id === "desktop-smoke-model"));
     })()`, "The custom provider entered through the settings UI was not persisted in Pi models.json.");
+    await client.waitFor(
+      `(() => { const button = [...document.querySelectorAll('.model-provider-settings button')].find((item) => item.textContent.includes("拉取上游模型列表")); return Boolean(button && !button.disabled); })()`,
+      "The upstream model picker action did not become ready after saving the provider.",
+    );
+    const openedUpstreamPicker = await client.evaluate(`(() => {
+      const button = [...document.querySelectorAll('.model-provider-settings button')].find((item) => item.textContent.includes("拉取上游模型列表"));
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    })()`);
+    assert.equal(openedUpstreamPicker, true, "The upstream model picker action was unavailable.");
+    await client.waitFor(`Boolean(document.querySelector('.upstream-model-picker'))`, "The upstream model picker did not open.", 15_000);
+    const pickerStyle = await client.evaluate(`(() => {
+      const picker = document.querySelector('.upstream-model-picker');
+      const search = document.querySelector('.upstream-model-search');
+      const input = document.querySelector('.upstream-model-search input');
+      if (!(picker instanceof HTMLElement) || !(search instanceof HTMLElement) || !(input instanceof HTMLInputElement)) return null;
+      const searchStyle = getComputedStyle(search);
+      const inputStyle = getComputedStyle(input);
+      return {
+        models: [...picker.querySelectorAll('.upstream-model-picker-list > label strong')].map((item) => item.textContent || ''),
+        searchBorder: searchStyle.borderTopWidth,
+        searchRadius: searchStyle.borderTopLeftRadius,
+        searchHeight: searchStyle.height,
+        inputBorder: inputStyle.borderTopWidth,
+        inputFontSize: inputStyle.fontSize,
+      };
+    })()`);
+    assert.ok(pickerStyle, "The upstream model picker search input did not render.");
+    assert.equal(pickerStyle.searchBorder, "1px", "The portalled model picker search lost its styled border.");
+    assert.equal(pickerStyle.searchRadius, "8px", "The portalled model picker search lost its rounded shape.");
+    assert.equal(pickerStyle.inputBorder, "0px", "The model picker input fell back to a native border.");
+    assert.equal(pickerStyle.inputFontSize, "11px", "The model picker input fell back to the browser default font size.");
+    assert.ok(pickerStyle.models.includes("desktop-smoke-id-model"), "The upstream model id was not rendered.");
+    assert.ok(pickerStyle.models.includes("Desktop Smoke 可读名称"), "The upstream model display name was not rendered.");
+    await client.evaluate(`document.querySelector('.upstream-model-picker [aria-label="关闭"]')?.click()`);
     const openedProtocolMenu = await client.evaluate(`(() => {
       const button = document.querySelector('.model-provider-settings button[aria-label="请求协议"]');
       if (!button) return false;
@@ -1627,6 +1691,7 @@ async function main() {
     await rm(projectDirectory, { recursive: true, force: true });
     await rm(concurrentDirectoryA, { recursive: true, force: true });
     await rm(concurrentDirectoryB, { recursive: true, force: true });
+    await new Promise((resolveClose) => modelFixture.server.close(resolveClose));
   }
 }
 
