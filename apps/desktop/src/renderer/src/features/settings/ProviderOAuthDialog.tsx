@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ModelProviderAuthState } from "@suocode/runtime-protocol";
 import { Modal } from "../../ui/dialog";
 import { toastError, toastSuccess } from "../../ui/toast";
+import { oauthCallbackUrl } from "./providerOAuthPresentation";
 
 function browserUrl(state: ModelProviderAuthState): string | undefined {
   return state.authUrl?.url ?? state.deviceCode?.verificationUri ?? state.links?.[0]?.url;
@@ -21,6 +22,7 @@ export function ProviderOAuthDialog({
   const [submitting, setSubmitting] = useState(false);
   const openedUrls = useRef(new Set<string>());
   const url = browserUrl(state);
+  const callbackUrl = oauthCallbackUrl(state);
   const terminal = state.status === "succeeded" || state.status === "failed" || state.status === "cancelled";
   const waiting = state.status === "starting" || state.status === "authorizing";
   const title = state.status === "succeeded"
@@ -69,6 +71,12 @@ export function ProviderOAuthDialog({
       </>}
     >
       <div className="provider-oauth-dialog-body">
+        {callbackUrl ? <section className="provider-oauth-callback">
+          <span>OAuth 回调地址</span>
+          <code>{callbackUrl}</code>
+          <button type="button" onClick={() => { void window.suocode.copyText(callbackUrl); toastSuccess("回调地址已复制。"); }}><Copy size={13} />复制</button>
+        </section> : null}
+
         {waiting && !state.deviceCode && !state.prompt ? <div className="provider-oauth-progress"><LoaderCircle className="spin" size={18} /><span>{state.message ?? "正在等待授权…"}</span></div> : null}
 
         {state.deviceCode ? <section className="provider-oauth-device-code">
