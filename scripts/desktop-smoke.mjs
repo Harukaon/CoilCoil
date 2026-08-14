@@ -848,9 +848,10 @@ async function main() {
       return true;
     })()`);
     assert.equal(openedArchive, true);
-    await client.waitFor(`Boolean(document.querySelector(".archive-popover"))`, "The archive restore popover did not open.");
-    await client.waitFor(`document.querySelector(".archive-popover")?.textContent.includes("暂无归档会话")`, "The empty archive state did not render.");
-    await client.evaluate(`document.querySelector('button[aria-label="归档会话"]')?.click()`);
+    await client.waitFor(`Boolean(document.querySelector(".archive-dialog"))`, "The archive restore dialog did not open.");
+    await client.waitFor(`document.querySelector(".archive-dialog")?.textContent.includes("暂无归档会话")`, "The empty archive state did not render.");
+    assert.equal(await client.evaluate(`document.querySelector(".archive-search input")?.getAttribute("placeholder")`), "搜索归档会话标题");
+    await client.evaluate(`document.querySelector('button[aria-label="关闭归档会话"]')?.click()`);
 
     const expandedHomePath = await client.evaluate(`(async () => {
       document.querySelector(".workspace-path")?.click();
@@ -1615,6 +1616,37 @@ async function main() {
         return { gap: activityRect.top - bannerRect.bottom };
       })()`);
       assert.ok(overlayLayout === null || overlayLayout.gap >= 7, `The error banner overlapped the Agent activity panel (${overlayLayout?.gap}px).`);
+      await client.evaluate(`window.suocode.request({ type: "archive_session", cwd: ${JSON.stringify(projectDirectory)}, sessionPath: ${JSON.stringify(fixturePath)} })`);
+      await client.evaluate(`document.querySelector('button[aria-label="归档会话"]')?.click()`);
+      await client.waitFor(
+        `document.querySelector(".archive-dialog")?.textContent.includes(${JSON.stringify(fixtureToken)})`,
+        "The archive dialog did not render the archived fixture conversation.",
+      );
+      const setArchiveSearch = async (value) => client.evaluate(`(() => {
+        const input = document.querySelector(".archive-search input");
+        if (!(input instanceof HTMLInputElement)) return false;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, ${JSON.stringify(value)});
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      })()`);
+      assert.equal(await setArchiveSearch(fixtureToken), true);
+      await client.waitFor(
+        `document.querySelectorAll(".archive-session").length === 1 && document.querySelector(".archive-session")?.textContent.includes(${JSON.stringify(fixtureToken)})`,
+        "Searching archived conversation titles did not preserve the matching row.",
+      );
+      assert.equal(await setArchiveSearch("DESKTOP_ARCHIVE_NO_MATCH"), true);
+      await client.waitFor(
+        `Boolean(document.querySelector(".archive-filter-empty")) && document.querySelectorAll(".archive-session").length === 0`,
+        "The archive title search did not hide non-matching rows.",
+      );
+      assert.equal(await setArchiveSearch(fixtureToken), true);
+      await client.waitFor(`document.querySelectorAll(".archive-session").length === 1`, "The archive title search did not recover after clearing a non-match.");
+      await client.evaluate(`document.querySelector(".archive-session button")?.click()`);
+      await client.waitFor(
+        `document.querySelector(".archive-dialog")?.textContent.includes("暂无归档会话")`,
+        "Restoring the archived fixture did not update the dialog.",
+      );
+      await client.evaluate(`document.querySelector('button[aria-label="关闭归档会话"]')?.click()`);
     }
 
     if (live) {

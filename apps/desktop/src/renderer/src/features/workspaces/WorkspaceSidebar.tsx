@@ -20,7 +20,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 import { SuoLoader } from "../../ui/SuoLoader";
-import { ArchivedSessionsPopover } from "./ArchivedSessionsPopover";
+import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH } from "./sessionList";
 
 export interface SessionActivityState {
@@ -126,7 +126,7 @@ export function WorkspaceSidebar({
         <button className={`nav-button ${skillsOpen ? "active" : ""}`} type="button" onClick={onOpenSkills}><Sparkles size={18} strokeWidth={1.7} /><span>技能</span></button>
       </nav>
       <section className="project-section">
-        <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsPopover projects={projects} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></span></div>
+        <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsDialog projects={projects} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></span></div>
         {projects.length ? projects.map((project) => {
           const expanded = expandedProjects.has(project.path);
           const sessions = sessionsByProject[project.path] ?? [];
