@@ -444,7 +444,11 @@ export class BrowserRuntimeManager {
     if (client.debuggerListeners.has(tab.id)) return;
     const listener = (_event: Electron.Event, method: string, params: unknown, sessionId?: string): void => {
       const sessions = client.sessions.get(tab.id);
-      if (!sessions?.pageAttached) return;
+      const directSessionIds = [...client.directSessions]
+        .filter(([, tabId]) => tabId === tab.id)
+        .map(([directSessionId]) => directSessionId);
+      const hasChildSession = sessionId ? client.childSessions.get(sessionId) === tab.id : false;
+      if (!sessions?.pageAttached && directSessionIds.length === 0 && !hasChildSession) return;
       const payload = params && typeof params === "object" ? params as Record<string, unknown> : {};
       const childSessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
       if (method === "Target.attachedToTarget" && childSessionId) client.childSessions.set(childSessionId, tab.id);
@@ -454,10 +458,8 @@ export class BrowserRuntimeManager {
         // Every flat CDP session attached to this target receives its own copy
         // of page events. Lighthouse relies on those events while its
         // short-lived session is active.
-        this.send(client, { method, params: payload, sessionId: sessions.pageSessionId });
-        for (const [directSessionId, tabId] of client.directSessions) {
-          if (tabId === tab.id) this.send(client, { method, params: payload, sessionId: directSessionId });
-        }
+        if (sessions?.pageAttached) this.send(client, { method, params: payload, sessionId: sessions.pageSessionId });
+        for (const directSessionId of directSessionIds) this.send(client, { method, params: payload, sessionId: directSessionId });
       }
       if (method === "Target.detachedFromTarget" && childSessionId) client.childSessions.delete(childSessionId);
     };
@@ -525,6 +527,20 @@ export class BrowserRuntimeManager {
   }
 
   private async executeRootCommand(client: CdpClient, method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (method === "SuoCode.getBrowserState") {
+      await this.ensureActiveTab();
+      return {
+        activeTabId: this.activeTabId,
+        activePageTargetId: this.activeTabId ? this.tabs.get(this.activeTabId)?.pageTargetId : undefined,
+        tabs: [...this.tabs.values()].map((tab) => ({
+          id: tab.id,
+          pageTargetId: tab.pageTargetId,
+          title: tab.view.webContents.getTitle() || "新标签页",
+          url: tab.view.webContents.getURL() || DEFAULT_URL,
+          active: tab.id === this.activeTabId,
+        })),
+      };
+    }
     if (method === "Target.getBrowserContexts") return { browserContextIds: [BROWSER_CONTEXT_ID] };
     if (method === "Browser.getVersion") {
       const tab = await this.ensureActiveTab();
@@ -577,6 +593,7 @@ export class BrowserRuntimeManager {
       // resolve. A real browser allocates a fresh flat session for every
       // explicit page attachment, so mirror that behavior here.
       if (params.targetId === tab.pageTargetId) {
+        this.ensureClientSessions(client, tab);
         const sessionId = `direct-session-${client.id.slice(0, 8)}-${randomUUID()}`;
         client.directSessions.set(sessionId, tab.id);
         this.send(client, {

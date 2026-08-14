@@ -42,6 +42,9 @@ test("bundled browser MCP layers are injected only into the Agent capability vie
     SUOCODE_BROWSER_DEVTOOLS_MCP_COMMAND: "/private/node",
     SUOCODE_BROWSER_DEVTOOLS_MCP_ARGS: JSON.stringify(["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools"]),
     SUOCODE_BROWSER_DEVTOOLS_MCP_ENV: JSON.stringify({ CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", ELECTRON_RUN_AS_NODE: "1" }),
+    SUOCODE_BROWSER_DEBUG_MCP_COMMAND: "/private/node",
+    SUOCODE_BROWSER_DEBUG_MCP_ARGS: JSON.stringify(["/private/browser-debug-mcp.js"]),
+    SUOCODE_BROWSER_DEBUG_MCP_ENV: JSON.stringify({ SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: "ws://127.0.0.1/devtools", SUOCODE_BROWSER_DEBUG_CDP_TOKEN: "secret" }),
   });
   assert.equal(source.mcpServers["suocode-browser"], undefined);
   assert.deepEqual(result.mcpServers["suocode-browser"], {
@@ -69,6 +72,16 @@ test("bundled browser MCP layers are injected only into the Agent capability vie
     requestTimeoutMs: 300_000,
     directTools: false,
     description: "按需提供 SuoCode 内置浏览器的网络、性能、内存、Lighthouse 等高级调试能力。",
+    builtin: true,
+  });
+  assert.deepEqual(result.mcpServers["suocode-browser-debugger"], {
+    command: "/private/node",
+    args: ["/private/browser-debug-mcp.js"],
+    env: { SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: "ws://127.0.0.1/devtools", SUOCODE_BROWSER_DEBUG_CDP_TOKEN: "secret" },
+    lifecycle: "lazy-keep-alive",
+    requestTimeoutMs: 300_000,
+    directTools: false,
+    description: "按需提供 SuoCode 内置浏览器的源码断点、单步、请求拦截、事件等待、HAR 与 Application 存储调试能力。",
     builtin: true,
   });
 });

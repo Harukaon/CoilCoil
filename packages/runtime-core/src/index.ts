@@ -228,7 +228,8 @@ export function withBundledBrowserMcp(
   try {
     const semantic = parseServer("SUOCODE_BROWSER_MCP_COMMAND", "SUOCODE_BROWSER_MCP_ARGS", "SUOCODE_BROWSER_MCP_ENV");
     const devtools = parseServer("SUOCODE_BROWSER_DEVTOOLS_MCP_COMMAND", "SUOCODE_BROWSER_DEVTOOLS_MCP_ARGS", "SUOCODE_BROWSER_DEVTOOLS_MCP_ENV");
-    if (!semantic && !devtools) return configuration;
+    const debuggerServer = parseServer("SUOCODE_BROWSER_DEBUG_MCP_COMMAND", "SUOCODE_BROWSER_DEBUG_MCP_ARGS", "SUOCODE_BROWSER_DEBUG_MCP_ENV");
+    if (!semantic && !devtools && !debuggerServer) return configuration;
     return {
       ...configuration,
       mcpServers: {
@@ -271,6 +272,14 @@ export function withBundledBrowserMcp(
           requestTimeoutMs: 300_000,
           directTools: false,
           description: "按需提供 SuoCode 内置浏览器的网络、性能、内存、Lighthouse 等高级调试能力。",
+          builtin: true,
+        } } : {}),
+        ...(debuggerServer ? { "suocode-browser-debugger": {
+          ...debuggerServer,
+          lifecycle: "lazy-keep-alive",
+          requestTimeoutMs: 300_000,
+          directTools: false,
+          description: "按需提供 SuoCode 内置浏览器的源码断点、单步、请求拦截、事件等待、HAR 与 Application 存储调试能力。",
           builtin: true,
         } } : {}),
       },

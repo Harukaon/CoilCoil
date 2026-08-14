@@ -59,6 +59,11 @@ function playwrightMcpEntry(): string {
   return existsSync(unpacked) ? unpacked : resolved;
 }
 
+function browserDebugMcpEntry(): string {
+  const resolved = join(__dirname, "browser-debug-mcp.js");
+  return resolved;
+}
+
 function playwrightMcpConfigPath(): string {
   const outputDir = join(app.getPath("userData"), "browser-artifacts", "playwright");
   mkdirSync(outputDir, { recursive: true });
@@ -311,6 +316,17 @@ class RuntimeHost {
             CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1",
             CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
             ELECTRON_RUN_AS_NODE: "1",
+          }),
+          SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: primaryBrowserRuntime.endpoint(),
+          SUOCODE_BROWSER_DEBUG_CDP_TOKEN: primaryBrowserRuntime.token,
+          SUOCODE_BROWSER_DEBUG_OUTPUT_DIR: join(app.getPath("userData"), "browser-artifacts", "debug"),
+          SUOCODE_BROWSER_DEBUG_MCP_COMMAND: nodeExecutable,
+          SUOCODE_BROWSER_DEBUG_MCP_ARGS: JSON.stringify([browserDebugMcpEntry()]),
+          SUOCODE_BROWSER_DEBUG_MCP_ENV: JSON.stringify({
+            ELECTRON_RUN_AS_NODE: "1",
+            SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: primaryBrowserRuntime.endpoint(),
+            SUOCODE_BROWSER_DEBUG_CDP_TOKEN: primaryBrowserRuntime.token,
+            SUOCODE_BROWSER_DEBUG_OUTPUT_DIR: join(app.getPath("userData"), "browser-artifacts", "debug"),
           }),
         } : {}),
       },
