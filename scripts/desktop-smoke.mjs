@@ -422,6 +422,26 @@ async function main() {
     assert.match(homeState.home.path, /\/Home$/);
     assert.equal(homeState.projectName, "Home");
     assert.match(homeState.status, /Home/);
+    const globalScrollbar = await client.evaluate(`(() => {
+      const probe = document.createElement("div");
+      probe.style.cssText = "position:fixed;left:-100px;top:-100px;width:40px;height:40px;overflow:scroll";
+      probe.innerHTML = '<div style="width:120px;height:120px"></div>';
+      document.body.append(probe);
+      const bar = getComputedStyle(probe, "::-webkit-scrollbar");
+      const thumb = getComputedStyle(probe, "::-webkit-scrollbar-thumb");
+      const result = {
+        width: bar.width,
+        height: bar.height,
+        thumb: thumb.backgroundColor,
+        radius: thumb.borderRadius,
+      };
+      probe.remove();
+      return result;
+    })()`);
+    assert.equal(globalScrollbar.width, "6px");
+    assert.equal(globalScrollbar.height, "6px");
+    assert.match(globalScrollbar.thumb, /rgba\([^)]*, 0\.3\)/);
+    assert.equal(globalScrollbar.radius, "999px");
     if (process.platform === "darwin") {
       const nodeRuntimeLauncher = join(dirname(homeState.home.path), "agent", "runtime-bin", "node");
       const expectedHelper = join(

@@ -5,12 +5,18 @@
   --pane-fill: #f8f8f6;
   --side-fill: #f8f8f6;
   --composer-fill: #f8f8f6;
+  --scrollbar-thumb: rgb(112 112 107 / 30%);
+  --scrollbar-thumb-hover: rgb(96 96 91 / 48%);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 
 * { box-sizing: border-box; }
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: var(--scrollbar-thumb); background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #f8f8f6; }
 button, textarea, input, select { color: inherit; font: inherit; }
 button { border: 0; }
@@ -135,7 +141,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .archive-search:focus-within { border-color: #aaa9a3; box-shadow: 0 0 0 2px rgb(70 70 64 / 5%); }
 .archive-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: #393936; background: transparent; font-size: 11px; }
 .archive-search input::placeholder { color: #a1a19c; }
-.archive-groups { min-height: 0; padding: 6px 8px 10px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #c7c7c2 transparent; }
+.archive-groups { min-height: 0; padding: 6px 8px 10px; overflow-y: auto; }
 .archive-groups section + section { margin-top: 7px; padding-top: 7px; border-top: 1px solid #ecece8; }
 .archive-groups h3 { margin: 4px 7px 5px; overflow: hidden; color: #8a8a85; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .archive-session { display: flex; min-height: 42px; align-items: center; gap: 8px; padding: 6px 7px 6px 9px; border-radius: 8px; }
@@ -181,10 +187,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .conversation-scroll { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .conversation-body { min-width: 0; min-height: 0; height: 100%; overflow-x: hidden; overflow-y: auto; padding: 30px clamp(12px, 2vw, 28px) 76px; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .conversation-pane.has-composer-activity .conversation-body { padding-bottom: 190px; }
-.conversation-body::-webkit-scrollbar { width: 8px; }
-.conversation-body::-webkit-scrollbar-track { background: transparent; }
-.conversation-body::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: #c9c9c4; background-clip: padding-box; }
-.conversation-body::-webkit-scrollbar-thumb:hover { background: #aaa9a3; background-clip: padding-box; }
 .scroll-to-bottom {
   position: absolute;
   z-index: 4;
@@ -307,7 +309,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .subagent-dialog-title strong, .subagent-dialog-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subagent-dialog-title strong { color: #30302d; font-size: 13px; font-weight: 650; }
 .subagent-dialog-title small { color: #92928d; font-size: 10px; }
-.subagent-dialog-scroll { min-height: 0; overflow-y: auto; padding: 18px 22px 28px; scrollbar-width: thin; scrollbar-color: #c7c7c2 transparent; }
+.subagent-dialog-scroll { min-height: 0; overflow-y: auto; padding: 18px 22px 28px; }
 .subagent-mini-chat { width: min(560px, 100%); margin: 0 auto; }
 .subagent-task-message { display: grid; justify-items: end; gap: 5px; margin: 0 0 24px; }
 .subagent-task-message > span { color: #999994; font-size: 10px; }
@@ -384,10 +386,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   to { opacity: 1; transform: translateY(0); }
 }
 .composer-activity ol { display: grid; gap: 1px; max-height: 152px; margin: 0; overflow-y: auto; padding: 0 8px var(--composer-overlap, 28px); scroll-padding-bottom: var(--composer-overlap, 28px); list-style: none; }
-.composer-activity ol::-webkit-scrollbar { width: 4px; }
-.composer-activity ol::-webkit-scrollbar-track { background: transparent; }
-.composer-activity ol::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 5px; background: #c7c7c2; background-clip: padding-box; }
-.composer-activity ol::-webkit-scrollbar-thumb:hover { background: #aaa9a3; background-clip: padding-box; }
 @container (max-width: 560px) {
   .composer-overlays .composer-activity { width: 100%; }
   .composer-overlays .composer-activity.collapsed { width: calc(100% - 24px); }
@@ -491,9 +489,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .composer textarea { display: block; width: 100%; height: 42px; min-height: 42px; max-height: 160px; overflow-x: hidden; overflow-y: auto; padding: 11px 18px 0; resize: none; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 1.45; }
 .composer textarea::placeholder { color: #a1a19c; }
 .composer textarea:disabled { cursor: default; }
-.composer textarea::-webkit-scrollbar { width: 5px; }
-.composer textarea::-webkit-scrollbar-track { background: transparent; }
-.composer textarea::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 5px; background: #c7c7c2; background-clip: padding-box; }
 .composer-toolbar { display: flex; align-items: center; min-height: 44px; padding: 4px 8px 8px 12px; }
 .agent-mode { display: inline-flex; max-width: 260px; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; color: #686863; background: #f4f4f1; font-size: 11px; font-weight: 500; cursor: pointer; }
 .agent-mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
