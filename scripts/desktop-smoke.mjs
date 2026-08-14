@@ -422,6 +422,16 @@ async function main() {
     assert.match(homeState.home.path, /\/Home$/);
     assert.equal(homeState.projectName, "Home");
     assert.match(homeState.status, /Home/);
+    const fixedNavSizing = await client.evaluate(`([...document.querySelectorAll(".primary-nav .nav-button")].map((button) => ({
+      label: button.querySelector("span")?.textContent || "",
+      height: button.getBoundingClientRect().height,
+      fontSize: getComputedStyle(button).fontSize,
+      iconWidth: button.querySelector("svg")?.getBoundingClientRect().width ?? 0,
+    })))`);
+    assert.deepEqual(fixedNavSizing, [
+      { label: "新建对话", height: 34, fontSize: "13px", iconWidth: 16 },
+      { label: "技能", height: 34, fontSize: "13px", iconWidth: 16 },
+    ]);
     const globalScrollbar = await client.evaluate(`(() => {
       const probe = document.createElement("div");
       probe.style.cssText = "position:fixed;left:-100px;top:-100px;width:40px;height:40px;overflow:scroll";
