@@ -5,7 +5,6 @@ import {
   ChevronRight,
   ChevronUp,
   Circle,
-  CircleDot,
   Folder,
   FolderOpen,
   GitFork,
@@ -168,12 +167,19 @@ export function WorkspaceSidebar({
                   {visibleSessions.map((session) => {
                     const activity = sessionActivity[session.path];
                     const renaming = renamingPath === session.path;
+                    const status = activity?.running
+                      ? <SuoLoader size={11} />
+                      : activity?.unread
+                        ? <i className="conversation-unread" />
+                        : session.pinned
+                          ? <Pin size={11} strokeWidth={2} />
+                          : null;
                     return <ContextMenu.Root key={session.id}>
                       <ContextMenu.Trigger asChild>
                         <div className="conversation-row-wrap">
                           {renaming ? (
                             <div className={`conversation-row renaming ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}>
-                              <span className="conversation-status">{session.pinned ? <Pin size={11} strokeWidth={2} /> : <CircleDot size={11} strokeWidth={2} />}</span>
+                              {session.pinned ? <span className="conversation-status"><Pin size={11} strokeWidth={2} /></span> : null}
                               <input
                                 ref={renameRef}
                                 className="conversation-rename-input"
@@ -198,9 +204,7 @@ export function WorkspaceSidebar({
                               type="button"
                               onClick={() => onOpenConversation(project, session)}
                             >
-                              <span className="conversation-status">
-                                {activity?.running ? <SuoLoader size={11} /> : activity?.unread ? <i className="conversation-unread" /> : session.pinned ? <Pin size={11} strokeWidth={2} /> : <CircleDot size={11} strokeWidth={2} />}
-                              </span>
+                              {status ? <span className="conversation-status">{status}</span> : null}
                               <span className="conversation-title-text">{session.title}</span>
                               <time>{relativeTime(session.updatedAt)}</time>
                             </button>

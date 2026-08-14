@@ -1486,6 +1486,10 @@ async function main() {
         "The packaged sidebar did not discover the restore fixture session.",
         60_000,
       );
+      assert.equal(await client.evaluate(`(() => {
+        const row = [...document.querySelectorAll(".conversation-row")].find((item) => item.textContent.includes(${JSON.stringify(fixtureToken)}));
+        return Boolean(row) && !row.querySelector(".conversation-status");
+      })()`), true, "A normal persisted conversation still rendered the meaningless default status icon.");
       await client.evaluate(`[...document.querySelectorAll(".conversation-row")].find((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))?.click()`);
       await client.waitFor(`document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The packaged renderer did not restore the historical image.", 60_000);
       await client.evaluate(`document.querySelector(".user-bubble-button")?.click()`);
