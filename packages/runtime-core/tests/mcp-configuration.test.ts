@@ -33,7 +33,7 @@ test("Agent MCP configuration contains enabled servers only", () => {
   ]);
 });
 
-test("bundled browser MCP layers are injected only into the Agent capability view and scoped per session", () => {
+test("bundled browser MCP layers are scoped per session and prewarm only advanced metadata", () => {
   const source: { mcpServers: Record<string, Record<string, unknown>> } = { mcpServers: { ordinary: { command: "ordinary" } } };
   const result = withBundledBrowserMcp(source, {
     SUOCODE_BROWSER_MCP_COMMAND: "/private/node",
@@ -68,7 +68,7 @@ test("bundled browser MCP layers are injected only into the Agent capability vie
     command: "/private/node",
     args: ["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools?scope=runtime+A%2F%E4%BC%9A%E8%AF%9D"],
     env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", ELECTRON_RUN_AS_NODE: "1" },
-    lifecycle: "lazy-keep-alive",
+    lifecycle: "eager",
     requestTimeoutMs: 300_000,
     directTools: false,
     description: "按需提供 SuoCode 内置浏览器的网络、性能、内存、Lighthouse 等高级调试能力。",
@@ -78,7 +78,7 @@ test("bundled browser MCP layers are injected only into the Agent capability vie
     command: "/private/node",
     args: ["/private/browser-debug-mcp.js"],
     env: { SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: "ws://127.0.0.1/devtools?scope=runtime+A%2F%E4%BC%9A%E8%AF%9D", SUOCODE_BROWSER_DEBUG_CDP_TOKEN: "secret" },
-    lifecycle: "lazy-keep-alive",
+    lifecycle: "eager",
     requestTimeoutMs: 300_000,
     directTools: false,
     description: "按需提供 SuoCode 内置浏览器的源码断点、单步、请求拦截、事件等待、HAR 与 Application 存储调试能力。",

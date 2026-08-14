@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/SuoCode.app/Contents/MacOS/SuoCode");
 const sourceDataDirectory = join(homedir(), "Library/Application Support/@suocode/desktop");
+const requestedModel = process.env.SUOCODE_BROWSER_AGENT_MODEL?.trim();
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
@@ -134,15 +135,18 @@ async function main() {
     await client.open();
     const setup = await client.evaluate(`(async () => {
       const configuration = await window.suocode.request({ type: "get_configuration" });
-      const model = configuration.models.find((item) => item.configured && item.provider === "xai" && item.id === "grok-4.5")
-        ?? configuration.models.find((item) => item.configured && item.provider === "ka" && item.id === "claude-sonnet-5")
+      const requestedModel = ${JSON.stringify(requestedModel || "")};
+      const model = requestedModel
+        ? configuration.models.find((item) => item.configured && [item.provider, item.id].join("/") === requestedModel)
+        : configuration.models.find((item) => item.configured && item.provider === "ka" && item.id === "claude-sonnet-5")
         ?? configuration.models.find((item) => item.configured && item.provider === "ka" && item.id === "claude-haiku-4-5-20251001")
         ?? configuration.models.find((item) => item.configured && item.provider === "pierce" && item.id === "claude-opus-5")
         ?? configuration.models.find((item) => item.configured && item.provider === "pierce" && /gpt[- ]?5\.6[- ]?sol/i.test(\`${'${item.id} ${item.name}'}\`))
+        ?? configuration.models.find((item) => item.configured && item.provider === "xai" && item.id === "grok-4.5")
         ?? configuration.models.find((item) => item.configured && item.provider === configuration.provider && item.id === configuration.modelId)
         ?? configuration.models.find((item) => item.configured && /minimax.*m3|m3.*minimax/i.test(\`${'${item.provider} ${item.id} ${item.name}'}\`))
         ?? configuration.models.find((item) => item.configured);
-      if (!model) return { error: "No configured model" };
+      if (!model) return { error: requestedModel ? "Requested model is not configured: " + requestedModel : "No configured model" };
       const snapshot = await window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(projectDirectory)} });
       await window.suocode.request({ type: "set_session_model", provider: model.provider, modelId: model.id, thinkingLevel: "low" }, snapshot.runtimeId);
       await window.suocode.createBrowserTab(snapshot.runtimeId, ${JSON.stringify(fixtureUrl)});
@@ -154,6 +158,7 @@ async function main() {
           type: event.type,
           running: event.type === "run_state" ? event.running : undefined,
           toolName: event.type === "tool_started" || event.type === "tool_finished" ? event.tool.name : undefined,
+          toolArgs: event.type === "tool_started" || event.type === "tool_finished" ? event.tool.args : undefined,
           toolOutput: event.type === "tool_finished" ? event.tool.output : undefined,
           messageText: event.type === "message_finished" ? event.message.text : undefined,
           message: event.type === "runtime_error" ? event.message : undefined,
@@ -164,7 +169,7 @@ async function main() {
     if (setup.error) throw new Error(setup.error);
     await client.evaluate(`window.suocode.request({
       type: "prompt",
-      text: ${JSON.stringify(`Use the MCP gateway to search for the hidden tool browser_application_storage. Then call that hidden tool exactly once with action "usage" and origin "${fixtureUrl.slice(0, -1)}". Do not use a direct browser tool and do not merely describe the schema. After the tool succeeds, reply exactly BROWSER_PROGRESSIVE_DISCLOSURE_OK.`)}
+      text: ${JSON.stringify(`For the page at "${fixtureUrl.slice(0, -1)}", use the browser debugging capability for Application Storage to inspect the origin's real storage usage and quota. Do not estimate it by evaluating JavaScript in the page and do not change any page data. Briefly report the measured values.`)}
     }, ${JSON.stringify(setup.runtimeId)})`);
     await client.waitFor(
       `window.__browserAgentEvents.some((event) => event.type === "run_state" && event.running === false)`,
@@ -172,8 +177,9 @@ async function main() {
     );
     const events = await client.evaluate("window.__browserAgentEvents");
     diagnostics = JSON.stringify(events, null, 2);
+    const mcpCalls = events.filter((event) => event.type === "tool_started" && event.toolName === "mcp");
     const mcpResults = events.filter((event) => event.type === "tool_finished" && event.toolName === "mcp");
-    assert.ok(mcpResults.some((event) => String(event.toolOutput).includes("browser_application_storage")), "The Agent did not discover the hidden browser tool through MCP search.");
+    assert.ok(mcpCalls.some((event) => JSON.stringify(event.toolArgs).includes("browser_application_storage")), "The Agent did not call the discovered advanced browser storage tool through MCP.");
     assert.ok(mcpResults.some((event) => /quota|usage/i.test(String(event.toolOutput))), "The Agent did not execute the discovered browser storage tool.");
     assert.equal(events.some((event) => event.toolName === "browser_application_storage"), false, "A hidden advanced browser tool leaked onto the direct tool surface.");
     process.stdout.write(`SuoCode browser Agent progressive-disclosure smoke passed with ${setup.model.provider}/${setup.model.id}.\n`);

@@ -373,8 +373,8 @@ server.registerTool("browser_coverage", {
 });
 
 server.registerTool("browser_application_storage", {
-  title: "Application 存储调试",
-  description: "查看站点存储用量、IndexedDB 数据库/结构/记录，或清理指定类型的站点数据。",
+  title: "Application 存储调试（Storage usage/quota）",
+  description: "查看浏览器 Application Storage 的站点 storage usage/quota、IndexedDB 数据库/结构/记录，或清理指定类型的站点数据。",
   inputSchema: z.object({
     action: z.enum(["usage", "cookies", "clear_cookies", "indexeddb_databases", "indexeddb_schema", "indexeddb_data", "cache_names", "cache_entries", "cache_delete", "service_workers", "clear"]),
     origin: z.string().optional(),

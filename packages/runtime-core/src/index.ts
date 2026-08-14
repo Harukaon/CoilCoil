@@ -291,7 +291,9 @@ export function withBundledBrowserMcp(
         } } : {}),
         ...(devtools ? { "suocode-browser-devtools": {
           ...devtools,
-          lifecycle: "lazy-keep-alive",
+          // Keep only metadata warm: the gateway can advertise and search this
+          // advanced layer without putting its tool schemas on the direct surface.
+          lifecycle: "eager",
           requestTimeoutMs: 300_000,
           directTools: false,
           description: "按需提供 SuoCode 内置浏览器的网络、性能、内存、Lighthouse 等高级调试能力。",
@@ -299,7 +301,9 @@ export function withBundledBrowserMcp(
         } } : {}),
         ...(debuggerServer ? { "suocode-browser-debugger": {
           ...debuggerServer,
-          lifecycle: "lazy-keep-alive",
+          // Application/Debugger tools are progressive-disclosure only, but
+          // their metadata must be searchable before the first tool call.
+          lifecycle: "eager",
           requestTimeoutMs: 300_000,
           directTools: false,
           description: "按需提供 SuoCode 内置浏览器的源码断点、单步、请求拦截、事件等待、HAR 与 Application 存储调试能力。",
