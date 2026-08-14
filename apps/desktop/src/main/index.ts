@@ -31,6 +31,7 @@ const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
 const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
+const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
@@ -399,6 +400,7 @@ class RuntimeBridge {
   private host?: RuntimeHost;
 
   private broadcast = (runtimeId: string | undefined, event: RuntimeEventEnvelope["event"]): void => {
+    if (runtimeId && event.type === "runtime_released") primaryBrowserRuntime?.releaseScope(runtimeId);
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
     }
@@ -457,8 +459,8 @@ async function createWindow(): Promise<void> {
 
   const browserRuntime = new BrowserRuntimeManager(mainWindow, (state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_STATE_CHANNEL, state);
-  }, () => {
-    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL);
+  }, (scopeId) => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
   });
   await browserRuntime.start();
   if (process.env.SUOCODE_BROWSER_PROBE_LOG === "1") {
@@ -542,14 +544,15 @@ app.whenReady().then(async () => {
     if (!value) throw new Error("内置浏览器运行时不可用。");
     return value;
   };
-  ipcMain.handle(BROWSER_GET_STATE_CHANNEL, (event) => browserFor(event).state());
-  ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, url?: string) => browserFor(event).createTab(url));
-  ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, id: string) => browserFor(event).selectTab(id));
-  ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, id: string) => browserFor(event).closeTab(id));
-  ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, (event, url: string) => browserFor(event).navigate(url));
-  ipcMain.handle(BROWSER_BACK_CHANNEL, (event) => browserFor(event).back());
-  ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event) => browserFor(event).forward());
-  ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event) => browserFor(event).reload());
+  ipcMain.handle(BROWSER_SET_SCOPE_CHANNEL, (event, scopeId: string) => browserFor(event).setUiScope(scopeId));
+  ipcMain.handle(BROWSER_GET_STATE_CHANNEL, (event, scopeId: string) => browserFor(event).state(scopeId));
+  ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string) => browserFor(event).createTab(url, true, scopeId));
+  ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).selectTab(id, scopeId));
+  ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).closeTab(id, scopeId));
+  ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, (event, scopeId: string, url: string) => browserFor(event).navigate(url, scopeId));
+  ipcMain.handle(BROWSER_BACK_CHANNEL, (event, scopeId: string) => browserFor(event).back(scopeId));
+  ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event, scopeId: string) => browserFor(event).forward(scopeId));
+  ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event, scopeId: string) => browserFor(event).reload(scopeId));
   ipcMain.handle(BROWSER_BOUNDS_CHANNEL, (event, bounds: BrowserViewBounds): void => {
     // Renderer cleanup can race the native window's closed event during dev reload/quit.
     browserRuntimes.get(event.sender.id)?.setBounds(bounds);

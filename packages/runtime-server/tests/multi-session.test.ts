@@ -29,6 +29,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 class FakeRuntime {
   private readonly emit: (event: RuntimeEvent) => void;
   private snapshotValue?: SessionSnapshot;
+  readonly browserScopeId?: string;
   readonly promptGate = deferred();
   readonly promptClientMessageIds: Array<string | undefined> = [];
   readonly createdWithModels: Array<SessionModelSelection | undefined> = [];
@@ -46,6 +47,7 @@ class FakeRuntime {
     } = {},
   ) {
     this.emit = options.onEvent ?? (() => undefined);
+    this.browserScopeId = options.browserScopeId;
   }
 
   async initialize(): Promise<RuntimeBootstrap> {
@@ -542,10 +544,11 @@ test("rapid navigation serializes restores and skips queued intermediate session
 
 test("idle historical runtimes are bounded while recent sessions remain reopenable", async () => {
   const runtimes: FakeRuntime[] = [];
+  const messages: RuntimeWireMessage[] = [];
   let runtimeId = 0;
   const server = new RuntimeServer(
     { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
-    () => undefined,
+    (message) => messages.push(message),
     {
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options);
@@ -566,6 +569,12 @@ test("idle historical runtimes are bounded while recent sessions remain reopenab
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(runtimes.filter((runtime) => !runtime.disposed).length, 7, "control plus six idle session runtimes should remain");
   assert.ok(runtimes.slice(1, 5).every((runtime) => runtime.disposed), "the least recently used idle sessions should be retired");
+  assert.equal(runtimes[0].browserScopeId, undefined, "the control runtime must not claim a session browser scope");
+  assert.equal(runtimes[1].browserScopeId, "runtime-1", "each session runtime must own its matching browser scope");
+  const releasedRuntimeIds = messages.flatMap((message) =>
+    "event" in message && message.event.type === "runtime_released" && message.runtimeId ? [message.runtimeId] : [],
+  );
+  assert.deepEqual(releasedRuntimeIds.slice(0, 4), ["runtime-1", "runtime-2", "runtime-3", "runtime-4"]);
 
   const reopened = await server.handle({
     id: "reopen-0",

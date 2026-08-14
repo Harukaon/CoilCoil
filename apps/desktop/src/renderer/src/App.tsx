@@ -120,7 +120,8 @@ export default function App(): React.JSX.Element {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const { leftOpen, rightOpen, leftWidth, rightWidth, setLeftOpen, setRightOpen, beginResize } = usePanelLayout();
 
-  useEffect(() => window.suocode.onBrowserAgentActivated(() => {
+  useEffect(() => window.suocode.onBrowserAgentActivated((scopeId) => {
+    if (scopeId !== snapshotRef.current?.runtimeId) return;
     setInspectorView("browser");
     setRightOpen(true);
   }), [setRightOpen]);
@@ -856,7 +857,7 @@ export default function App(): React.JSX.Element {
           activeTab={inspectorView}
           onSelectTab={setInspectorView}
           onRefresh={() => inspectorView === "browser"
-            ? void window.suocode.reloadBrowser()
+            ? void window.suocode.reloadBrowser(snapshot?.runtimeId ?? project?.path ?? "default")
             : void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}
           refreshDisabled={inspectorView !== "browser" && !snapshot}
           onClose={() => setRightOpen(false)}
@@ -868,7 +869,7 @@ export default function App(): React.JSX.Element {
             <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} />
           </div>
           <div className={`inspector-tab-panel browser-tab-panel ${inspectorView === "browser" ? "active" : ""}`}>
-            <BrowserPanel active={rightOpen && inspectorView === "browser"} />
+            <BrowserPanel active={rightOpen && inspectorView === "browser"} scopeId={snapshot?.runtimeId ?? project?.path ?? "default"} />
           </div>
         </InspectorPane>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}

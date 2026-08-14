@@ -33,7 +33,7 @@ test("Agent MCP configuration contains enabled servers only", () => {
   ]);
 });
 
-test("bundled browser MCP layers are injected only into the Agent capability view", () => {
+test("bundled browser MCP layers are injected only into the Agent capability view and scoped per session", () => {
   const source: { mcpServers: Record<string, Record<string, unknown>> } = { mcpServers: { ordinary: { command: "ordinary" } } };
   const result = withBundledBrowserMcp(source, {
     SUOCODE_BROWSER_MCP_COMMAND: "/private/node",
@@ -45,11 +45,11 @@ test("bundled browser MCP layers are injected only into the Agent capability vie
     SUOCODE_BROWSER_DEBUG_MCP_COMMAND: "/private/node",
     SUOCODE_BROWSER_DEBUG_MCP_ARGS: JSON.stringify(["/private/browser-debug-mcp.js"]),
     SUOCODE_BROWSER_DEBUG_MCP_ENV: JSON.stringify({ SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: "ws://127.0.0.1/devtools", SUOCODE_BROWSER_DEBUG_CDP_TOKEN: "secret" }),
-  });
+  }, "runtime A/会话");
   assert.equal(source.mcpServers["suocode-browser"], undefined);
   assert.deepEqual(result.mcpServers["suocode-browser"], {
     command: "/private/node",
-    args: ["/private/playwright.js", "--cdp-endpoint", "ws://127.0.0.1/playwright"],
+    args: ["/private/playwright.js", "--cdp-endpoint", "ws://127.0.0.1/playwright?scope=runtime+A%2F%E4%BC%9A%E8%AF%9D"],
     env: { ELECTRON_RUN_AS_NODE: "1" },
     lifecycle: "lazy-keep-alive",
     requestTimeoutMs: 180_000,
@@ -66,7 +66,7 @@ test("bundled browser MCP layers are injected only into the Agent capability vie
   });
   assert.deepEqual(result.mcpServers["suocode-browser-devtools"], {
     command: "/private/node",
-    args: ["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools"],
+    args: ["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools?scope=runtime+A%2F%E4%BC%9A%E8%AF%9D"],
     env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", ELECTRON_RUN_AS_NODE: "1" },
     lifecycle: "lazy-keep-alive",
     requestTimeoutMs: 300_000,
@@ -77,7 +77,7 @@ test("bundled browser MCP layers are injected only into the Agent capability vie
   assert.deepEqual(result.mcpServers["suocode-browser-debugger"], {
     command: "/private/node",
     args: ["/private/browser-debug-mcp.js"],
-    env: { SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: "ws://127.0.0.1/devtools", SUOCODE_BROWSER_DEBUG_CDP_TOKEN: "secret" },
+    env: { SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: "ws://127.0.0.1/devtools?scope=runtime+A%2F%E4%BC%9A%E8%AF%9D", SUOCODE_BROWSER_DEBUG_CDP_TOKEN: "secret" },
     lifecycle: "lazy-keep-alive",
     requestTimeoutMs: 300_000,
     directTools: false,

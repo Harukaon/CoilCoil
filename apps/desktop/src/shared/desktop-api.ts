@@ -59,6 +59,7 @@ export interface BrowserTabSnapshot {
 }
 
 export interface BrowserStateSnapshot {
+  scopeId: string;
   tabs: BrowserTabSnapshot[];
   activeTabId?: string;
 }
@@ -84,17 +85,18 @@ export interface SuoCodeDesktopApi {
   performProjectFileAction(input: ProjectFileActionInput): Promise<ProjectFileActionResult>;
   onFilePreviewUpdated(listener: (document: FilePreviewDocument) => void): () => void;
   listProjectDirectory(root: string, path?: string): Promise<FileNode[]>;
-  getBrowserState(): Promise<BrowserStateSnapshot>;
-  createBrowserTab(url?: string): Promise<BrowserStateSnapshot>;
-  selectBrowserTab(id: string): Promise<BrowserStateSnapshot>;
-  closeBrowserTab(id: string): Promise<BrowserStateSnapshot>;
-  navigateBrowser(url: string): Promise<BrowserStateSnapshot>;
-  browserBack(): Promise<BrowserStateSnapshot>;
-  browserForward(): Promise<BrowserStateSnapshot>;
-  reloadBrowser(): Promise<BrowserStateSnapshot>;
+  setBrowserScope(scopeId: string): Promise<BrowserStateSnapshot>;
+  getBrowserState(scopeId: string): Promise<BrowserStateSnapshot>;
+  createBrowserTab(scopeId: string, url?: string): Promise<BrowserStateSnapshot>;
+  selectBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
+  closeBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
+  navigateBrowser(scopeId: string, url: string): Promise<BrowserStateSnapshot>;
+  browserBack(scopeId: string): Promise<BrowserStateSnapshot>;
+  browserForward(scopeId: string): Promise<BrowserStateSnapshot>;
+  reloadBrowser(scopeId: string): Promise<BrowserStateSnapshot>;
   setBrowserViewBounds(bounds: BrowserViewBounds): Promise<void>;
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
-  onBrowserAgentActivated(listener: () => void): () => void;
+  onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
   request<T = unknown>(command: RuntimeCommand, runtimeId?: string): Promise<T>;
   onRuntimeEvent(listener: (event: RuntimeEvent, runtimeId?: string) => void): () => void;
 }

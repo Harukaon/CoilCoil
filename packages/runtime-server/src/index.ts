@@ -104,6 +104,7 @@ export class RuntimeServer {
     return this.createRuntime({
       ...this.options,
       modelRuntimePromise,
+      browserScopeId: runtimeId,
       onEvent: (event) => this.sendRuntimeEvent(runtimeId, event),
     });
   }
@@ -180,6 +181,7 @@ export class RuntimeServer {
 
   private removeRuntimeReferences(runtimeId: string): SuoCodeRuntime | undefined {
     const runtime = this.runtimes.get(runtimeId);
+    if (runtime) this.send({ runtimeId, event: { type: "runtime_released" } });
     this.runtimes.delete(runtimeId);
     this.runtimeAccess.delete(runtimeId);
     this.runningRuntimes.delete(runtimeId);
@@ -486,6 +488,9 @@ export class RuntimeServer {
   async dispose(): Promise<void> {
     this.disposed = true;
     this.desiredSessionPath = undefined;
+    for (const runtimeId of this.runtimes.keys()) {
+      this.send({ runtimeId, event: { type: "runtime_released" } });
+    }
     await Promise.allSettled([
       this.runtime.dispose(),
       ...[...this.runtimes.values()].map((runtime) => runtime.dispose()),

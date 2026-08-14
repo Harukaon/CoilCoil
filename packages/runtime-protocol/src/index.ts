@@ -940,6 +940,7 @@ export type RuntimeEvent =
   | { type: "runtime_inspection_updated"; inspection: RuntimeInspectionSnapshot }
   | { type: "runtime_notice"; level: "info" | "success" | "error"; message: string }
   | { type: "run_state"; running: boolean }
+  | { type: "runtime_released" }
   | { type: "runtime_error"; message: string; detail?: string };
 
 export interface RuntimeCommandEnvelope {

@@ -33,6 +33,7 @@ const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
 const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
+const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
@@ -74,22 +75,23 @@ const api: SuoCodeDesktopApi = {
     return () => ipcRenderer.removeListener(PREVIEW_UPDATED_CHANNEL, handler);
   },
   listProjectDirectory: (root: string, path?: string) => ipcRenderer.invoke(PROJECT_DIRECTORY_LIST_CHANNEL, root, path) as Promise<FileNode[]>,
-  getBrowserState: () => ipcRenderer.invoke(BROWSER_GET_STATE_CHANNEL) as Promise<BrowserStateSnapshot>,
-  createBrowserTab: (url?: string) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, url) as Promise<BrowserStateSnapshot>,
-  selectBrowserTab: (id: string) => ipcRenderer.invoke(BROWSER_SELECT_TAB_CHANNEL, id) as Promise<BrowserStateSnapshot>,
-  closeBrowserTab: (id: string) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, id) as Promise<BrowserStateSnapshot>,
-  navigateBrowser: (url: string) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, url) as Promise<BrowserStateSnapshot>,
-  browserBack: () => ipcRenderer.invoke(BROWSER_BACK_CHANNEL) as Promise<BrowserStateSnapshot>,
-  browserForward: () => ipcRenderer.invoke(BROWSER_FORWARD_CHANNEL) as Promise<BrowserStateSnapshot>,
-  reloadBrowser: () => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL) as Promise<BrowserStateSnapshot>,
+  setBrowserScope: (scopeId: string) => ipcRenderer.invoke(BROWSER_SET_SCOPE_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
+  getBrowserState: (scopeId: string) => ipcRenderer.invoke(BROWSER_GET_STATE_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
+  createBrowserTab: (scopeId: string, url?: string) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, scopeId, url) as Promise<BrowserStateSnapshot>,
+  selectBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_SELECT_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
+  closeBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
+  navigateBrowser: (scopeId: string, url: string) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, scopeId, url) as Promise<BrowserStateSnapshot>,
+  browserBack: (scopeId: string) => ipcRenderer.invoke(BROWSER_BACK_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
+  browserForward: (scopeId: string) => ipcRenderer.invoke(BROWSER_FORWARD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
+  reloadBrowser: (scopeId: string) => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   setBrowserViewBounds: (bounds: BrowserViewBounds) => ipcRenderer.invoke(BROWSER_BOUNDS_CHANNEL, bounds) as Promise<void>,
   onBrowserStateUpdated: (listener: (state: BrowserStateSnapshot) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: BrowserStateSnapshot): void => listener(state);
     ipcRenderer.on(BROWSER_STATE_CHANNEL, handler);
     return () => ipcRenderer.removeListener(BROWSER_STATE_CHANNEL, handler);
   },
-  onBrowserAgentActivated: (listener: () => void) => {
-    const handler = (): void => listener();
+  onBrowserAgentActivated: (listener: (scopeId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, scopeId: string): void => listener(scopeId);
     ipcRenderer.on(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
     return () => ipcRenderer.removeListener(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
   },

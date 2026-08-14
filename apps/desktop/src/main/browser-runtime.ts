@@ -7,6 +7,7 @@ import { browserCssBoundsToDip } from "./browser-bounds";
 import { normalizeBrowserUrl } from "./browser-navigation";
 
 const DEFAULT_URL = "about:blank";
+const DEFAULT_SCOPE_ID = "default";
 const BROWSER_TARGET_ID = "suocode-browser";
 const BROWSER_CONTEXT_ID = "suocode-browser-context";
 const BACKGROUND_VIEWPORT: Rectangle = { x: 0, y: 0, width: 1280, height: 720 };
@@ -14,6 +15,7 @@ const OFFSCREEN_VIEWPORT: Rectangle = { x: -16_384, y: -16_384, width: 1280, hei
 
 interface BrowserTab {
   id: string;
+  scopeId: string;
   tabTargetId: string;
   pageTargetId: string;
   view: WebContentsView;
@@ -36,6 +38,7 @@ interface ClientTabSessions {
 
 interface CdpClient {
   id: string;
+  scopeId: string;
   mode: "devtools" | "playwright";
   socket: WebSocket;
   discover: boolean;
@@ -44,6 +47,10 @@ interface CdpClient {
   directSessions: Map<string, string>;
   childSessions: Map<string, string>;
   debuggerListeners: Map<string, (...args: unknown[]) => void>;
+}
+
+function browserContextId(scopeId: string): string {
+  return `${BROWSER_CONTEXT_ID}:${scopeId}`;
 }
 
 function targetInfo(tab: BrowserTab, kind: "tab" | "page"): Record<string, unknown> {
@@ -55,7 +62,7 @@ function targetInfo(tab: BrowserTab, kind: "tab" | "page"): Record<string, unkno
     url: contents.getURL() || DEFAULT_URL,
     attached: true,
     canAccessOpener: false,
-    browserContextId: BROWSER_CONTEXT_ID,
+    browserContextId: browserContextId(tab.scopeId),
   };
 }
 
@@ -80,7 +87,8 @@ export class BrowserRuntimeManager {
   private readonly server: HttpServer;
   private readonly socketServer: WebSocketServer;
   private port?: number;
-  private activeTabId?: string;
+  private readonly activeTabIds = new Map<string, string>();
+  private uiScopeId = DEFAULT_SCOPE_ID;
   private browserCssBounds: BrowserViewBounds = { x: 0, y: 0, width: 0, height: 0, visible: false };
   private disposed = false;
   private readonly handleWindowLayoutChanged = (): void => this.applyViewLayout();
@@ -88,7 +96,7 @@ export class BrowserRuntimeManager {
   constructor(
     private readonly window: BrowserWindow,
     private readonly publishState: (state: BrowserStateSnapshot) => void,
-    private readonly onAgentActivated: () => void,
+    private readonly onAgentActivated: (scopeId: string) => void,
   ) {
     this.server = createServer((_request, response) => {
       response.writeHead(404);
@@ -98,8 +106,9 @@ export class BrowserRuntimeManager {
     this.server.on("upgrade", (request, socket, head) => {
       const expected = Buffer.from(`Bearer ${this.token}`);
       const actual = Buffer.from(request.headers.authorization ?? "");
-      const authorizedPath = request.url === `/devtools/browser/${this.pathToken}`
-        || request.url === `/playwright/browser/${this.pathToken}`;
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      const authorizedPath = requestUrl.pathname === `/devtools/browser/${this.pathToken}`
+        || requestUrl.pathname === `/playwright/browser/${this.pathToken}`;
       const authorized = authorizedPath
         && actual.length === expected.length
         && timingSafeEqual(actual, expected);
@@ -108,8 +117,9 @@ export class BrowserRuntimeManager {
         socket.destroy();
         return;
       }
-      const mode = request.url?.startsWith(`/playwright/browser/${this.pathToken}`) ? "playwright" : "devtools";
-      this.socketServer.handleUpgrade(request, socket, head, (webSocket) => this.acceptClient(webSocket, mode));
+      const mode = requestUrl.pathname.startsWith(`/playwright/browser/${this.pathToken}`) ? "playwright" : "devtools";
+      const scopeId = requestUrl.searchParams.get("scope")?.trim() || DEFAULT_SCOPE_ID;
+      this.socketServer.handleUpgrade(request, socket, head, (webSocket) => this.acceptClient(webSocket, mode, scopeId));
     });
     this.window.on("resize", this.handleWindowLayoutChanged);
     this.window.webContents.on("zoom-changed", this.handleWindowLayoutChanged);
@@ -139,19 +149,28 @@ export class BrowserRuntimeManager {
     return `ws://127.0.0.1:${this.port}/playwright/browser/${this.pathToken}`;
   }
 
-  state(): BrowserStateSnapshot {
+  state(scopeId = this.uiScopeId): BrowserStateSnapshot {
     return {
-      tabs: [...this.tabs.values()].map((tab) => this.tabSnapshot(tab)),
-      activeTabId: this.activeTabId,
+      scopeId,
+      tabs: this.tabsForScope(scopeId).map((tab) => this.tabSnapshot(tab)),
+      activeTabId: this.activeTabIds.get(scopeId),
     };
   }
 
-  async createTab(rawUrl?: string, activate = true): Promise<BrowserStateSnapshot> {
-    const tab = this.createTabRecord(activate);
+  setUiScope(scopeId: string): BrowserStateSnapshot {
+    this.uiScopeId = scopeId.trim() || DEFAULT_SCOPE_ID;
+    this.applyViewLayout();
+    const state = this.state();
+    this.publishState(state);
+    return state;
+  }
+
+  async createTab(rawUrl?: string, activate = true, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
+    const tab = this.createTabRecord(activate, scopeId);
     const url = normalizeBrowserUrl(rawUrl);
     await tab.view.webContents.loadURL(url);
     await this.finishTabCreation(tab);
-    return this.state();
+    return this.state(scopeId);
   }
 
   /**
@@ -161,7 +180,7 @@ export class BrowserRuntimeManager {
    * it private until about:blank is ready so Puppeteer cannot issue Page/Runtime
    * initialization commands against a half-created target.
    */
-  private createTabRecord(activate: boolean): BrowserTab {
+  private createTabRecord(activate: boolean, scopeId: string): BrowserTab {
     const id = randomUUID();
     const view = new WebContentsView({
       webPreferences: {
@@ -178,6 +197,7 @@ export class BrowserRuntimeManager {
     this.window.contentView.addChildView(view);
     const tab: BrowserTab = {
       id,
+      scopeId,
       tabTargetId: `tab-${id}`,
       pageTargetId: `pending-page-${id}`,
       view,
@@ -187,7 +207,7 @@ export class BrowserRuntimeManager {
     this.installTabSecurity(tab);
     this.installTabEvents(tab);
     this.attachDebugger(tab);
-    if (activate || !this.activeTabId) this.activeTabId = id;
+    if (activate || !this.activeTabIds.has(scopeId)) this.activeTabIds.set(scopeId, id);
     return tab;
   }
 
@@ -222,78 +242,86 @@ export class BrowserRuntimeManager {
     tab.pageTargetId = targetId;
   }
 
-  private async createCdpTab(rawUrl: string | undefined, activate: boolean): Promise<BrowserTab> {
+  private async createCdpTab(rawUrl: string | undefined, activate: boolean, scopeId: string): Promise<BrowserTab> {
     const url = normalizeBrowserUrl(rawUrl);
-    const tab = this.createTabRecord(activate);
+    const tab = this.createTabRecord(activate, scopeId);
     try {
       await tab.view.webContents.loadURL(url);
       await this.finishTabCreation(tab);
     } catch (error) {
-      this.closeTab(tab.id);
+      this.closeTabRecord(tab);
       throw error;
     }
     return tab;
   }
 
-  async ensureActiveTab(): Promise<BrowserTab> {
-    const active = this.activeTab();
+  async ensureActiveTab(scopeId = this.uiScopeId): Promise<BrowserTab> {
+    const active = this.activeTab(scopeId);
     if (active) return active;
-    await this.createTab();
-    const created = this.activeTab();
+    await this.createTab(undefined, true, scopeId);
+    const created = this.activeTab(scopeId);
     if (!created) throw new Error("无法创建内置浏览器标签页。");
     return created;
   }
 
-  selectTab(id: string): BrowserStateSnapshot {
-    if (!this.tabs.has(id)) throw new Error("浏览器标签页不存在。");
-    this.activeTabId = id;
+  selectTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
+    if (this.tabs.get(id)?.scopeId !== scopeId) throw new Error("浏览器标签页不存在。");
+    this.activeTabIds.set(scopeId, id);
     this.applyViewLayout();
     this.publish();
-    return this.state();
+    return this.state(scopeId);
   }
 
-  closeTab(id: string): BrowserStateSnapshot {
+  closeTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
     const tab = this.tabs.get(id);
-    if (!tab) return this.state();
-    const order = [...this.tabs.keys()];
+    if (!tab || tab.scopeId !== scopeId) return this.state(scopeId);
+    const order = this.tabsForScope(scopeId).map((item) => item.id);
     const index = order.indexOf(id);
-    this.tabs.delete(id);
-    if (!this.window.isDestroyed()) this.window.contentView.removeChildView(tab.view);
-    if (!tab.view.webContents.isDestroyed()) {
-      if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach();
-      tab.view.webContents.close({ waitForBeforeUnload: false });
-    }
-    for (const client of this.clients.values()) this.announceDestroyed(client, tab);
-    if (this.activeTabId === id) {
-      this.activeTabId = order[index + 1] ?? order[index - 1] ?? [...this.tabs.keys()][0];
+    this.closeTabRecord(tab);
+    if (this.activeTabIds.get(scopeId) === id) {
+      const next = order[index + 1] ?? order[index - 1];
+      if (next) this.activeTabIds.set(scopeId, next);
+      else this.activeTabIds.delete(scopeId);
     }
     if (!this.window.isDestroyed()) this.applyViewLayout();
     this.publish();
-    return this.state();
+    return this.state(scopeId);
   }
 
-  async navigate(rawUrl: string): Promise<BrowserStateSnapshot> {
-    const tab = await this.ensureActiveTab();
+  releaseScope(scopeId: string): void {
+    for (const client of [...this.clients.values()]) {
+      if (client.scopeId === scopeId) client.socket.close(1008, "浏览器会话已释放");
+    }
+    for (const tab of this.tabsForScope(scopeId)) this.closeTabRecord(tab);
+    this.activeTabIds.delete(scopeId);
+    if (this.uiScopeId === scopeId) {
+      this.applyViewLayout();
+      this.publish();
+    }
+  }
+
+  async navigate(rawUrl: string, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
+    const tab = await this.ensureActiveTab(scopeId);
     await tab.view.webContents.loadURL(normalizeBrowserUrl(rawUrl));
-    return this.state();
+    return this.state(scopeId);
   }
 
-  async back(): Promise<BrowserStateSnapshot> {
-    const tab = await this.ensureActiveTab();
+  async back(scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
+    const tab = await this.ensureActiveTab(scopeId);
     if (tab.view.webContents.navigationHistory.canGoBack()) tab.view.webContents.navigationHistory.goBack();
-    return this.state();
+    return this.state(scopeId);
   }
 
-  async forward(): Promise<BrowserStateSnapshot> {
-    const tab = await this.ensureActiveTab();
+  async forward(scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
+    const tab = await this.ensureActiveTab(scopeId);
     if (tab.view.webContents.navigationHistory.canGoForward()) tab.view.webContents.navigationHistory.goForward();
-    return this.state();
+    return this.state(scopeId);
   }
 
-  async reload(): Promise<BrowserStateSnapshot> {
-    const tab = await this.ensureActiveTab();
+  async reload(scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
+    const tab = await this.ensureActiveTab(scopeId);
     tab.view.webContents.reload();
-    return this.state();
+    return this.state(scopeId);
   }
 
   setBounds(bounds: BrowserViewBounds): void {
@@ -318,13 +346,35 @@ export class BrowserRuntimeManager {
     }
     for (const client of this.clients.values()) client.socket.close(1001, "SuoCode 正在关闭");
     this.clients.clear();
-    for (const tab of [...this.tabs.values()]) this.closeTab(tab.id);
+    for (const tab of [...this.tabs.values()]) this.closeTabRecord(tab);
     await new Promise<void>((resolve) => this.socketServer.close(() => resolve()));
     if (this.server.listening) await new Promise<void>((resolve) => this.server.close(() => resolve()));
   }
 
-  private activeTab(): BrowserTab | undefined {
-    return this.activeTabId ? this.tabs.get(this.activeTabId) : undefined;
+  private tabsForScope(scopeId: string): BrowserTab[] {
+    return [...this.tabs.values()].filter((tab) => tab.scopeId === scopeId);
+  }
+
+  private activeTab(scopeId: string): BrowserTab | undefined {
+    const id = this.activeTabIds.get(scopeId);
+    return id ? this.tabs.get(id) : undefined;
+  }
+
+  private closeTabRecord(tab: BrowserTab): void {
+    if (!this.tabs.delete(tab.id)) return;
+    if (this.activeTabIds.get(tab.scopeId) === tab.id) {
+      const replacement = this.tabsForScope(tab.scopeId)[0];
+      if (replacement) this.activeTabIds.set(tab.scopeId, replacement.id);
+      else this.activeTabIds.delete(tab.scopeId);
+    }
+    if (!this.window.isDestroyed()) this.window.contentView.removeChildView(tab.view);
+    if (!tab.view.webContents.isDestroyed()) {
+      if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach();
+      tab.view.webContents.close({ waitForBeforeUnload: false });
+    }
+    for (const client of this.clients.values()) {
+      if (client.scopeId === tab.scopeId) this.announceDestroyed(client, tab);
+    }
   }
 
   private tabSnapshot(tab: BrowserTab): BrowserTabSnapshot {
@@ -349,7 +399,7 @@ export class BrowserRuntimeManager {
     contents.setWindowOpenHandler(({ url }) => {
       try {
         normalizeBrowserUrl(url);
-        void this.createTab(url).catch((error) => console.error("[browser] 打开新标签页失败", error));
+        void this.createTab(url, true, tab.scopeId).catch((error) => console.error("[browser] 打开新标签页失败", error));
       } catch {
         // Keep unsupported protocols inside the browser sandbox.
       }
@@ -369,9 +419,11 @@ export class BrowserRuntimeManager {
   private installTabEvents(tab: BrowserTab): void {
     const contents = tab.view.webContents;
     const update = (): void => {
-      this.publish();
+      if (tab.scopeId === this.uiScopeId) this.publish();
       if (tab.announced) {
-        for (const client of this.clients.values()) this.announceChanged(client, tab);
+        for (const client of this.clients.values()) {
+          if (client.scopeId === tab.scopeId) this.announceChanged(client, tab);
+        }
       }
     };
     contents.on("did-start-loading", update);
@@ -402,11 +454,12 @@ export class BrowserRuntimeManager {
       height: nativeBounds.height,
     };
     for (const tab of this.tabs.values()) {
-      const active = tab.id === this.activeTabId && nativeBounds.visible && bounds.width > 0 && bounds.height > 0;
+      const isUiActive = tab.scopeId === this.uiScopeId && tab.id === this.activeTabIds.get(this.uiScopeId);
+      const active = isUiActive && nativeBounds.visible && bounds.width > 0 && bounds.height > 0;
       if (active) {
         tab.view.setBounds(bounds);
         tab.view.setVisible(true);
-      } else if (tab.id === this.activeTabId) {
+      } else if (isUiActive) {
         tab.view.setBounds(OFFSCREEN_VIEWPORT);
         tab.view.setVisible(true);
       } else {
@@ -416,14 +469,14 @@ export class BrowserRuntimeManager {
     }
   }
 
-  private acceptClient(socket: WebSocket, mode: CdpClient["mode"]): void {
+  private acceptClient(socket: WebSocket, mode: CdpClient["mode"], scopeId: string): void {
     const client: CdpClient = {
-      id: randomUUID(), mode, socket, discover: false, autoAttach: false,
+      id: randomUUID(), scopeId, mode, socket, discover: false, autoAttach: false,
       sessions: new Map(), directSessions: new Map(), childSessions: new Map(), debuggerListeners: new Map(),
     };
     this.clients.set(client.id, client);
-    this.onAgentActivated();
-    for (const tab of this.tabs.values()) this.installDebuggerRelay(client, tab);
+    this.onAgentActivated(scopeId);
+    for (const tab of this.tabsForScope(scopeId)) this.installDebuggerRelay(client, tab);
     socket.on("message", (data) => { void this.handleClientMessage(client, data); });
     socket.once("close", () => this.removeClient(client));
     socket.once("error", () => this.removeClient(client));
@@ -441,6 +494,7 @@ export class BrowserRuntimeManager {
   }
 
   private installDebuggerRelay(client: CdpClient, tab: BrowserTab): void {
+    if (client.scopeId !== tab.scopeId) return;
     if (client.debuggerListeners.has(tab.id)) return;
     const listener = (_event: Electron.Event, method: string, params: unknown, sessionId?: string): void => {
       const sessions = client.sessions.get(tab.id);
@@ -528,45 +582,46 @@ export class BrowserRuntimeManager {
 
   private async executeRootCommand(client: CdpClient, method: string, params: Record<string, unknown>): Promise<unknown> {
     if (method === "SuoCode.getBrowserState") {
-      await this.ensureActiveTab();
+      await this.ensureActiveTab(client.scopeId);
+      const activeTabId = this.activeTabIds.get(client.scopeId);
       return {
-        activeTabId: this.activeTabId,
-        activePageTargetId: this.activeTabId ? this.tabs.get(this.activeTabId)?.pageTargetId : undefined,
-        tabs: [...this.tabs.values()].map((tab) => ({
+        activeTabId,
+        activePageTargetId: activeTabId ? this.tabs.get(activeTabId)?.pageTargetId : undefined,
+        tabs: this.tabsForScope(client.scopeId).map((tab) => ({
           id: tab.id,
           pageTargetId: tab.pageTargetId,
           title: tab.view.webContents.getTitle() || "新标签页",
           url: tab.view.webContents.getURL() || DEFAULT_URL,
-          active: tab.id === this.activeTabId,
+          active: tab.id === activeTabId,
         })),
       };
     }
-    if (method === "Target.getBrowserContexts") return { browserContextIds: [BROWSER_CONTEXT_ID] };
+    if (method === "Target.getBrowserContexts") return { browserContextIds: [browserContextId(client.scopeId)] };
     if (method === "Browser.getVersion") {
-      const tab = await this.ensureActiveTab();
+      const tab = await this.ensureActiveTab(client.scopeId);
       this.installDebuggerRelay(client, tab);
       return tab.view.webContents.debugger.sendCommand(method, params);
     }
     if (method === "Target.setDiscoverTargets") {
       client.discover = params.discover === true;
       if (client.discover) {
-        await this.ensureActiveTab();
+        await this.ensureActiveTab(client.scopeId);
         this.announceAllTargets(client);
       }
       return {};
     }
     if (method === "Target.setAutoAttach") {
       client.autoAttach = params.autoAttach === true;
-      if (client.autoAttach) for (const tab of this.tabs.values()) this.attachTab(client, tab);
+      if (client.autoAttach) for (const tab of this.tabsForScope(client.scopeId)) this.attachTab(client, tab);
       return {};
     }
     if (method === "Target.getTargets") return { targetInfos: this.allTargetInfos(client) };
     if (method === "Target.getTargetInfo") {
       const requestedId = typeof params.targetId === "string" ? params.targetId : BROWSER_TARGET_ID;
-      return { targetInfo: this.findTargetInfo(requestedId) };
+      return { targetInfo: this.findTargetInfo(requestedId, client.scopeId) };
     }
     if (method === "Target.createTarget") {
-      const tab = await this.createCdpTab(typeof params.url === "string" ? params.url : undefined, params.background !== true);
+      const tab = await this.createCdpTab(typeof params.url === "string" ? params.url : undefined, params.background !== true, client.scopeId);
       // CDP's Target.createTarget returns the page target. The synthetic `tab`
       // target only exists to reproduce Chrome's parent/child auto-attach
       // hierarchy; returning it makes Puppeteer wait for a PageTarget that can
@@ -574,17 +629,17 @@ export class BrowserRuntimeManager {
       return { targetId: tab.pageTargetId };
     }
     if (method === "Target.activateTarget") {
-      const tab = this.findTabByTarget(String(params.targetId ?? ""));
-      if (tab) this.selectTab(tab.id);
+      const tab = this.findTabByTarget(String(params.targetId ?? ""), client.scopeId);
+      if (tab) this.selectTab(tab.id, client.scopeId);
       return {};
     }
     if (method === "Target.closeTarget") {
-      const tab = this.findTabByTarget(String(params.targetId ?? ""));
-      if (tab) this.closeTab(tab.id);
+      const tab = this.findTabByTarget(String(params.targetId ?? ""), client.scopeId);
+      if (tab) this.closeTab(tab.id, client.scopeId);
       return { success: Boolean(tab) };
     }
     if (method === "Target.attachToTarget") {
-      const tab = this.findTabByTarget(String(params.targetId ?? ""));
+      const tab = this.findTabByTarget(String(params.targetId ?? ""), client.scopeId);
       if (!tab) throw new Error("目标标签页不存在。");
       // Lighthouse and other consumers may open a temporary CDP session on a
       // page that Puppeteer already owns. Reusing Puppeteer's persistent tab
@@ -612,11 +667,11 @@ export class BrowserRuntimeManager {
     }
     if (method === "Browser.close") return {};
     if (method === "Browser.getWindowBounds") {
-      const tab = this.findTabByWindowId(params.windowId) ?? await this.ensureActiveTab();
+      const tab = this.findTabByWindowId(params.windowId, client.scopeId) ?? await this.ensureActiveTab(client.scopeId);
       return { bounds: this.windowBounds(tab) };
     }
     if (method === "Browser.setWindowBounds") {
-      const tab = this.findTabByWindowId(params.windowId) ?? await this.ensureActiveTab();
+      const tab = this.findTabByWindowId(params.windowId, client.scopeId) ?? await this.ensureActiveTab(client.scopeId);
       const bounds = params.bounds && typeof params.bounds === "object" ? params.bounds as Record<string, unknown> : {};
       if (typeof bounds.width === "number" && typeof bounds.height === "number") {
         await this.setContentsSize(tab, bounds);
@@ -624,14 +679,14 @@ export class BrowserRuntimeManager {
       return {};
     }
     if (method === "Browser.getWindowForTarget") {
-      const requested = typeof params.targetId === "string" ? this.findTabByTarget(params.targetId) : undefined;
-      return this.windowForTab(requested ?? await this.ensureActiveTab());
+      const requested = typeof params.targetId === "string" ? this.findTabByTarget(params.targetId, client.scopeId) : undefined;
+      return this.windowForTab(requested ?? await this.ensureActiveTab(client.scopeId));
     }
     if (method === "Browser.setContentsSize") {
-      const tab = this.findTabByWindowId(params.windowId) ?? await this.ensureActiveTab();
+      const tab = this.findTabByWindowId(params.windowId, client.scopeId) ?? await this.ensureActiveTab(client.scopeId);
       return this.setContentsSize(tab, params);
     }
-    const tab = await this.ensureActiveTab();
+    const tab = await this.ensureActiveTab(client.scopeId);
     this.installDebuggerRelay(client, tab);
     this.attachDebugger(tab);
     return tab.view.webContents.debugger.sendCommand(method, params);
@@ -676,7 +731,7 @@ export class BrowserRuntimeManager {
 
   private announceAllTargets(client: CdpClient): void {
     this.send(client, { method: "Target.targetCreated", params: { targetInfo: { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false } } });
-    for (const tab of this.tabs.values()) {
+    for (const tab of this.tabsForScope(client.scopeId)) {
       if (client.mode === "devtools") this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
       this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "page") } });
     }
@@ -685,6 +740,7 @@ export class BrowserRuntimeManager {
   private announceCreated(tab: BrowserTab): void {
     if (!tab.announced) return;
     for (const client of this.clients.values()) {
+      if (client.scopeId !== tab.scopeId) continue;
       this.installDebuggerRelay(client, tab);
       if (client.discover) {
         if (client.mode === "devtools") this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
@@ -723,43 +779,44 @@ export class BrowserRuntimeManager {
   private tabForSession(client: CdpClient, sessionId: string): { tab: BrowserTab; sessions: ClientTabSessions; kind: "tab" | "page" | "direct" | "child" } | undefined {
     for (const [tabId, sessions] of client.sessions) {
       const tab = this.tabs.get(tabId);
-      if (!tab) continue;
+      if (!tab || tab.scopeId !== client.scopeId) continue;
       if (sessions.tabSessionId === sessionId) return { tab, sessions, kind: "tab" };
       if (sessions.pageSessionId === sessionId) return { tab, sessions, kind: "page" };
     }
     const directTabId = client.directSessions.get(sessionId);
     const directTab = directTabId ? this.tabs.get(directTabId) : undefined;
     const directSessions = directTabId ? client.sessions.get(directTabId) : undefined;
-    if (directTab && directSessions) return { tab: directTab, sessions: directSessions, kind: "direct" };
+    if (directTab?.scopeId === client.scopeId && directSessions) return { tab: directTab, sessions: directSessions, kind: "direct" };
     const childTabId = client.childSessions.get(sessionId);
     const childTab = childTabId ? this.tabs.get(childTabId) : undefined;
     const childSessions = childTabId ? client.sessions.get(childTabId) : undefined;
-    return childTab && childSessions ? { tab: childTab, sessions: childSessions, kind: "child" } : undefined;
+    return childTab?.scopeId === client.scopeId && childSessions ? { tab: childTab, sessions: childSessions, kind: "child" } : undefined;
   }
 
   private allTargetInfos(client?: CdpClient): Array<Record<string, unknown>> {
+    const scopeId = client?.scopeId ?? this.uiScopeId;
     return [
       { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false },
-      ...[...this.tabs.values()].flatMap((tab) => client?.mode === "playwright"
+      ...this.tabsForScope(scopeId).flatMap((tab) => client?.mode === "playwright"
         ? [targetInfo(tab, "page")]
         : [targetInfo(tab, "tab"), targetInfo(tab, "page")]),
     ];
   }
 
-  private findTargetInfo(id: string): Record<string, unknown> {
+  private findTargetInfo(id: string, scopeId: string): Record<string, unknown> {
     if (id === BROWSER_TARGET_ID) return this.allTargetInfos()[0];
-    const tab = this.findTabByTarget(id);
+    const tab = this.findTabByTarget(id, scopeId);
     if (!tab) throw new Error("目标不存在。");
     return targetInfo(tab, id === tab.tabTargetId ? "tab" : "page");
   }
 
-  private findTabByTarget(id: string): BrowserTab | undefined {
-    return [...this.tabs.values()].find((tab) => tab.tabTargetId === id || tab.pageTargetId === id);
+  private findTabByTarget(id: string, scopeId: string): BrowserTab | undefined {
+    return this.tabsForScope(scopeId).find((tab) => tab.tabTargetId === id || tab.pageTargetId === id);
   }
 
-  private findTabByWindowId(value: unknown): BrowserTab | undefined {
+  private findTabByWindowId(value: unknown, scopeId: string): BrowserTab | undefined {
     if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
-    return [...this.tabs.values()].find((tab) => tab.view.webContents.id === value);
+    return this.tabsForScope(scopeId).find((tab) => tab.view.webContents.id === value);
   }
 
   private windowBounds(tab: BrowserTab): Record<string, unknown> {

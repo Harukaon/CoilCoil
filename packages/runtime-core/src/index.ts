@@ -207,7 +207,18 @@ export function mcpConfigurationForAgent(
 export function withBundledBrowserMcp(
   configuration: McpAdapterEffectiveConfig,
   environment: NodeJS.ProcessEnv = process.env,
+  browserScopeId?: string,
 ): McpAdapterEffectiveConfig {
+  const scopedEndpoint = (value: string): string => {
+    if (!browserScopeId) return value;
+    try {
+      const url = new URL(value);
+      url.searchParams.set("scope", browserScopeId);
+      return url.toString();
+    } catch {
+      return value;
+    }
+  };
   const parseServer = (
     commandKey: string,
     argsKey: string,
@@ -216,13 +227,24 @@ export function withBundledBrowserMcp(
     const command = environment[commandKey]?.trim();
     const rawArgs = environment[argsKey];
     if (!command || !rawArgs) return undefined;
-    const args = JSON.parse(rawArgs) as unknown;
+    const parsedArgs = JSON.parse(rawArgs) as unknown;
+    const args = Array.isArray(parsedArgs)
+      ? parsedArgs.map((value, index) => typeof value === "string" && (value === "--cdp-endpoint" || value === "--wsEndpoint")
+        ? value
+        : typeof value === "string" && index > 0 && (parsedArgs[index - 1] === "--cdp-endpoint" || parsedArgs[index - 1] === "--wsEndpoint")
+          ? scopedEndpoint(value)
+          : value)
+      : parsedArgs;
     const env = environment[envKey]
       ? JSON.parse(environment[envKey] as string) as unknown
       : {};
     if (!Array.isArray(args) || !args.every((value) => typeof value === "string")) return undefined;
     if (!env || typeof env !== "object" || Array.isArray(env) || !Object.values(env).every((value) => typeof value === "string")) return undefined;
-    return { command, args, env: env as Record<string, string> };
+    const scopedEnv = { ...(env as Record<string, string>) };
+    if (scopedEnv.SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT) {
+      scopedEnv.SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT = scopedEndpoint(scopedEnv.SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT);
+    }
+    return { command, args, env: scopedEnv };
   };
 
   try {
@@ -760,6 +782,8 @@ export interface SuoCodeRuntimeOptions {
   legacyAgentDir?: string;
   modelRuntime?: ModelRuntime;
   modelRuntimePromise?: Promise<ModelRuntime>;
+  /** Browser capability scope owned by this runtime/session. */
+  browserScopeId?: string;
   onEvent?: EventSink;
 }
 
@@ -1751,6 +1775,7 @@ export class SuoCodeRuntime {
   readonly agentDir: string;
   readonly sessionDir: string;
   readonly workflowDir: string;
+  readonly browserScopeId?: string;
 
   private readonly emitEvent: EventSink;
   private readonly extensionPaths: string[];
@@ -1778,6 +1803,7 @@ export class SuoCodeRuntime {
     this.agentDir = resolve(options.agentDir);
     this.sessionDir = resolve(options.sessionDir);
     this.workflowDir = resolveWorkflowDirectory(options.workflowDir);
+    this.browserScopeId = options.browserScopeId;
     const resources = bundledRuntimeResources(this.workflowDir);
     this.extensionPaths = resources.extensions;
     this.skillPaths = resources.skills;
@@ -2828,7 +2854,11 @@ export class SuoCodeRuntime {
       ...this.readRemovedMcpServers(),
       ...this.readDisabledMcpServers(),
     ]);
-    mcpAgentConfigRegistry().set(eventBus, withBundledBrowserMcp(mcpConfigurationForAgent(configuration, hiddenNames)));
+    mcpAgentConfigRegistry().set(eventBus, withBundledBrowserMcp(
+      mcpConfigurationForAgent(configuration, hiddenNames),
+      process.env,
+      this.browserScopeId,
+    ));
   }
 
   private async reloadActiveSessionNow(active: ActiveSession): Promise<void> {

@@ -1,8 +1,9 @@
 # SuoCode 内置浏览器
 
-SuoCode 的内置浏览器由 Electron `WebContentsView` 渲染，Agent 侧复用
-[`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp)
-的成熟工具定义、可访问性快照、输入、网络与性能能力。
+SuoCode 的内置浏览器由 Electron `WebContentsView` 渲染。Agent 的高频网页操作以
+[`@playwright/mcp`](https://github.com/microsoft/playwright-mcp) 为语义层；
+[`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp) 与
+SuoCode 自有调试 MCP 通过搜索按需提供网络、性能、Sources 和存储等高级能力。
 
 ## 安全边界
 
@@ -12,15 +13,31 @@ SuoCode 的内置浏览器由 Electron `WebContentsView` 渲染，Agent 侧复�
   Renderer、设置页和其他 WebContents 不在可发现目标中。
 - CDP WebSocket 仅监听 `127.0.0.1`，使用随机路径和随机 Bearer Token；地址与
   凭据只通过内置 Runtime 子进程环境传递。
-- `Browser.close` 会被拦截，页面导航只允许 HTTP/HTTPS。
+- `Browser.close` 会被拦截；网页、本地文件、`data:` 等 Chromium 可加载地址均由
+  内置浏览器承载，不把应用 Renderer 暴露给 Agent。
 - 浏览器 MCP 只注入 Agent 的有效能力视图，不写入用户或工作区的 MCP 配置文件。
+- 每个 Agent 会话拥有独立的 capability scope。它只能发现和操作自己创建的标签页；
+  后台会话不会切走用户当前右栏，运行时归档或被回收时会同时关闭其 CDP 连接和网页。
 
 ## 上游复用方式
 
-`chrome-devtools-mcp` 作为 Apache-2.0 npm 依赖保留，SuoCode 不复制其工具层。
-`apps/desktop/src/main/browser-runtime.ts` 实现一个很薄的兼容层，把 Puppeteer 所需
-的 browser → tab → page 目标层级映射到 Electron 的单页 debugger。这样可继续
-升级上游 MCP，同时连接层始终由 SuoCode 控制。
+Playwright 和 Chrome DevTools MCP 均作为 Apache-2.0 npm 依赖保留，SuoCode 不复制
+它们的通用工具层。`apps/desktop/src/main/browser-runtime.ts` 实现 capability-scoped
+兼容层，把 Playwright/Puppeteer 需要的 browser → tab → page 目标层级映射到 Electron
+的单页 debugger。这样可继续升级上游 MCP，同时连接层始终由 SuoCode 控制。
+
+Playwright 的参数较少不是因为浏览器能力更少，而是它预先处理了原始 CDP 状态：
+
+- `snapshot ref` / selector 被解析成 Locator 与具体 frame、node、execution context；
+- click/fill/drag 内置可见、稳定、未被遮挡、可编辑等 actionability 检查和自动等待；
+- Page/BrowserContext 管理导航、弹窗、下载和页面生命周期；
+- 调用者通常只需表达“对哪个语义元素做什么”，不用持续传递 CDP session、frame、
+  backend node、坐标和等待条件。
+
+因此 SuoCode 将快照、查找、点击、输入、导航、标签页、等待和截图等高频能力直接
+提供给 Agent；Console、任意脚本求值、Network 明细以及更底层的 Debugger/Fetch/
+Storage 工具通过 MCP 搜索渐进披露。能力没有删除，只避免把低频 schema 和复杂参数
+常驻在每轮模型上下文中。
 
 ## 当前界面
 
