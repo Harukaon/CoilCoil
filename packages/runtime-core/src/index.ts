@@ -2446,10 +2446,11 @@ export class SuoCodeRuntime {
   /**
    * Change the model owned by this live conversation.
    *
-   * Pi captures a model when a provider request starts. Mutating it while an
-   * Agent run is active only changes the session log; it cannot retarget that
-   * already-started request. Refuse that ambiguous state instead of claiming a
-   * switch that did not actually happen.
+   * Pi captures a model when a provider request starts. A switch during an
+   * active run therefore changes the session branch and the next request, but
+   * never retargets the request already in flight. If a prompt is still in Pi's
+   * async preflight, wait until it has crossed that boundary before applying
+   * the new model so the same guarantee holds for the startup race as well.
    */
   async setSessionModel(input: {
     provider: string;
@@ -2458,14 +2459,14 @@ export class SuoCodeRuntime {
     contextWindow?: number;
   }): Promise<RuntimeConfiguration> {
     const active = this.requireActive();
-    if (active.session.isStreaming || this.promptStarting) {
-      throw new Error("当前 Agent 正在运行。请等待回复结束或先停止，再切换模型。");
-    }
     if (this.modelTransition) {
       throw new Error("模型正在切换，请稍候。");
     }
 
     const transition = (async (): Promise<void> => {
+      while (this.promptStarting) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
       const modelRuntime = await this.ready();
       const model = modelRuntime.getModel(input.provider, input.modelId);
       if (!model) throw new Error(`Unknown model: ${input.provider}/${input.modelId}`);

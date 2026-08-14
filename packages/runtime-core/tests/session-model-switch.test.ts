@@ -143,29 +143,45 @@ test("an idle session commits its model before publishing the new snapshot", asy
   assert.equal(published?.type === "session_snapshot" ? published.snapshot.thinkingLevel : undefined, "off");
 });
 
-test("a running session rejects a model switch without mutating the model or log", async (context) => {
+test("a running session records a model switch for the next request", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "suocode-running-model-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const current = model("pierce", "gpt-5.6-sol");
+  const next = model("xai", "grok-4.5");
   let setModelCalls = 0;
+  let thinking: ThinkingLevel = "high";
   const session: ModelSessionDouble = {
     isStreaming: true,
     model: current,
-    thinkingLevel: "high",
-    async setModel() { setModelCalls += 1; },
-    setThinkingLevel() { throw new Error("must not be called"); },
-    settingsManager: { async flush() { throw new Error("must not be called"); } },
+    thinkingLevel: thinking,
+    async setModel(selected) { setModelCalls += 1; this.model = selected; },
+    setThinkingLevel(level) { thinking = level; this.thinkingLevel = level; },
+    settingsManager: { async flush() {} },
   };
+  const modelRuntime = {
+    getModel: (provider: string, id: string) => provider === next.provider && id === next.id ? next : undefined,
+    checkAuth: async () => true,
+  } as unknown as ModelRuntime;
   const runtime = new SuoCodeRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    modelRuntime,
   });
-  (runtime as unknown as RuntimeInternals).active = { session };
+  const internals = runtime as unknown as RuntimeInternals;
+  internals.active = { session };
+  internals.snapshot = async () => snapshot(session);
+  internals.getConfiguration = async () => ({
+    provider: session.model?.provider,
+    modelId: session.model?.id,
+    thinkingLevel: session.thinkingLevel,
+    configuredProviders: ["pierce", "xai"],
+    models: [],
+    migratedLegacyCredentials: false,
+  });
 
-  await assert.rejects(
-    runtime.setSessionModel({ provider: "xai", modelId: "grok-4.5", thinkingLevel: "off" }),
-    /正在运行/,
-  );
-  assert.equal(setModelCalls, 0);
-  assert.equal(session.model, current);
+  await runtime.setSessionModel({ provider: "xai", modelId: "grok-4.5", thinkingLevel: "off" });
+  assert.equal(setModelCalls, 1);
+  assert.equal(session.model, next);
+  assert.equal(session.thinkingLevel, "off");
+  assert.equal(thinking, "off");
 });
