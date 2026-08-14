@@ -1119,6 +1119,29 @@ async function main() {
     assert.ok(inspectorTabLayout.width > 45, `The runtime inspector tab was clipped to ${inspectorTabLayout.width}px.`);
     assert.ok(inspectorTabLayout.labelWidth >= inspectorTabLayout.labelScrollWidth, "The runtime inspector label was ellipsized.");
     assert.equal(inspectorTabLayout.contextComposition, false, "The removed context-composition panel is still visible.");
+    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="浏览器"]')?.click()`);
+    await client.waitFor(
+      `Boolean(document.querySelector(".browser-tabs .browser-tab")) && Boolean(document.querySelector(".browser-tabs > .browser-new-tab"))`,
+      "The browser tab strip did not render its initial tab and new-tab action.",
+    );
+    const browserNewTabPlacement = await client.evaluate(`(() => {
+      const tabs = document.querySelector(".browser-tabs");
+      const lastTab = tabs?.querySelector(".browser-tab:last-of-type");
+      const add = tabs?.querySelector(":scope > .browser-new-tab");
+      const tabsBounds = tabs?.getBoundingClientRect();
+      const lastBounds = lastTab?.getBoundingClientRect();
+      const addBounds = add?.getBoundingClientRect();
+      return {
+        directChild: add?.parentElement === tabs,
+        gap: lastBounds && addBounds ? addBounds.left - lastBounds.right : 999,
+        trailingSpace: tabsBounds && addBounds ? tabsBounds.right - addBounds.right : -1,
+      };
+    })()`);
+    assert.equal(browserNewTabPlacement.directChild, true, "The browser new-tab action is outside the scrollable tab sequence.");
+    assert.ok(browserNewTabPlacement.gap >= 0 && browserNewTabPlacement.gap <= 3, `The browser new-tab action does not follow the last tab: ${JSON.stringify(browserNewTabPlacement)}`);
+    assert.ok(browserNewTabPlacement.trailingSpace > 20, `The browser new-tab action is still pinned to the strip's right edge: ${JSON.stringify(browserNewTabPlacement)}`);
+    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
+    await client.evaluate(`window.suocode.setBrowserViewBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })`);
     const preferredPanelWidths = await client.evaluate(`({
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0

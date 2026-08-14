@@ -76,8 +76,8 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
               <button className="browser-tab-close" type="button" aria-label={`关闭 ${tab.title}`} onClick={() => void window.suocode.closeBrowserTab(scopeId, tab.id).then(setState)}><X size={10} /></button>
             </div>
           ))}
+          <button className="browser-new-tab" type="button" aria-label="新建浏览器标签页" onClick={() => void window.suocode.createBrowserTab(scopeId).then(setState)}><Plus size={13} /></button>
         </div>
-        <button className="browser-new-tab" type="button" aria-label="新建浏览器标签页" onClick={() => void window.suocode.createBrowserTab(scopeId).then(setState)}><Plus size={13} /></button>
       </div>
       <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
         <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => void window.suocode.browserBack(scopeId).then(setState)}><ArrowLeft size={13} /></button>
