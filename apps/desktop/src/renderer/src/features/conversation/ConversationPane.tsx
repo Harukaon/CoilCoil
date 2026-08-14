@@ -28,11 +28,6 @@ import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./Con
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
 import { SubagentCard, SubagentDetailDialog } from "../subagents/SubagentActivity";
 
-function truncateTitle(value: string, maximum = 10): string {
-  const characters = Array.from(value);
-  return characters.length > maximum ? `${characters.slice(0, maximum).join("")}…` : value;
-}
-
 function turnModelName(
   model: ChatMessage["model"],
   configuration: RuntimeConfiguration | undefined,
@@ -145,6 +140,7 @@ export function ConversationPane({
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [selectedSubagentId, setSelectedSubagentId] = useState<string>();
   const selectedSubagent = subagents.find((activity) => activity.id === selectedSubagentId);
+  const conversationTitle = pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话";
   const slashMenu = useSlashMenu({
     draft,
     inputRef,
@@ -193,7 +189,7 @@ export function ConversationPane({
     <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""} ${hasComposerActivity ? "has-composer-activity" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <header className="conversation-header window-drag">
         {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
-        <div className="conversation-title"><strong title={pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话"}>{truncateTitle(pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话")}</strong>{project ? <span>{project.name}</span> : null}</div>
+        <div className="conversation-title"><strong title={conversationTitle}>{conversationTitle}</strong>{project ? <span>{project.name}</span> : null}</div>
         <div className="header-actions no-drag">{!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={onOpenRight}><PanelRight size={17} /></button> : null}</div>
       </header>
 

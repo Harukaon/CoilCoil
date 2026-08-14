@@ -1529,6 +1529,19 @@ async function main() {
       })()`), true, "A normal persisted conversation still rendered the meaningless default status icon.");
       await client.evaluate(`[...document.querySelectorAll(".conversation-row")].find((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))?.click()`);
       await client.waitFor(`document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The packaged renderer did not restore the historical image.", 60_000);
+      const restoredConversationTitle = await client.evaluate(`(() => {
+        const title = document.querySelector(".conversation-title strong");
+        return {
+          text: title?.textContent || "",
+          tooltip: title?.getAttribute("title") || "",
+          visibleWidth: title?.clientWidth ?? 0,
+          contentWidth: title?.scrollWidth ?? 0,
+        };
+      })()`);
+      const expectedConversationTitle = `会话恢复投影测试 ${fixtureToken}`;
+      assert.equal(restoredConversationTitle.text, expectedConversationTitle, "The conversation header still hard-truncated the title text.");
+      assert.equal(restoredConversationTitle.tooltip, expectedConversationTitle, "The conversation title tooltip did not preserve the full title.");
+      assert.ok(restoredConversationTitle.visibleWidth > 0 && restoredConversationTitle.visibleWidth <= 620, `The conversation title did not respect the available header width: ${JSON.stringify(restoredConversationTitle)}`);
       await client.evaluate(`document.querySelector(".user-bubble-button")?.click()`);
       await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="编辑历史消息"]'))`, "The historical message did not enter edit mode.");
       const historicalImageBeforePaste = await client.evaluate(`(() => {

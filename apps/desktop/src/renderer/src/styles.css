@@ -168,8 +168,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 [data-platform="darwin"] .app-shell.left-collapsed .skills-workspace-header { padding-left: 82px; }
 .conversation-header { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; }
 [data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 82px; }
-.conversation-title { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.conversation-title strong { max-width: 620px; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; }
+.conversation-title strong { display: block; width: 100%; max-width: 620px; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-title span { color: #8a8a85; font-size: 10px; }
 .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .conversation-header > .header-actions { align-self: flex-start; margin-top: 7px; }
