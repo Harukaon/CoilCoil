@@ -7,7 +7,7 @@ import type {
 } from "@suocode/runtime-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
@@ -57,6 +57,18 @@ function playwrightMcpEntry(): string {
   if (!app.isPackaged) return resolved;
   const unpacked = resolved.replace(`${join("app.asar", "node_modules")}`, `${join("app.asar.unpacked", "node_modules")}`);
   return existsSync(unpacked) ? unpacked : resolved;
+}
+
+function playwrightMcpConfigPath(): string {
+  const outputDir = join(app.getPath("userData"), "browser-artifacts", "playwright");
+  mkdirSync(outputDir, { recursive: true });
+  const path = join(outputDir, "mcp-config.json");
+  writeFileSync(path, `${JSON.stringify({
+    capabilities: ["core", "network", "storage", "testing", "vision", "pdf", "devtools"],
+    allowUnrestrictedFileAccess: true,
+    codegen: "none",
+  }, null, 2)}\n`, { mode: 0o600 });
+  return path;
 }
 
 function backgroundNodeExecutable(): string {
@@ -277,12 +289,10 @@ class RuntimeHost {
           SUOCODE_BROWSER_MCP_COMMAND: nodeExecutable,
           SUOCODE_BROWSER_MCP_ARGS: JSON.stringify([
             playwrightMcpEntry(),
+            "--config", playwrightMcpConfigPath(),
             "--cdp-endpoint", primaryBrowserRuntime.playwrightEndpoint(),
             "--cdp-header", `Authorization: Bearer ${primaryBrowserRuntime.token}`,
-            "--allow-unrestricted-file-access",
             "--output-dir", join(app.getPath("userData"), "browser-artifacts", "playwright"),
-            "--caps", "vision,pdf,devtools",
-            "--codegen", "none",
           ]),
           SUOCODE_BROWSER_MCP_ENV: JSON.stringify({
             ELECTRON_RUN_AS_NODE: "1",
