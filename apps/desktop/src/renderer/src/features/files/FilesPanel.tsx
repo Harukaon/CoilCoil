@@ -15,15 +15,30 @@ interface PreviewSelection {
   error?: string;
 }
 
+function findFileNode(nodes: FileNode[], path: string): FileNode | undefined {
+  for (const node of nodes) {
+    if (node.path === path && node.kind === "file") return node;
+    if (node.children) {
+      const found = findFileNode(node.children, path);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
 function samePreviewPath(root: string, node: FileNode, document: FilePreviewDocument): boolean {
   const expected = absoluteProjectPath(root, node.path).replaceAll("\\", "/");
   const actual = document.path.replaceAll("\\", "/");
   return actual === expected || actual.endsWith(`/${node.path.replaceAll("\\", "/")}`);
 }
 
-export function FilesPanel({ project, runtimeId }: {
+export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onCloseFile, onRemovePath }: {
   project: ProjectSnapshot;
   runtimeId?: string;
+  activeFilePath?: string;
+  onOpenFile?: (node: FileNode) => void;
+  onCloseFile?: (path: string) => void;
+  onRemovePath?: (path: string) => void;
 }): React.JSX.Element {
   const [tree, setTree] = useState<FileNode[]>(project.files);
   const [selection, setSelection] = useState<PreviewSelection>();
@@ -86,7 +101,7 @@ export function FilesPanel({ project, runtimeId }: {
     }
   };
 
-  const openPreview = async (node: FileNode, forceText = false): Promise<void> => {
+  const openPreview = useCallback(async (node: FileNode, forceText = false): Promise<void> => {
     if (!project.cwd || node.kind !== "file") return;
     const requestId = ++requestIdRef.current;
     selectedNodeRef.current = node;
@@ -110,12 +125,23 @@ export function FilesPanel({ project, runtimeId }: {
       if (requestId !== requestIdRef.current) return;
       setSelection({ node, loading: false, error: caught instanceof Error ? caught.message : String(caught) });
     }
-  };
+  }, [project.cwd, releasePreview]);
+
+  useEffect(() => {
+    if (!activeFilePath) {
+      if (selectedNodeRef.current) closePreview();
+      return;
+    }
+    if (selectedNodeRef.current?.path === activeFilePath) return;
+    const node = findFileNode(tree, activeFilePath);
+    if (node) void openPreview(node);
+  }, [activeFilePath, closePreview, openPreview, tree]);
 
   const removeNode = (path: string): void => {
     setTree((current) => removeTreeNode(current, path));
     const selectedPath = selectedNodeRef.current?.path;
     if (selectedPath === path || selectedPath?.startsWith(`${path}/`) || selectedPath?.startsWith(`${path}\\`)) closePreview();
+    onRemovePath?.(path);
   };
 
   if (!project.cwd) {
@@ -132,7 +158,11 @@ export function FilesPanel({ project, runtimeId }: {
           preview={selection.document}
           loading={selection.loading}
           error={selection.error}
-          onClose={closePreview}
+          onClose={() => {
+            const path = selectedNodeRef.current?.path;
+            closePreview();
+            if (path) onCloseFile?.(path);
+          }}
         />
       ) : null}
       {selection ? (
@@ -155,8 +185,14 @@ export function FilesPanel({ project, runtimeId }: {
           root={project.cwd}
           selectedPath={selection?.node.path}
           onLoad={loadDirectory}
-          onOpen={(node) => void openPreview(node)}
-          onOpenAsText={(node) => void openPreview(node, true)}
+          onOpen={(node) => {
+            onOpenFile?.(node);
+            void openPreview(node);
+          }}
+          onOpenAsText={(node) => {
+            onOpenFile?.(node);
+            void openPreview(node, true);
+          }}
           onTrashed={removeNode}
         />
       </aside>

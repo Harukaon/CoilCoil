@@ -1,6 +1,7 @@
 import {
   BrainCircuit,
   Files,
+  FileText,
   Globe2,
   PanelLeft,
 } from "lucide-react";
@@ -12,6 +13,7 @@ import type {
   PlanExecutionTarget,
   ProjectSelection,
   ProjectSnapshot,
+  FileNode,
   RuntimeBootstrap,
   RuntimeConfiguration,
   RuntimeEvent,
@@ -43,8 +45,21 @@ import { usePanelLayout } from "./hooks/usePanelLayout";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
 import { toastError, toastInfo, toastSuccess } from "./ui/toast";
 
-type InspectorView = "files" | "browser" | "runtime";
+type InspectorTabKind = "files" | "browser" | "runtime" | "file";
+type InspectorTabId = string;
 type WorkspaceSurface = "conversation" | "skills";
+
+interface InspectorTabDefinition {
+  id: InspectorTabId;
+  kind: InspectorTabKind;
+  label: string;
+  icon: typeof Files;
+  path?: string;
+}
+
+function fileInspectorTabId(path: string): string {
+  return `file:${path}`;
+}
 
 const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
 const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
@@ -112,7 +127,9 @@ export default function App(): React.JSX.Element {
   const [subagents, setSubagents] = useState<SubagentActivity[]>([]);
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
   const [configuration, setConfiguration] = useState<RuntimeConfiguration>();
-  const [inspectorView, setInspectorView] = useState<InspectorView>("files");
+  const [inspectorTabs, setInspectorTabs] = useState<InspectorTabDefinition[]>([]);
+  const [activeInspectorTabId, setActiveInspectorTabId] = useState<InspectorTabId>();
+  const [selectedFilePath, setSelectedFilePath] = useState<string>();
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivityState>>({});
   const [pendingProjectPath, setPendingProjectPath] = useState<string>();
   const [expandedSessionLimits, setExpandedSessionLimits] = useState<Record<string, number>>({});
@@ -120,11 +137,62 @@ export default function App(): React.JSX.Element {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const { leftOpen, rightOpen, leftWidth, rightWidth, setLeftOpen, setRightOpen, beginResize } = usePanelLayout();
 
+  const openInspectorTab = useCallback((tab: InspectorTabDefinition): void => {
+    setInspectorTabs((current) => current.some((item) => item.id === tab.id) ? current : [...current, tab]);
+    setActiveInspectorTabId(tab.id);
+    if (tab.kind === "file") setSelectedFilePath(tab.path);
+    if (tab.kind === "files") setSelectedFilePath(undefined);
+    setRightOpen(true);
+  }, [setRightOpen]);
+
+  const openFilesTab = useCallback((): void => {
+    openInspectorTab({ id: "files", kind: "files", label: "文件", icon: Files });
+  }, [openInspectorTab]);
+
+  const openBrowserTab = useCallback((): void => {
+    openInspectorTab({ id: "browser", kind: "browser", label: "浏览器", icon: Globe2 });
+  }, [openInspectorTab]);
+
+  const openRuntimeTab = useCallback((): void => {
+    openInspectorTab({ id: "runtime", kind: "runtime", label: "运行时", icon: BrainCircuit });
+  }, [openInspectorTab]);
+
+  const openFileTab = useCallback((node: FileNode): void => {
+    openInspectorTab({ id: fileInspectorTabId(node.path), kind: "file", label: node.name, icon: FileText, path: node.path });
+  }, [openInspectorTab]);
+
+  const selectInspectorTab = useCallback((id: InspectorTabId): void => {
+    const tab = inspectorTabs.find((item) => item.id === id);
+    if (!tab) return;
+    setActiveInspectorTabId(id);
+    if (tab.kind === "file") setSelectedFilePath(tab.path);
+    else if (tab.kind === "files") setSelectedFilePath(undefined);
+    setRightOpen(true);
+  }, [inspectorTabs, setRightOpen]);
+
+  const closeInspectorTab = useCallback((id: InspectorTabId): void => {
+    setInspectorTabs((current) => current.filter((item) => item.id !== id));
+    setActiveInspectorTabId((current) => current === id ? undefined : current);
+    if (id.startsWith("file:")) {
+      setSelectedFilePath((current) => current === id.slice("file:".length) ? undefined : current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeInspectorTabId && inspectorTabs.some((item) => item.id === activeInspectorTabId)) return;
+    setActiveInspectorTabId(inspectorTabs.at(-1)?.id);
+  }, [activeInspectorTabId, inspectorTabs]);
+
+  useEffect(() => {
+    const active = inspectorTabs.find((item) => item.id === activeInspectorTabId);
+    if (active?.kind === "file") setSelectedFilePath(active.path);
+    else if (active?.kind === "files") setSelectedFilePath(undefined);
+  }, [activeInspectorTabId, inspectorTabs]);
+
   useEffect(() => window.suocode.onBrowserAgentActivated((scopeId) => {
     if (scopeId !== snapshotRef.current?.runtimeId) return;
-    setInspectorView("browser");
-    setRightOpen(true);
-  }), [setRightOpen]);
+    openBrowserTab();
+  }), [openBrowserTab]);
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
   const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -194,6 +262,9 @@ export default function App(): React.JSX.Element {
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(selection.path);
     setWorkspaceSurface("conversation");
+    setInspectorTabs([]);
+    setActiveInspectorTabId(undefined);
+    setSelectedFilePath(undefined);
     snapshotRef.current = undefined;
     setSnapshot(undefined);
     dispatchConversationMessages({ type: "reset" });
@@ -374,6 +445,9 @@ export default function App(): React.JSX.Element {
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(undefined);
     setDraftImages([]);
+    setInspectorTabs([]);
+    setActiveInspectorTabId(undefined);
+    setSelectedFilePath(undefined);
     setLoading(true);
     dispatchConversationMessages({ type: "reset" });
     setTools([]);
@@ -441,7 +515,7 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const runtimeId = snapshot?.runtimeId;
-    if (settingsOpen || workspaceSurface !== "conversation" || inspectorView !== "runtime" || !runtimeId) return;
+    if (settingsOpen || workspaceSurface !== "conversation" || activeInspectorTabId !== "runtime" || !runtimeId) return;
     let cancelled = false;
     void window.suocode.request<SessionSnapshot["runtimeInspection"]>({ type: "get_runtime_inspection" }, runtimeId)
       .then((inspection) => {
@@ -458,7 +532,7 @@ export default function App(): React.JSX.Element {
         if (!cancelled) toastError(caught instanceof Error ? caught.message : String(caught));
       });
     return () => { cancelled = true; };
-  }, [inspectorView, settingsOpen, snapshot?.runtimeId, workspaceSurface]);
+  }, [activeInspectorTabId, settingsOpen, snapshot?.runtimeId, workspaceSurface]);
 
   useEffect(() => {
     if (!snapshot?.running) return;
@@ -666,8 +740,7 @@ export default function App(): React.JSX.Element {
     setDraft("");
     setDraftImages([]);
     if (runtimeCommand) {
-      setInspectorView("runtime");
-      setRightOpen(true);
+      openRuntimeTab();
     }
     shouldAutoScrollRef.current = true;
     const clientMessageId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -755,11 +828,8 @@ export default function App(): React.JSX.Element {
     shouldAutoScrollRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1;
   };
 
-  const inspectorItems: Array<{ id: InspectorView; label: string; icon: typeof Files }> = [
-    { id: "files", label: "文件", icon: Files },
-    { id: "browser", label: "浏览器", icon: Globe2 },
-    { id: "runtime", label: "运行时", icon: BrainCircuit },
-  ];
+  const activeInspectorTab = inspectorTabs.find((item) => item.id === activeInspectorTabId);
+  const filesVisible = activeInspectorTab?.kind === "files" || activeInspectorTab?.kind === "file";
 
   if (settingsOpen) {
     return <SettingsDialog configuration={configuration} open onClose={() => { shouldAutoScrollRef.current = true; setSettingsOpen(false); }} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} initialSection={settingsSection} />;
@@ -883,23 +953,43 @@ export default function App(): React.JSX.Element {
         />
 
         <InspectorPane
-          tabs={inspectorItems}
-          activeTab={inspectorView}
-          onSelectTab={setInspectorView}
-          onRefresh={() => inspectorView === "browser"
-            ? void window.suocode.reloadBrowser(snapshot?.runtimeId ?? project?.path ?? "default")
-            : void window.suocode.request({ type: "refresh_project" }, snapshot?.runtimeId)}
-          refreshDisabled={inspectorView !== "browser" && !snapshot}
+          tabs={inspectorTabs.map((item) => ({ ...item, closable: true }))}
+          activeTab={activeInspectorTabId ?? ""}
+          onSelectTab={selectInspectorTab}
+          onCloseTab={closeInspectorTab}
           onClose={() => setRightOpen(false)}
+          emptyState={(
+            <>
+              <div className="inspector-empty-icon"><Files size={18} strokeWidth={1.7} /></div>
+              <strong>打开一个面板</strong>
+              <p>选择文件、浏览器或运行时，内容会以标签页保留在这里。</p>
+              <div className="inspector-empty-actions">
+                <button type="button" onClick={openFilesTab}><Files size={14} />文件</button>
+                <button type="button" onClick={openBrowserTab}><Globe2 size={14} />浏览器</button>
+                <button type="button" onClick={openRuntimeTab}><BrainCircuit size={14} />运行时</button>
+              </div>
+            </>
+          )}
         >
-          <div className={`inspector-tab-panel files-tab-panel ${inspectorView === "files" ? "active" : ""}`}>
-            <FilesPanel key={`agent-files:${projectState.cwd}`} project={projectState} runtimeId={snapshot?.runtimeId} />
+          <div className={`inspector-tab-panel files-tab-panel ${filesVisible ? "active" : ""}`}>
+            <FilesPanel
+              key={`agent-files:${projectState.cwd}`}
+              project={projectState}
+              runtimeId={snapshot?.runtimeId}
+              activeFilePath={selectedFilePath}
+              onOpenFile={openFileTab}
+              onCloseFile={(path) => closeInspectorTab(fileInspectorTabId(path))}
+              onRemovePath={(path) => {
+                setInspectorTabs((current) => current.filter((tab) => tab.kind !== "file" || !(tab.path === path || tab.path?.startsWith(`${path}/`) || tab.path?.startsWith(`${path}\\`))));
+                setSelectedFilePath((current) => current && (current === path || current.startsWith(`${path}/`) || current.startsWith(`${path}\\`)) ? undefined : current);
+              }}
+            />
           </div>
-          <div className={`inspector-tab-panel runtime-tab-panel ${inspectorView === "runtime" ? "active" : ""}`}>
+          <div className={`inspector-tab-panel runtime-tab-panel ${activeInspectorTab?.kind === "runtime" ? "active" : ""}`}>
             <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} />
           </div>
-          <div className={`inspector-tab-panel browser-tab-panel ${inspectorView === "browser" ? "active" : ""}`}>
-            <BrowserPanel active={rightOpen && inspectorView === "browser"} scopeId={snapshot?.runtimeId ?? project?.path ?? "default"} />
+          <div className={`inspector-tab-panel browser-tab-panel ${activeInspectorTab?.kind === "browser" ? "active" : ""}`}>
+            <BrowserPanel active={rightOpen && activeInspectorTab?.kind === "browser"} scopeId={snapshot?.runtimeId ?? project?.path ?? "default"} />
           </div>
         </InspectorPane>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
