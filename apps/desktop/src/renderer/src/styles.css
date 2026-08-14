@@ -322,7 +322,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .composer-width-resizer.right { right: -4px; }
 .composer-width-resizer::after { position: absolute; top: 18%; bottom: 18%; left: 3px; width: 1px; content: ""; background: transparent; transition: background 120ms ease; }
 .composer-width-resizer:hover::after, .composer-width-resizer:active::after { background: #aaa9a3; }
-.composer-stack { position: relative; isolation: isolate; display: flex; align-items: center; flex-direction: column; }
+.composer-stack { position: relative; isolation: isolate; display: flex; align-items: center; flex-direction: column; container-type: inline-size; }
 .composer-overlays { position: absolute; z-index: 0; bottom: calc(100% - 10px); left: 0; display: flex; width: 100%; min-width: 0; align-items: center; flex-direction: column; gap: 8px; pointer-events: none; --composer-overlap: 20px; }
 .composer-overlays > * { pointer-events: auto; }
 .composer-overlays .composer-activity {
@@ -382,6 +382,14 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .composer-activity ol::-webkit-scrollbar-track { background: transparent; }
 .composer-activity ol::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 5px; background: #c7c7c2; background-clip: padding-box; }
 .composer-activity ol::-webkit-scrollbar-thumb:hover { background: #aaa9a3; background-clip: padding-box; }
+@container (max-width: 560px) {
+  .composer-overlays .composer-activity { width: 100%; }
+  .composer-overlays .composer-activity.collapsed { width: calc(100% - 24px); }
+  .composer-activity-header { padding-right: 6px; padding-left: 10px; }
+  .composer-activity-tabs { flex: 1; overflow: hidden; }
+  .composer-activity-tabs button { min-width: 0; padding-right: 6px; padding-left: 6px; }
+  .composer-activity-toggle { flex: 0 0 auto; padding-left: 6px; }
+}
 .plan-approval-card { display: grid; width: 100%; min-width: 0; gap: 14px; margin: 0 0 18px; padding: 16px; border: 1px solid #deded9; border-radius: 14px; color: #4b4b47; background: #fafaf8; }
 .plan-approval-card.status-pending_approval { border-color: #d7d7d1; box-shadow: 0 8px 24px rgb(28 28 25 / 4%); }
 .plan-approval-summary { display: flex; min-width: 0; align-items: center; gap: 10px; }

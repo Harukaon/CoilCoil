@@ -122,6 +122,31 @@ async function main() {
     })()`);
     assert.deepEqual(conversation, { hasActivity: false, paddingBottom: 76 });
 
+    const narrowActivity = await client.evaluate(`(() => {
+      const pane = document.querySelector(".conversation-pane");
+      const stack = document.querySelector(".composer-stack");
+      const overlays = document.querySelector(".composer-overlays");
+      if (!(pane instanceof HTMLElement) || !(stack instanceof HTMLElement) || !(overlays instanceof HTMLElement)) return null;
+      pane.style.setProperty("--chat-content-width", "360px");
+      const activity = document.createElement("section");
+      activity.className = "composer-activity expanded";
+      activity.innerHTML = '<div class="composer-activity-header"><strong>Todo</strong><button class="composer-activity-toggle"><small>0/6</small></button></div>';
+      overlays.append(activity);
+      const stackWidth = stack.getBoundingClientRect().width;
+      const expandedWidth = activity.getBoundingClientRect().width;
+      activity.classList.remove("expanded");
+      activity.classList.add("collapsed");
+      const collapsedWidth = activity.getBoundingClientRect().width;
+      const containerType = getComputedStyle(stack).containerType;
+      activity.remove();
+      pane.style.removeProperty("--chat-content-width");
+      return { stackWidth, expandedWidth, collapsedWidth, containerType };
+    })()`);
+    assert.ok(narrowActivity);
+    assert.equal(narrowActivity.containerType, "inline-size");
+    assert.ok(Math.abs(narrowActivity.expandedWidth - narrowActivity.stackWidth) <= 2, `Narrow activity panel did not align with the composer (${narrowActivity.expandedWidth}px vs ${narrowActivity.stackWidth}px).`);
+    assert.ok(narrowActivity.collapsedWidth >= narrowActivity.stackWidth - 26, `Collapsed activity panel remained excessively narrow (${narrowActivity.collapsedWidth}px vs ${narrowActivity.stackWidth}px).`);
+
     await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
     await client.waitFor(`Boolean(document.querySelector(".inspector-pane"))`, "Inspector did not open.");
     await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
