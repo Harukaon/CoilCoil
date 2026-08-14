@@ -1,4 +1,4 @@
-import type { SessionSummary } from "@suocode/runtime-protocol";
+import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 
 export const DEFAULT_VISIBLE_SESSION_ROWS = 4;
 export const SESSION_EXPANSION_BATCH = 4;
@@ -23,4 +23,20 @@ export function upsertSessionSummary(sessions: SessionSummary[], session: Sessio
     if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
     return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
   });
+}
+
+export interface PinnedSessionEntry {
+  project: ProjectSelection;
+  session: SessionSummary;
+}
+
+/** Pinned conversations are shown in one global section, while retaining their workspace owner. */
+export function collectPinnedSessions(
+  projects: ProjectSelection[],
+  sessionsByProject: Record<string, SessionSummary[]>,
+): PinnedSessionEntry[] {
+  return projects.flatMap((project) => (sessionsByProject[project.path] ?? [])
+    .filter((session) => session.pinned)
+    .map((session) => ({ project, session })))
+    .sort((left, right) => Date.parse(right.session.pinnedAt ?? right.session.updatedAt) - Date.parse(left.session.pinnedAt ?? left.session.updatedAt));
 }

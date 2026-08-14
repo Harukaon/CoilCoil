@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SessionSummary } from "@suocode/runtime-protocol";
+import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 import {
+  collectPinnedSessions,
   collapsedSessionLimit,
   nextExpandedSessionLimit,
   titleFromPrompt,
@@ -55,6 +56,19 @@ test("置顶会话仍保持在普通新会话之前", () => {
   });
 
   assert.deepEqual(upsertSessionSummary([pinned], created).map((item) => item.id), ["pinned", "new"]);
+});
+
+test("置顶会话在全局区排序，但保留原工作区归属", () => {
+  const projects = [
+    { kind: "workspace", name: "A", path: "/a" },
+    { kind: "workspace", name: "B", path: "/b" },
+  ] as ProjectSelection[];
+  const sessionsByProject = {
+    "/a": [{ ...session({ id: "a-1", title: "A 会话" }), pinned: true, pinnedAt: "2026-08-15T00:00:00.000Z" }],
+    "/b": [{ ...session({ id: "b-1", title: "B 会话" }), pinned: true, pinnedAt: "2026-08-16T00:00:00.000Z" }],
+  };
+  const pinned = collectPinnedSessions(projects, sessionsByProject);
+  assert.deepEqual(pinned.map((entry) => [entry.session.id, entry.project.path]), [["b-1", "/b"], ["a-1", "/a"]]);
 });
 
 test("工作区默认展示四行会话", () => {
