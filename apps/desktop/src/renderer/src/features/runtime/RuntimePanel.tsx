@@ -23,6 +23,7 @@ import type {
 import { summarizeCacheUsage } from "@suocode/runtime-protocol";
 import { Modal } from "../../ui/dialog";
 import { toastError, toastSuccess } from "../../ui/toast";
+import { Tooltip } from "../../ui/tooltip";
 import { tokenNumber, toolDisplayName } from "./runtimePresentation";
 import {
   mcpSectionBadge,
@@ -261,27 +262,28 @@ export function RuntimePanel({
 
       <RuntimeSection title="工具" icon={<Wrench size={14} />} badge={inspection?.tools.length ? `${activeTools.length}/${inspection.tools.length} 启用` : undefined}>
         {inspection?.tools.length ? <div className="runtime-chip-grid">{inspection.tools.map((tool) => (
-          <div className={`runtime-chip ${tool.active ? "active" : "inactive"}`} data-tooltip={tool.description || undefined} title={tool.description || undefined} key={tool.name}>
-            <strong>{toolDisplayName(tool.name)}</strong>
-            <small>{tool.name} · {tokenNumber(tool.estimatedTokens)} Token</small>
-          </div>
+          <Tooltip content={tool.description} key={tool.name}>
+            <div className={`runtime-chip ${tool.active ? "active" : "inactive"}`}>
+              <strong>{toolDisplayName(tool.name)}</strong>
+              <small>{tool.name} · {tokenNumber(tool.estimatedTokens)} Token</small>
+            </div>
+          </Tooltip>
         ))}</div> : <p className="runtime-muted">尚未取得当前会话的工具定义。</p>}
       </RuntimeSection>
 
       <RuntimeSection title="Skills" icon={<Sparkles size={14} />} badge={inspection?.skills.length ? `${inspection.skills.filter((skill) => skill.sessionEnabled).length}/${inspection.skills.length} 可用` : undefined}>
         {inspection?.skills.length ? <div className="runtime-chip-grid">{inspection.skills.map((skill) => (
-          <button
-            className={`runtime-chip toggle ${skill.sessionEnabled ? "active" : "inactive"}`}
-            data-tooltip={skill.description || undefined}
-            title={skill.description || undefined}
-            disabled={!skill.globallyEnabled || busyAction === `skill:${skill.filePath}`}
-            key={skill.filePath}
-            type="button"
-            onClick={() => { void setSkillEnabled(skill.filePath, !skill.sessionEnabled); }}
-          >
-            <strong>{skill.name}</strong>
-            <small>{!skill.globallyEnabled ? "设置中已停用" : skill.readInSession ? "已读取" : skill.sessionEnabled ? "已提供给 Agent" : "当前会话停用"}</small>
-          </button>
+          <Tooltip content={skill.description} key={skill.filePath}>
+            <button
+              className={`runtime-chip toggle ${skill.sessionEnabled ? "active" : "inactive"}`}
+              disabled={!skill.globallyEnabled || busyAction === `skill:${skill.filePath}`}
+              type="button"
+              onClick={() => { void setSkillEnabled(skill.filePath, !skill.sessionEnabled); }}
+            >
+              <strong>{skill.name}</strong>
+              <small>{!skill.globallyEnabled ? "设置中已停用" : skill.readInSession ? "已读取" : skill.sessionEnabled ? "已提供给 Agent" : "当前会话停用"}</small>
+            </button>
+          </Tooltip>
         ))}</div> : <p className="runtime-muted">当前工作区没有发现可用 Skill。</p>}
         <p className="runtime-section-footnote">设置页控制工作区是否启用；这里的开关只影响当前会话。</p>
       </RuntimeSection>
