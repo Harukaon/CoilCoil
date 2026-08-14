@@ -746,3 +746,7 @@
   color: #756842;
   background: #fbf7e9;
 }
+.settings-policy-card { margin: 0 0 14px; padding: 12px 14px; border: 1px solid #e2e2dc; border-radius: 10px; background: #fafaf7; }
+.settings-policy-card .checkbox-setting { align-items: flex-start; }
+.settings-policy-card .checkbox-setting > span { display: grid; gap: 3px; }
+.settings-policy-card small { color: #888881; font-size: 11px; line-height: 1.45; }

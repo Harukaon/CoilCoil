@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
 const SCHEMA_MARKER = Symbol.for("suocode-workflow.tool-purpose-field");
 const PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
+const POLICY_STATE = Symbol.for("suocode-workflow.tool-purpose-policy-state");
 const MAX_PURPOSE_LENGTH = 100;
 const PURPOSE_DESCRIPTION = `本次工具调用的具体目的，1至${MAX_PURPOSE_LENGTH}字`;
 const PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
@@ -264,6 +265,11 @@ function isValidPurpose(value: string): boolean {
   );
 }
 
+function auditEnabled(): boolean {
+  const state = (globalThis as Record<PropertyKey, unknown>)[POLICY_STATE];
+  return state instanceof Map ? state.get("*") !== false : true;
+}
+
 export default function auditPolicyExtension(pi: ExtensionAPI): void {
   const fieldsByTool = new Map<string, string>();
   const warnedTools = new Set<string>();
@@ -290,6 +296,7 @@ export default function auditPolicyExtension(pi: ExtensionAPI): void {
   };
 
   pi.on("session_start", (_event, ctx) => {
+    if (!auditEnabled()) return;
     // toolCallId is already globally unique across sessions, and rememberPurpose()
     // self-bounds via MAX_PURPOSE_RECORDS eviction — clearing here would wipe live
     // entries belonging to any OTHER concurrently open session.
@@ -314,10 +321,12 @@ export default function auditPolicyExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("turn_start", () => {
+    if (!auditEnabled()) return;
     patchAllToolSchemas();
   });
 
   pi.on("before_agent_start", (event) => {
+    if (!auditEnabled()) return;
     patchAllToolSchemas();
 
     let systemPrompt = event.systemPrompt;
@@ -328,6 +337,7 @@ export default function auditPolicyExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("before_provider_request", (event) => {
+    if (!auditEnabled()) return;
     patchAllToolSchemas();
     if (patchProviderPayload(event.payload, fieldsByTool)) {
       return event.payload;
@@ -336,10 +346,12 @@ export default function auditPolicyExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", () => {
+    if (!auditEnabled()) return;
     patchAllToolSchemas();
   });
 
   pi.on("tool_call", (event, ctx) => {
+    if (!auditEnabled()) return;
     const input = event.input as Record<string, unknown>;
     const preferredField = fieldsByTool.get(event.toolName);
     const field = [preferredField, ...PURPOSE_FIELDS].find(

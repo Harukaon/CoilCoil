@@ -137,6 +137,7 @@ const PLAN_STATE_CHANNEL = "suocode:plan:state:v1";
 const PLAN_RPC_REQUEST_CHANNEL = "suocode:plan:rpc:v1:request";
 const PLAN_ENTRY_TYPE = "suocode-plan";
 const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
+const TOOL_PURPOSE_POLICY_STATE = Symbol.for("suocode-workflow.tool-purpose-policy-state");
 const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("suocode-workflow.mcp-agent-config-registry");
 const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 const IGNORED_DIRECTORIES = new Set([
@@ -1185,6 +1186,20 @@ function liveToolPurpose(toolCallId: string | undefined): string | undefined {
   return purpose || undefined;
 }
 
+function setGlobalToolPurposeAuditEnabled(enabled: boolean): void {
+  const globals = globalThis as Record<PropertyKey, unknown>;
+  const state = globals[TOOL_PURPOSE_POLICY_STATE];
+  const registry = state instanceof Map ? state as Map<string, boolean> : new Map<string, boolean>();
+  registry.set("*", enabled);
+  globals[TOOL_PURPOSE_POLICY_STATE] = registry;
+}
+
+function globalToolPurposeAuditEnabled(): boolean {
+  const globals = globalThis as Record<PropertyKey, unknown>;
+  const state = globals[TOOL_PURPOSE_POLICY_STATE];
+  return state instanceof Map ? state.get("*") !== false : true;
+}
+
 function restoredToolPurposes(session: AgentSession): Map<string, string> {
   const purposes = new Map<string, string>();
   for (const entry of session.sessionManager.getEntries()) {
@@ -1824,6 +1839,7 @@ export class SuoCodeRuntime {
     configureHttpDispatcher();
     this.agentDir = resolve(options.agentDir);
     this.sessionDir = resolve(options.sessionDir);
+    setGlobalToolPurposeAuditEnabled(this.readToolPurposeAuditSetting());
     this.workflowDir = resolveWorkflowDirectory(options.workflowDir);
     this.browserScopeId = options.browserScopeId;
     const resources = bundledRuntimeResources(this.workflowDir);
@@ -1894,6 +1910,7 @@ export class SuoCodeRuntime {
   }
 
   async getConfiguration(): Promise<RuntimeConfiguration> {
+    setGlobalToolPurposeAuditEnabled(this.readToolPurposeAuditSetting());
     const modelRuntime = await this.ready();
     const cwd = this.active?.cwd ?? process.cwd();
     const settings = SettingsManager.create(cwd, this.agentDir);
@@ -1934,7 +1951,45 @@ export class SuoCodeRuntime {
       configuredProviders,
       models,
       migratedLegacyCredentials: this.migratedLegacyCredentials,
+      toolPurposeAuditEnabled: globalToolPurposeAuditEnabled(),
     };
+  }
+
+  private suocodeSettingsPath(): string {
+    return join(this.agentDir, "suocode-settings.json");
+  }
+
+  private readToolPurposeAuditSetting(): boolean {
+    const path = this.suocodeSettingsPath();
+    if (!existsSync(path)) return true;
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8"));
+      return !isRecord(value) || value.toolPurposeAuditEnabled !== false;
+    } catch {
+      return true;
+    }
+  }
+
+  async setToolPurposeAuditEnabled(enabled: boolean): Promise<RuntimeConfiguration> {
+    const path = this.suocodeSettingsPath();
+    let current: Record<string, unknown> = {};
+    if (existsSync(path)) {
+      try {
+        const value = JSON.parse(readFileSync(path, "utf8"));
+        if (isRecord(value)) current = value;
+      } catch {
+        current = {};
+      }
+    }
+    mkdirSync(this.agentDir, { recursive: true });
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify({ ...current, toolPurposeAuditEnabled: enabled }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
+    setGlobalToolPurposeAuditEnabled(enabled);
+    this.reloadActiveSessionResources("工具调用意图设置重新加载失败");
+    const configuration = await this.getConfiguration();
+    this.emitEvent({ type: "configuration_updated", configuration });
+    return configuration;
   }
 
   private openAIResponsesWsConfigurationPath(): string {

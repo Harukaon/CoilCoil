@@ -379,6 +379,8 @@ export class RuntimeServer {
         return runtime.setSessionModel(command);
       case "set_session_fast":
         return runtime.setSessionFast(command.enabled);
+      case "set_tool_purpose_audit_enabled":
+        return runtime.setToolPurposeAuditEnabled(command.enabled);
       case "remove_provider_auth":
         return runtime.removeProviderAuth(command.provider);
       case "start_model_provider_oauth":

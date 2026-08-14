@@ -25,6 +25,8 @@ export interface RuntimeConfiguration {
   configuredProviders: string[];
   models: ModelOption[];
   migratedLegacyCredentials: boolean;
+  /** Whether SuoCode injects and validates the tool-call purpose field. */
+  toolPurposeAuditEnabled?: boolean;
 }
 
 /** An explicit model choice carried across a session boundary. */
@@ -873,6 +875,7 @@ export type RuntimeCommand =
       contextWindow?: number;
     }
   | { type: "set_session_fast"; enabled: boolean }
+  | { type: "set_tool_purpose_audit_enabled"; enabled: boolean }
   | { type: "remove_provider_auth"; provider: string }
   | { type: "start_model_provider_oauth"; provider: string }
   | { type: "respond_model_provider_oauth"; flowId: string; promptId: string; value: string }

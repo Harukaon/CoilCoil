@@ -30,6 +30,33 @@ function storedSettingsSidebarWidth(): number {
     : DEFAULT_SETTINGS_SIDEBAR_WIDTH;
 }
 
+function ToolPurposePolicyCard({ configuration, runtimeId, onSaved }: {
+  configuration?: RuntimeConfiguration;
+  runtimeId?: string;
+  onSaved: (configuration: RuntimeConfiguration) => void;
+}): React.JSX.Element {
+  const [enabled, setEnabled] = useState(configuration?.toolPurposeAuditEnabled ?? true);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setEnabled(configuration?.toolPurposeAuditEnabled ?? true), [configuration?.toolPurposeAuditEnabled]);
+  const toggle = async (next: boolean): Promise<void> => {
+    setEnabled(next);
+    setSaving(true);
+    try {
+      const configuration = await window.suocode.request<RuntimeConfiguration>({ type: "set_tool_purpose_audit_enabled", enabled: next }, runtimeId);
+      onSaved(configuration);
+      toastSuccess(next ? "已开启工具调用意图记录。" : "已关闭工具调用意图强制校验。");
+    } catch (caught) {
+      setEnabled(!next);
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return <section className="settings-policy-card">
+    <label className="checkbox-setting"><input type="checkbox" checked={enabled} disabled={saving || !runtimeId} onChange={(event) => { void toggle(event.target.checked); }} /><span><strong>强制工具调用填写目的</strong><small>开启后，Agent 每次调用工具都需要填写简短的直接目的，并在会话中记录；关闭后不注入或阻断工具调用。</small></span></label>
+  </section>;
+}
+
 function blankMcpServer(): McpServerConfiguration {
   return {
     name: "",
@@ -468,7 +495,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
         </header>
         <div className="settings-page-content">
           {section === "models" ? (
-            <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} />
+            <><ToolPurposePolicyCard configuration={configuration} runtimeId={runtimeId} onSaved={onSaved} /><ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} /></>
           ) : section === "mcp" ? (
             <McpSettings runtimeId={runtimeId} cwd={cwd} reloadKey={mcpReloadKey} />
           ) : (
