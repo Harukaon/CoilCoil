@@ -41,6 +41,8 @@ test("a just-finished response is reflected before Pi persists its assistant mes
     messageIds: new WeakMap(),
     messageRevision: 0,
     pendingUserMessageIds: [],
+    promptQueue: [],
+    promptDrainInProgress: false,
     nextTimelineOrder: 0,
     responseMetricsHistory: [],
     sessionRevision: 1,

@@ -226,6 +226,9 @@ export function MessageView({
           >
             {value ? <span>{value}</span> : null}
             <ImageStrip images={images} />
+            {message.status === "queued" ? (
+              <span className="user-message-queue-status"><LoaderCircle className="spin" size={12} />排队中</span>
+            ) : null}
           </button>
         )}
         <ConfirmDialog

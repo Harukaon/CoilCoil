@@ -186,7 +186,7 @@ export function ConversationComposer({
           inline
             ? "编辑历史消息…"
             : project
-              ? (running ? "补充指令…" : "让 SuoCode 处理这个项目…")
+              ? (running ? "消息将排队发送…" : "让 SuoCode 处理这个项目…")
               : "请先打开项目"
         }
         disabled={!project || loading || startingSession || modelChanging}
@@ -221,7 +221,7 @@ export function ConversationComposer({
         <button
           className="send-button"
           type="submit"
-          aria-label={inline ? "从这里重新开始" : running ? "补充指令" : "发送消息"}
+          aria-label={inline ? "从这里重新开始" : running ? "加入队列" : "发送消息"}
           disabled={!project || startingSession || modelChanging || (!draft.trim() && !images.length)}
         >
           <ArrowUp size={17} strokeWidth={2.2} />

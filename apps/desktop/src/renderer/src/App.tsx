@@ -172,6 +172,7 @@ export default function App(): React.JSX.Element {
       type: "snapshot",
       sessionPath: next.session.path,
       messages: next.messages,
+      promptQueue: next.promptQueue,
       revision: next.messageRevision ?? 0,
     });
     setTools(next.tools);
@@ -255,6 +256,21 @@ export default function App(): React.JSX.Element {
         setSnapshot((current) => {
           if (!current) return current;
           const next = { ...current, fast: event.fast };
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
+        break;
+      case "prompt_queue_updated":
+        dispatchConversationMessages({
+          type: "prompt_queue",
+          queue: event.queue,
+          revision: event.revision,
+          sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
+        });
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = { ...current, promptQueue: event.queue };
           snapshotRef.current = next;
           if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
           return next;
@@ -595,7 +611,7 @@ export default function App(): React.JSX.Element {
       text,
       images,
       timestamp: Date.now(),
-      status: "succeeded",
+      status: snapshotRef.current?.running ? "queued" : "succeeded",
     };
     dispatchConversationMessages({ type: "truncate", order: message.order });
     dispatchConversationMessages({ type: "queue", message: pendingMessage, sessionPath: snapshot.session.path });
@@ -715,7 +731,7 @@ export default function App(): React.JSX.Element {
         target = activeSnapshot;
       }
       if (runtimeCommand) await window.suocode.request({ type: "run_memory_now" }, target.runtimeId);
-      else await window.suocode.request({ type: target.running ? "steer" : "prompt", text: prompt, images, clientMessageId }, target.runtimeId);
+      else await window.suocode.request({ type: "prompt", text: prompt, images, clientMessageId }, target.runtimeId);
     } catch (caught) {
       setDraft(prompt);
       setDraftImages(images);

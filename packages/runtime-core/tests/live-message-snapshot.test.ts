@@ -54,6 +54,8 @@ test("a mid-stream snapshot includes the in-progress assistant message instead o
     messageIds: new WeakMap(),
     messageRevision: 0,
     pendingUserMessageIds: [],
+    promptQueue: [],
+    promptDrainInProgress: false,
     // Deliberately far from reconstructState's own local order counter (which starts at
     // 0 per call) to prove the splice recomputes order rather than trusting this value.
     nextTimelineOrder: 50,

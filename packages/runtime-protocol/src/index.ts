@@ -470,6 +470,14 @@ export interface PromptImage {
   name?: string;
 }
 
+/** A user prompt accepted by the runtime but not started by Pi yet. */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  images?: PromptImage[];
+  queuedAt: number;
+}
+
 export interface ChatMessage {
   id: string;
   entryId?: string;
@@ -483,7 +491,7 @@ export interface ChatMessage {
   toolName?: string;
   toolCallId?: string;
   isError?: boolean;
-  status?: "running" | "succeeded" | "failed" | "aborted";
+  status?: "queued" | "running" | "succeeded" | "failed" | "aborted";
 }
 
 export interface TodoItem {
@@ -812,6 +820,7 @@ export interface SessionSnapshot {
   messageRevision?: number;
   session: SessionSummary;
   messages: ChatMessage[];
+  promptQueue: QueuedPrompt[];
   tools: ToolRun[];
   subagents: SubagentActivity[];
   project: ProjectSnapshot;
@@ -922,6 +931,7 @@ export type RuntimeEvent =
   | { type: "sessions_updated"; cwd: string; sessions: SessionSummary[] }
   | { type: "session_snapshot"; snapshot: SessionSnapshot }
   | { type: "session_fast_updated"; fast: boolean }
+  | { type: "prompt_queue_updated"; queue: QueuedPrompt[]; revision: number }
   | { type: "message_started"; message: ChatMessage; revision: number }
   | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; revision: number }
   | { type: "message_finished"; message: ChatMessage; revision: number }

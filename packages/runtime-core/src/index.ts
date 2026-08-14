@@ -58,6 +58,7 @@ import type {
   TestProviderConnectionResult,
   ModelOption,
   PromptImage,
+  QueuedPrompt,
   ProjectSnapshot,
   RuntimeBootstrap,
   RuntimeConfiguration,
@@ -800,6 +801,8 @@ interface ActiveSession {
   messageIds: WeakMap<object, string>;
   messageRevision: number;
   pendingUserMessageIds: string[];
+  promptQueue: QueuedPrompt[];
+  promptDrainInProgress: boolean;
   activeUserId?: string;
   activeUserOrder?: number;
   lastUserId?: string;
@@ -4171,6 +4174,8 @@ export class SuoCodeRuntime {
       messageIds: new WeakMap(),
       messageRevision: 0,
       pendingUserMessageIds: [],
+      promptQueue: [],
+      promptDrainInProgress: false,
       nextTimelineOrder: reconstructed.nextTimelineOrder,
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
@@ -4335,6 +4340,45 @@ export class SuoCodeRuntime {
   private queueClientMessage(active: ActiveSession, clientMessageId?: string): void {
     if (!clientMessageId || active.pendingUserMessageIds.includes(clientMessageId)) return;
     active.pendingUserMessageIds.push(clientMessageId);
+  }
+
+  private publishPromptQueue(active: ActiveSession): void {
+    this.emitEvent({
+      type: "prompt_queue_updated",
+      queue: active.promptQueue.map((item) => ({
+        ...item,
+        images: item.images?.map((image) => ({ ...image })),
+      })),
+      revision: ++active.messageRevision,
+    });
+  }
+
+  private enqueuePrompt(
+    active: ActiveSession,
+    text: string,
+    images: PromptImage[] | undefined,
+    clientMessageId?: string,
+  ): void {
+    const id = clientMessageId || `queued-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    if (active.promptQueue.some((item) => item.id === id) || active.pendingUserMessageIds.includes(id)) return;
+    active.promptQueue.push({
+      id,
+      text,
+      images: images?.map((image) => ({ ...image })),
+      queuedAt: Date.now(),
+    });
+    this.publishPromptQueue(active);
+    // Protect this session runtime from idle retirement during the small gap
+    // between one Pi run settling and the next queued prompt starting.
+    this.emitEvent({ type: "run_state", running: true });
+  }
+
+  private removeQueuedPrompt(active: ActiveSession, id: string): boolean {
+    const index = active.promptQueue.findIndex((item) => item.id === id);
+    if (index < 0) return false;
+    active.promptQueue.splice(index, 1);
+    this.publishPromptQueue(active);
+    return true;
   }
 
   private rejectClientMessage(active: ActiveSession, clientMessageId?: string): void {
@@ -4508,7 +4552,10 @@ export class SuoCodeRuntime {
           active.activeAssistantId = undefined;
           active.activeAssistantOrder = undefined;
           active.activeAssistantMessage = undefined;
-          this.emitEvent({ type: "run_state", running: false });
+          // Keep the runtime visibly busy while accepted FIFO work remains.
+          // The promise that owns the completed Pi run starts the next item only
+          // after AgentSession.prompt() has fully resolved.
+          if (active.promptQueue.length === 0) this.emitEvent({ type: "run_state", running: false });
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
           this.scheduleProjectRefresh();
           void this.listSessions(active.cwd);
@@ -4648,6 +4695,9 @@ export class SuoCodeRuntime {
           if (mapped && mapped.role !== "tool") {
             this.emitEvent({ type: "message_started", message: mapped, revision: ++active.messageRevision });
           }
+          // Confirm the user bubble before removing its queued projection, so
+          // the renderer never observes a frame where the message disappears.
+          if (role === "user" && clientMessageId) this.removeQueuedPrompt(active, clientMessageId);
           if (mapped && mapped.role === "assistant") {
             active.activeAssistantMessage = { ...mapped, status: "running" };
           }
@@ -4853,39 +4903,87 @@ export class SuoCodeRuntime {
     }
   }
 
+  private async startPrompt(
+    active: ActiveSession,
+    prompt: string,
+    images: PromptImage[] | undefined,
+    clientMessageId: string | undefined,
+    queued: boolean,
+  ): Promise<void> {
+    this.promptStarting = true;
+    this.emitEvent({ type: "run_state", running: true });
+    try {
+      const prepared = await preparePromptImages(images);
+      const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
+      const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
+      if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
+
+      this.queueClientMessage(active, clientMessageId);
+      const run = active.session.prompt(expandedPrompt, {
+        images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
+        preflightResult: () => { this.promptStarting = false; },
+      });
+      void run.then(() => {
+        // Extension commands may complete without producing a Pi user message.
+        // Such an item must still leave the queue instead of blocking all later
+        // prompts, and its optimistic chat bubble must be withdrawn.
+        if (clientMessageId && active.pendingUserMessageIds.includes(clientMessageId)) {
+          if (queued) this.removeQueuedPrompt(active, clientMessageId);
+          this.rejectClientMessage(active, clientMessageId);
+        }
+      }).catch((error) => {
+        if (clientMessageId && queued) this.removeQueuedPrompt(active, clientMessageId);
+        this.rejectClientMessage(active, clientMessageId);
+        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+      }).finally(() => {
+        this.promptStarting = false;
+        if (queued) active.promptDrainInProgress = false;
+        if (this.active !== active) return;
+        if (active.promptQueue.length > 0) void this.drainPromptQueue(active);
+        else if (!active.session.isStreaming) this.emitEvent({ type: "run_state", running: false });
+      });
+    } catch (error) {
+      this.promptStarting = false;
+      throw error;
+    }
+  }
+
+  private async drainPromptQueue(active: ActiveSession): Promise<void> {
+    if (
+      this.active !== active
+      || active.promptDrainInProgress
+      || active.session.isStreaming
+      || this.promptStarting
+      || active.promptQueue.length === 0
+    ) return;
+    const next = active.promptQueue[0]!;
+    active.promptDrainInProgress = true;
+    try {
+      if (this.modelTransition) await this.modelTransition;
+      if (this.active !== active) return;
+      await this.startPrompt(active, next.text, next.images, next.id, true);
+    } catch (error) {
+      active.promptDrainInProgress = false;
+      this.removeQueuedPrompt(active, next.id);
+      this.rejectClientMessage(active, next.id);
+      this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+      if (active.promptQueue.length > 0) queueMicrotask(() => { void this.drainPromptQueue(active); });
+      else this.emitEvent({ type: "run_state", running: false });
+    }
+  }
+
   async prompt(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
     const active = this.requireActive();
     if (this.modelTransition) await this.modelTransition;
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (prompt === "/memory" && !images?.length) return this.runMemoryNow();
-    if (!active.session.isStreaming) {
-      if (this.promptStarting) throw new Error("上一条消息正在启动，请稍候。");
-      this.promptStarting = true;
-    }
-    if (active.session.isStreaming) return this.steer(prompt, images, clientMessageId);
-    try {
-      const prepared = await preparePromptImages(images);
-      const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-
-      const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
-      if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
-
-      this.queueClientMessage(active, clientMessageId);
-      void active.session.prompt(expandedPrompt, {
-        images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
-        preflightResult: () => { this.promptStarting = false; },
-      }).catch((error) => {
-        this.promptStarting = false;
-        this.rejectClientMessage(active, clientMessageId);
-        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
-        this.emitEvent({ type: "run_state", running: false });
-      });
+    if (active.session.isStreaming || this.promptStarting || active.promptQueue.length > 0) {
+      this.enqueuePrompt(active, prompt, images, clientMessageId);
       return { accepted: true };
-    } catch (error) {
-      this.promptStarting = false;
-      throw error;
     }
+    await this.startPrompt(active, prompt, images, clientMessageId, false);
+    return { accepted: true };
   }
 
   async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
@@ -4928,30 +5026,15 @@ export class SuoCodeRuntime {
   }
 
   async steer(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true }> {
-    const active = this.requireActive();
-    if (this.modelTransition) await this.modelTransition;
-    const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
-    if (!prompt) throw new Error("消息不能为空。");
-    const prepared = await preparePromptImages(images);
-    const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-    this.queueClientMessage(active, clientMessageId);
-    try {
-      await active.session.prompt(expandedPrompt, {
-        images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
-        streamingBehavior: "steer",
-      });
-    } catch (error) {
-      this.rejectClientMessage(active, clientMessageId);
-      throw error;
-    }
-    return { accepted: true };
+    // Keep the legacy wire command compatible, but never let it bypass SuoCode's
+    // per-session FIFO semantics by inserting work into Pi's active turn.
+    return this.prompt(text, images, clientMessageId);
   }
 
   async abort(): Promise<{ aborted: boolean }> {
     const active = this.requireActive();
     if (!active.session.isStreaming) return { aborted: false };
     await active.session.abort();
-    this.emitEvent({ type: "run_state", running: false });
     return { aborted: true };
   }
 
@@ -5052,6 +5135,10 @@ export class SuoCodeRuntime {
       messageRevision: active.messageRevision,
       session: summary,
       messages,
+      promptQueue: active.promptQueue.map((item) => ({
+        ...item,
+        images: item.images?.map((image) => ({ ...image })),
+      })),
       tools: [...reconstructed.tools.values()].sort((a, b) => a.order - b.order),
       subagents: [...active.subagents.values()].sort((left, right) => left.updatedAt - right.updatedAt || left.index - right.index),
       project: active.project,
@@ -5065,7 +5152,7 @@ export class SuoCodeRuntime {
       contextUsage: usage.contextUsage,
       tokenUsage: usage.tokenUsage,
       runtimeInspection: this.runtimeInspection(active),
-      running: active.session.isStreaming,
+      running: active.session.isStreaming || this.promptStarting || active.promptQueue.length > 0,
     };
   }
 

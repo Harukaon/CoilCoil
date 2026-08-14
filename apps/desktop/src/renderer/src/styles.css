@@ -222,6 +222,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .user-bubble-button:hover { background: #e6e6e3; }
 .user-bubble-button:disabled { cursor: default; }
 .user-bubble-button:disabled:hover { background: #ecece9; }
+.user-message-queue-status { display: flex; width: fit-content; align-items: center; gap: 5px; margin-top: 7px; color: #858580; font-size: 11px; line-height: 1; }
 .message-images { display: grid; margin-top: 8px; grid-template-columns: repeat(auto-fit, minmax(88px, 150px)); gap: 7px; }
 .message-images:first-child { margin-top: 0; }
 .message-image { position: relative; display: block; min-width: 0; }

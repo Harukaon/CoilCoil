@@ -36,6 +36,8 @@ test("one client message id survives Pi user start and finish events", async (co
     messageIds: new WeakMap(),
     messageRevision: 0,
     pendingUserMessageIds: [],
+    promptQueue: [],
+    promptDrainInProgress: false,
     nextTimelineOrder: 0,
     responseMetricsHistory: [],
     sessionRevision: 1,

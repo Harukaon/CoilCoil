@@ -48,6 +48,7 @@ function normalizeSessionPath(path: string): string {
 
 function eventChangesSnapshot(event: RuntimeEvent): boolean {
   return event.type === "message_started"
+    || event.type === "prompt_queue_updated"
     || event.type === "message_delta"
     || event.type === "message_finished"
     || event.type === "tool_started"

@@ -53,3 +53,48 @@ test("晚到的旧空快照不能覆盖已经开始的用户消息", () => {
   state = conversationMessagesReducer(state, { type: "snapshot", sessionPath: "/sessions/new.jsonl", messages: [], revision: 0 });
   assert.deepEqual(selectConversationMessages(state), [{ ...local, order: 1 }]);
 });
+
+test("切换会话后仍从运行时快照恢复 FIFO 排队消息", () => {
+  const queued = { id: "client-queued", text: "稍后处理", queuedAt: 20 };
+  let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, {
+    type: "snapshot",
+    sessionPath: "/sessions/a.jsonl",
+    messages: [],
+    promptQueue: [queued],
+    revision: 4,
+  });
+  assert.equal(selectConversationMessages(state)[0]?.status, "queued");
+  state = conversationMessagesReducer(state, {
+    type: "snapshot",
+    sessionPath: "/sessions/b.jsonl",
+    messages: [],
+    promptQueue: [],
+    revision: 0,
+  });
+  state = conversationMessagesReducer(state, {
+    type: "snapshot",
+    sessionPath: "/sessions/a.jsonl",
+    messages: [],
+    promptQueue: [queued],
+    revision: 5,
+  });
+  assert.deepEqual(selectConversationMessages(state).map((message) => [message.id, message.status]), [["client-queued", "queued"]]);
+});
+
+test("队列投影在正式 user message 到达时只保留一条消息", () => {
+  const queued = { id: "client-queued", text: "排队消息", queuedAt: 20 };
+  let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, {
+    type: "prompt_queue",
+    queue: [queued],
+    revision: 1,
+    sessionPath: "/sessions/a.jsonl",
+  });
+  state = { ...state, sessionPath: "/sessions/a.jsonl" };
+  state = conversationMessagesReducer(state, {
+    type: "runtime_message",
+    message: { ...user("client-queued", "排队消息", 2), status: undefined },
+    revision: 2,
+    sessionPath: "/sessions/a.jsonl",
+  });
+  assert.deepEqual(selectConversationMessages(state).map((message) => message.id), ["client-queued"]);
+});

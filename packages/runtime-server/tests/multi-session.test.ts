@@ -127,6 +127,7 @@ class FakeRuntime {
         messageCount: 0,
       },
       messages: [],
+      promptQueue: [],
       tools: [],
       subagents: initialSubagent,
       project: { cwd, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
