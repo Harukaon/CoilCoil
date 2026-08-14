@@ -43,8 +43,6 @@ interface ProviderFormState {
   credentialPreserveFields: string[];
   credentialDirty: boolean;
   preserveApiKeyReference: boolean;
-  defaultModelId: string;
-  thinkingLevel: ThinkingLevel;
 }
 
 const THINKING_OPTIONS: SettingsSelectOption[] = [
@@ -439,7 +437,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const [credentialPreserveFields, setCredentialPreserveFields] = useState<string[]>([]);
   const [credentialDirty, setCredentialDirty] = useState(false);
   const [preserveApiKeyReference, setPreserveApiKeyReference] = useState(false);
-  const [defaultModelId, setDefaultModelId] = useState("");
+  const [testModelId, setTestModelId] = useState("");
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("medium");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -469,9 +467,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     credentialPreserveFields,
     credentialDirty,
     preserveApiKeyReference,
-    defaultModelId,
-    thinkingLevel,
-  }) : undefined, [credentialDirty, credentialMethod, credentialPreserveFields, credentialValues, defaultModelId, draft, modelAdvanced, overridesText, preserveApiKeyReference, providerCompatText, providerHeadersText, thinkingLevel]);
+  }) : undefined, [credentialDirty, credentialMethod, credentialPreserveFields, credentialValues, draft, modelAdvanced, overridesText, preserveApiKeyReference, providerCompatText, providerHeadersText]);
   const hasUnsavedChanges = Boolean(currentFingerprint && currentFingerprint !== savedFingerprint);
 
   const applyProvider = (provider: ModelProviderConfiguration, nextConfiguration = configuration): void => {
@@ -500,9 +496,9 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setPreserveApiKeyReference(nextPreserveApiKeyReference);
     const available = nextConfiguration?.models.filter((model) => model.provider === provider.id) ?? [];
     const current = nextConfiguration?.provider === provider.id ? nextConfiguration.modelId : undefined;
-    const nextDefaultModelId = current && available.some((model) => model.id === current) ? current : nextDraft.models[0]?.id ?? available[0]?.id ?? "";
+    const nextTestModelId = current && available.some((model) => model.id === current) ? current : nextDraft.models[0]?.id ?? available[0]?.id ?? "";
     const nextThinkingLevel = nextConfiguration?.provider === provider.id ? nextConfiguration.thinkingLevel : "medium";
-    setDefaultModelId(nextDefaultModelId);
+    setTestModelId(nextTestModelId);
     setThinkingLevel(nextThinkingLevel);
     setRemoveArmed(false);
     setSavedFingerprint(providerFormFingerprint({
@@ -516,8 +512,6 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
       credentialPreserveFields: nextCredentialPreserveFields,
       credentialDirty: false,
       preserveApiKeyReference: nextPreserveApiKeyReference,
-      defaultModelId: nextDefaultModelId,
-      thinkingLevel: nextThinkingLevel,
     }));
   };
 
@@ -564,8 +558,8 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     const runtime = configuration?.models.filter((model) => model.provider === draft.id) ?? [];
     return runtime.map((model): EditableModel => ({ uid: `runtime-${model.id}`, id: model.id, name: model.name, reasoning: model.reasoning, input: model.supportsImages ? ["text", "image"] : ["text"], contextWindow: model.contextWindow }));
   }, [configuration, draft]);
-  const activeDefaultModel = defaultModels.find((model) => model.id === defaultModelId) ?? defaultModels[0];
-  const thinkingOptions = activeDefaultModel ? modelThinkingLevels(activeDefaultModel, configuration, draft?.id ?? "").map((level) => THINKING_OPTIONS.find((option) => option.value === level)!).filter(Boolean) : THINKING_OPTIONS.filter((option) => option.value === "off");
+  const activeTestModel = defaultModels.find((model) => model.id === testModelId) ?? defaultModels[0];
+  const thinkingOptions = activeTestModel ? modelThinkingLevels(activeTestModel, configuration, draft?.id ?? "").map((level) => THINKING_OPTIONS.find((option) => option.value === level)!).filter(Boolean) : THINKING_OPTIONS.filter((option) => option.value === "off");
   const isBuiltinProvider = selectedSource !== "custom";
 
   const selectProvider = (provider: ModelProviderConfiguration): void => applyProvider(provider);
@@ -588,7 +582,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setCredentialPreserveFields([]);
     setCredentialDirty(false);
     setPreserveApiKeyReference(false);
-    setDefaultModelId(next.models[0]?.id ?? "");
+    setTestModelId(next.models[0]?.id ?? "");
     setThinkingLevel("medium");
     setRemoveArmed(false);
     setSavedFingerprint(undefined);
@@ -647,22 +641,13 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     };
   };
 
-  const save = async (applyDefault = false): Promise<ModelProviderSaveResult | undefined> => {
+  const save = async (): Promise<ModelProviderSaveResult | undefined> => {
     setSaving(true);
     try {
       const result = await window.suocode.request<ModelProviderSaveResult>({ type: "save_model_provider_configuration", input: buildInput() }, runtimeId);
       onSaved(result.configuration);
       await load(result.provider.id, result.configuration);
-      if (applyDefault) {
-        const modelId = defaultModelId || result.provider.models[0]?.id;
-        if (!modelId) throw new Error("请先添加至少一个模型，再将其设为新会话默认模型。");
-        const next = await window.suocode.request<RuntimeConfiguration>({ type: "configure_model", provider: result.provider.id, modelId, thinkingLevel }, runtimeId);
-        onSaved(next);
-        await load(result.provider.id, next);
-        toastSuccess("已保存并设为新会话默认模型。");
-      } else {
-        toastSuccess(isBuiltinProvider ? "已保存设置。" : "已保存服务商。");
-      }
+      toastSuccess(isBuiltinProvider ? "已保存设置。" : "已保存服务商。");
       return result;
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
@@ -785,8 +770,8 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     );
     setDraft((current) => current ? { ...current, replaceModels: true, models: compact.length ? compact : [blankModel()] } : current);
     setModelAdvanced((current) => ({ ...current, ...initialAdvancedText(added.filter((model) => !current[model.uid])) }));
-    if (!defaultModelId || !compact.some((model) => model.id === defaultModelId)) {
-      setDefaultModelId(compact.find((model) => model.id.trim())?.id ?? "");
+    if (!testModelId || !compact.some((model) => model.id === testModelId)) {
+      setTestModelId(compact.find((model) => model.id.trim())?.id ?? "");
     }
     setUpstreamPickerModels(undefined);
     toastSuccess(added.length ? `已添加 ${added.length} 个上游模型。` : "所选模型均已在本地目录中。");
@@ -797,7 +782,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
       toastError("测试需要 Base URL 和请求协议。");
       return;
     }
-    const modelId = defaultModelId.trim() || draft.models.find((model) => model.id.trim())?.id.trim() || "";
+    const modelId = testModelId.trim() || draft.models.find((model) => model.id.trim())?.id.trim() || "";
     if (!modelId) {
       toastError("请先选择要测试的模型。");
       return;
@@ -914,14 +899,11 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
               </div>
             </> : <><div className="provider-builtins-summary">当前内置目录包含 {defaultModels.length} 个模型。启用“自定义目录”后，你可以只保留需要展示的模型。</div><details className="provider-advanced"><summary>按模型覆盖参数 <ChevronRight size={14} /></summary><p>保留内置目录时，使用 <code>modelOverrides</code> 为任意内置模型配置上下文、输出上限、图片能力、采样或兼容性参数。</p><label>modelOverrides JSON<textarea value={overridesText} placeholder={'{\n  "gpt-5.6": { "contextWindow": 128000, "maxTokens": 16384 }\n}'} onChange={(event) => setOverridesText(event.target.value)} /></label></details></>}
           </section>
-          <section className="provider-default-model">
-            <div><strong>新会话默认模型</strong><small>{isBuiltinProvider ? "这里设置以后新建会话使用的模型；已有会话请在输入框的模型菜单中切换。" : "先选择模型，再保存为新会话默认或发送测试请求。"}</small></div>
-            <div className="settings-grid"><label>模型<SettingsSelect value={defaultModelId} options={defaultModels.map((model) => ({ value: model.id, label: model.name || model.id, detail: model.id }))} ariaLabel="当前默认模型" placeholder="请选择模型" onChange={(modelId) => { setDefaultModelId(modelId); const selected = defaultModels.find((model) => model.id === modelId); const levels: ThinkingLevel[] = selected ? modelThinkingLevels(selected, configuration, draft.id) : ["off"]; setThinkingLevel((current) => levels.includes(current) ? current : levels[0]); }} searchable /></label><label>Thinking<SettingsSelect value={thinkingLevel} options={thinkingOptions} ariaLabel="Thinking 强度" onChange={(value) => setThinkingLevel(value as ThinkingLevel)} disabled={thinkingOptions.length <= 1} /></label></div>
-            <div className="provider-default-actions">
-              {!isBuiltinProvider ? <button className="secondary-button" type="button" disabled={saving || testing || !defaultModelId} onClick={() => void testConnection()}>{testing ? <LoaderCircle className="spin" size={15} /> : <Zap size={15} />}{testing ? "测试中…" : "测试此模型"}</button> : null}
-              <button className="secondary-button" type="button" disabled={saving || !defaultModelId} onClick={() => void save(true)}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存为新会话默认</button>
-            </div>
-          </section>
+          {!isBuiltinProvider ? <section className="provider-test-card">
+            <div><strong>测试模型</strong><small>测试只发起一次独立请求，不会创建会话，也不会改变当前或新会话使用的模型。</small></div>
+            <div className="settings-grid"><label>模型<SettingsSelect value={testModelId} options={defaultModels.map((model) => ({ value: model.id, label: model.name || model.id, detail: model.id }))} ariaLabel="要测试的模型" placeholder="请选择模型" onChange={(modelId) => { setTestModelId(modelId); const selected = defaultModels.find((model) => model.id === modelId); const levels: ThinkingLevel[] = selected ? modelThinkingLevels(selected, configuration, draft.id) : ["off"]; setThinkingLevel((current) => levels.includes(current) ? current : levels[0]); }} searchable /></label><label>Thinking<SettingsSelect value={thinkingLevel} options={thinkingOptions} ariaLabel="测试 Thinking 强度" onChange={(value) => setThinkingLevel(value as ThinkingLevel)} disabled={thinkingOptions.length <= 1} /></label></div>
+            <div className="provider-default-actions"><button className="secondary-button" type="button" disabled={saving || testing || !testModelId} onClick={() => void testConnection()}>{testing ? <LoaderCircle className="spin" size={15} /> : <Zap size={15} />}{testing ? "测试中…" : "测试此模型"}</button></div>
+          </section> : null}
           <footer><span>{snapshot?.configPath}</span><span className="provider-runtime-note">内置协议、模型覆盖和凭据都在 SuoCode 私有运行时中处理。</span></footer>
         </form> : null}
       </section>
