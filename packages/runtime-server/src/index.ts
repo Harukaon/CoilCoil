@@ -59,6 +59,7 @@ function eventChangesSnapshot(event: RuntimeEvent): boolean {
     || event.type === "project_updated"
     || event.type === "metrics_updated"
     || event.type === "runtime_inspection_updated"
+    || event.type === "session_fast_updated"
     || event.type === "run_state";
 }
 
@@ -330,8 +331,8 @@ export class RuntimeServer {
       || command.type === "start_model_provider_oauth"
       || command.type === "respond_model_provider_oauth"
       || command.type === "cancel_model_provider_oauth";
-    if (command.type === "set_session_model" && !runtimeId) {
-      throw new Error("切换当前会话模型时缺少会话标识，请重新打开会话后再试。");
+    if ((command.type === "set_session_model" || command.type === "set_session_fast") && !runtimeId) {
+      throw new Error("修改当前会话模型参数时缺少会话标识，请重新打开会话后再试。");
     }
     const runtime = alwaysControl ? this.runtime : this.selectedRuntime(runtimeId);
     const result = await this.dispatchTo(runtime, command);
@@ -375,6 +376,8 @@ export class RuntimeServer {
         return runtime.configureModel(command);
       case "set_session_model":
         return runtime.setSessionModel(command);
+      case "set_session_fast":
+        return runtime.setSessionFast(command.enabled);
       case "remove_provider_auth":
         return runtime.removeProviderAuth(command.provider);
       case "start_model_provider_oauth":

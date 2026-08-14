@@ -26,6 +26,7 @@ export function ConversationComposer({
   configuration,
   selectedModel,
   thinkingLevel,
+  fast,
   modelMenuOpen,
   modelChanging,
   autoFocus,
@@ -40,6 +41,7 @@ export function ConversationComposer({
   onModelMenuOpenChange,
   onSelectModel,
   onConfigureModelOptions,
+  onFastChange,
   onOpenSettings,
   onAbort,
   onEscape,
@@ -56,6 +58,7 @@ export function ConversationComposer({
   configuration?: RuntimeConfiguration;
   selectedModel?: SessionSnapshot["model"];
   thinkingLevel?: RuntimeConfiguration["thinkingLevel"];
+  fast?: boolean;
   modelMenuOpen: boolean;
   modelChanging: boolean;
   autoFocus?: boolean;
@@ -69,7 +72,8 @@ export function ConversationComposer({
   onSlashKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean;
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
-  onConfigureModelOptions?: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow: number) => Promise<void>;
+  onConfigureModelOptions?: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow?: number) => Promise<void>;
+  onFastChange?: (enabled: boolean) => Promise<void>;
   onOpenSettings: () => void;
   onAbort?: () => void;
   onEscape?: () => void;
@@ -199,12 +203,14 @@ export function ConversationComposer({
           configuration={configuration}
           currentModel={selectedModel}
           currentThinkingLevel={thinkingLevel}
+          currentFast={fast}
           open={modelMenuOpen}
           busy={modelChanging}
           side={inline ? "bottom" : "top"}
           onOpenChange={onModelMenuOpenChange}
           onSelect={onSelectModel}
           onConfigureOptions={onConfigureModelOptions}
+          onFastChange={onFastChange}
           onOpenSettings={onOpenSettings}
         />
         {!inline && running && onAbort ? (

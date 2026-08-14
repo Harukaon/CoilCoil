@@ -887,6 +887,27 @@ async function main() {
     assert.equal(emptyMetricState.summary, "");
     assert.equal(emptyMetricState.performance, false);
     assert.equal(emptyMetricState.context, true);
+    assert.equal(await client.evaluate(`(() => { const button = document.querySelector(".agent-mode"); button?.click(); return Boolean(button); })()`), true, "The composer model parameter menu trigger was missing.");
+    await client.waitFor(`Boolean(document.querySelector(".model-parameter-popover"))`, "The model parameter menu did not open.");
+    const modelParameterMenu = await client.evaluate(`(() => {
+      const menu = document.querySelector(".model-parameter-popover");
+      return {
+        text: menu?.textContent || "",
+        directSearch: Boolean(menu?.querySelector(".model-popover-search")),
+        contextInput: Boolean(menu?.querySelector('input[type="number"]')),
+        submenuTrigger: Boolean(menu?.querySelector(".model-submenu-trigger")),
+      };
+    })()`);
+    assert.match(modelParameterMenu.text, /思考级别/);
+    assert.match(modelParameterMenu.text, /Fast/);
+    assert.match(modelParameterMenu.text, /模型/);
+    assert.equal(modelParameterMenu.directSearch, false, "The primary parameter menu still rendered the model list/search directly.");
+    assert.equal(modelParameterMenu.contextInput, false, "The removed ad-hoc context input still appeared in the parameter menu.");
+    assert.equal(modelParameterMenu.submenuTrigger, true);
+    await client.evaluate(`document.querySelector(".model-submenu-trigger")?.click()`);
+    await client.waitFor(`Boolean(document.querySelector('.model-submenu input[placeholder="搜索模型名称或 ID"]'))`, "The model list did not open as a secondary menu.");
+    await client.evaluate(`document.querySelector(".agent-mode")?.click()`);
+    await client.waitFor(`!document.querySelector(".model-parameter-popover") && !document.querySelector(".model-submenu")`, "The nested model menu did not close.");
     const inspectorDragSurface = await client.evaluate(`(() => {
       const surface = document.querySelector(".inspector-drag-surface");
       const bounds = surface?.getBoundingClientRect();

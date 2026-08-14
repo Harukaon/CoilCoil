@@ -62,6 +62,7 @@ function snapshot(session: ModelSessionDouble): SessionSnapshot {
       reasoning: Boolean(session.model.reasoning),
     } : undefined,
     thinkingLevel: session.thinkingLevel,
+    fast: false,
     responseMetricsHistory: [],
     tokenUsage: EMPTY_USAGE,
     runtimeInspection: {

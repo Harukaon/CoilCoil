@@ -123,6 +123,7 @@ const MAX_TERMINAL_OUTPUT = 120_000;
 const WORKFLOW_AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
 const RESPONSE_METRICS_ENTRY_TYPE = "suocode-response-metrics";
 const PROJECT_MEMORY_STATUS_EVENT = "suocode:project-memory:status:v1";
+const FAST_STATE_EVENT = "suocode:fast:state:v1";
 const RUNTIME_BRIDGE_COMMAND_EVENT = "suocode:runtime-bridge:command:v1";
 const RUNTIME_BRIDGE_REPLY_PREFIX = "suocode:runtime-bridge:reply:v1:";
 const RUNTIME_BRIDGE_STATE_EVENT = "suocode:runtime-bridge:state:v1";
@@ -811,11 +812,19 @@ interface ActiveSession {
   sessionRevision: number;
   summaryActivity?: RuntimeSummaryEvent;
   bridgeState?: RuntimeBridgeState;
+  fastState?: FastRuntimeState;
   memoryStatus?: ProjectMemoryRuntimeStatus;
   skillConfiguration?: SkillConfigurationSnapshot;
   mcpStatus?: McpRuntimeStatus;
   planApproval?: PlanApprovalState;
   eventBus: EventBusController;
+}
+
+interface FastRuntimeState {
+  version: 1;
+  enabled: boolean;
+  supported: boolean;
+  modelId?: string;
 }
 
 interface RuntimeBridgeState {
@@ -872,6 +881,16 @@ function runtimeBridgeState(value: unknown): RuntimeBridgeState | undefined {
     readSkills: stringArray(value.readSkills),
     contextMessages: Array.isArray(value.contextMessages) ? value.contextMessages : undefined,
     updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : Date.now(),
+  };
+}
+
+function fastRuntimeState(value: unknown): FastRuntimeState | undefined {
+  if (!isRecord(value) || value.version !== 1 || typeof value.enabled !== "boolean" || typeof value.supported !== "boolean") return undefined;
+  return {
+    version: 1,
+    enabled: value.enabled,
+    supported: value.supported,
+    modelId: optionalString(value, "modelId"),
   };
 }
 
@@ -2480,6 +2499,18 @@ export class SuoCodeRuntime {
     return configuration;
   }
 
+  async setSessionFast(enabled: boolean): Promise<boolean> {
+    const active = this.requireActive();
+    if (!active.fastState?.supported) {
+      throw new Error("当前模型不支持 Fast / priority 模式。");
+    }
+    await active.session.prompt(`/fast ${enabled ? "on" : "off"}`);
+    if (active.fastState?.enabled !== enabled) {
+      throw new Error("Fast 状态没有成功同步到当前会话。");
+    }
+    return enabled;
+  }
+
   private publishProviderAuth(flow: ProviderAuthFlow): void {
     this.emitEvent({
       type: "model_provider_auth_updated",
@@ -3990,6 +4021,7 @@ export class SuoCodeRuntime {
     const eventBus = createEventBus();
     let installedActive: ActiveSession | undefined;
     let pendingBridgeState: RuntimeBridgeState | undefined;
+    let pendingFastState: FastRuntimeState | undefined;
     let pendingMemoryStatus: ProjectMemoryRuntimeStatus | undefined;
     let pendingPlanApproval: PlanApprovalState | undefined;
     eventBus.on(RUNTIME_BRIDGE_STATE_EVENT, (value) => {
@@ -3999,6 +4031,14 @@ export class SuoCodeRuntime {
       if (!installedActive) return;
       installedActive.bridgeState = next;
       this.publishRuntimeInspection(installedActive);
+    });
+    eventBus.on(FAST_STATE_EVENT, (value) => {
+      const next = fastRuntimeState(value);
+      if (!next) return;
+      pendingFastState = next;
+      if (!installedActive) return;
+      installedActive.fastState = next;
+      this.emitEvent({ type: "session_fast_updated", fast: next.enabled });
     });
     eventBus.on(PROJECT_MEMORY_STATUS_EVENT, (value) => {
       const parsed = projectMemoryStatus(value);
@@ -4136,6 +4176,7 @@ export class SuoCodeRuntime {
       responseMetricsHistory: reconstructed.responseMetricsHistory,
       sessionRevision: 1,
       bridgeState: pendingBridgeState,
+      fastState: pendingFastState,
       memoryStatus: pendingMemoryStatus ?? projectMemoryStatusByCwd.get(safeRealPath(cwd)),
       planApproval: reconstructed.planApproval ?? pendingPlanApproval,
       eventBus,
@@ -5018,6 +5059,7 @@ export class SuoCodeRuntime {
         ? { provider: model.provider, id: model.id, name: model.name || model.id, reasoning: Boolean(model.reasoning) }
         : undefined,
       thinkingLevel: active.session.thinkingLevel as ThinkingLevel,
+      fast: active.fastState?.enabled ?? false,
       responseMetrics: active.responseMetrics,
       responseMetricsHistory: active.responseMetricsHistory,
       contextUsage: usage.contextUsage,

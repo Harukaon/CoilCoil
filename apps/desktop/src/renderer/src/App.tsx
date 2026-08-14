@@ -251,6 +251,15 @@ export default function App(): React.JSX.Element {
       case "session_snapshot":
         applySnapshot(event.snapshot);
         break;
+      case "session_fast_updated":
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = { ...current, fast: event.fast };
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
+        break;
       case "message_started":
       case "message_finished":
         dispatchConversationMessages({
@@ -846,6 +855,7 @@ export default function App(): React.JSX.Element {
           onModelMenuOpenChange={setModelMenuOpen}
           onSelectModel={(model) => { void composer.selectModel(model); }}
           onConfigureModelOptions={composer.configureModelOptions}
+          onFastChange={composer.setFast}
           onOpenSettings={(section) => {
             setModelMenuOpen(false);
             setSettingsSection(section ?? "models");

@@ -30,7 +30,8 @@ export interface ComposerController {
   handleCompositionEnd: () => void;
   handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   selectModel: (model: ModelOption) => Promise<void>;
-  configureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow: number) => Promise<void>;
+  configureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow?: number) => Promise<void>;
+  setFast: (enabled: boolean) => Promise<void>;
 }
 
 export function useComposerController({
@@ -114,7 +115,7 @@ export function useComposerController({
   const configureModelOptions = useCallback(async (
     model: ModelOption,
     thinkingLevel: RuntimeConfiguration["thinkingLevel"],
-    contextWindow: number,
+    contextWindow?: number,
   ): Promise<void> => {
     if (!configuration || modelChanging) return;
     setModelChanging(true);
@@ -135,6 +136,19 @@ export function useComposerController({
     }
   }, [configuration, modelChanging, onConfigurationChange, onError, runtimeId]);
 
+  const setFast = useCallback(async (enabled: boolean): Promise<void> => {
+    if (!runtimeId || modelChanging) return;
+    setModelChanging(true);
+    onError(undefined);
+    try {
+      await window.suocode.request({ type: "set_session_fast", enabled }, runtimeId);
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setModelChanging(false);
+    }
+  }, [modelChanging, onError, runtimeId]);
+
   return {
     draft,
     images,
@@ -153,5 +167,6 @@ export function useComposerController({
     handleKeyDown,
     selectModel,
     configureModelOptions,
+    setFast,
   };
 }

@@ -86,6 +86,7 @@ export function ConversationPane({
   onModelMenuOpenChange,
   onSelectModel,
   onConfigureModelOptions,
+  onFastChange,
   onOpenSettings,
   onAbort,
   onApprovePlan,
@@ -132,7 +133,8 @@ export function ConversationPane({
   onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
-  onConfigureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow: number) => Promise<void>;
+  onConfigureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow?: number) => Promise<void>;
+  onFastChange: (enabled: boolean) => Promise<void>;
   onOpenSettings: (section?: SettingsSection) => void;
   onAbort: () => void;
   onApprovePlan: (planId: string, target: PlanExecutionTarget, agent?: string) => Promise<PlanApprovalState>;
@@ -266,6 +268,7 @@ export function ConversationPane({
             configuration={configuration}
             selectedModel={selectedModel}
             thinkingLevel={snapshot?.thinkingLevel}
+            fast={snapshot?.fast}
             modelMenuOpen={modelMenuOpen}
             modelChanging={modelChanging}
             onSubmit={onSubmit}
@@ -279,6 +282,7 @@ export function ConversationPane({
             onModelMenuOpenChange={onModelMenuOpenChange}
             onSelectModel={onSelectModel}
             onConfigureModelOptions={onConfigureModelOptions}
+            onFastChange={onFastChange}
             onOpenSettings={() => onOpenSettings()}
             onAbort={onAbort}
           />

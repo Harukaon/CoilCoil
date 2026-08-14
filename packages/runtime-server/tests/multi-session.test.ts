@@ -34,6 +34,7 @@ class FakeRuntime {
   readonly promptClientMessageIds: Array<string | undefined> = [];
   readonly createdWithModels: Array<SessionModelSelection | undefined> = [];
   readonly sessionModelChanges: SessionModelSelection[] = [];
+  readonly sessionFastChanges: boolean[] = [];
   disposed = false;
 
   constructor(
@@ -89,6 +90,12 @@ class FakeRuntime {
     return this.configureModel({ provider, modelId, thinkingLevel });
   }
 
+  async setSessionFast(enabled: boolean): Promise<boolean> {
+    this.sessionFastChanges.push(enabled);
+    if (this.snapshotValue) this.snapshotValue = { ...this.snapshotValue, fast: enabled };
+    return enabled;
+  }
+
   async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
     this.controls.openCalls?.set(sessionPath, (this.controls.openCalls.get(sessionPath) ?? 0) + 1);
     await this.controls.openGates?.get(sessionPath)?.promise;
@@ -124,6 +131,7 @@ class FakeRuntime {
       subagents: initialSubagent,
       project: { cwd, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
       thinkingLevel: "off",
+      fast: false,
       responseMetricsHistory: [],
       tokenUsage: EMPTY_USAGE,
       runtimeInspection: { sessionRevision: 1, activeLeafId: undefined, summaryEvents: [] },
@@ -334,12 +342,28 @@ test("model selection is explicit at session creation and later switches only th
   assert.deepEqual(runtimes[2].sessionModelChanges, [], "another live conversation must keep its own model");
   assert.notEqual(first.runtimeId, second.runtimeId);
 
+  const fastResponse = await server.handle({
+    id: "fast-model-a",
+    runtimeId: first.runtimeId,
+    command: { type: "set_session_fast", enabled: true },
+  });
+  assert.equal(fastResponse.ok, true);
+  assert.deepEqual(runtimes[1].sessionFastChanges, [true]);
+  assert.deepEqual(runtimes[2].sessionFastChanges, []);
+
   const missingRuntime = await server.handle({
     id: "switch-without-runtime",
     command: { type: "set_session_model", ...firstChoice },
   });
   assert.equal(missingRuntime.ok, false);
   assert.match(missingRuntime.error ?? "", /缺少会话标识/);
+
+  const missingFastRuntime = await server.handle({
+    id: "fast-without-runtime",
+    command: { type: "set_session_fast", enabled: true },
+  });
+  assert.equal(missingFastRuntime.ok, false);
+  assert.match(missingFastRuntime.error ?? "", /缺少会话标识/);
 
   await server.dispose();
 });

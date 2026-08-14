@@ -817,6 +817,7 @@ export interface SessionSnapshot {
   project: ProjectSnapshot;
   model?: Pick<ModelOption, "provider" | "id" | "name" | "reasoning">;
   thinkingLevel: ThinkingLevel;
+  fast: boolean;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   contextUsage?: ContextUsage;
@@ -862,6 +863,7 @@ export type RuntimeCommand =
       thinkingLevel: ThinkingLevel;
       contextWindow?: number;
     }
+  | { type: "set_session_fast"; enabled: boolean }
   | { type: "remove_provider_auth"; provider: string }
   | { type: "start_model_provider_oauth"; provider: string }
   | { type: "respond_model_provider_oauth"; flowId: string; promptId: string; value: string }
@@ -919,6 +921,7 @@ export type RuntimeEvent =
   | { type: "model_provider_auth_updated"; state: ModelProviderAuthState }
   | { type: "sessions_updated"; cwd: string; sessions: SessionSummary[] }
   | { type: "session_snapshot"; snapshot: SessionSnapshot }
+  | { type: "session_fast_updated"; fast: boolean }
   | { type: "message_started"; message: ChatMessage; revision: number }
   | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; revision: number }
   | { type: "message_finished"; message: ChatMessage; revision: number }
