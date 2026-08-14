@@ -608,6 +608,26 @@ async function main() {
     assert.equal(pickerStyle.inputFontSize, "11px", "The model picker input fell back to the browser default font size.");
     assert.ok(pickerStyle.models.includes("desktop-smoke-id-model"), "The upstream model id was not rendered.");
     assert.ok(pickerStyle.models.includes("Desktop Smoke 可读名称"), "The upstream model display name was not rendered.");
+    const filteredById = await client.evaluate(`(() => {
+      const input = document.querySelector('.upstream-model-search input');
+      if (!(input instanceof HTMLInputElement)) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "id-model");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    assert.equal(filteredById, true);
+    await client.waitFor(`document.querySelectorAll('.upstream-model-picker-list > label').length === 1`, "The upstream model picker did not filter by model id.");
+    const filteredByName = await client.evaluate(`(() => {
+      const input = document.querySelector('.upstream-model-search input');
+      if (!(input instanceof HTMLInputElement)) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "可读名称");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    assert.equal(filteredByName, true);
+    await client.waitFor(`document.querySelectorAll('.upstream-model-picker-list > label').length === 1`, "The upstream model picker did not filter by display name.");
     await client.evaluate(`document.querySelector('.upstream-model-picker [aria-label="关闭"]')?.click()`);
     const openedProtocolMenu = await client.evaluate(`(() => {
       const button = document.querySelector('.model-provider-settings button[aria-label="请求协议"]');
