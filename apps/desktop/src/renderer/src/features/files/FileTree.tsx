@@ -7,9 +7,10 @@ import { toastError } from "../../ui/toast";
 import { quotePath, SUOCODE_PATH_TYPE } from "../composer/pathInsert";
 import { absoluteProjectPath, relativeProjectPath } from "./filePaths";
 
-function FileContextMenu({ node, root, onTrashed }: {
+function FileContextMenu({ node, root, onOpenAsText, onTrashed }: {
   node: FileNode;
   root: string;
+  onOpenAsText: (node: FileNode) => void;
   onTrashed: (path: string) => void;
 }): React.JSX.Element {
   const copy = async (value: string): Promise<void> => {
@@ -33,6 +34,8 @@ function FileContextMenu({ node, root, onTrashed }: {
         <ContextMenu.Item className="conversation-context-item" onSelect={() => void copy(absoluteProjectPath(root, node.path))}>复制绝对路径</ContextMenu.Item>
         <ContextMenu.Item className="conversation-context-item" onSelect={() => void copy(relativeProjectPath(root, node.path))}>复制相对路径</ContextMenu.Item>
         <ContextMenu.Separator className="file-context-separator" />
+        {node.kind === "file" ? <ContextMenu.Item className="conversation-context-item" onSelect={() => onOpenAsText(node)}>作为文本尝试预览</ContextMenu.Item> : null}
+        {node.kind === "file" ? <ContextMenu.Separator className="file-context-separator" /> : null}
         <ContextMenu.Item className="conversation-context-item" onSelect={() => void run("reveal")}>在访达中显示</ContextMenu.Item>
         <ContextMenu.Separator className="file-context-separator" />
         <ContextMenu.Item className="conversation-context-item file-context-danger" onSelect={() => void run("trash")}>移到废纸篓</ContextMenu.Item>
@@ -41,13 +44,14 @@ function FileContextMenu({ node, root, onTrashed }: {
   );
 }
 
-function FileTreeNode({ node, root, depth, selectedPath, onLoad, onOpen, onTrashed }: {
+function FileTreeNode({ node, root, depth, selectedPath, onLoad, onOpen, onOpenAsText, onTrashed }: {
   node: FileNode;
   root: string;
   depth: number;
   selectedPath?: string;
   onLoad: (path: string) => Promise<void>;
   onOpen: (node: FileNode) => void;
+  onOpenAsText: (node: FileNode) => void;
   onTrashed: (path: string) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -82,7 +86,7 @@ function FileTreeNode({ node, root, depth, selectedPath, onLoad, onOpen, onTrash
               <span>{node.name}</span>
             </button>
           </ContextMenu.Trigger>
-          <FileContextMenu node={node} root={root} onTrashed={onTrashed} />
+          <FileContextMenu node={node} root={root} onOpenAsText={onOpenAsText} onTrashed={onTrashed} />
         </ContextMenu.Root>
         {open ? node.children?.map((child) => (
           <FileTreeNode
@@ -93,6 +97,7 @@ function FileTreeNode({ node, root, depth, selectedPath, onLoad, onOpen, onTrash
             selectedPath={selectedPath}
             onLoad={onLoad}
             onOpen={onOpen}
+            onOpenAsText={onOpenAsText}
             onTrashed={onTrashed}
           />
         )) : null}
@@ -113,17 +118,18 @@ function FileTreeNode({ node, root, depth, selectedPath, onLoad, onOpen, onTrash
           <File size={13} /><span>{node.name}</span>
         </button>
       </ContextMenu.Trigger>
-      <FileContextMenu node={node} root={root} onTrashed={onTrashed} />
+      <FileContextMenu node={node} root={root} onOpenAsText={onOpenAsText} onTrashed={onTrashed} />
     </ContextMenu.Root>
   );
 }
 
-export function FileTree({ nodes, root, selectedPath, onLoad, onOpen, onTrashed }: {
+export function FileTree({ nodes, root, selectedPath, onLoad, onOpen, onOpenAsText, onTrashed }: {
   nodes: FileNode[];
   root: string;
   selectedPath?: string;
   onLoad: (path: string) => Promise<void>;
   onOpen: (node: FileNode) => void;
+  onOpenAsText: (node: FileNode) => void;
   onTrashed: (path: string) => void;
 }): React.JSX.Element {
   return (
@@ -137,6 +143,7 @@ export function FileTree({ nodes, root, selectedPath, onLoad, onOpen, onTrashed 
           selectedPath={selectedPath}
           onLoad={onLoad}
           onOpen={onOpen}
+          onOpenAsText={onOpenAsText}
           onTrashed={onTrashed}
         />
       )) : <p className="panel-note">此文件夹为空。</p>}

@@ -86,7 +86,7 @@ export function FilesPanel({ project, runtimeId }: {
     }
   };
 
-  const openPreview = async (node: FileNode): Promise<void> => {
+  const openPreview = async (node: FileNode, forceText = false): Promise<void> => {
     if (!project.cwd || node.kind !== "file") return;
     const requestId = ++requestIdRef.current;
     selectedNodeRef.current = node;
@@ -95,7 +95,7 @@ export function FilesPanel({ project, runtimeId }: {
     releasePreview(previousId);
     setSelection({ node, loading: true });
     try {
-      const result = await window.suocode.openFilePreview({ root: project.cwd, path: node.path });
+      const result = await window.suocode.openFilePreview({ root: project.cwd, path: node.path, forceText });
       if (requestId !== requestIdRef.current) {
         releasePreview(result.document?.id);
         return;
@@ -105,7 +105,7 @@ export function FilesPanel({ project, runtimeId }: {
         setSelection({ node, document: result.document, loading: false });
         return;
       }
-      setSelection({ node, loading: false, error: "此文件类型暂不支持直接预览，可从弹出的菜单选择其他打开方式。" });
+      setSelection({ node, loading: false, error: "此文件类型暂不支持直接预览，可从右键菜单选择其他打开方式。" });
     } catch (caught) {
       if (requestId !== requestIdRef.current) return;
       setSelection({ node, loading: false, error: caught instanceof Error ? caught.message : String(caught) });
@@ -156,6 +156,7 @@ export function FilesPanel({ project, runtimeId }: {
           selectedPath={selection?.node.path}
           onLoad={loadDirectory}
           onOpen={(node) => void openPreview(node)}
+          onOpenAsText={(node) => void openPreview(node, true)}
           onTrashed={removeNode}
         />
       </aside>

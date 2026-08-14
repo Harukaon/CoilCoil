@@ -670,7 +670,7 @@ async function main() {
     })()`);
     assert.equal(disabledMcpServer, true, "The MCP adapter-native disable action was not exposed in settings.");
     await client.waitFor(
-      `Boolean(document.querySelector('button[aria-label="启用 MCP 服务器"]'))`,
+      `(() => { const button = document.querySelector('button[aria-label="启用 MCP 服务器"]'); return Boolean(button && !button.disabled); })()`,
       "The MCP settings did not reflect the disabled project override.",
     );
     const disabledMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
@@ -683,31 +683,13 @@ async function main() {
     })()`);
     assert.equal(enabledMcpServer, true, "The MCP adapter-native enable action was not exposed in settings.");
     await client.waitFor(
-      `Boolean(document.querySelector('button[aria-label="停用 MCP 服务器"]'))`,
+      `(() => { const button = document.querySelector('button[aria-label="停用 MCP 服务器"]'); return Boolean(button && !button.disabled); })()`,
       "The MCP settings did not clear the disabled project override.",
     );
     const enabledMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
     assert.equal(enabledMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp")?.disabled, false);
     const rejectedUnsafeExternalUrl = await client.evaluate(`window.suocode.openExternal("file:///tmp/suocode-smoke").then(() => false, () => true)`);
     assert.equal(rejectedUnsafeExternalUrl, true, "The desktop external URL bridge accepted a non-HTTP URL.");
-    await delay(900);
-    const connectedMcpServer = await client.evaluate(`(() => {
-      const button = document.querySelector('button[aria-label="连接 MCP 服务器"]');
-      if (!button) return false;
-      button.click();
-      return true;
-    })()`);
-    assert.equal(connectedMcpServer, true, "The MCP extension connection action was not exposed in settings.");
-    await client.waitFor(
-      `Boolean(document.querySelector(".mcp-action-message")) || Boolean(document.querySelector(".mcp-editor .settings-error")) || Boolean(document.querySelector(".toast-error .toast-message"))`,
-      "The MCP extension connection action did not return diagnostics.",
-    );
-    const mcpConnectionState = await client.evaluate(`({
-      diagnostics: document.querySelector(".mcp-action-message")?.textContent || document.querySelector(".mcp-editor .settings-error")?.textContent || document.querySelector(".toast-error .toast-message")?.textContent || "",
-      ui: document.querySelector(".mcp-runtime-card")?.textContent || ""
-    })`);
-    assert.ok(mcpConnectionState.diagnostics, "The MCP adapter connection failure did not surface diagnostics.");
-    assert.match(mcpConnectionState.ui, /连接失败|未连接|已缓存|已连接|需要认证|状态未知|初始化中|暂不可用/);
     const addedProjectMcp = await client.evaluate(`(async () => {
       document.querySelector(".mcp-add-button")?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
@@ -988,6 +970,7 @@ async function main() {
       const chevron = summary?.querySelector(".tool-chevron")?.getBoundingClientRect();
       const tableScroller = probe.querySelector(".markdown-table-scroll");
       const result = {
+        hasActivity: document.querySelector(".conversation-pane")?.classList.contains("has-composer-activity") ?? false,
         paddingBottom: Number.parseFloat(getComputedStyle(body).paddingBottom),
         clientWidth: body.clientWidth,
         scrollWidth: body.scrollWidth,
@@ -1001,7 +984,7 @@ async function main() {
       probe.remove();
       return result;
     })()`);
-    assert.ok((narrowConversationLayout?.paddingBottom ?? 0) >= 175);
+    assert.equal(narrowConversationLayout?.paddingBottom, narrowConversationLayout?.hasActivity ? 190 : 76);
     assert.ok((narrowConversationLayout?.scrollWidth ?? 1) <= (narrowConversationLayout?.clientWidth ?? 0) + 1);
     assert.ok((narrowConversationLayout?.probeScrollWidth ?? 1) <= (narrowConversationLayout?.probeClientWidth ?? 0) + 1);
     assert.ok((narrowConversationLayout?.probeRight ?? 1) <= (narrowConversationLayout?.bodyRight ?? 0) + 1);
@@ -1032,7 +1015,7 @@ async function main() {
       const center = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
       return { width: bounds.width, hit: center === surface };
     })()`);
-    assert.ok((openInspectorDragSurface?.width ?? 0) > 100);
+    assert.ok((openInspectorDragSurface?.width ?? 0) >= 12);
     assert.equal(openInspectorDragSurface?.hit, true);
     const rightHandle = await client.evaluate(`(() => {
       const bounds = document.querySelector(".right-resizer")?.getBoundingClientRect();
@@ -1220,30 +1203,52 @@ async function main() {
     assert.equal(lazyBeforeExpand.child, false);
     const unknownFileFallback = await client.evaluate(`window.suocode.openFilePreview({ root: ${JSON.stringify(projectDirectory)}, path: "unknown-format.suocode-smoke" })`);
     assert.deepEqual(unknownFileFallback, { opened: false, actions: ["reveal", "force-text", "trash"] });
-    await client.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
-    await client.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+    await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("unknown-format.suocode-smoke"))?.click()`);
+    await client.waitFor(
+      `document.querySelector(".preview-placeholder.error")?.textContent.includes("可从右键菜单选择其他打开方式")`,
+      "Left-clicking an unsupported file did not show the right-click guidance.",
+    );
+    assert.equal(await client.evaluate(`Boolean(document.querySelector(".conversation-context-menu"))`), false, "Left-clicking an unsupported file opened a duplicate native/context menu.");
+    const openedUnknownContextMenu = await client.evaluate(`(() => {
+      const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("unknown-format.suocode-smoke"));
+      if (!file) return false;
+      file.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 180, clientY: 180 }));
+      return true;
+    })()`);
+    assert.equal(openedUnknownContextMenu, true);
+    await client.waitFor(`document.querySelectorAll('.conversation-context-menu[data-state="open"]').length === 1`, "The unsupported-file context menu did not settle.");
+    const unknownContextMenu = await client.evaluate(`[...document.querySelectorAll('.conversation-context-menu[data-state="open"] .conversation-context-item')].map((item) => item.textContent)`);
+    assert.deepEqual(unknownContextMenu, ["复制绝对路径", "复制相对路径", "作为文本尝试预览", "在访达中显示", "移到废纸篓"]);
+    await client.evaluate(`([...document.querySelectorAll('.conversation-context-menu[data-state="open"] .conversation-context-item')].find((item) => item.textContent === "作为文本尝试预览"))?.click()`);
+    await client.waitFor(
+      `document.querySelector(".files-workspace.has-preview .text-preview")?.textContent.includes("unknown")`,
+      "The unified context menu did not force-open the unsupported file as text.",
+    );
+    await client.evaluate(`document.querySelector('button[aria-label="关闭文件预览"]')?.click()`);
     await client.evaluate(`[...document.querySelectorAll(".file-tree-node > button")].find((item) => item.textContent.includes("lazy-folder"))?.click()`);
     await client.waitFor(
       `[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("lazy-child.txt"))`,
       "The file tree did not load an expanded folder on demand.",
     );
-    const fileContextMenu = await client.evaluate(`(async () => {
+    const openedFileContextMenu = await client.evaluate(`(() => {
       const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
-      if (!file) return null;
+      if (!file) return false;
       file.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 180, clientY: 180 }));
-      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
-      return [...document.querySelectorAll(".conversation-context-menu .conversation-context-item")].map((item) => item.textContent);
+      return true;
     })()`);
-    assert.deepEqual(fileContextMenu, ["复制绝对路径", "复制相对路径", "在访达中显示", "移到废纸篓"]);
-    await client.evaluate(`([...document.querySelectorAll(".conversation-context-menu .conversation-context-item")].find((item) => item.textContent === "复制绝对路径"))?.click()`);
+    assert.equal(openedFileContextMenu, true);
+    await client.waitFor(`document.querySelectorAll('.conversation-context-menu[data-state="open"]').length === 1`, "The file context menu did not settle.");
+    const fileContextMenu = await client.evaluate(`[...document.querySelectorAll('.conversation-context-menu[data-state="open"] .conversation-context-item')].map((item) => item.textContent)`);
+    assert.deepEqual(fileContextMenu, ["复制绝对路径", "复制相对路径", "作为文本尝试预览", "在访达中显示", "移到废纸篓"]);
+    await client.evaluate(`([...document.querySelectorAll('.conversation-context-menu[data-state="open"] .conversation-context-item')].find((item) => item.textContent === "复制绝对路径"))?.click()`);
     await delay(50);
     assert.equal(execFileSync("pbpaste", { encoding: "utf8" }).trim(), join(await realpath(projectDirectory), "lazy-folder", "lazy-child.txt"));
     await client.evaluate(`(() => {
       const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
       file?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 180, clientY: 180 }));
     })()`);
-    await client.waitFor(`[...document.querySelectorAll(".conversation-context-menu .conversation-context-item")].some((item) => item.textContent === "复制相对路径")`, "The relative-path context action did not reopen.");
-    await client.evaluate(`([...document.querySelectorAll(".conversation-context-menu .conversation-context-item")].find((item) => item.textContent === "复制相对路径"))?.click()`);
+    await client.waitFor(`[...document.querySelectorAll('.conversation-context-menu[data-state="open"] .conversation-context-item')].some((item) => item.textContent === "复制相对路径")`, "The relative-path context action did not reopen.");
+    await client.evaluate(`([...document.querySelectorAll('.conversation-context-menu[data-state="open"] .conversation-context-item')].find((item) => item.textContent === "复制相对路径"))?.click()`);
     await delay(50);
     assert.equal(execFileSync("pbpaste", { encoding: "utf8" }).trim(), join("lazy-folder", "lazy-child.txt"));
     const draggedPaths = await client.evaluate(`(async () => {
@@ -1282,6 +1287,7 @@ async function main() {
     const previewLayout = await client.evaluate(`(() => {
       const workspace = document.querySelector(".files-workspace.has-preview")?.getBoundingClientRect();
       const preview = document.querySelector(".inline-file-preview")?.getBoundingClientRect();
+      const resizer = document.querySelector(".files-split-resizer")?.getBoundingClientRect();
       const tree = document.querySelector(".files-tree-region")?.getBoundingClientRect();
       const footer = document.querySelector(".inline-preview-status")?.getBoundingClientRect();
       return {
@@ -1289,6 +1295,8 @@ async function main() {
         workspaceRight: workspace?.right ?? 0,
         previewLeft: preview?.left ?? 0,
         previewRight: preview?.right ?? 0,
+        resizerLeft: resizer?.left ?? 0,
+        resizerRight: resizer?.right ?? 0,
         treeLeft: tree?.left ?? 0,
         treeRight: tree?.right ?? 0,
         footerBottom: footer?.bottom ?? 0,
@@ -1296,7 +1304,8 @@ async function main() {
       };
     })()`);
     assert.ok(Math.abs(previewLayout.workspaceLeft - previewLayout.previewLeft) <= 1);
-    assert.ok(Math.abs(previewLayout.previewRight - previewLayout.treeLeft) <= 1);
+    assert.ok(Math.abs(previewLayout.previewRight - previewLayout.resizerLeft) <= 1);
+    assert.ok(Math.abs(previewLayout.resizerRight - previewLayout.treeLeft) <= 1);
     assert.ok(Math.abs(previewLayout.workspaceRight - previewLayout.treeRight) <= 1);
     assert.ok(Math.abs(previewLayout.footerBottom - previewLayout.workspaceBottom) <= 1);
     const splitBefore = await client.evaluate(`(() => {

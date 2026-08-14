@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import { createRequire } from "node:module";
 import type { BrowserViewBounds, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
@@ -242,24 +242,11 @@ async function createPreviewRecord(event: Electron.IpcMainInvokeEvent, input: Op
   }
 }
 
-async function openPreviewOrMenu(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<{ opened: boolean; document?: FilePreviewDocument; actions?: Array<"reveal" | "force-text" | "trash"> }> {
+async function openFilePreview(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<{ opened: boolean; document?: FilePreviewDocument; actions?: Array<"reveal" | "force-text" | "trash"> }> {
   const target = await safePreviewPath(input);
   if (previewKind(target.path, Boolean(input.forceText))) {
     return { opened: true, document: await createPreviewRecord(event, input) };
   }
-  const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-  Menu.buildFromTemplate([
-    { label: "在访达中显示", click: () => shell.showItemInFolder(target.path) },
-    { label: "作为文本尝试预览", click: () => void createPreviewRecord(event, { ...input, forceText: true }).then((document) => {
-      if (!event.sender.isDestroyed()) event.sender.send(PREVIEW_UPDATED_CHANNEL, document);
-    }).catch((error) => console.error("Unable to open file as text preview", error)) },
-    { type: "separator" },
-    { label: "移到废纸篓", role: "delete", click: () => void (async () => {
-      const options = { type: "warning" as const, title: "移到废纸篓", message: `确定要将“${basename(target.path)}”移到废纸篓吗？`, buttons: ["取消", "移到废纸篓"], defaultId: 0, cancelId: 0 };
-      const result = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
-      if (result.response === 1) await shell.trashItem(target.path);
-    })() },
-  ]).popup({ window: owner });
   return { opened: false, actions: ["reveal", "force-text", "trash"] };
 }
 
@@ -531,7 +518,7 @@ app.whenReady().then(async () => {
     if (typeof text !== "string" || text.length > 1_000_000) throw new Error("剪贴板内容无效。");
     clipboard.writeText(text);
   });
-  ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openPreviewOrMenu(event, input));
+  ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openFilePreview(event, input));
   ipcMain.handle(PREVIEW_CLOSE_CHANNEL, (event, id: string): void => {
     const record = previews.get(id);
     if (!record || record.owner.id !== event.sender.id) return;
