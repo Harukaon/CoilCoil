@@ -15,6 +15,7 @@ import type {
   RuntimeRequestPayload,
   RuntimeRequestResult,
   SuoCodeDesktopApi,
+  TerminalSessionSnapshot,
 } from "../shared/desktop-api";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
@@ -42,6 +43,11 @@ const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_BOUNDS_CHANNEL = "browser:bounds";
+const TERMINAL_STATE_CHANNEL = "terminal:state";
+const TERMINAL_CREATE_CHANNEL = "terminal:create";
+const TERMINAL_WRITE_CHANNEL = "terminal:write";
+const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
+const TERMINAL_CLOSE_CHANNEL = "terminal:close";
 
 const platform = ((): DesktopPlatform => {
   if (process.platform === "darwin") return "darwin";
@@ -94,6 +100,15 @@ const api: SuoCodeDesktopApi = {
     const handler = (_event: Electron.IpcRendererEvent, scopeId: string): void => listener(scopeId);
     ipcRenderer.on(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
     return () => ipcRenderer.removeListener(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
+  },
+  createTerminal: (cwd: string) => ipcRenderer.invoke(TERMINAL_CREATE_CHANNEL, cwd) as Promise<TerminalSessionSnapshot[]>,
+  writeTerminal: (id: string, data: string) => ipcRenderer.invoke(TERMINAL_WRITE_CHANNEL, id, data) as Promise<void>,
+  resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke(TERMINAL_RESIZE_CHANNEL, id, cols, rows) as Promise<void>,
+  closeTerminal: (id: string) => ipcRenderer.invoke(TERMINAL_CLOSE_CHANNEL, id) as Promise<TerminalSessionSnapshot[]>,
+  onTerminalStateUpdated: (listener: (state: TerminalSessionSnapshot[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: TerminalSessionSnapshot[]): void => listener(state);
+    ipcRenderer.on(TERMINAL_STATE_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(TERMINAL_STATE_CHANNEL, handler);
   },
   request: async <T>(command: RuntimeCommand, runtimeId?: string): Promise<T> => {
     const result = await ipcRenderer.invoke(

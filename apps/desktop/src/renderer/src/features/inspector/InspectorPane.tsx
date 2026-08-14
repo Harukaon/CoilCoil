@@ -1,4 +1,5 @@
-import { PanelRight, X } from "lucide-react";
+import { PanelRight, Plus, X } from "lucide-react";
+import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -7,6 +8,7 @@ export interface InspectorTab<T extends string> {
   label: string;
   icon: LucideIcon;
   closable?: boolean;
+  disabled?: boolean;
 }
 
 export function InspectorPane<T extends string>({
@@ -15,6 +17,8 @@ export function InspectorPane<T extends string>({
   onSelectTab,
   onCloseTab,
   onClose,
+  addOptions,
+  onAddTab,
   emptyState,
   children,
 }: {
@@ -23,9 +27,12 @@ export function InspectorPane<T extends string>({
   onSelectTab: (tab: T) => void;
   onCloseTab?: (tab: T) => void;
   onClose: () => void;
+  addOptions?: InspectorTab<T>[];
+  onAddTab?: (tab: T) => void;
   emptyState?: ReactNode;
   children: ReactNode;
 }): React.JSX.Element {
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   return (
     <aside className="inspector-pane">
       <header className="inspector-header">
@@ -56,6 +63,15 @@ export function InspectorPane<T extends string>({
         </nav>
         <div className="inspector-drag-surface" aria-hidden="true" />
         <div className="inspector-actions no-drag">
+          {addOptions?.length && onAddTab ? <div className="inspector-add-menu-wrap">
+            <button className="icon-button inspector-add-tab" type="button" aria-label="打开面板" title="打开面板" onClick={() => setAddMenuOpen((current) => !current)}><Plus size={15} /></button>
+            {addMenuOpen ? <div className="inspector-add-menu" role="menu">
+              {addOptions.map((item) => {
+                const Icon = item.icon;
+                return <button key={item.id} type="button" disabled={item.disabled} onClick={() => { onAddTab(item.id); setAddMenuOpen(false); }}><Icon size={13} /><span>{item.label}</span></button>;
+              })}
+            </div> : null}
+          </div> : null}
           <button className="icon-button" type="button" aria-label="收起右侧栏" onClick={onClose}><PanelRight size={17} /></button>
         </div>
       </header>

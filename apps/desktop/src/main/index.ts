@@ -14,6 +14,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron"
 import { createRequire } from "node:module";
 import type { BrowserViewBounds, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
+import { TerminalRuntimeManager } from "./terminal-runtime";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
@@ -40,9 +41,15 @@ const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_BOUNDS_CHANNEL = "browser:bounds";
+const TERMINAL_STATE_CHANNEL = "terminal:state";
+const TERMINAL_CREATE_CHANNEL = "terminal:create";
+const TERMINAL_WRITE_CHANNEL = "terminal:write";
+const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
+const TERMINAL_CLOSE_CHANNEL = "terminal:close";
 let isQuitting = false;
 const moduleRequire = createRequire(import.meta.url);
 const browserRuntimes = new Map<number, BrowserRuntimeManager>();
+const terminalRuntimes = new Map<number, TerminalRuntimeManager>();
 let primaryBrowserRuntime: BrowserRuntimeManager | undefined;
 
 function chromeDevtoolsMcpEntry(): string {
@@ -450,6 +457,9 @@ async function createWindow(): Promise<void> {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
   });
   await browserRuntime.start();
+  const terminalRuntime = new TerminalRuntimeManager((state) => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_STATE_CHANNEL, state);
+  });
   if (process.env.SUOCODE_BROWSER_PROBE_LOG === "1") {
     console.error("[browser-probe]", JSON.stringify({
       devtoolsEndpoint: browserRuntime.endpoint(),
@@ -459,15 +469,18 @@ async function createWindow(): Promise<void> {
   }
   const ownerWebContentsId = mainWindow.webContents.id;
   browserRuntimes.set(ownerWebContentsId, browserRuntime);
+  terminalRuntimes.set(ownerWebContentsId, terminalRuntime);
   primaryBrowserRuntime ??= browserRuntime;
   mainWindow.once("closed", () => {
     browserRuntimes.delete(ownerWebContentsId);
+    terminalRuntimes.delete(ownerWebContentsId);
     if (primaryBrowserRuntime === browserRuntime) {
       runtime.stop();
       primaryBrowserRuntime = browserRuntimes.values().next().value;
       if (primaryBrowserRuntime && !isQuitting) runtime.start();
     }
     void browserRuntime.dispose().catch((error) => console.error("[browser] 关闭运行时失败", error));
+    terminalRuntime.dispose();
   });
 
   mainWindow.on("ready-to-show", () => mainWindow.show());
@@ -544,6 +557,15 @@ app.whenReady().then(async () => {
     // Renderer cleanup can race the native window's closed event during dev reload/quit.
     browserRuntimes.get(event.sender.id)?.setBounds(bounds);
   });
+  const terminalFor = (event: Electron.IpcMainInvokeEvent): TerminalRuntimeManager => {
+    const value = terminalRuntimes.get(event.sender.id);
+    if (!value) throw new Error("终端运行时不可用。");
+    return value;
+  };
+  ipcMain.handle(TERMINAL_CREATE_CHANNEL, (event, cwd: string) => terminalFor(event).create(cwd));
+  ipcMain.handle(TERMINAL_WRITE_CHANNEL, (event, id: string, data: string): void => terminalFor(event).write(id, data));
+  ipcMain.handle(TERMINAL_RESIZE_CHANNEL, (event, id: string, cols: number, rows: number): void => terminalFor(event).resize(id, cols, rows));
+  ipcMain.handle(TERMINAL_CLOSE_CHANNEL, (event, id: string) => terminalFor(event).close(id));
   ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (_event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
     try {
       return { ok: true, value: await runtime.request(payload) };
@@ -560,11 +582,33 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", async (event) => {
+  if (isQuitting) return;
+  const hasRunningTerminal = [...terminalRuntimes.values()].some((manager) => manager.hasRunning());
+  if (hasRunningTerminal) {
+    event.preventDefault();
+    const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const result = owner
+      ? await dialog.showMessageBox(owner, {
+          type: "warning",
+          title: "终端仍在运行",
+          message: "关闭 SuoCode 会同时结束仍在运行的终端会话。",
+          buttons: ["取消", "关闭并结束终端"],
+          defaultId: 0,
+          cancelId: 0,
+        })
+      : { response: 0 };
+    if (result.response !== 1) return;
+    isQuitting = true;
+    app.quit();
+    return;
+  }
   isQuitting = true;
   for (const id of [...previews.keys()]) closePreviewRecord(id);
   for (const browser of browserRuntimes.values()) void browser.dispose().catch(() => {});
+  for (const terminal of terminalRuntimes.values()) terminal.dispose();
   browserRuntimes.clear();
+  terminalRuntimes.clear();
   runtime.stop();
 });
 

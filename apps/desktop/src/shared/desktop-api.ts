@@ -72,6 +72,16 @@ export interface BrowserViewBounds {
   visible: boolean;
 }
 
+export interface TerminalSessionSnapshot {
+  id: string;
+  cwd: string;
+  output: string;
+  status: "running" | "exited";
+  startedAt: number;
+  endedAt?: number;
+  exitCode?: number;
+}
+
 export interface SuoCodeDesktopApi {
   platform: DesktopPlatform;
   homeProject(): Promise<ProjectSelection>;
@@ -97,6 +107,11 @@ export interface SuoCodeDesktopApi {
   setBrowserViewBounds(bounds: BrowserViewBounds): Promise<void>;
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
   onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
+  createTerminal(cwd: string): Promise<TerminalSessionSnapshot[]>;
+  writeTerminal(id: string, data: string): Promise<void>;
+  resizeTerminal(id: string, cols: number, rows: number): Promise<void>;
+  closeTerminal(id: string): Promise<TerminalSessionSnapshot[]>;
+  onTerminalStateUpdated(listener: (state: TerminalSessionSnapshot[]) => void): () => void;
   request<T = unknown>(command: RuntimeCommand, runtimeId?: string): Promise<T>;
   onRuntimeEvent(listener: (event: RuntimeEvent, runtimeId?: string) => void): () => void;
 }

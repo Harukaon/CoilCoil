@@ -4,6 +4,7 @@ import {
   FileText,
   Globe2,
   PanelLeft,
+  Terminal as TerminalIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
@@ -40,14 +41,16 @@ import { FilesPanel } from "./features/files/FilesPanel";
 import { InspectorPane } from "./features/inspector/InspectorPane";
 import { RuntimePanel } from "./features/runtime/RuntimePanel";
 import { BrowserPanel } from "./features/browser/BrowserPanel";
+import { TerminalPanel } from "./features/terminal/TerminalPanel";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
 import { toastError, toastInfo, toastSuccess } from "./ui/toast";
+import type { TerminalSessionSnapshot } from "../../shared/desktop-api";
 
 type InspectorTabKind = "files" | "browser" | "runtime" | "file";
 type InspectorTabId = string;
-type WorkspaceSurface = "conversation" | "skills";
+type WorkspaceSurface = "conversation" | "skills" | "terminal";
 
 interface InspectorTabDefinition {
   id: InspectorTabId;
@@ -130,6 +133,8 @@ export default function App(): React.JSX.Element {
   const [inspectorTabs, setInspectorTabs] = useState<InspectorTabDefinition[]>([]);
   const [activeInspectorTabId, setActiveInspectorTabId] = useState<InspectorTabId>();
   const [selectedFilePath, setSelectedFilePath] = useState<string>();
+  const [terminals, setTerminals] = useState<TerminalSessionSnapshot[]>([]);
+  const [activeTerminalId, setActiveTerminalId] = useState<string>();
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivityState>>({});
   const [pendingProjectPath, setPendingProjectPath] = useState<string>();
   const [expandedSessionLimits, setExpandedSessionLimits] = useState<Record<string, number>>({});
@@ -156,6 +161,12 @@ export default function App(): React.JSX.Element {
   const openRuntimeTab = useCallback((): void => {
     openInspectorTab({ id: "runtime", kind: "runtime", label: "运行时", icon: BrainCircuit });
   }, [openInspectorTab]);
+
+  const openInspectorOption = useCallback((id: InspectorTabId): void => {
+    if (id === "files") openFilesTab();
+    else if (id === "browser") openBrowserTab();
+    else if (id === "runtime") openRuntimeTab();
+  }, [openBrowserTab, openFilesTab, openRuntimeTab]);
 
   const openFileTab = useCallback((node: FileNode): void => {
     openInspectorTab({ id: fileInspectorTabId(node.path), kind: "file", label: node.name, icon: FileText, path: node.path });
@@ -193,6 +204,45 @@ export default function App(): React.JSX.Element {
     if (scopeId !== snapshotRef.current?.runtimeId) return;
     openBrowserTab();
   }), [openBrowserTab]);
+
+  useEffect(() => window.suocode.onTerminalStateUpdated((next) => {
+    setTerminals(next);
+    setActiveTerminalId((current) => current && next.some((terminal) => terminal.id === current) ? current : next.at(-1)?.id);
+    if (!next.length) setWorkspaceSurface((current) => current === "terminal" ? "conversation" : current);
+  }), []);
+
+  const openNewTerminal = useCallback(async (): Promise<void> => {
+    if (!project?.path) return;
+    try {
+      const next = await window.suocode.createTerminal(project.path);
+      setTerminals(next);
+      setActiveTerminalId(next.at(-1)?.id);
+      setWorkspaceSurface("terminal");
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, [project?.path]);
+
+  const openTerminal = useCallback((id: string): void => {
+    if (!terminals.some((terminal) => terminal.id === id)) return;
+    setActiveTerminalId(id);
+    setWorkspaceSurface("terminal");
+  }, [terminals]);
+
+  const closeTerminal = useCallback(async (id: string): Promise<void> => {
+    try {
+      const next = await window.suocode.closeTerminal(id);
+      setTerminals(next);
+      setActiveTerminalId((current) => current === id ? next.at(-1)?.id : current);
+      if (!next.length) setWorkspaceSurface("conversation");
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, []);
+
+  const writeTerminal = useCallback((id: string, data: string): void => {
+    void window.suocode.writeTerminal(id, data).catch((caught) => toastError(caught instanceof Error ? caught.message : String(caught)));
+  }, []);
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
   const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -830,6 +880,12 @@ export default function App(): React.JSX.Element {
 
   const activeInspectorTab = inspectorTabs.find((item) => item.id === activeInspectorTabId);
   const filesVisible = activeInspectorTab?.kind === "files" || activeInspectorTab?.kind === "file";
+  const activeTerminal = activeTerminalId ? terminals.find((terminal) => terminal.id === activeTerminalId) : undefined;
+  const inspectorAddOptions = [
+    { id: "files", label: "文件", icon: Files, disabled: inspectorTabs.some((item) => item.kind === "files") },
+    { id: "browser", label: "浏览器", icon: Globe2, disabled: inspectorTabs.some((item) => item.kind === "browser") },
+    { id: "runtime", label: "运行时", icon: BrainCircuit, disabled: inspectorTabs.some((item) => item.kind === "runtime") },
+  ];
 
   if (settingsOpen) {
     return <SettingsDialog configuration={configuration} open onClose={() => { shouldAutoScrollRef.current = true; setSettingsOpen(false); }} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} initialSection={settingsSection} />;
@@ -849,6 +905,11 @@ export default function App(): React.JSX.Element {
           expandedSessionLimits={expandedSessionLimits}
           modelLabel={snapshot?.model ? `${snapshot.model.provider}/${snapshot.model.name}` : "本地 Agent"}
           onNewConversation={(owner) => startNewConversation(owner)}
+          onNewTerminal={() => { void openNewTerminal(); }}
+          onOpenTerminal={(id) => openTerminal(id)}
+          onCloseTerminal={(id) => { void closeTerminal(id); }}
+          terminals={terminals}
+          activeTerminalId={activeTerminalId}
           onOpenProject={() => { void openProject(); }}
           onToggleProject={(path) => setExpandedProjects((current) => {
             const next = new Set(current);
@@ -898,7 +959,15 @@ export default function App(): React.JSX.Element {
             }}
           />
         ) : <>
-        <ConversationPane
+        {workspaceSurface === "terminal" ? (
+          activeTerminal ? (
+            <TerminalPanel
+              session={activeTerminal}
+              onWrite={(data) => writeTerminal(activeTerminal.id, data)}
+              onClose={() => { void closeTerminal(activeTerminal.id); }}
+            />
+          ) : <div className="terminal-empty"><TerminalIcon size={28} /><strong>终端已关闭</strong><button type="button" onClick={() => { void openNewTerminal(); }}>新建终端</button></div>
+        ) : <ConversationPane
           fileDragActive={fileDragActive}
           leftOpen={leftOpen}
           rightOpen={rightOpen}
@@ -950,7 +1019,7 @@ export default function App(): React.JSX.Element {
           onAbort={() => { void window.suocode.request({ type: "abort" }, snapshot?.runtimeId); }}
           onApprovePlan={approvePlan}
           onRejectPlan={rejectPlan}
-        />
+        />}
 
         <InspectorPane
           tabs={inspectorTabs.map((item) => ({ ...item, closable: true }))}
@@ -958,6 +1027,8 @@ export default function App(): React.JSX.Element {
           onSelectTab={selectInspectorTab}
           onCloseTab={closeInspectorTab}
           onClose={() => setRightOpen(false)}
+          addOptions={inspectorAddOptions}
+          onAddTab={openInspectorOption}
           emptyState={(
             <>
               <div className="inspector-empty-icon"><Files size={18} strokeWidth={1.7} /></div>

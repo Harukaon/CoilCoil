@@ -16,9 +16,11 @@ import {
   Plus,
   Settings,
   Sparkles,
+  Terminal as TerminalIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
+import type { TerminalSessionSnapshot } from "../../../../shared/desktop-api";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { collectPinnedSessions, collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, type PinnedSessionEntry } from "./sessionList";
@@ -80,6 +82,11 @@ export function WorkspaceSidebar({
   expandedSessionLimits,
   modelLabel,
   onNewConversation,
+  onNewTerminal,
+  onOpenTerminal,
+  onCloseTerminal,
+  terminals,
+  activeTerminalId,
   onOpenProject,
   onToggleProject,
   onShowMoreSessions,
@@ -107,6 +114,11 @@ export function WorkspaceSidebar({
   expandedSessionLimits: Record<string, number>;
   modelLabel: string;
   onNewConversation: (project?: ProjectSelection) => void;
+  onNewTerminal: () => void;
+  onOpenTerminal: (id: string) => void;
+  onCloseTerminal: (id: string) => void;
+  terminals: TerminalSessionSnapshot[];
+  activeTerminalId?: string;
   onOpenProject: () => void;
   onToggleProject: (path: string) => void;
   onShowMoreSessions: (path: string, limit: number) => void;
@@ -154,6 +166,7 @@ export function WorkspaceSidebar({
       <nav className="primary-nav">
         <button className="nav-button" type="button" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button>
         <button className={`nav-button ${skillsOpen ? "active" : ""}`} type="button" onClick={onOpenSkills}><Sparkles size={16} strokeWidth={1.7} /><span>技能</span></button>
+        <button className="nav-button" type="button" disabled={!activeProject} onClick={onNewTerminal}><TerminalIcon size={16} strokeWidth={1.7} /><span>终端</span></button>
       </nav>
       {pinnedSessions.length ? <section className="pinned-sessions-section">
         <div className="section-heading"><span>置顶</span><span className="pinned-count">{pinnedSessions.length}</span></div>
@@ -309,6 +322,17 @@ export function WorkspaceSidebar({
           <button className="open-project-card" type="button" onClick={onOpenProject}><span className="open-project-icon"><Plus size={14} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
         )}
       </section>
+      {terminals.length ? <section className="terminal-session-section">
+        <div className="section-heading"><span>终端会话</span><span className="pinned-count">{terminals.length}</span></div>
+        <div className="terminal-session-list">
+          {terminals.map((terminal, index) => (
+            <div className={`terminal-session-row ${terminal.id === activeTerminalId ? "active" : ""}`} key={terminal.id}>
+              <button type="button" onClick={() => onOpenTerminal(terminal.id)}><TerminalIcon size={13} /><span>终端 {index + 1}</span><small>{terminal.status === "running" ? "运行中" : "已退出"}</small></button>
+              <button type="button" aria-label={`关闭终端 ${index + 1}`} title="关闭终端" onClick={() => onCloseTerminal(terminal.id)}>×</button>
+            </div>
+          ))}
+        </div>
+      </section> : null}
       <div className="sidebar-footer"><div className="brand-mark">S</div><div className="brand-copy"><strong>SuoCode</strong><span>{modelLabel}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={onOpenSettings}><Settings size={17} strokeWidth={1.7} /></button></div>
     </aside>
   );

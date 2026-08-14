@@ -176,12 +176,32 @@ class DevToolsClient {
 }
 
 async function clickInspector(client, label) {
-  await client.evaluate(`(() => {
-    const button = [...document.querySelectorAll(".inspector-nav button")]
-      .find((item) => item.textContent.includes(${JSON.stringify(label)}));
-    if (!button) return false;
-    button.click();
-    return true;
+  return client.evaluate(`(async () => {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const button = [...document.querySelectorAll(".inspector-nav button")]
+        .find((item) => item.textContent.includes(${JSON.stringify(label)}));
+      if (button) {
+        button.click();
+        return true;
+      }
+      const quick = [...document.querySelectorAll(".inspector-empty-actions button")]
+        .find((item) => item.textContent.includes(${JSON.stringify(label)}));
+      if (quick) {
+        quick.click();
+        return true;
+      }
+      const add = document.querySelector(".inspector-add-tab");
+      if (!add || add.disabled) return false;
+      add.click();
+      await new Promise((resolveWait) => requestAnimationFrame(resolveWait));
+      const option = [...document.querySelectorAll(".inspector-add-menu button")]
+        .find((item) => item.textContent.includes(${JSON.stringify(label)}));
+      if (option && !option.disabled) {
+        option.click();
+        return true;
+      }
+    }
+    return false;
   })()`);
 }
 
@@ -431,7 +451,17 @@ async function main() {
     assert.deepEqual(fixedNavSizing, [
       { label: "新建对话", height: 34, fontSize: "13px", iconWidth: 16 },
       { label: "技能", height: 34, fontSize: "13px", iconWidth: 16 },
+      { label: "终端", height: 34, fontSize: "13px", iconWidth: 16 },
     ]);
+    await client.evaluate(`([...document.querySelectorAll(".primary-nav .nav-button")].find((button) => button.textContent.includes("终端")))?.click()`);
+    await client.waitFor(`Boolean(document.querySelector(".terminal-panel"))`, "The terminal surface did not open.");
+    await client.evaluate(`document.querySelector('.terminal-input input')?.focus()`);
+    await client.send("Input.insertText", { text: "printf terminal-gui-smoke-ok" });
+    await client.waitFor(`document.querySelector('.terminal-input input')?.value === "printf terminal-gui-smoke-ok"`, "The terminal input did not receive text.");
+    await client.evaluate(`document.querySelector('.terminal-input')?.requestSubmit()`);
+    await client.waitFor(`document.querySelector(".terminal-output")?.textContent.includes("terminal-gui-smoke-ok")`, "The terminal did not execute input through the packaged PTY.");
+    await client.evaluate(`document.querySelector('.terminal-header-actions button[aria-label="关闭终端"]')?.click()`);
+    await client.waitFor(`!document.querySelector(".terminal-panel")`, "Closing the terminal did not release its session.");
     const globalScrollbar = await client.evaluate(`(() => {
       const probe = document.createElement("div");
       probe.style.cssText = "position:fixed;left:-100px;top:-100px;width:40px;height:40px;overflow:scroll";
@@ -908,8 +938,8 @@ async function main() {
     assert.equal(isolation.panes, true);
     assert.equal(isolation.rightClosed, true);
     assert.equal(isolation.rightResizer, false);
-    assert.match(isolation.inspector, /文件/);
-    assert.doesNotMatch(isolation.inspector, /Todo|变更|终端/);
+    assert.equal(isolation.inspector, "");
+    assert.equal(await client.evaluate(`document.querySelectorAll(".inspector-empty-actions button").length`), 3);
     const emptyMetricState = await client.evaluate(`({
       summary: document.querySelector(".response-metrics")?.textContent || "",
       performance: Boolean(document.querySelector(".performance-trigger")),
@@ -1105,7 +1135,7 @@ async function main() {
     assert.ok(Math.abs(inspectorButtonInsets.collapsedTop - inspectorButtonInsets.expandedTop) <= 1, `Collapsed/expanded inspector top insets differ: ${JSON.stringify(inspectorButtonInsets)}`);
     assert.ok(Math.abs(inspectorButtonInsets.collapsedRight - inspectorButtonInsets.expandedRight) <= 1, `Collapsed/expanded inspector right insets differ: ${JSON.stringify(inspectorButtonInsets)}`);
     await client.waitFor(`Boolean(document.querySelector(".right-resizer"))`, "The right panel did not open for resize priority testing.");
-    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
+    assert.equal(await clickInspector(client, "运行时"), true);
     const inspectorTabLayout = await client.evaluate(`(() => {
       const runtime = document.querySelector('.inspector-nav button[aria-label="运行时"]');
       const label = runtime?.querySelector("span");
@@ -1119,7 +1149,7 @@ async function main() {
     assert.ok(inspectorTabLayout.width > 45, `The runtime inspector tab was clipped to ${inspectorTabLayout.width}px.`);
     assert.ok(inspectorTabLayout.labelWidth >= inspectorTabLayout.labelScrollWidth, "The runtime inspector label was ellipsized.");
     assert.equal(inspectorTabLayout.contextComposition, false, "The removed context-composition panel is still visible.");
-    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="浏览器"]')?.click()`);
+    assert.equal(await clickInspector(client, "浏览器"), true);
     await client.waitFor(
       `Boolean(document.querySelector(".browser-tabs .browser-tab")) && Boolean(document.querySelector(".browser-tabs > .browser-new-tab"))`,
       "The browser tab strip did not render its initial tab and new-tab action.",
