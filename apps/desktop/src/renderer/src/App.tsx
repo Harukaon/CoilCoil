@@ -115,7 +115,7 @@ export default function App(): React.JSX.Element {
   const [inspectorView, setInspectorView] = useState<InspectorView>("files");
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivityState>>({});
   const [pendingProjectPath, setPendingProjectPath] = useState<string>();
-  const [expandedSessionLists, setExpandedSessionLists] = useState<Set<string>>(new Set());
+  const [expandedSessionLimits, setExpandedSessionLimits] = useState<Record<string, number>>({});
   const [startingSession, setStartingSession] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const { leftOpen, rightOpen, leftWidth, rightWidth, setLeftOpen, setRightOpen, beginResize } = usePanelLayout();
@@ -751,7 +751,7 @@ export default function App(): React.JSX.Element {
           sessionsByProject={sessionsByProject}
           sessionActivity={sessionActivity}
           expandedProjects={expandedProjects}
-          expandedSessionLists={expandedSessionLists}
+          expandedSessionLimits={expandedSessionLimits}
           modelLabel={snapshot?.model ? `${snapshot.model.provider}/${snapshot.model.name}` : "本地 Agent"}
           onNewConversation={(owner) => startNewConversation(owner)}
           onOpenProject={() => { void openProject(); }}
@@ -760,8 +760,12 @@ export default function App(): React.JSX.Element {
             if (next.has(path)) next.delete(path); else next.add(path);
             return next;
           })}
-          onShowAllSessions={(path) => setExpandedSessionLists((current) => new Set(current).add(path))}
-          onCollapseSessions={(path) => setExpandedSessionLists((current) => { const next = new Set(current); next.delete(path); return next; })}
+          onShowMoreSessions={(path, limit) => setExpandedSessionLimits((current) => ({ ...current, [path]: limit }))}
+          onCollapseSessions={(path) => setExpandedSessionLimits((current) => {
+            const next = { ...current };
+            delete next[path];
+            return next;
+          })}
           onOpenConversation={(owner, session) => { void openConversation(owner, session); }}
           onArchiveConversation={(owner, session) => { void archiveConversation(owner, session); }}
           onRenameConversation={(owner, session, name) => renameConversation(owner, session, name)}

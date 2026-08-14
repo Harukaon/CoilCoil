@@ -1,9 +1,14 @@
 import type { SessionSummary } from "@suocode/runtime-protocol";
 
 export const DEFAULT_VISIBLE_SESSION_ROWS = 4;
+export const SESSION_EXPANSION_BATCH = 4;
 
 export function collapsedSessionLimit(hasPendingConversation: boolean): number {
   return DEFAULT_VISIBLE_SESSION_ROWS - (hasPendingConversation ? 1 : 0);
+}
+
+export function nextExpandedSessionLimit(currentVisible: number, total: number): number {
+  return Math.min(total, currentVisible + SESSION_EXPANSION_BATCH);
 }
 
 export function titleFromPrompt(text: string, hasImages: boolean): string {

@@ -22,7 +22,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { ArchivedSessionsPopover } from "./ArchivedSessionsPopover";
-import { collapsedSessionLimit } from "./sessionList";
+import { collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH } from "./sessionList";
 
 export interface SessionActivityState {
   runtimeId?: string;
@@ -49,12 +49,12 @@ export function WorkspaceSidebar({
   sessionsByProject,
   sessionActivity,
   expandedProjects,
-  expandedSessionLists,
+  expandedSessionLimits,
   modelLabel,
   onNewConversation,
   onOpenProject,
   onToggleProject,
-  onShowAllSessions,
+  onShowMoreSessions,
   onCollapseSessions,
   onOpenConversation,
   onArchiveConversation,
@@ -76,12 +76,12 @@ export function WorkspaceSidebar({
   sessionsByProject: Record<string, SessionSummary[]>;
   sessionActivity: Record<string, SessionActivityState>;
   expandedProjects: Set<string>;
-  expandedSessionLists: Set<string>;
+  expandedSessionLimits: Record<string, number>;
   modelLabel: string;
   onNewConversation: (project?: ProjectSelection) => void;
   onOpenProject: () => void;
   onToggleProject: (path: string) => void;
-  onShowAllSessions: (path: string) => void;
+  onShowMoreSessions: (path: string, limit: number) => void;
   onCollapseSessions: (path: string) => void;
   onOpenConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onArchiveConversation: (project: ProjectSelection, session: SessionSummary) => void;
@@ -132,9 +132,9 @@ export function WorkspaceSidebar({
           const expanded = expandedProjects.has(project.path);
           const sessions = sessionsByProject[project.path] ?? [];
           const hasPending = pendingProjectPath === project.path;
-          const showAll = expandedSessionLists.has(project.path);
           const collapsedLimit = collapsedSessionLimit(hasPending);
-          const visibleSessions = showAll ? sessions : sessions.slice(0, collapsedLimit);
+          const visibleLimit = Math.max(collapsedLimit, expandedSessionLimits[project.path] ?? collapsedLimit);
+          const visibleSessions = sessions.slice(0, visibleLimit);
           const hiddenCount = sessions.length - visibleSessions.length;
           return (
             <div className={`project-tree ${project.path === activeProject?.path ? "active" : ""}`} key={project.path}>
@@ -251,8 +251,8 @@ export function WorkspaceSidebar({
                       </ContextMenu.Portal>
                     </ContextMenu.Root>;
                   })}
-                  {hiddenCount > 0 ? <button className="more-conversations" type="button" aria-label={`显示另外 ${hiddenCount} 个对话`} onClick={() => onShowAllSessions(project.path)}><MoreHorizontal size={15} /></button> : null}
-                  {showAll && sessions.length > collapsedLimit ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => onCollapseSessions(project.path)}><ChevronUp size={14} /></button> : null}
+                  {hiddenCount > 0 ? <button className="more-conversations" type="button" aria-label={`再显示 ${Math.min(SESSION_EXPANSION_BATCH, hiddenCount)} 个对话`} onClick={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleSessions.length, sessions.length))}><MoreHorizontal size={15} /></button> : null}
+                  {visibleLimit > collapsedLimit ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => onCollapseSessions(project.path)}><ChevronUp size={14} /></button> : null}
                   {!sessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
                 </div>
               </div>

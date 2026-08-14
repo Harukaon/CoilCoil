@@ -3,6 +3,7 @@ import test from "node:test";
 import type { SessionSummary } from "@suocode/runtime-protocol";
 import {
   collapsedSessionLimit,
+  nextExpandedSessionLimit,
   titleFromPrompt,
   upsertSessionSummary,
 } from "../src/renderer/src/features/workspaces/sessionList.ts";
@@ -59,4 +60,10 @@ test("置顶会话仍保持在普通新会话之前", () => {
 test("工作区默认展示四行会话", () => {
   assert.equal(collapsedSessionLimit(false), 4);
   assert.equal(collapsedSessionLimit(true), 3);
+});
+
+test("更多会话每次只追加四行并且不会超过总数", () => {
+  assert.equal(nextExpandedSessionLimit(4, 20), 8);
+  assert.equal(nextExpandedSessionLimit(8, 20), 12);
+  assert.equal(nextExpandedSessionLimit(12, 14), 14);
 });
