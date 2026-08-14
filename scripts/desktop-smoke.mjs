@@ -1023,7 +1023,23 @@ async function main() {
     assert.equal(narrowInspectorLayout.rightResizer, true);
     await client.evaluate(`(() => { window.resizeTo(1440, 900); return true; })()`);
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not return to its regular test size.");
-    await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+    const inspectorButtonInsets = await client.evaluate(`(async () => {
+      const collapsedButton = document.querySelector('button[aria-label="展开作业栏"]');
+      const conversationBounds = document.querySelector(".conversation-pane")?.getBoundingClientRect();
+      const collapsedBounds = collapsedButton?.getBoundingClientRect();
+      collapsedButton?.click();
+      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      const inspectorBounds = document.querySelector(".inspector-pane")?.getBoundingClientRect();
+      const expandedBounds = document.querySelector('button[aria-label="收起右侧栏"]')?.getBoundingClientRect();
+      return {
+        collapsedTop: collapsedBounds && conversationBounds ? collapsedBounds.top - conversationBounds.top : -1,
+        collapsedRight: collapsedBounds && conversationBounds ? conversationBounds.right - collapsedBounds.right : -1,
+        expandedTop: expandedBounds && inspectorBounds ? expandedBounds.top - inspectorBounds.top : -1,
+        expandedRight: expandedBounds && inspectorBounds ? inspectorBounds.right - expandedBounds.right : -1,
+      };
+    })()`);
+    assert.ok(Math.abs(inspectorButtonInsets.collapsedTop - inspectorButtonInsets.expandedTop) <= 1, `Collapsed/expanded inspector top insets differ: ${JSON.stringify(inspectorButtonInsets)}`);
+    assert.ok(Math.abs(inspectorButtonInsets.collapsedRight - inspectorButtonInsets.expandedRight) <= 1, `Collapsed/expanded inspector right insets differ: ${JSON.stringify(inspectorButtonInsets)}`);
     await client.waitFor(`Boolean(document.querySelector(".right-resizer"))`, "The right panel did not open for resize priority testing.");
     await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
     const inspectorTabLayout = await client.evaluate(`(() => {
