@@ -101,6 +101,7 @@ import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -3162,13 +3163,21 @@ export class SuoCodeRuntime {
     if (!existsSync(resolvedPath) || !statSync(resolvedPath).isDirectory()) {
       throw new Error(`技能目录不存在：${resolvedPath}`);
     }
-    const settingsManager = this.skillSettingsManager(resolvedCwd);
-    const current = settingsManager.getSkillPaths();
-    const already = this.plainSkillPathEntries(current).some((entry) => this.expandSkillPath(entry) === resolvedPath);
-    if (!already) {
-      settingsManager.setSkillPaths([...current, resolvedPath]);
-      this.reloadActiveSessionResources("Skills 重新加载失败");
+    const managedRoot = join(this.agentDir, "skills");
+    const sourceRealPath = safeRealPath(resolvedPath);
+    if (sourceRealPath === safeRealPath(managedRoot) || sourceRealPath.startsWith(`${safeRealPath(managedRoot)}${sep}`)) {
+      throw new Error("所选目录已经位于 SuoCode 自维护技能目录中。");
     }
+    mkdirSync(managedRoot, { recursive: true });
+    const baseName = basename(resolvedPath).trim() || "imported-skill";
+    let destination = join(managedRoot, baseName);
+    let suffix = 2;
+    while (safeRealPath(destination) === sourceRealPath || existsSync(destination)) {
+      destination = join(managedRoot, `${baseName}-${suffix}`);
+      suffix += 1;
+    }
+    cpSync(resolvedPath, destination, { recursive: true, force: false, errorOnExist: true });
+    this.reloadActiveSessionResources("Skills 重新加载失败");
     const next = await this.getSkillConfiguration(resolvedCwd);
     this.updateActiveSkillConfiguration(resolvedCwd, next);
     return next;

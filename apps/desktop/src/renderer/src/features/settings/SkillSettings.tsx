@@ -57,11 +57,11 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
   };
 
   const addPath = async (): Promise<void> => {
-    const path = await window.suocode.pickDirectory({ title: "选择技能目录" });
+    const path = await window.suocode.pickDirectory({ title: "选择要导入的技能目录" });
     if (!path) return;
     await withBusy(
       () => window.suocode.request<SkillConfigurationSnapshot>({ type: "add_skill_path", path, cwd }, runtimeId),
-      "已添加技能目录",
+      "已导入技能目录",
     );
   };
 
@@ -82,11 +82,11 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
             <strong>已发现的技能</strong>
             {configuration ? <small>{skillCountLabel(configuration.skills)}</small> : null}
           </div>
-          <p>放到用户 skills、项目 <code>.pi/skills</code> / <code>.agents/skills</code>，或 <code>~/.agents/skills</code>。</p>
+          <p>技能会从约定目录自动发现；从其他位置导入后，会复制到 SuoCode 自维护目录，不依赖原目录。</p>
         </div>
         <div className="skills-toolbar">
           <button type="button" disabled={busy || loading} onClick={() => void addPath()}>
-            <FolderPlus size={13} />添加技能目录
+            <FolderPlus size={13} />导入技能目录
           </button>
           <button type="button" aria-label="刷新技能" disabled={loading || busy} onClick={() => void load(true)}>
             {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
@@ -95,8 +95,8 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
       </header>
 
       {configuration?.customSkillPaths.length ? (
-        <section className="skills-paths" aria-label="自定义技能目录">
-          <header><strong>自定义目录</strong></header>
+        <section className="skills-paths" aria-label="旧外部技能目录">
+          <header><strong>旧外部目录</strong><small>这些目录仍由设置直接引用；新导入的技能会复制到自维护目录。</small></header>
           <ul>
             {configuration.customSkillPaths.map((path) => (
               <li key={path}>
@@ -139,7 +139,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
           </article>
         ))}
         {!loading && !skills.length ? (
-          <p className="skills-empty">尚未发现技能。可将含 SKILL.md 的目录放到约定位置，或点击「添加技能目录」。</p>
+          <p className="skills-empty">尚未发现技能。可将含 SKILL.md 的目录放到约定位置，或点击「导入技能目录」将其复制保存到 SuoCode 自维护目录。</p>
         ) : null}
       </section>
 
