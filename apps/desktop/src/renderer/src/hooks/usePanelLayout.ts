@@ -3,12 +3,29 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 const LEFT_WIDTH_KEY = "suocode.left-panel-width";
 const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
-const MINIMUM_CONVERSATION_WIDTH = 315;
-const MINIMUM_PANEL_WIDTH = 40;
+export const MINIMUM_CONVERSATION_WIDTH = 315;
+export const MINIMUM_LEFT_PANEL_WIDTH = 167;
+export const MINIMUM_RIGHT_PANEL_WIDTH = 40;
 
-function storedWidth(key: string, fallback: number): number {
+function panelMinimumWidth(side: "left" | "right"): number {
+  return side === "left" ? MINIMUM_LEFT_PANEL_WIDTH : MINIMUM_RIGHT_PANEL_WIDTH;
+}
+
+function storedWidth(key: string, fallback: number, minimum: number): number {
   const value = Number(window.localStorage.getItem(key));
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+  return Math.max(minimum, Number.isFinite(value) && value > 0 ? value : fallback);
+}
+
+export function clampPanelWidth(side: "left" | "right", raw: number, windowWidth: number, oppositeWidth: number): number {
+  const minimum = panelMinimumWidth(side);
+  const maximum = Math.max(minimum, windowWidth - oppositeWidth - MINIMUM_CONVERSATION_WIDTH);
+  return Math.round(Math.max(minimum, Math.min(maximum, raw)));
+}
+
+export function minimumWindowWidth(leftOpen: boolean, rightOpen: boolean): number {
+  return MINIMUM_CONVERSATION_WIDTH
+    + (leftOpen ? MINIMUM_LEFT_PANEL_WIDTH : 0)
+    + (rightOpen ? MINIMUM_RIGHT_PANEL_WIDTH : 0);
 }
 
 export function usePanelLayout(): {
@@ -22,8 +39,8 @@ export function usePanelLayout(): {
 } {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
-  const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT_WIDTH_KEY, 268));
-  const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352));
+  const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT_WIDTH_KEY, 268, MINIMUM_LEFT_PANEL_WIDTH));
+  const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352, MINIMUM_RIGHT_PANEL_WIDTH));
   const preferredLeftWidthRef = useRef(leftWidth);
   const preferredRightWidthRef = useRef(rightWidth);
 
@@ -31,8 +48,8 @@ export function usePanelLayout(): {
     const fitPanelsToWindow = (): void => {
       const leftIsTiled = leftOpen;
       const rightIsTiled = rightOpen;
-      let nextLeftWidth = preferredLeftWidthRef.current;
-      let nextRightWidth = preferredRightWidthRef.current;
+      let nextLeftWidth = Math.max(MINIMUM_LEFT_PANEL_WIDTH, preferredLeftWidthRef.current);
+      let nextRightWidth = Math.max(MINIMUM_RIGHT_PANEL_WIDTH, preferredRightWidthRef.current);
       let deficit = Math.max(
         0,
         (leftIsTiled ? nextLeftWidth : 0)
@@ -42,22 +59,18 @@ export function usePanelLayout(): {
       );
 
       if (deficit > 0 && rightIsTiled) {
-        const reduction = Math.min(deficit, Math.max(0, nextRightWidth - MINIMUM_PANEL_WIDTH));
+        const reduction = Math.min(deficit, Math.max(0, nextRightWidth - MINIMUM_RIGHT_PANEL_WIDTH));
         nextRightWidth -= reduction;
         deficit -= reduction;
       }
       if (deficit > 0 && leftIsTiled) {
-        const reduction = Math.min(deficit, Math.max(0, nextLeftWidth - MINIMUM_PANEL_WIDTH));
+        const reduction = Math.min(deficit, Math.max(0, nextLeftWidth - MINIMUM_LEFT_PANEL_WIDTH));
         nextLeftWidth -= reduction;
       }
 
       setLeftWidth(Math.round(leftIsTiled ? nextLeftWidth : preferredLeftWidthRef.current));
       setRightWidth(Math.round(rightIsTiled ? nextRightWidth : preferredRightWidthRef.current));
-      void window.suocode.setWindowMinimumWidth(
-        MINIMUM_CONVERSATION_WIDTH
-          + (leftIsTiled ? MINIMUM_PANEL_WIDTH : 0)
-          + (rightIsTiled ? MINIMUM_PANEL_WIDTH : 0),
-      );
+      void window.suocode.setWindowMinimumWidth(minimumWindowWidth(leftIsTiled, rightIsTiled));
     };
     fitPanelsToWindow();
     window.addEventListener("resize", fitPanelsToWindow);
@@ -77,8 +90,7 @@ export function usePanelLayout(): {
       const oppositeWidth = side === "left"
         ? (rightOpen ? rightWidth : 0)
         : (leftOpen ? leftWidth : 0);
-      const maximum = Math.max(MINIMUM_PANEL_WIDTH, window.innerWidth - oppositeWidth - MINIMUM_CONVERSATION_WIDTH);
-      const width = Math.round(Math.max(MINIMUM_PANEL_WIDTH, Math.min(maximum, raw)));
+      const width = clampPanelWidth(side, raw, window.innerWidth, oppositeWidth);
       finalWidth = width;
       // Update layout via CSS only — avoid React re-rendering the chat tree every frame.
       shell?.style.setProperty(cssVar, `${width}px`);

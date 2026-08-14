@@ -967,13 +967,23 @@ async function main() {
     assert.equal(panelWidthAfterWindowResize.sidebar, panelWidthBeforeWindowResize.sidebar);
     assert.ok(panelWidthAfterWindowResize.conversation < panelWidthBeforeWindowResize.conversation);
 
-    await client.evaluate(`(() => { window.resizeTo(395, 700); return true; })()`);
+    await client.evaluate(`(() => { window.resizeTo(482, 700); return true; })()`);
     await client.waitFor(`window.innerWidth <= 700`, "The window did not reach its narrow desktop layout.");
-    await client.evaluate(`(() => { window.resizeTo(395, 700); return true; })()`);
+    await client.evaluate(`(() => { window.resizeTo(482, 700); return true; })()`);
     await client.waitFor(
-      `window.innerWidth <= 395`,
-      "The packaged desktop window could not shrink to 395px.",
+      `window.innerWidth <= 482`,
+      "The packaged desktop window could not shrink to the 482px left-panel minimum.",
     );
+    await client.waitFor(
+      `document.querySelector(".sidebar")?.getBoundingClientRect().width <= 168`,
+      "The conversation sidebar did not settle at its 167px minimum.",
+    );
+    const minimumSidebarLayout = await client.evaluate(`({
+      left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
+      center: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
+    })`);
+    assert.ok(minimumSidebarLayout.left <= 168 && minimumSidebarLayout.left >= 166, `The conversation sidebar did not stop at 167px: ${JSON.stringify(minimumSidebarLayout)}`);
+    assert.ok(minimumSidebarLayout.center <= 316 && minimumSidebarLayout.center >= 314, `The conversation pane lost its minimum width: ${JSON.stringify(minimumSidebarLayout)}`);
     await client.evaluate(`document.querySelectorAll(".toast-dismiss").forEach((button) => button.click())`);
     await client.evaluate(`(async () => {
       if (!document.querySelector(".app-shell")?.classList.contains("left-collapsed")) return true;
@@ -1013,6 +1023,8 @@ async function main() {
       return !document.querySelector(".app-shell")?.classList.contains("left-collapsed");
     })()`);
     assert.equal(narrowSidebarOpened, true);
+    await client.evaluate(`window.resizeTo(522, 700)`);
+    await client.waitFor(`window.innerWidth >= 522`, "The window did not make room for both panel minimums.");
     const narrowInspectorLayout = await client.evaluate(`(async () => {
       document.querySelector('button[aria-label="展开作业栏"]')?.click();
       await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
@@ -1080,8 +1092,8 @@ async function main() {
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
     })`);
-    await client.evaluate(`window.resizeTo(500, 700)`);
-    await client.waitFor(`window.innerWidth <= 500`, "The window did not shrink through the panel priority range.");
+    await client.evaluate(`window.resizeTo(600, 700)`);
+    await client.waitFor(`window.innerWidth <= 600`, "The window did not shrink through the panel priority range.");
     await client.waitFor(
       `document.querySelector(".conversation-pane")?.getBoundingClientRect().width <= 316 && document.querySelector(".inspector-pane")?.getBoundingClientRect().width <= 41`,
       "The right panel did not compress after the conversation reached its minimum.",
@@ -1097,11 +1109,11 @@ async function main() {
     assert.notEqual(compressedPanelWidths.inspectorPosition, "absolute");
     assert.ok(compressedPanelWidths.center <= 316 && compressedPanelWidths.center >= 314);
     assert.ok(compressedPanelWidths.right <= 41 && compressedPanelWidths.right >= 39);
-    assert.ok(compressedPanelWidths.left > 40 && compressedPanelWidths.left < preferredPanelWidths.left);
-    await client.evaluate(`window.resizeTo(395, 700)`);
-    await client.waitFor(`window.innerWidth <= 395`, "The window did not reach the three-pane minimum width.");
+    assert.ok(compressedPanelWidths.left > 167 && compressedPanelWidths.left < preferredPanelWidths.left);
+    await client.evaluate(`window.resizeTo(522, 700)`);
+    await client.waitFor(`window.innerWidth <= 522`, "The window did not reach the three-pane minimum width.");
     await client.waitFor(
-      `document.querySelector(".sidebar")?.getBoundingClientRect().width <= 41 && document.querySelector(".inspector-pane")?.getBoundingClientRect().width <= 41`,
+      `document.querySelector(".sidebar")?.getBoundingClientRect().width <= 168 && document.querySelector(".inspector-pane")?.getBoundingClientRect().width <= 41`,
       "The left panel did not compress after the right panel reached its minimum.",
     );
     const minimumPanelWidths = await client.evaluate(`({
@@ -1110,7 +1122,7 @@ async function main() {
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
     })`);
     assert.ok(minimumPanelWidths.center <= 316 && minimumPanelWidths.center >= 314);
-    assert.ok(minimumPanelWidths.left <= 41 && minimumPanelWidths.left >= 39);
+    assert.ok(minimumPanelWidths.left <= 168 && minimumPanelWidths.left >= 166);
     assert.ok(minimumPanelWidths.right <= 41 && minimumPanelWidths.right >= 39);
     const narrowConversationLayout = await client.evaluate(`(() => {
       const body = document.querySelector(".conversation-body");
@@ -1161,6 +1173,30 @@ async function main() {
     assert.ok(
       Math.abs(restoredPanelWidths.right - preferredPanelWidths.right) <= 1,
       `Right panel did not restore: preferred ${preferredPanelWidths.right}px, restored ${restoredPanelWidths.right}px.`,
+    );
+    const leftHandle = await client.evaluate(`(() => {
+      const bounds = document.querySelector(".left-resizer")?.getBoundingClientRect();
+      return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;
+    })()`);
+    assert.ok(leftHandle, "The left panel resize handle was missing.");
+    await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x: leftHandle.x, y: leftHandle.y, button: "left", buttons: 1, clickCount: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: leftHandle.y, button: "left", buttons: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 1, y: leftHandle.y, button: "left", buttons: 0, clickCount: 1 });
+    await client.waitFor(
+      `Math.abs((document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0) - 167) <= 1`,
+      "Dragging the conversation sidebar past its lower bound did not stop at 167px.",
+    );
+    const minimumLeftHandle = await client.evaluate(`(() => {
+      const bounds = document.querySelector(".left-resizer")?.getBoundingClientRect();
+      return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;
+    })()`);
+    assert.ok(minimumLeftHandle, "The left panel resize handle disappeared at its minimum.");
+    await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x: minimumLeftHandle.x, y: minimumLeftHandle.y, button: "left", buttons: 1, clickCount: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: preferredPanelWidths.left, y: minimumLeftHandle.y, button: "left", buttons: 1 });
+    await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: preferredPanelWidths.left, y: minimumLeftHandle.y, button: "left", buttons: 0, clickCount: 1 });
+    await client.waitFor(
+      `Math.abs((document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0) - ${preferredPanelWidths.left}) <= 1`,
+      "The conversation sidebar did not restore after its minimum-width drag test.",
     );
     const openInspectorDragSurface = await client.evaluate(`(() => {
       const surface = document.querySelector(".inspector-drag-surface");
