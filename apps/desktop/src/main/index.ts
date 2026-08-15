@@ -14,6 +14,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron"
 import { createRequire } from "node:module";
 import type { BrowserViewBounds, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
+import { hardenGuestPreferences } from "./browser-webview-policy";
 import { TerminalRuntimeManager } from "./terminal-runtime";
 
 // This is deliberately opt-in and development-only. It lets the desktop smoke
@@ -59,6 +60,8 @@ const TERMINAL_CLOSE_CHANNEL = "terminal:close";
 let isQuitting = false;
 const moduleRequire = createRequire(import.meta.url);
 const browserRuntimes = new Map<number, BrowserRuntimeManager>();
+/** WebContents ids allowed to host <webview> guests — app windows, never previews or guests. */
+const webviewHostIds = new Set<number>();
 const terminalRuntimes = new Map<number, TerminalRuntimeManager>();
 let primaryBrowserRuntime: BrowserRuntimeManager | undefined;
 
@@ -458,7 +461,29 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
+      // The built-in browser renders as <webview> guests so DOM overlays can paint
+      // over it. This is the only window allowed to host them; every other
+      // WebContents refuses attachment outright (see app.on("web-contents-created")).
+      webviewTag: true,
     },
+  });
+
+  // Enabling webviewTag means any script in this renderer could mint a guest and
+  // choose its own preferences. This is the gate that rewrites them into the only
+  // shape SuoCode allows, or refuses the attachment.
+  webviewHostIds.add(mainWindow.webContents.id);
+  mainWindow.once("closed", () => webviewHostIds.delete(mainWindow.webContents.id));
+  mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    const allowed = hardenGuestPreferences(
+      webPreferences as unknown as Record<string, unknown>,
+      params as unknown as Record<string, unknown>,
+    );
+    if (!allowed) event.preventDefault();
+  });
+  // Baseline until the tab record claims the guest and installs its own handler;
+  // a guest must never be able to open an OS window.
+  mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
+    guest.setWindowOpenHandler(() => ({ action: "deny" }));
   });
 
   const browserRuntime = new BrowserRuntimeManager(mainWindow, (state) => {
@@ -502,6 +527,19 @@ async function createWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // Only the main window may host <webview> guests, and only through the handler
+  // installed in createWindow. Preview windows and anything added later refuse
+  // attachment, so a future webPreferences default cannot widen the surface.
+  app.on("web-contents-created", (_event, contents) => {
+    if (contents.getType() === "webview") return;
+    contents.on("will-attach-webview", (event) => {
+      // Checked at attach time, not creation time: this fires while the window is
+      // still being constructed, before createWindow can allowlist its id.
+      if (webviewHostIds.has(contents.id)) return;
+      event.preventDefault();
+    });
+  });
+
   ipcMain.handle(PROJECT_HOME_CHANNEL, async (): Promise<ProjectSelection> => {
     const path = join(app.getPath("userData"), "Home");
     await mkdir(path, { recursive: true });
