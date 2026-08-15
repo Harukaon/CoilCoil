@@ -16,6 +16,16 @@ import type { BrowserViewBounds, FilePreviewDocument, OpenFilePreviewInput, Proj
 import { BrowserRuntimeManager } from "./browser-runtime";
 import { TerminalRuntimeManager } from "./terminal-runtime";
 
+// This is deliberately opt-in and development-only. It lets the desktop smoke
+// harness inspect the *running* renderer instead of proving layout solely with
+// a synthetic DOM fixture. Electron otherwise does not expose the application
+// WebContents through the scoped browser CDP bridge below.
+const rendererDebugPort = process.env.SUOCODE_RENDERER_DEBUG_PORT;
+if (!app.isPackaged && rendererDebugPort && /^\d{2,5}$/.test(rendererDebugPort)) {
+  app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+  app.commandLine.appendSwitch("remote-debugging-port", rendererDebugPort);
+}
+
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
 const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
