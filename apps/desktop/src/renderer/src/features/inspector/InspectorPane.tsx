@@ -1,3 +1,4 @@
+import * as Popover from "@radix-ui/react-popover";
 import { PanelRight, Plus, X } from "lucide-react";
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
@@ -63,15 +64,21 @@ export function InspectorPane<T extends string>({
         </nav>
         <div className="inspector-drag-surface" aria-hidden="true" />
         <div className="inspector-actions no-drag">
-          {addOptions?.length && onAddTab ? <div className="inspector-add-menu-wrap">
-            <button className="icon-button inspector-add-tab" type="button" aria-label="打开面板" title="打开面板" onClick={() => setAddMenuOpen((current) => !current)}><Plus size={15} /></button>
-            {addMenuOpen ? <div className="inspector-add-menu" role="menu">
-              {addOptions.map((item) => {
-                const Icon = item.icon;
-                return <button key={item.id} type="button" disabled={item.disabled} onClick={() => { onAddTab(item.id); setAddMenuOpen(false); }}><Icon size={13} /><span>{item.label}</span></button>;
-              })}
-            </div> : null}
-          </div> : null}
+          {addOptions?.length && onAddTab ? (
+            <Popover.Root open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+              <Popover.Trigger asChild>
+                <button className="icon-button inspector-add-tab" type="button" aria-label="打开面板" title="打开面板"><Plus size={15} /></button>
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Content className="inspector-add-popover" role="menu" side="bottom" align="end" sideOffset={5} collisionPadding={8}>
+                  {addOptions.map((item) => {
+                    const Icon = item.icon;
+                    return <button key={item.id} type="button" role="menuitem" disabled={item.disabled} onClick={() => { onAddTab(item.id); setAddMenuOpen(false); }}><Icon size={13} /><span>{item.label}</span></button>;
+                  })}
+                </Popover.Content>
+              </Popover.Portal>
+            </Popover.Root>
+          ) : null}
           <button className="icon-button" type="button" aria-label="收起右侧栏" onClick={onClose}><PanelRight size={17} /></button>
         </div>
       </header>

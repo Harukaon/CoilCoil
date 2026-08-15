@@ -194,7 +194,7 @@ async function clickInspector(client, label) {
       if (!add || add.disabled) return false;
       add.click();
       await new Promise((resolveWait) => requestAnimationFrame(resolveWait));
-      const option = [...document.querySelectorAll(".inspector-add-menu button")]
+      const option = [...document.querySelectorAll(".inspector-add-popover button")]
         .find((item) => item.textContent.includes(${JSON.stringify(label)}));
       if (option && !option.disabled) {
         option.click();
@@ -960,7 +960,7 @@ async function main() {
       };
     })()`);
     assert.match(modelParameterMenu.text, /思考级别/);
-    assert.match(modelParameterMenu.text, /Fast/);
+    assert.doesNotMatch(modelParameterMenu.text, /Fast/, "An unsupported model still consumed space with a disabled Fast control.");
     assert.match(modelParameterMenu.text, /模型/);
     assert.equal(modelParameterMenu.directSearch, false, "The primary parameter menu still rendered the model list/search directly.");
     assert.equal(modelParameterMenu.contextInput, false, "The removed ad-hoc context input still appeared in the parameter menu.");
@@ -1309,6 +1309,30 @@ async function main() {
     })`);
     assert.ok(narrowConversation.conversation <= 316, `Conversation pane stopped at ${narrowConversation.conversation}px instead of 315px.`);
     assert.ok(narrowConversation.inspector >= 800);
+    const narrowTodoOverlay = await client.evaluate(`(() => {
+      const conversation = document.querySelector(".conversation-pane");
+      const overlays = document.querySelector(".composer-overlays");
+      const composer = document.querySelector(".composer");
+      if (!conversation || !overlays || !composer) return null;
+      const activity = document.createElement("section");
+      activity.className = "composer-activity expanded";
+      activity.innerHTML = '<div class="composer-activity-header"><strong>Todo</strong></div><div class="composer-activity-body"><ol><li>一条很长、足以验证窄布局不会越过右侧面板边界的任务文本</li></ol></div>';
+      overlays.append(activity);
+      const bounds = (element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, width: rect.width };
+      };
+      const result = {
+        conversation: bounds(conversation),
+        composer: bounds(composer),
+        activity: bounds(activity),
+      };
+      activity.remove();
+      return result;
+    })()`);
+    assert.ok(narrowTodoOverlay, "The narrow Todo overlay fixture did not render.");
+    assert.ok(narrowTodoOverlay.composer.right <= narrowTodoOverlay.conversation.right + 1, `Composer overflowed the narrow conversation pane: ${JSON.stringify(narrowTodoOverlay)}`);
+    assert.ok(narrowTodoOverlay.activity.right <= narrowTodoOverlay.conversation.right + 1, `Todo overflowed the narrow conversation pane: ${JSON.stringify(narrowTodoOverlay)}`);
     const expandedHandle = await client.evaluate(`(() => {
       const bounds = document.querySelector(".right-resizer")?.getBoundingClientRect();
       return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;

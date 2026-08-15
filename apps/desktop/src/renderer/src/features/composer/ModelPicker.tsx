@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { ModelOption, RuntimeConfiguration, SessionSnapshot, ThinkingLevel } from "@suocode/runtime-protocol";
 
 const THINKING_LABELS: Record<ThinkingLevel, string> = {
-  off: "关闭",
-  minimal: "最低",
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "超高",
-  max: "最大",
+  off: "Off",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
 };
 
 function supportsFast(modelId: string | undefined): boolean {
@@ -101,10 +101,10 @@ export function ModelPicker({
             </div>
           </section>
           <section className="model-parameter-section model-parameter-actions">
-            <button className="model-parameter-toggle" type="button" aria-pressed={currentFast && fastAvailable} disabled={busy || !fastAvailable} onClick={() => onFastChange ? void onFastChange(!currentFast) : undefined}>
-              <span><strong>Fast</strong><small>{fastAvailable ? "Priority 快速服务" : "当前模型不支持"}</small></span>
-              <i className={currentFast && fastAvailable ? "active" : ""} aria-hidden="true"><b /></i>
-            </button>
+            {fastAvailable ? <button className="model-parameter-toggle" type="button" aria-pressed={currentFast} disabled={busy} onClick={() => onFastChange ? void onFastChange(!currentFast) : undefined}>
+              <span><strong>Fast</strong><small>Priority service</small></span>
+              <i className={currentFast ? "active" : ""} aria-hidden="true"><b /></i>
+            </button> : null}
             <Popover.Root open={modelsOpen} onOpenChange={setModelsOpen}>
               <Popover.Trigger asChild>
                 <button className="model-submenu-trigger" type="button">
