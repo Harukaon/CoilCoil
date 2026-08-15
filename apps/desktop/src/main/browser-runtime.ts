@@ -355,6 +355,17 @@ export class BrowserRuntimeManager {
     return [...this.tabs.values()].filter((tab) => tab.scopeId === scopeId);
   }
 
+  /**
+   * Tabs a CDP client is allowed to see. A tab exists internally before its page
+   * has committed, while its target id is still a placeholder; announcing one
+   * would hand Playwright a `pending-page-` id it can never resolve. Every path
+   * that enumerates or resolves targets for a client must filter through here —
+   * `tabsForScope` stays for the UI, which does show tabs while they load.
+   */
+  private cdpTabs(scopeId: string): BrowserTab[] {
+    return this.tabsForScope(scopeId).filter((tab) => tab.announced);
+  }
+
   private activeTab(scopeId: string): BrowserTab | undefined {
     const id = this.activeTabIds.get(scopeId);
     return id ? this.tabs.get(id) : undefined;
@@ -476,7 +487,7 @@ export class BrowserRuntimeManager {
     };
     this.clients.set(client.id, client);
     this.onAgentActivated(scopeId);
-    for (const tab of this.tabsForScope(scopeId)) this.installDebuggerRelay(client, tab);
+    for (const tab of this.cdpTabs(scopeId)) this.installDebuggerRelay(client, tab);
     socket.on("message", (data) => { void this.handleClientMessage(client, data); });
     socket.once("close", () => this.removeClient(client));
     socket.once("error", () => this.removeClient(client));
@@ -587,7 +598,7 @@ export class BrowserRuntimeManager {
       return {
         activeTabId,
         activePageTargetId: activeTabId ? this.tabs.get(activeTabId)?.pageTargetId : undefined,
-        tabs: this.tabsForScope(client.scopeId).map((tab) => ({
+        tabs: this.cdpTabs(client.scopeId).map((tab) => ({
           id: tab.id,
           pageTargetId: tab.pageTargetId,
           title: tab.view.webContents.getTitle() || "新标签页",
@@ -612,7 +623,7 @@ export class BrowserRuntimeManager {
     }
     if (method === "Target.setAutoAttach") {
       client.autoAttach = params.autoAttach === true;
-      if (client.autoAttach) for (const tab of this.tabsForScope(client.scopeId)) this.attachTab(client, tab);
+      if (client.autoAttach) for (const tab of this.cdpTabs(client.scopeId)) this.attachTab(client, tab);
       return {};
     }
     if (method === "Target.getTargets") return { targetInfos: this.allTargetInfos(client) };
@@ -731,7 +742,7 @@ export class BrowserRuntimeManager {
 
   private announceAllTargets(client: CdpClient): void {
     this.send(client, { method: "Target.targetCreated", params: { targetInfo: { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false } } });
-    for (const tab of this.tabsForScope(client.scopeId)) {
+    for (const tab of this.cdpTabs(client.scopeId)) {
       if (client.mode === "devtools") this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
       this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "page") } });
     }
@@ -797,7 +808,7 @@ export class BrowserRuntimeManager {
     const scopeId = client?.scopeId ?? this.uiScopeId;
     return [
       { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false },
-      ...this.tabsForScope(scopeId).flatMap((tab) => client?.mode === "playwright"
+      ...this.cdpTabs(scopeId).flatMap((tab) => client?.mode === "playwright"
         ? [targetInfo(tab, "page")]
         : [targetInfo(tab, "tab"), targetInfo(tab, "page")]),
     ];
@@ -811,12 +822,12 @@ export class BrowserRuntimeManager {
   }
 
   private findTabByTarget(id: string, scopeId: string): BrowserTab | undefined {
-    return this.tabsForScope(scopeId).find((tab) => tab.tabTargetId === id || tab.pageTargetId === id);
+    return this.cdpTabs(scopeId).find((tab) => tab.tabTargetId === id || tab.pageTargetId === id);
   }
 
   private findTabByWindowId(value: unknown, scopeId: string): BrowserTab | undefined {
     if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
-    return this.tabsForScope(scopeId).find((tab) => tab.view.webContents.id === value);
+    return this.cdpTabs(scopeId).find((tab) => tab.view.webContents.id === value);
   }
 
   private windowBounds(tab: BrowserTab): Record<string, unknown> {
