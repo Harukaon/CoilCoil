@@ -1,6 +1,6 @@
 import * as Popover from "@radix-ui/react-popover";
 import { PanelRight, Plus, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -20,7 +20,6 @@ export function InspectorPane<T extends string>({
   onClose,
   addOptions,
   onAddTab,
-  onAddMenuOpenChange,
   emptyState,
   children,
 }: {
@@ -31,18 +30,10 @@ export function InspectorPane<T extends string>({
   onClose: () => void;
   addOptions?: InspectorTab<T>[];
   onAddTab?: (tab: T) => void;
-  /** Native browser views cannot be layered below DOM popovers. */
-  onAddMenuOpenChange?: (open: boolean) => void;
   emptyState?: ReactNode;
   children: ReactNode;
 }): React.JSX.Element {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  useEffect(() => () => onAddMenuOpenChange?.(false), [onAddMenuOpenChange]);
-
-  const setMenuOpen = (open: boolean): void => {
-    setAddMenuOpen(open);
-    onAddMenuOpenChange?.(open);
-  };
   return (
     <aside className="inspector-pane">
       <header className="inspector-header">
@@ -74,7 +65,7 @@ export function InspectorPane<T extends string>({
         <div className="inspector-drag-surface" aria-hidden="true" />
         <div className="inspector-actions no-drag">
           {addOptions?.length && onAddTab ? (
-            <Popover.Root open={addMenuOpen} onOpenChange={setMenuOpen}>
+            <Popover.Root open={addMenuOpen} onOpenChange={setAddMenuOpen}>
               <Popover.Trigger asChild>
                 <button className="icon-button inspector-add-tab" type="button" aria-label="打开面板" title="打开面板"><Plus size={15} /></button>
               </Popover.Trigger>
@@ -82,13 +73,13 @@ export function InspectorPane<T extends string>({
                 <Popover.Content className="inspector-add-popover" role="menu" side="bottom" align="end" sideOffset={5} collisionPadding={8}>
                   {addOptions.map((item) => {
                     const Icon = item.icon;
-                    return <button key={item.id} type="button" role="menuitem" disabled={item.disabled} onClick={() => { onAddTab(item.id); setMenuOpen(false); }}><Icon size={13} /><span>{item.label}</span></button>;
+                    return <button key={item.id} type="button" role="menuitem" disabled={item.disabled} onClick={() => { onAddTab(item.id); setAddMenuOpen(false); }}><Icon size={13} /><span>{item.label}</span></button>;
                   })}
                 </Popover.Content>
               </Popover.Portal>
             </Popover.Root>
           ) : null}
-          <button className="icon-button" type="button" aria-label="收起右侧栏" onClick={() => { setMenuOpen(false); onClose(); }}><PanelRight size={17} /></button>
+          <button className="icon-button" type="button" aria-label="收起右侧栏" onClick={onClose}><PanelRight size={17} /></button>
         </div>
       </header>
       <section className={`inspector-content inspector-content-${activeTab}`}>
