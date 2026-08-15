@@ -89,9 +89,11 @@ function createGuest(tabId: string, nonce: string): GuestEntry {
     });
   });
 
+  // Main destroys the guest as part of closing a tab, so the element must stay in
+  // the map until the roster says the slot is gone; dropping it here would leave
+  // an orphaned <webview> that reconcile can no longer find and remove.
   element.addEventListener("destroyed", () => {
-    if (!guests.has(tabId)) return;
-    guests.delete(tabId);
+    if (guests.get(tabId) !== entry) return;
     void window.suocode.reportBrowserGuestFailure(tabId, nonce, "guest destroyed");
   });
 

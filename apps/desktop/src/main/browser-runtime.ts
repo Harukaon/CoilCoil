@@ -1,9 +1,8 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { BrowserWindow, WebContentsView, session, webContents as webContentsRegistry, type Rectangle, type WebContents } from "electron";
+import { BrowserWindow, session, webContents as webContentsRegistry, type WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
-import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot, BrowserViewBounds } from "../shared/desktop-api";
-import { browserCssBoundsToDip } from "./browser-bounds";
+import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { normalizeBrowserUrl } from "./browser-navigation";
 import { BROWSER_PARTITION } from "./browser-webview-policy";
@@ -12,15 +11,26 @@ const DEFAULT_URL = "about:blank";
 const DEFAULT_SCOPE_ID = "default";
 const BROWSER_TARGET_ID = "suocode-browser";
 const BROWSER_CONTEXT_ID = "suocode-browser-context";
-const BACKGROUND_VIEWPORT: Rectangle = { x: 0, y: 0, width: 1280, height: 720 };
-const OFFSCREEN_VIEWPORT: Rectangle = { x: -16_384, y: -16_384, width: 1280, height: 720 };
+/**
+ * Logical viewport for a tab the user is not looking at.
+ *
+ * A parked guest is a 1x1 element on screen, so without this every background
+ * tab would report a 1x1 viewport to the page and to agents. Emulation gives it
+ * a real size; the element stays tiny but composited, which is what keeps
+ * Page.captureScreenshot working at all.
+ */
+const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
 
 interface BrowserTab {
   id: string;
   scopeId: string;
   tabTargetId: string;
   pageTargetId: string;
-  view: WebContentsView;
+  /** Set once the renderer reports the <webview> it created for this tab. */
+  guest?: WebContents;
+  /** Travels with the roster entry so a stale report cannot satisfy a newer slot. */
+  guestNonce: string;
+  phase: "awaiting-guest" | "loading" | "ready" | "closing";
   announced: boolean;
   emulatedSize?: { width: number; height: number };
 }
@@ -56,7 +66,7 @@ function browserContextId(scopeId: string): string {
 }
 
 function targetInfo(tab: BrowserTab, kind: "tab" | "page"): Record<string, unknown> {
-  const contents = tab.view.webContents;
+  const contents = tab.guest!;
   return {
     targetId: kind === "tab" ? tab.tabTargetId : tab.pageTargetId,
     type: kind,
@@ -78,7 +88,7 @@ function responseError(error: unknown): { code: number; message: string } {
  * Puppeteer expects Chrome's browser -> tab -> page target hierarchy. Electron
  * exposes only a debugger bound to one WebContents. This facade supplies the
  * missing target hierarchy and forwards page commands exclusively to the
- * WebContentsView instances owned by SuoCode. No global remote-debugging port is
+ * <webview> guests owned by SuoCode. No global remote-debugging port is
  * opened and renderer WebContents are never addressable.
  */
 export class BrowserRuntimeManager {
@@ -91,7 +101,11 @@ export class BrowserRuntimeManager {
   private port?: number;
   private readonly activeTabIds = new Map<string, string>();
   private uiScopeId = DEFAULT_SCOPE_ID;
-  private browserCssBounds: BrowserViewBounds = { x: 0, y: 0, width: 0, height: 0, visible: false };
+  private uiViewport = { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height };
+  /** False while the browser panel is hidden, so its tab parks like a background one. */
+  private panelVisible = false;
+  /** One in-flight creation per scope; see ensureActiveTab. */
+  private readonly pendingEnsure = new Map<string, Promise<BrowserTab>>();
   private disposed = false;
   /** Correlates renderer-created <webview> guests with tab records. Unused until the switch. */
   private readonly guests = new BrowserGuestRegistry({
@@ -111,7 +125,12 @@ export class BrowserRuntimeManager {
       };
     },
   });
-  private readonly handleWindowLayoutChanged = (): void => this.applyViewLayout();
+  private readonly handleHostNavigation = (
+    _event: unknown, _url: string, _isInPlace: boolean, isMainFrame: boolean,
+  ): void => {
+    if (isMainFrame) this.dropAllGuests();
+  };
+  private readonly handleHostGone = (): void => this.dropAllGuests();
 
   constructor(
     private readonly window: BrowserWindow,
@@ -142,8 +161,12 @@ export class BrowserRuntimeManager {
       const scopeId = requestUrl.searchParams.get("scope")?.trim() || DEFAULT_SCOPE_ID;
       this.socketServer.handleUpgrade(request, socket, head, (webSocket) => this.acceptClient(webSocket, mode, scopeId));
     });
-    this.window.on("resize", this.handleWindowLayoutChanged);
-    this.window.webContents.on("zoom-changed", this.handleWindowLayoutChanged);
+    // Guests live in the renderer's document, so a reload or crash destroys every
+    // one of them. Tear the records down deliberately and tell clients their
+    // targets are gone; resurrecting them under the old page target id would
+    // leave Playwright with a permanently half-initialized Page.
+    this.window.webContents.on("did-start-navigation", this.handleHostNavigation);
+    this.window.webContents.on("render-process-gone", this.handleHostGone);
   }
 
   async start(): Promise<void> {
@@ -180,62 +203,131 @@ export class BrowserRuntimeManager {
 
   setUiScope(scopeId: string): BrowserStateSnapshot {
     this.uiScopeId = scopeId.trim() || DEFAULT_SCOPE_ID;
-    this.applyViewLayout();
+    this.refreshViewportOverrides();
     const state = this.state();
     this.publishState(state);
     return state;
   }
 
   async createTab(rawUrl?: string, activate = true, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
-    const tab = this.createTabRecord(activate, scopeId);
-    const url = normalizeBrowserUrl(rawUrl);
-    await tab.view.webContents.loadURL(url);
-    await this.finishTabCreation(tab);
+    await this.createCdpTab(rawUrl, activate, scopeId);
     return this.state(scopeId);
   }
 
   /**
-   * Create and announce the target without waiting for navigation.
+   * Reserve the tab synchronously, before any await.
    *
-   * A new Electron WebContents does not have a committed document yet. We keep
-   * it private until about:blank is ready so Puppeteer cannot issue Page/Runtime
-   * initialization commands against a half-created target.
+   * The guest itself is created by the renderer, which is asynchronous, but the
+   * record and its claim on activeTabIds must land in this turn: ensureActiveTab
+   * has thirteen callers that would otherwise each start their own tab while the
+   * first was still in flight. The tab is quarantined until its page commits —
+   * announced stays false and pageTargetId is a placeholder — so no CDP client
+   * can see a target that has no WebContents behind it yet.
    */
   private createTabRecord(activate: boolean, scopeId: string): BrowserTab {
     const id = randomUUID();
-    const view = new WebContentsView({
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        partition: "persist:suocode-browser",
-        backgroundThrottling: false,
-      },
-    });
-    view.setBackgroundColor("#ffffff");
-    view.setBounds(OFFSCREEN_VIEWPORT);
-    view.setVisible(false);
-    this.window.contentView.addChildView(view);
     const tab: BrowserTab = {
       id,
       scopeId,
       tabTargetId: `tab-${id}`,
       pageTargetId: `pending-page-${id}`,
-      view,
+      guestNonce: randomBytes(16).toString("hex"),
+      phase: "awaiting-guest",
       announced: false,
     };
     this.tabs.set(id, tab);
+    if (activate || !this.activeTabIds.has(scopeId)) this.activeTabIds.set(scopeId, id);
+    // The tab strip shows a placeholder immediately, and the roster tells the
+    // renderer to mint the element this tab is waiting for.
+    this.publish();
+    this.publishRoster();
+    return tab;
+  }
+
+  /**
+   * Wait for the renderer to create and report this tab's <webview>, then wire it
+   * up in the same order the main-process view used: security, events, debugger —
+   * all before the first navigation.
+   */
+  private async attachGuest(tab: BrowserTab): Promise<void> {
+    const webContentsId = await this.guests.expectGuest(tab.id, tab.guestNonce)
+      .catch(async (error: unknown) => {
+        // A guest cannot arrive if the layer never mounted; report that instead.
+        await this.guests.waitForLayer();
+        throw error;
+      });
+    const guest = webContentsRegistry.fromId(webContentsId);
+    if (!guest || guest.isDestroyed()) throw new Error("内置浏览器视图已失效。");
+    if (tab.phase === "closing" || !this.tabs.has(tab.id)) throw new Error("标签页已关闭。");
+    tab.guest = guest;
+    tab.phase = "loading";
     this.installTabSecurity(tab);
     this.installTabEvents(tab);
+    this.installGuestTeardown(tab, guest);
     this.attachDebugger(tab);
-    if (activate || !this.activeTabIds.has(scopeId)) this.activeTabIds.set(scopeId, id);
-    return tab;
+    await this.applyViewportOverride(tab);
+  }
+
+  /**
+   * Give a parked guest a real logical viewport.
+   *
+   * A parked guest is a 1x1 element, and a guest hidden any other way stops
+   * compositing — which makes Page.captureScreenshot hang forever. Keeping it
+   * tiny but on screen and overriding the metrics is what lets an agent drive and
+   * screenshot a tab the user is not looking at.
+   *
+   * The visible tab must NOT carry this override: its element is already the size
+   * of the panel, and forcing 1280x720 on top would render the page wider than the
+   * space it is drawn into and clip it.
+   */
+  private async applyViewportOverride(tab: BrowserTab): Promise<void> {
+    if (tab.emulatedSize) return;
+    const guest = tab.guest;
+    if (!guest || guest.isDestroyed()) return;
+    const parked = !this.panelVisible
+      || tab.scopeId !== this.uiScopeId
+      || tab.id !== this.activeTabIds.get(this.uiScopeId);
+    try {
+      if (!parked) {
+        // Let the element's own box drive layout again.
+        await guest.debugger.sendCommand("Emulation.clearDeviceMetricsOverride");
+        return;
+      }
+      await guest.debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
+        width: DEFAULT_VIEWPORT.width,
+        height: DEFAULT_VIEWPORT.height,
+        screenWidth: DEFAULT_VIEWPORT.width,
+        screenHeight: DEFAULT_VIEWPORT.height,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+    } catch (error) {
+      console.error("[browser] 设置视口失败", error);
+    }
+  }
+
+  /** Re-evaluate every tab's viewport after the visible tab changes. */
+  private refreshViewportOverrides(): void {
+    for (const tab of this.tabs.values()) {
+      if (tab.phase === "closing" || !tab.guest) continue;
+      void this.applyViewportOverride(tab);
+    }
+  }
+
+  /** A guest can die on its own — renderer reload, crash, or element removal. */
+  private installGuestTeardown(tab: BrowserTab, guest: WebContents): void {
+    guest.once("destroyed", () => {
+      if (this.tabs.get(tab.id) !== tab) return;
+      this.closeTabRecord(tab);
+      this.publish();
+    });
   }
 
   private async finishTabCreation(tab: BrowserTab): Promise<void> {
     await this.refreshPageTargetIdentity(tab);
+    tab.phase = "ready";
     tab.announced = true;
-    this.applyViewLayout();
+    this.refreshViewportOverrides();
     this.announceCreated(tab);
     this.publish();
   }
@@ -253,7 +345,7 @@ export class BrowserRuntimeManager {
    */
   private async refreshPageTargetIdentity(tab: BrowserTab): Promise<void> {
     this.attachDebugger(tab);
-    const result = await tab.view.webContents.debugger.sendCommand("Target.getTargetInfo") as {
+    const result = await this.guestOf(tab).debugger.sendCommand("Target.getTargetInfo") as {
       targetInfo?: { targetId?: unknown };
     };
     const targetId = result.targetInfo?.targetId;
@@ -267,28 +359,39 @@ export class BrowserRuntimeManager {
     const url = normalizeBrowserUrl(rawUrl);
     const tab = this.createTabRecord(activate, scopeId);
     try {
-      await tab.view.webContents.loadURL(url);
+      await this.attachGuest(tab);
+      await tab.guest!.loadURL(url);
       await this.finishTabCreation(tab);
     } catch (error) {
       this.closeTabRecord(tab);
+      this.publish();
       throw error;
     }
     return tab;
   }
 
+  /**
+   * Creation is asynchronous now, so concurrent callers must share one attempt:
+   * every CDP root command funnels through here, and a fresh client typically
+   * issues several at once.
+   */
   async ensureActiveTab(scopeId = this.uiScopeId): Promise<BrowserTab> {
-    const active = this.activeTab(scopeId);
+    const active = this.readyTab(scopeId);
     if (active) return active;
-    await this.createTab(undefined, true, scopeId);
-    const created = this.activeTab(scopeId);
-    if (!created) throw new Error("无法创建内置浏览器标签页。");
-    return created;
+    const inFlight = this.pendingEnsure.get(scopeId);
+    if (inFlight) return inFlight;
+    const attempt = this.createCdpTab(undefined, true, scopeId)
+      .finally(() => {
+        if (this.pendingEnsure.get(scopeId) === attempt) this.pendingEnsure.delete(scopeId);
+      });
+    this.pendingEnsure.set(scopeId, attempt);
+    return attempt;
   }
 
   selectTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
     if (this.tabs.get(id)?.scopeId !== scopeId) throw new Error("浏览器标签页不存在。");
     this.activeTabIds.set(scopeId, id);
-    this.applyViewLayout();
+    this.refreshViewportOverrides();
     this.publish();
     return this.state(scopeId);
   }
@@ -303,8 +406,9 @@ export class BrowserRuntimeManager {
       const next = order[index + 1] ?? order[index - 1];
       if (next) this.activeTabIds.set(scopeId, next);
       else this.activeTabIds.delete(scopeId);
+      // The promoted tab is now the visible one and must drop its parked viewport.
+      this.refreshViewportOverrides();
     }
-    if (!this.window.isDestroyed()) this.applyViewLayout();
     this.publish();
     return this.state(scopeId);
   }
@@ -316,46 +420,56 @@ export class BrowserRuntimeManager {
     for (const tab of this.tabsForScope(scopeId)) this.closeTabRecord(tab);
     this.activeTabIds.delete(scopeId);
     if (this.uiScopeId === scopeId) {
-      this.applyViewLayout();
       this.publish();
     }
   }
 
   async navigate(rawUrl: string, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
     const tab = await this.ensureActiveTab(scopeId);
-    await tab.view.webContents.loadURL(normalizeBrowserUrl(rawUrl));
+    await this.guestOf(tab).loadURL(normalizeBrowserUrl(rawUrl));
     return this.state(scopeId);
   }
 
   async back(scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
     const tab = await this.ensureActiveTab(scopeId);
-    if (tab.view.webContents.navigationHistory.canGoBack()) tab.view.webContents.navigationHistory.goBack();
+    const history = this.guestOf(tab).navigationHistory;
+    if (history.canGoBack()) history.goBack();
     return this.state(scopeId);
   }
 
   async forward(scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
     const tab = await this.ensureActiveTab(scopeId);
-    if (tab.view.webContents.navigationHistory.canGoForward()) tab.view.webContents.navigationHistory.goForward();
+    const history = this.guestOf(tab).navigationHistory;
+    if (history.canGoForward()) history.goForward();
     return this.state(scopeId);
   }
 
   async reload(scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
     const tab = await this.ensureActiveTab(scopeId);
-    tab.view.webContents.reload();
+    this.guestOf(tab).reload();
     return this.state(scopeId);
   }
 
-  setBounds(bounds: BrowserViewBounds): void {
-    const finite = [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite);
-    if (!finite) return;
-    this.browserCssBounds = {
-      x: Math.max(0, Math.round(bounds.x)),
-      y: Math.max(0, Math.round(bounds.y)),
-      width: Math.max(0, Math.round(bounds.width)),
-      height: Math.max(0, Math.round(bounds.height)),
-      visible: Boolean(bounds.visible),
-    };
-    this.applyViewLayout();
+  /**
+   * The visible size of the browser panel, reported by the renderer.
+   *
+   * Replaces the old bounds pump: positioning is CSS now, but Browser.getWindowBounds
+   * and chrome-devtools-mcp's resize_page still need to know how big the page the
+   * user is looking at actually is.
+   */
+  setUiViewport(viewport: { width: number; height: number }): void {
+    const width = Math.round(viewport.width);
+    const height = Math.round(viewport.height);
+    const hidden = !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0;
+    // A zero size means the panel is hidden, so the active tab is parked like any
+    // other and needs the override back to stay screenshot-able.
+    if (this.panelVisible === !hidden) {
+      if (!hidden) this.uiViewport = { width, height };
+      return;
+    }
+    this.panelVisible = !hidden;
+    if (!hidden) this.uiViewport = { width, height };
+    this.refreshViewportOverrides();
   }
 
   /**
@@ -366,7 +480,11 @@ export class BrowserRuntimeManager {
    * so the handshake can be exercised before anything depends on it.
    */
   guestRoster(): BrowserGuestRoster {
-    return { tabs: [] };
+    return {
+      tabs: [...this.tabs.values()]
+        .filter((tab) => tab.phase !== "closing")
+        .map((tab) => ({ tabId: tab.id, nonce: tab.guestNonce })),
+    };
   }
 
   /** The renderer's guest layer has mounted and can create elements. */
@@ -385,6 +503,16 @@ export class BrowserRuntimeManager {
     this.guests.register(tabId, nonce, webContentsId);
   }
 
+  /** The renderer that owned every guest went away; close the records it backed. */
+  private dropAllGuests(): void {
+    if (this.disposed) return;
+    this.guests.markLayerGone();
+    const tabs = [...this.tabs.values()];
+    if (tabs.length === 0) return;
+    for (const tab of tabs) this.closeTabRecord(tab);
+    this.publish();
+  }
+
   reportGuestFailure(tabId: string, nonce: string, reason: string): void {
     this.guests.fail(tabId, nonce, reason);
   }
@@ -394,8 +522,8 @@ export class BrowserRuntimeManager {
     this.disposed = true;
     this.guests.dispose();
     if (!this.window.isDestroyed()) {
-      this.window.off("resize", this.handleWindowLayoutChanged);
-      this.window.webContents.off("zoom-changed", this.handleWindowLayoutChanged);
+      this.window.webContents.off("did-start-navigation", this.handleHostNavigation);
+      this.window.webContents.off("render-process-gone", this.handleHostGone);
     }
     for (const client of this.clients.values()) client.socket.close(1001, "SuoCode 正在关闭");
     this.clients.clear();
@@ -424,25 +552,51 @@ export class BrowserRuntimeManager {
     return id ? this.tabs.get(id) : undefined;
   }
 
+  /** The active tab only when it can actually serve a command. */
+  private readyTab(scopeId: string): BrowserTab | undefined {
+    const tab = this.activeTab(scopeId);
+    if (!tab || tab.phase !== "ready") return undefined;
+    return tab.guest && !tab.guest.isDestroyed() ? tab : undefined;
+  }
+
+  /** The guest behind a tab, or a clear error rather than a null dereference. */
+  private guestOf(tab: BrowserTab): WebContents {
+    if (!tab.guest || tab.guest.isDestroyed()) throw new Error("内置浏览器视图不可用。");
+    return tab.guest;
+  }
+
   private closeTabRecord(tab: BrowserTab): void {
+    tab.phase = "closing";
     if (!this.tabs.delete(tab.id)) return;
     if (this.activeTabIds.get(tab.scopeId) === tab.id) {
       const replacement = this.tabsForScope(tab.scopeId)[0];
       if (replacement) this.activeTabIds.set(tab.scopeId, replacement.id);
       else this.activeTabIds.delete(tab.scopeId);
     }
-    if (!this.window.isDestroyed()) this.window.contentView.removeChildView(tab.view);
-    if (!tab.view.webContents.isDestroyed()) {
-      if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach();
-      tab.view.webContents.close({ waitForBeforeUnload: false });
+    // Frees the pending reservation and the guest binding; a late registration
+    // for this tab is then refused rather than silently bound.
+    this.guests.release(tab.id);
+    const guest = tab.guest;
+    if (guest && !guest.isDestroyed()) {
+      if (guest.debugger.isAttached()) guest.debugger.detach();
+      // beforeunload must not let a page keep an agent's tab alive.
+      guest.close({ waitForBeforeUnload: false });
     }
+    tab.guest = undefined;
+    // Announce before the roster drops the element, so clients see the target
+    // destroyed while its session bookkeeping is still intact.
     for (const client of this.clients.values()) {
       if (client.scopeId === tab.scopeId) this.announceDestroyed(client, tab);
     }
+    this.publishRoster();
   }
 
   private tabSnapshot(tab: BrowserTab): BrowserTabSnapshot {
-    const contents = tab.view.webContents;
+    const contents = tab.guest;
+    // A tab exists in the strip while its guest is still being created.
+    if (!contents || contents.isDestroyed()) {
+      return { id: tab.id, title: "新标签页", url: DEFAULT_URL, loading: true, canGoBack: false, canGoForward: false };
+    }
     return {
       id: tab.id,
       title: contents.getTitle() || (contents.getURL() === DEFAULT_URL ? "新标签页" : contents.getURL()) || "新标签页",
@@ -458,7 +612,7 @@ export class BrowserRuntimeManager {
   }
 
   private installTabSecurity(tab: BrowserTab): void {
-    const contents = tab.view.webContents;
+    const contents = this.guestOf(tab);
     contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     contents.setWindowOpenHandler(({ url }) => {
       try {
@@ -481,7 +635,7 @@ export class BrowserRuntimeManager {
   }
 
   private installTabEvents(tab: BrowserTab): void {
-    const contents = tab.view.webContents;
+    const contents = this.guestOf(tab);
     const update = (): void => {
       if (tab.scopeId === this.uiScopeId) this.publish();
       if (tab.announced) {
@@ -499,38 +653,8 @@ export class BrowserRuntimeManager {
   }
 
   private attachDebugger(tab: BrowserTab): void {
-    const debug = tab.view.webContents.debugger;
+    const debug = this.guestOf(tab).debugger;
     if (!debug.isAttached()) debug.attach("1.3");
-  }
-
-  private applyViewLayout(): void {
-    if (this.window.isDestroyed()) return;
-    const [contentWidth, contentHeight] = this.window.getContentSize();
-    const nativeBounds = browserCssBoundsToDip(
-      this.browserCssBounds,
-      this.window.webContents.getZoomFactor(),
-      { width: contentWidth, height: contentHeight },
-    );
-    const bounds: Rectangle = {
-      x: nativeBounds.x,
-      y: nativeBounds.y,
-      width: nativeBounds.width,
-      height: nativeBounds.height,
-    };
-    for (const tab of this.tabs.values()) {
-      const isUiActive = tab.scopeId === this.uiScopeId && tab.id === this.activeTabIds.get(this.uiScopeId);
-      const active = isUiActive && nativeBounds.visible && bounds.width > 0 && bounds.height > 0;
-      if (active) {
-        tab.view.setBounds(bounds);
-        tab.view.setVisible(true);
-      } else if (isUiActive) {
-        tab.view.setBounds(OFFSCREEN_VIEWPORT);
-        tab.view.setVisible(true);
-      } else {
-        tab.view.setBounds(BACKGROUND_VIEWPORT);
-        tab.view.setVisible(false);
-      }
-    }
   }
 
   private acceptClient(socket: WebSocket, mode: CdpClient["mode"], scopeId: string): void {
@@ -550,7 +674,7 @@ export class BrowserRuntimeManager {
     if (!this.clients.delete(client.id)) return;
     for (const [tabId, listener] of client.debuggerListeners) {
       const tab = this.tabs.get(tabId);
-      tab?.view.webContents.debugger.off("message", listener as never);
+      tab?.guest?.debugger.off("message", listener as never);
     }
     client.debuggerListeners.clear();
     client.directSessions.clear();
@@ -581,7 +705,7 @@ export class BrowserRuntimeManager {
       }
       if (method === "Target.detachedFromTarget" && childSessionId) client.childSessions.delete(childSessionId);
     };
-    tab.view.webContents.debugger.on("message", listener);
+    this.guestOf(tab).debugger.on("message", listener);
     client.debuggerListeners.set(tab.id, listener as (...args: unknown[]) => void);
   }
 
@@ -619,7 +743,13 @@ export class BrowserRuntimeManager {
     if (request.method === "Browser.close") return {};
     if (request.method === "Browser.getWindowForTarget") return this.windowForTab(tab);
     if (request.method === "Browser.setContentsSize") return this.setContentsSize(tab, params);
-    if (request.method === "Emulation.clearDeviceMetricsOverride") delete tab.emulatedSize;
+    if (request.method === "Emulation.clearDeviceMetricsOverride") {
+      // Clearing outright would drop the guest back to its 1x1 element box, so
+      // restore the default logical viewport instead of leaving it unusable.
+      delete tab.emulatedSize;
+      await this.applyViewportOverride(tab);
+      return {};
+    }
     // Electron's page-level debugger does not currently expose Chrome's
     // experimental WebMCP domain. Puppeteer initializes it optimistically and
     // treats an unavailable domain as optional, but Electron can leave the
@@ -635,7 +765,7 @@ export class BrowserRuntimeManager {
     this.attachDebugger(tab);
     const childSession = kind === "child" ? request.sessionId : undefined;
     try {
-      const result = await tab.view.webContents.debugger.sendCommand(request.method, params, childSession);
+      const result = await this.guestOf(tab).debugger.sendCommand(request.method, params, childSession);
       if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error("[browser-cdp] ✓", request.method, request.sessionId);
       return result;
     } catch (error) {
@@ -654,8 +784,8 @@ export class BrowserRuntimeManager {
         tabs: this.cdpTabs(client.scopeId).map((tab) => ({
           id: tab.id,
           pageTargetId: tab.pageTargetId,
-          title: tab.view.webContents.getTitle() || "新标签页",
-          url: tab.view.webContents.getURL() || DEFAULT_URL,
+          title: tab.guest?.getTitle() || "新标签页",
+          url: tab.guest?.getURL() || DEFAULT_URL,
           active: tab.id === activeTabId,
         })),
       };
@@ -664,7 +794,7 @@ export class BrowserRuntimeManager {
     if (method === "Browser.getVersion") {
       const tab = await this.ensureActiveTab(client.scopeId);
       this.installDebuggerRelay(client, tab);
-      return tab.view.webContents.debugger.sendCommand(method, params);
+      return this.guestOf(tab).debugger.sendCommand(method, params);
     }
     if (method === "Target.setDiscoverTargets") {
       client.discover = params.discover === true;
@@ -753,7 +883,7 @@ export class BrowserRuntimeManager {
     const tab = await this.ensureActiveTab(client.scopeId);
     this.installDebuggerRelay(client, tab);
     this.attachDebugger(tab);
-    return tab.view.webContents.debugger.sendCommand(method, params);
+    return this.guestOf(tab).debugger.sendCommand(method, params);
   }
 
   private ensureClientSessions(client: CdpClient, tab: BrowserTab): ClientTabSessions {
@@ -836,7 +966,7 @@ export class BrowserRuntimeManager {
       if (tabId === tab.id) client.childSessions.delete(sessionId);
     }
     const listener = client.debuggerListeners.get(tab.id);
-    if (listener) tab.view.webContents.debugger.off("message", listener as never);
+    if (listener) tab.guest?.debugger.off("message", listener as never);
     client.debuggerListeners.delete(tab.id);
   }
 
@@ -880,19 +1010,19 @@ export class BrowserRuntimeManager {
 
   private findTabByWindowId(value: unknown, scopeId: string): BrowserTab | undefined {
     if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
-    return this.cdpTabs(scopeId).find((tab) => tab.view.webContents.id === value);
+    return this.cdpTabs(scopeId).find((tab) => tab.guest?.id === value);
   }
 
   private windowBounds(tab: BrowserTab): Record<string, unknown> {
     const visible = tab.emulatedSize ?? {
-      width: Math.max(1, this.browserCssBounds.width || BACKGROUND_VIEWPORT.width),
-      height: Math.max(1, this.browserCssBounds.height || BACKGROUND_VIEWPORT.height),
+      width: Math.max(1, this.uiViewport.width),
+      height: Math.max(1, this.uiViewport.height),
     };
     return { left: 0, top: 0, width: visible.width, height: visible.height, windowState: "normal" };
   }
 
   private windowForTab(tab: BrowserTab): Record<string, unknown> {
-    return { windowId: tab.view.webContents.id, bounds: this.windowBounds(tab) };
+    return { windowId: this.guestOf(tab).id, bounds: this.windowBounds(tab) };
   }
 
   private async setContentsSize(tab: BrowserTab, params: Record<string, unknown>): Promise<Record<string, never>> {
@@ -903,7 +1033,7 @@ export class BrowserRuntimeManager {
     }
     tab.emulatedSize = { width, height };
     this.attachDebugger(tab);
-    await tab.view.webContents.debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
+    await this.guestOf(tab).debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
       width,
       height,
       screenWidth: width,

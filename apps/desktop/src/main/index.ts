@@ -12,7 +12,7 @@ import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promise
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import { createRequire } from "node:module";
-import type { BrowserViewBounds, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import type { BrowserUiViewport, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
 import { hardenGuestPreferences } from "./browser-webview-policy";
 import { TerminalRuntimeManager } from "./terminal-runtime";
@@ -51,7 +51,7 @@ const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
-const BROWSER_BOUNDS_CHANNEL = "browser:bounds";
+const BROWSER_UI_VIEWPORT_CHANNEL = "browser:ui-viewport";
 const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
 const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
 const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
@@ -475,8 +475,11 @@ async function createWindow(): Promise<void> {
   // Enabling webviewTag means any script in this renderer could mint a guest and
   // choose its own preferences. This is the gate that rewrites them into the only
   // shape SuoCode allows, or refuses the attachment.
-  webviewHostIds.add(mainWindow.webContents.id);
-  mainWindow.once("closed", () => webviewHostIds.delete(mainWindow.webContents.id));
+  const webviewHostId = mainWindow.webContents.id;
+  webviewHostIds.add(webviewHostId);
+  // Capture the id up front: by the time "closed" fires the window is destroyed
+  // and reading webContents throws.
+  mainWindow.once("closed", () => webviewHostIds.delete(webviewHostId));
   mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
     const allowed = hardenGuestPreferences(
       webPreferences as unknown as Record<string, unknown>,
@@ -616,9 +619,9 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_GUEST_FAILED_CHANNEL, (event, tabId: string, nonce: string, reason: string): void => {
     browserRuntimes.get(event.sender.id)?.reportGuestFailure(tabId, nonce, String(reason).slice(0, 500));
   });
-  ipcMain.handle(BROWSER_BOUNDS_CHANNEL, (event, bounds: BrowserViewBounds): void => {
-    // Renderer cleanup can race the native window's closed event during dev reload/quit.
-    browserRuntimes.get(event.sender.id)?.setBounds(bounds);
+  ipcMain.handle(BROWSER_UI_VIEWPORT_CHANNEL, (event, viewport: BrowserUiViewport): void => {
+    // Renderer cleanup can race the window's closed event during dev reload/quit.
+    browserRuntimes.get(event.sender.id)?.setUiViewport(viewport);
   });
   const terminalFor = (event: Electron.IpcMainInvokeEvent): TerminalRuntimeManager => {
     const value = terminalRuntimes.get(event.sender.id);

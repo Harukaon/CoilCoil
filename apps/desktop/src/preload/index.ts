@@ -5,7 +5,7 @@ import type {
   DesktopPlatform,
   BrowserGuestRoster,
   BrowserStateSnapshot,
-  BrowserViewBounds,
+  BrowserUiViewport,
   FilePreviewDocument,
   OpenFilePreviewInput,
   OpenFilePreviewResult,
@@ -43,7 +43,7 @@ const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
-const BROWSER_BOUNDS_CHANNEL = "browser:bounds";
+const BROWSER_UI_VIEWPORT_CHANNEL = "browser:ui-viewport";
 const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
 const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
 const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
@@ -95,7 +95,7 @@ const api: SuoCodeDesktopApi = {
   browserBack: (scopeId: string) => ipcRenderer.invoke(BROWSER_BACK_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   browserForward: (scopeId: string) => ipcRenderer.invoke(BROWSER_FORWARD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   reloadBrowser: (scopeId: string) => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
-  setBrowserViewBounds: (bounds: BrowserViewBounds) => ipcRenderer.invoke(BROWSER_BOUNDS_CHANNEL, bounds) as Promise<void>,
+  setBrowserUiViewport: (viewport: BrowserUiViewport) => ipcRenderer.invoke(BROWSER_UI_VIEWPORT_CHANNEL, viewport) as Promise<void>,
   browserGuestLayerReady: () => ipcRenderer.invoke(BROWSER_GUEST_LAYER_READY_CHANNEL) as Promise<BrowserGuestRoster>,
   registerBrowserGuest: (tabId: string, nonce: string, webContentsId: number) =>
     ipcRenderer.invoke(BROWSER_REGISTER_GUEST_CHANNEL, tabId, nonce, webContentsId) as Promise<void>,

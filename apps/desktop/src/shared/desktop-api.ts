@@ -78,12 +78,10 @@ export interface BrowserGuestRoster {
   tabs: BrowserGuestSlot[];
 }
 
-export interface BrowserViewBounds {
-  x: number;
-  y: number;
+/** Visible size of the browser panel, so agents see the viewport the user sees. */
+export interface BrowserUiViewport {
   width: number;
   height: number;
-  visible: boolean;
 }
 
 export interface TerminalSessionSnapshot {
@@ -118,7 +116,7 @@ export interface SuoCodeDesktopApi {
   browserBack(scopeId: string): Promise<BrowserStateSnapshot>;
   browserForward(scopeId: string): Promise<BrowserStateSnapshot>;
   reloadBrowser(scopeId: string): Promise<BrowserStateSnapshot>;
-  setBrowserViewBounds(bounds: BrowserViewBounds): Promise<void>;
+  setBrowserUiViewport(viewport: BrowserUiViewport): Promise<void>;
   /** The guest layer has mounted; returns the roster it must reconcile against. */
   browserGuestLayerReady(): Promise<BrowserGuestRoster>;
   /** Report the guest created for a roster slot. Rejects rather than rebinding. */

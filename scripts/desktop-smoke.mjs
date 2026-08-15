@@ -1171,7 +1171,6 @@ async function main() {
     assert.ok(browserNewTabPlacement.gap >= 0 && browserNewTabPlacement.gap <= 3, `The browser new-tab action does not follow the last tab: ${JSON.stringify(browserNewTabPlacement)}`);
     assert.ok(browserNewTabPlacement.trailingSpace > 20, `The browser new-tab action is still pinned to the strip's right edge: ${JSON.stringify(browserNewTabPlacement)}`);
     await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
-    await client.evaluate(`window.suocode.setBrowserViewBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })`);
     const preferredPanelWidths = await client.evaluate(`({
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0

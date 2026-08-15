@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Plus, RotateCw, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
+import { setGuestPlacement } from "./guestLayer";
 
 const EMPTY_STATE = (scopeId: string): BrowserStateSnapshot => ({ scopeId, tabs: [] });
 
@@ -30,18 +31,25 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
 
   useEffect(() => setAddress(activeTab?.url === "about:blank" ? "" : activeTab?.url ?? ""), [activeTab?.id, activeTab?.url]);
 
+  // The guest is a <webview> in the layer at the app root, so this measures the
+  // hole it should fill rather than pushing native bounds over IPC.
+  const activeTabId = activeTab?.id;
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const update = (): void => {
-      const bounds = host.getBoundingClientRect();
-      void window.suocode.setBrowserViewBounds({
-        x: bounds.left,
-        y: bounds.top,
-        width: bounds.width,
-        height: bounds.height,
-        visible: active && document.visibilityState === "visible",
-      });
+      const visible = active && document.visibilityState === "visible";
+      const rect = host.getBoundingClientRect();
+      if (!visible || !activeTabId || rect.width <= 0 || rect.height <= 0) {
+        setGuestPlacement(undefined);
+        // Zero tells main the panel is hidden, so the tab parks and keeps a real
+        // emulated viewport instead of rendering into its 1x1 element box.
+        void window.suocode.setBrowserUiViewport({ width: 0, height: 0 });
+        return;
+      }
+      setGuestPlacement({ tabId: activeTabId, x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+      // Agents ask for the window size; report what the user is actually looking at.
+      void window.suocode.setBrowserUiViewport({ width: rect.width, height: rect.height });
     };
     const observer = new ResizeObserver(update);
     observer.observe(host);
@@ -54,9 +62,10 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
       document.removeEventListener("visibilitychange", update);
-      void window.suocode.setBrowserViewBounds({ x: 0, y: 0, width: 0, height: 0, visible: false });
+      setGuestPlacement(undefined);
+      void window.suocode.setBrowserUiViewport({ width: 0, height: 0 });
     };
-  }, [active]);
+  }, [active, activeTabId]);
 
   const submitAddress = (event: React.FormEvent): void => {
     event.preventDefault();
