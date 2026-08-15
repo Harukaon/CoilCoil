@@ -1170,7 +1170,60 @@ async function main() {
     assert.equal(browserNewTabPlacement.directChild, true, "The browser new-tab action is outside the scrollable tab sequence.");
     assert.ok(browserNewTabPlacement.gap >= 0 && browserNewTabPlacement.gap <= 3, `The browser new-tab action does not follow the last tab: ${JSON.stringify(browserNewTabPlacement)}`);
     assert.ok(browserNewTabPlacement.trailingSpace > 20, `The browser new-tab action is still pinned to the strip's right edge: ${JSON.stringify(browserNewTabPlacement)}`);
+
+    // The browser renders as a <webview> guest specifically so DOM overlays can
+    // paint over it. A native view would composite above the renderer and there
+    // is no per-view click-through, so a regression here is unfixable in CSS.
+    await client.waitFor(
+      `Boolean(document.querySelector(".browser-guest-layer > webview.visible"))`,
+      "The browser guest never became visible in the guest layer.",
+    );
+    const guestPlacement = await client.evaluate(`(() => {
+      const host = document.querySelector(".browser-native-host")?.getBoundingClientRect();
+      const guest = document.querySelector(".browser-guest-layer > webview.visible")?.getBoundingClientRect();
+      if (!host || !guest) return { matched: false };
+      return {
+        matched: true,
+        dx: Math.abs(host.left - guest.left),
+        dy: Math.abs(host.top - guest.top),
+        dw: Math.abs(host.width - guest.width),
+        dh: Math.abs(host.height - guest.height),
+      };
+    })()`);
+    assert.equal(guestPlacement.matched, true, "The visible browser guest is not aligned to its panel host.");
+    assert.ok(
+      guestPlacement.dx <= 1 && guestPlacement.dy <= 1 && guestPlacement.dw <= 1 && guestPlacement.dh <= 1,
+      `The visible browser guest does not fill its panel host: ${JSON.stringify(guestPlacement)}`,
+    );
+
+    const overlayOcclusion = await client.evaluate(`(() => {
+      const guest = document.querySelector(".browser-guest-layer > webview.visible");
+      const rect = guest?.getBoundingClientRect();
+      if (!rect || rect.width < 20 || rect.height < 20) return { ran: false };
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const beneath = document.elementFromPoint(x, y)?.tagName ?? "";
+      const overlay = document.createElement("div");
+      overlay.className = "inspector-add-popover";
+      overlay.style.cssText = "position:fixed;left:" + (x - 40) + "px;top:" + (y - 30) + "px;width:80px;height:60px;";
+      document.body.appendChild(overlay);
+      const hit = document.elementFromPoint(x, y);
+      const above = hit === overlay || overlay.contains(hit);
+      overlay.remove();
+      return { ran: true, beneath, above };
+    })()`);
+    assert.equal(overlayOcclusion.ran, true, "The overlay occlusion probe could not find a visible browser guest.");
+    assert.equal(overlayOcclusion.beneath, "WEBVIEW", "The browser guest is not the element under the panel centre.");
+    assert.equal(overlayOcclusion.above, true, "A DOM overlay is occluded by the browser guest.");
+
     await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
+    // Switching away must not destroy guests: agents keep driving them in the background.
+    const guestsAfterSwitch = await client.evaluate(`(() => ({
+      count: document.querySelectorAll(".browser-guest-layer > webview").length,
+      layerDisplay: getComputedStyle(document.querySelector(".browser-guest-layer")).display,
+    }))()`);
+    assert.ok(guestsAfterSwitch.count >= 1, "Switching inspector tabs destroyed the browser guests.");
+    assert.notEqual(guestsAfterSwitch.layerDisplay, "none", "The browser guest layer was hidden with display:none.");
     const preferredPanelWidths = await client.evaluate(`({
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
