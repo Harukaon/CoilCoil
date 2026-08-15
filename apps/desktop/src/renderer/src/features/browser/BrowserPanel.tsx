@@ -1,10 +1,11 @@
 import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Plus, RotateCw, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
+import { isBrowserViewVisible } from "./browserViewVisibility";
 
 const EMPTY_STATE = (scopeId: string): BrowserStateSnapshot => ({ scopeId, tabs: [] });
 
-export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: string }): React.JSX.Element {
+export function BrowserPanel({ active, covered = false, scopeId }: { active: boolean; covered?: boolean; scopeId: string }): React.JSX.Element {
   const [state, setState] = useState<BrowserStateSnapshot>(() => EMPTY_STATE(scopeId));
   const [address, setAddress] = useState("");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -40,7 +41,7 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
         y: bounds.top,
         width: bounds.width,
         height: bounds.height,
-        visible: active && document.visibilityState === "visible",
+        visible: isBrowserViewVisible(active, covered, document.visibilityState === "visible"),
       });
     };
     const observer = new ResizeObserver(update);
@@ -56,7 +57,7 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
       document.removeEventListener("visibilitychange", update);
       void window.suocode.setBrowserViewBounds({ x: 0, y: 0, width: 0, height: 0, visible: false });
     };
-  }, [active]);
+  }, [active, covered]);
 
   const submitAddress = (event: React.FormEvent): void => {
     event.preventDefault();

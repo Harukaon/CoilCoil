@@ -132,6 +132,7 @@ export default function App(): React.JSX.Element {
   const [configuration, setConfiguration] = useState<RuntimeConfiguration>();
   const [inspectorTabs, setInspectorTabs] = useState<InspectorTabDefinition[]>([]);
   const [activeInspectorTabId, setActiveInspectorTabId] = useState<InspectorTabId>();
+  const [inspectorMenuOpen, setInspectorMenuOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string>();
   const [terminals, setTerminals] = useState<TerminalSessionSnapshot[]>([]);
   const [activeTerminalId, setActiveTerminalId] = useState<string>();
@@ -1026,9 +1027,10 @@ export default function App(): React.JSX.Element {
           activeTab={activeInspectorTabId ?? ""}
           onSelectTab={selectInspectorTab}
           onCloseTab={closeInspectorTab}
-          onClose={() => setRightOpen(false)}
+          onClose={() => { setInspectorMenuOpen(false); setRightOpen(false); }}
           addOptions={inspectorAddOptions}
           onAddTab={openInspectorOption}
+          onAddMenuOpenChange={setInspectorMenuOpen}
           emptyState={(
             <>
               <div className="inspector-empty-icon"><Files size={18} strokeWidth={1.7} /></div>
@@ -1060,7 +1062,7 @@ export default function App(): React.JSX.Element {
             <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} />
           </div>
           <div className={`inspector-tab-panel browser-tab-panel ${activeInspectorTab?.kind === "browser" ? "active" : ""}`}>
-            <BrowserPanel active={rightOpen && activeInspectorTab?.kind === "browser"} scopeId={snapshot?.runtimeId ?? project?.path ?? "default"} />
+            <BrowserPanel active={rightOpen && activeInspectorTab?.kind === "browser"} covered={inspectorMenuOpen} scopeId={snapshot?.runtimeId ?? project?.path ?? "default"} />
           </div>
         </InspectorPane>
         {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
