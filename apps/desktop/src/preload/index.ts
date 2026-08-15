@@ -3,6 +3,7 @@ import type { RuntimeCommand, RuntimeEvent } from "@suocode/runtime-protocol";
 import type { FileNode } from "@suocode/runtime-protocol";
 import type {
   DesktopPlatform,
+  BrowserGuestRoster,
   BrowserStateSnapshot,
   BrowserViewBounds,
   FilePreviewDocument,
@@ -43,6 +44,10 @@ const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_BOUNDS_CHANNEL = "browser:bounds";
+const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
+const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
+const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
+const BROWSER_GUEST_FAILED_CHANNEL = "browser:guest-failed";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_CREATE_CHANNEL = "terminal:create";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
@@ -91,6 +96,16 @@ const api: SuoCodeDesktopApi = {
   browserForward: (scopeId: string) => ipcRenderer.invoke(BROWSER_FORWARD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   reloadBrowser: (scopeId: string) => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   setBrowserViewBounds: (bounds: BrowserViewBounds) => ipcRenderer.invoke(BROWSER_BOUNDS_CHANNEL, bounds) as Promise<void>,
+  browserGuestLayerReady: () => ipcRenderer.invoke(BROWSER_GUEST_LAYER_READY_CHANNEL) as Promise<BrowserGuestRoster>,
+  registerBrowserGuest: (tabId: string, nonce: string, webContentsId: number) =>
+    ipcRenderer.invoke(BROWSER_REGISTER_GUEST_CHANNEL, tabId, nonce, webContentsId) as Promise<void>,
+  reportBrowserGuestFailure: (tabId: string, nonce: string, reason: string) =>
+    ipcRenderer.invoke(BROWSER_GUEST_FAILED_CHANNEL, tabId, nonce, reason) as Promise<void>,
+  onBrowserGuestRoster: (listener: (roster: BrowserGuestRoster) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, roster: BrowserGuestRoster): void => listener(roster);
+    ipcRenderer.on(BROWSER_GUEST_ROSTER_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(BROWSER_GUEST_ROSTER_CHANNEL, handler);
+  },
   onBrowserStateUpdated: (listener: (state: BrowserStateSnapshot) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: BrowserStateSnapshot): void => listener(state);
     ipcRenderer.on(BROWSER_STATE_CHANNEL, handler);

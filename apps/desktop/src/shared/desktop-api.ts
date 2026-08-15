@@ -64,6 +64,20 @@ export interface BrowserStateSnapshot {
   activeTabId?: string;
 }
 
+/**
+ * One `<webview>` the renderer must keep mounted. Deliberately carries no URL and
+ * no scope id: the app document never holds one agent's browsing state, and there
+ * is no scope value in the renderer for a bug to mis-associate.
+ */
+export interface BrowserGuestSlot {
+  tabId: string;
+  nonce: string;
+}
+
+export interface BrowserGuestRoster {
+  tabs: BrowserGuestSlot[];
+}
+
 export interface BrowserViewBounds {
   x: number;
   y: number;
@@ -105,6 +119,13 @@ export interface SuoCodeDesktopApi {
   browserForward(scopeId: string): Promise<BrowserStateSnapshot>;
   reloadBrowser(scopeId: string): Promise<BrowserStateSnapshot>;
   setBrowserViewBounds(bounds: BrowserViewBounds): Promise<void>;
+  /** The guest layer has mounted; returns the roster it must reconcile against. */
+  browserGuestLayerReady(): Promise<BrowserGuestRoster>;
+  /** Report the guest created for a roster slot. Rejects rather than rebinding. */
+  registerBrowserGuest(tabId: string, nonce: string, webContentsId: number): Promise<void>;
+  /** The element could not be created or died before registering. */
+  reportBrowserGuestFailure(tabId: string, nonce: string, reason: string): Promise<void>;
+  onBrowserGuestRoster(listener: (roster: BrowserGuestRoster) => void): () => void;
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
   onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
   createTerminal(cwd: string): Promise<TerminalSessionSnapshot[]>;

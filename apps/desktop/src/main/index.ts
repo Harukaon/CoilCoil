@@ -52,6 +52,10 @@ const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_BOUNDS_CHANNEL = "browser:bounds";
+const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
+const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
+const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
+const BROWSER_GUEST_FAILED_CHANNEL = "browser:guest-failed";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_CREATE_CHANNEL = "terminal:create";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
@@ -490,6 +494,8 @@ async function createWindow(): Promise<void> {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_STATE_CHANNEL, state);
   }, (scopeId) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
+  }, (roster) => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_GUEST_ROSTER_CHANNEL, roster);
   });
   await browserRuntime.start();
   const terminalRuntime = new TerminalRuntimeManager((state) => {
@@ -601,6 +607,15 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_BACK_CHANNEL, (event, scopeId: string) => browserFor(event).back(scopeId));
   ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event, scopeId: string) => browserFor(event).forward(scopeId));
   ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event, scopeId: string) => browserFor(event).reload(scopeId));
+  ipcMain.handle(BROWSER_GUEST_LAYER_READY_CHANNEL, (event) => browserFor(event).markGuestLayerReady());
+  ipcMain.handle(BROWSER_REGISTER_GUEST_CHANNEL, (event, tabId: string, nonce: string, webContentsId: number): void => {
+    // Throws on any failed check so the renderer drops the element it created
+    // rather than leaving a live guest that nothing owns.
+    browserFor(event).registerGuest(tabId, nonce, webContentsId);
+  });
+  ipcMain.handle(BROWSER_GUEST_FAILED_CHANNEL, (event, tabId: string, nonce: string, reason: string): void => {
+    browserRuntimes.get(event.sender.id)?.reportGuestFailure(tabId, nonce, String(reason).slice(0, 500));
+  });
   ipcMain.handle(BROWSER_BOUNDS_CHANNEL, (event, bounds: BrowserViewBounds): void => {
     // Renderer cleanup can race the native window's closed event during dev reload/quit.
     browserRuntimes.get(event.sender.id)?.setBounds(bounds);

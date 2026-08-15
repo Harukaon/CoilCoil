@@ -1,10 +1,12 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { BrowserWindow, WebContentsView, type Rectangle, type WebContents } from "electron";
+import { BrowserWindow, WebContentsView, session, webContents as webContentsRegistry, type Rectangle, type WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
-import type { BrowserStateSnapshot, BrowserTabSnapshot, BrowserViewBounds } from "../shared/desktop-api";
+import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot, BrowserViewBounds } from "../shared/desktop-api";
 import { browserCssBoundsToDip } from "./browser-bounds";
+import { BrowserGuestRegistry } from "./browser-guests";
 import { normalizeBrowserUrl } from "./browser-navigation";
+import { BROWSER_PARTITION } from "./browser-webview-policy";
 
 const DEFAULT_URL = "about:blank";
 const DEFAULT_SCOPE_ID = "default";
@@ -91,12 +93,31 @@ export class BrowserRuntimeManager {
   private uiScopeId = DEFAULT_SCOPE_ID;
   private browserCssBounds: BrowserViewBounds = { x: 0, y: 0, width: 0, height: 0, visible: false };
   private disposed = false;
+  /** Correlates renderer-created <webview> guests with tab records. Unused until the switch. */
+  private readonly guests = new BrowserGuestRegistry({
+    expectedPartition: BROWSER_PARTITION,
+    hostWebContentsId: () => this.window.webContents.id,
+    inspect: (webContentsId) => {
+      const contents = webContentsRegistry.fromId(webContentsId);
+      if (!contents) return undefined;
+      // Sessions are cached per partition string, so identity is an exact test
+      // that the guest really was created in the browser's own session.
+      const expected = session.fromPartition(BROWSER_PARTITION);
+      return {
+        hostWebContentsId: contents.hostWebContents?.id,
+        type: contents.getType(),
+        partition: contents.session === expected ? BROWSER_PARTITION : undefined,
+        destroyed: contents.isDestroyed(),
+      };
+    },
+  });
   private readonly handleWindowLayoutChanged = (): void => this.applyViewLayout();
 
   constructor(
     private readonly window: BrowserWindow,
     private readonly publishState: (state: BrowserStateSnapshot) => void,
     private readonly onAgentActivated: (scopeId: string) => void,
+    private readonly publishGuestRoster: (roster: BrowserGuestRoster) => void = () => {},
   ) {
     this.server = createServer((_request, response) => {
       response.writeHead(404);
@@ -337,9 +358,41 @@ export class BrowserRuntimeManager {
     this.applyViewLayout();
   }
 
+  /**
+   * The `<webview>` elements the renderer must keep mounted. Carries no URL and no
+   * scope id, so the app document never holds an agent's browsing state.
+   *
+   * Empty until the switch to guest-backed tabs; the layer and its IPC land first
+   * so the handshake can be exercised before anything depends on it.
+   */
+  guestRoster(): BrowserGuestRoster {
+    return { tabs: [] };
+  }
+
+  /** The renderer's guest layer has mounted and can create elements. */
+  markGuestLayerReady(): BrowserGuestRoster {
+    this.guests.markLayerReady();
+    return this.guestRoster();
+  }
+
+  /** Push the roster after the tab set changes so the renderer mints or drops elements. */
+  private publishRoster(): void {
+    if (this.disposed || this.window.isDestroyed()) return;
+    this.publishGuestRoster(this.guestRoster());
+  }
+
+  registerGuest(tabId: string, nonce: string, webContentsId: number): void {
+    this.guests.register(tabId, nonce, webContentsId);
+  }
+
+  reportGuestFailure(tabId: string, nonce: string, reason: string): void {
+    this.guests.fail(tabId, nonce, reason);
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.guests.dispose();
     if (!this.window.isDestroyed()) {
       this.window.off("resize", this.handleWindowLayoutChanged);
       this.window.webContents.off("zoom-changed", this.handleWindowLayoutChanged);

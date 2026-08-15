@@ -633,6 +633,15 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .browser-toolbar input { min-width: 0; height: 25px; flex: 1; padding: 0 9px; border: 1px solid #dfdfda; border-radius: 7px; outline: 0; color: #555550; background: #fff; font-size: 8px; }
 .browser-toolbar input:focus { border-color: #b9c1b6; box-shadow: 0 0 0 2px rgb(110 130 106 / 10%); }
 .browser-native-host { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
+/* Guests composite above the app shell but below every overlay: resizer 20, sidebar-toggle 80,
+   context-menu 100, dialog 240, subagent backdrop 300, popovers 1000, tooltip 1500. */
+.browser-guest-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+/* Parked guests stay 1x1 and on-screen. Anything that stops them compositing —
+   display:none, visibility:hidden, opacity:0, offscreen, zero size — permanently
+   hangs Page.captureScreenshot; their real viewport comes from Emulation in main. */
+.browser-guest-layer > webview { position: absolute; top: 0; left: 0; width: 1px; height: 1px; border: 0; background: #fff; }
+.browser-guest-layer > webview.visible { pointer-events: auto; }
+.resizing-panels .browser-guest-layer > webview { pointer-events: none; }
 .browser-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 9px; color: #999993; font-size: 9px; }
 .browser-empty strong { color: #5d5d58; font-size: 11px; }
 .browser-empty button { padding: 6px 10px; border: 1px solid #deded9; border-radius: 7px; color: #5d5d58; background: #f6f6f3; cursor: pointer; }
