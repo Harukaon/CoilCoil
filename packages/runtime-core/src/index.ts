@@ -20,6 +20,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   clampThinkingLevel,
+  cleanupSessionResources,
   getSupportedThinkingLevels,
   type AuthEvent,
   type AuthPrompt,
@@ -1905,13 +1906,24 @@ export class SuoCodeRuntime {
     if (!active) return;
     const current = active.session.model;
     if (!current) return;
-    // Context-window overrides are SuoCode runtime metadata rather than Pi
-    // registry data. Refreshing such a model would first discard the override
-    // and then require setModel(), which appends a false user model-change
-    // record. Keep the effective session object until an explicit switch or a
-    // reopen can apply both registry metadata and the override atomically.
-    if (this.readModelRuntimeOptions()[current.provider]?.[current.id]?.contextWindow) return;
+    // Pooled provider connections are keyed by session id alone — not by URL,
+    // key or protocol — so a socket opened against the old configuration would
+    // otherwise be reused until it idles out. Drop them before rebinding.
+    try {
+      cleanupSessionResources(active.session.sessionId);
+    } catch (error) {
+      console.error("[runtime] 释放会话连接失败", error);
+    }
     active.session.refreshModelFromRegistry();
+    // Context-window overrides are SuoCode runtime metadata rather than Pi
+    // registry data, so the refresh above discards them. Re-apply directly on
+    // the agent state: setModel() would append a model_change entry and make it
+    // look like the user switched models, and skipping the refresh entirely
+    // left the session pinned to the old endpoint and protocol.
+    const refreshed = active.session.model;
+    if (!refreshed) return;
+    const withOverride = this.modelWithRuntimeOptions(refreshed);
+    if (withOverride !== refreshed) active.session.agent.state.model = withOverride;
   }
 
   async getConfiguration(): Promise<RuntimeConfiguration> {

@@ -149,7 +149,9 @@ export class RuntimeServer {
       }
     }
     if (event.type === "model_provider_auth_updated" && event.state.status === "succeeded") {
-      this.refreshAllSessionModels(runtimeId ? this.runtimes.get(runtimeId) : this.runtime);
+      // Includes the runtime that just authenticated: it is the one most likely
+      // to be holding a connection opened with the credential that just changed.
+      this.refreshAllSessionModels();
     }
     const scopedEvent = runtimeId && event.type === "session_snapshot"
       ? { ...event, snapshot: this.decorateSnapshot(runtimeId, event.snapshot) }
@@ -343,16 +345,27 @@ export class RuntimeServer {
       || command.type === "save_model_provider_configuration"
       || command.type === "remove_model_provider_configuration"
       || command.type === "remove_provider_auth"
+      // configure_model persists the context-window override, which open
+      // sessions carry on their own Model snapshot.
+      || command.type === "configure_model"
     ) {
-      this.refreshAllSessionModels(runtime);
+      this.refreshAllSessionModels();
     }
     return result;
   }
 
-  private refreshAllSessionModels(except?: SuoCodeRuntime): void {
-    if (except !== this.runtime) this.runtime.refreshSessionModelFromRegistry();
+  /**
+   * Rebind every open session to the saved configuration.
+   *
+   * This deliberately includes the runtime that handled the save. Settings sends
+   * the current runtimeId, so excluding the handler meant the conversation the
+   * user was editing config from was the only one left on the stale model — the
+   * exact opposite of what they were asking for.
+   */
+  private refreshAllSessionModels(): void {
+    this.runtime.refreshSessionModelFromRegistry();
     for (const sessionRuntime of this.runtimes.values()) {
-      if (sessionRuntime === except) continue;
+      if (sessionRuntime === this.runtime) continue;
       sessionRuntime.refreshSessionModelFromRegistry();
     }
   }
