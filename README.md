@@ -90,7 +90,28 @@ npm run smoke:desktop
 npm run package:desktop
 ```
 
-Installers and archives are written to `apps/desktop/release/`. The macOS build produces both DMG and ZIP artifacts; Linux and Windows targets are configured as AppImage and NSIS respectively.
+Installers and archives are written to `apps/desktop/release/`. The macOS build produces both DMG and ZIP artifacts; Linux is configured as AppImage.
+
+### Windows
+
+Windows builds NSIS installers for x64 and arm64 plus an x64 ZIP:
+
+```bash
+npm run build:pi
+npm run build --workspace @suocode/openai-responses-ws
+npm run build --workspace @suocode/desktop
+npm --prefix apps/desktop exec electron-builder -- --win
+```
+
+`node-pty` is the only native dependency and is built with Node-API, so its
+shipped `prebuilds/win32-*` binaries load unchanged under Electron. The build
+therefore sets `npmRebuild: false`: `@electron/rebuild` would otherwise try to
+compile it from source and fail, because node-gyp cannot cross-compile. Host
+native modules are prepared by `npm run setup` instead.
+
+Cross-building the ZIP from macOS or Linux works as-is. The NSIS installers
+additionally need Wine on a non-Windows host; without it, run the command above
+on Windows.
 
 ## Product data
 

@@ -54,6 +54,7 @@
     "appId": "app.suocode.desktop",
     "productName": "SuoCode",
     "asar": true,
+    "npmRebuild": false,
     "asarUnpack": [
       "**/node-pty/**",
       "**/@silvia-odwyer/photon-node/**",
