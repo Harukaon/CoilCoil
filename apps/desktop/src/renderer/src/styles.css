@@ -100,6 +100,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .project-tree.active > .project-row { color: #242422; }
 .project-row { display: flex; width: 100%; height: 32px; align-items: center; border-radius: 7px; font-size: 13px; }
 .project-row:hover { background: #e4e4e1; }
+.project-row[draggable="true"] { cursor: grab; }
+.project-row.dragging { opacity: .45; cursor: grabbing; }
+.project-row.drop-target { box-shadow: inset 0 2px 0 #7391b9; }
 .project-toggle { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 7px; padding: 0 0 0 8px; text-align: left; background: transparent; cursor: pointer; }
 .project-leading { position: relative; display: grid; width: 15px; height: 15px; flex: 0 0 auto; place-items: center; }
 .project-folder-icon, .project-hover-icon { position: absolute; inset: 0; transition: opacity 120ms ease; }
@@ -130,6 +133,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .conversation-context-item[data-highlighted] { color: #20201e; background: #e9e9e5; }
 .conversation-context-item[data-disabled] { color: #aaa9a4; }
 .conversation-context-separator { height: 1px; margin: 4px 6px; background: #e6e6e2; }
+.conversation-context-more { margin-left: auto; color: #92928d; }
+.conversation-context-label { min-width: 0; max-width: 168px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-row.renaming { cursor: text; }
 .conversation-rename-input { min-width: 0; flex: 1; height: 20px; padding: 0 4px; border: 1px solid #cfcfc9; border-radius: 5px; background: #fff; color: #242422; font: inherit; outline: none; }
 .conversation-rename-input:focus { border-color: #a8a8a2; box-shadow: 0 0 0 2px rgb(70 70 64 / 6%); }

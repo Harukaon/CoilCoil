@@ -82,6 +82,8 @@ export interface AppViewController {
   renameConversation(owner: ProjectSelection, session: SessionSummary, name: string): Promise<void>;
   pinConversation(owner: ProjectSelection, session: SessionSummary, pinned: boolean): Promise<void>;
   forkConversation(owner: ProjectSelection, session: SessionSummary): Promise<void>;
+  moveConversation(owner: ProjectSelection, session: SessionSummary, target: ProjectSelection): Promise<void>;
+  reorderProjects(fromPath: string, toPath: string): void;
   rewindPrompt(message: ChatMessage, text: string, images: PromptImage[]): Promise<void>;
   approvePlan(planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState>;
   rejectPlan(planId: string): Promise<PlanApprovalState>;
@@ -105,6 +107,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     setSettingsOpen, setSettingsSection, setLeftOpen, beginResize,
     startNewConversation, openProject, removeProject, openConversation,
     archiveConversation, renameConversation, pinConversation, forkConversation,
+    moveConversation, reorderProjects,
     rewindPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
     handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,
   } = controller;
@@ -147,6 +150,8 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
         onRenameConversation={renameConversation}
         onPinConversation={(owner, session, pinned) => { void pinConversation(owner, session, pinned); }}
         onForkConversation={(owner, session) => { void forkConversation(owner, session); }}
+        onMoveConversation={(owner, session, target) => { void moveConversation(owner, session, target); }}
+        onReorderProjects={reorderProjects}
         onRestoreSessions={(owner, sessions) => setSessionsByProject((current) => ({ ...current, [owner.path]: sessions }))}
         onFocusPending={() => {
           setWorkspaceSurface("conversation");

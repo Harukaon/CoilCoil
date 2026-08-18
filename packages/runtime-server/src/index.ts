@@ -332,6 +332,18 @@ export class RuntimeServer {
     if (command.type === "create_session") return this.createSession(command.cwd, command.model);
     if (command.type === "open_session") return this.openSession(command.cwd, command.sessionPath);
     if (command.type === "open_workspace") return this.openWorkspace(command.cwd);
+    if (command.type === "move_session") {
+      // Relocating rewrites the session header on disk, so the live runtime has
+      // to let go of the file first; a still-open SessionManager would append
+      // over the move. Releasing also tells the renderer to drop this session's
+      // cached snapshot and workspace-scoped panels.
+      const runtimeId = this.sessionPaths.get(normalizeSessionPath(command.sessionPath));
+      if (runtimeId && this.runningRuntimes.has(runtimeId)) {
+        throw new Error("请先停止正在运行的会话，再移动到其他工作区。");
+      }
+      await this.releaseSession(command.sessionPath);
+      return this.dispatchTo(this.runtime, command);
+    }
 
     const alwaysControl = command.type === "bootstrap"
       || command.type === "list_sessions"
@@ -488,6 +500,8 @@ export class RuntimeServer {
         return runtime.pinSession(command.cwd, command.sessionPath, command.pinned);
       case "fork_session":
         return runtime.forkSession(command.cwd, command.sessionPath);
+      case "move_session":
+        return runtime.moveSession(command.cwd, command.sessionPath, command.targetCwd);
       case "prompt":
         return runtime.prompt(command.text, command.images, command.clientMessageId);
       case "rewind_prompt":

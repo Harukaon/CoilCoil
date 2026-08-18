@@ -10,6 +10,7 @@ import {
   createEventBus,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type MoveSessionResult,
   type PlanApprovalState,
   type ProjectMemoryRuntimeStatus,
   type ProjectSnapshot,
@@ -57,6 +58,7 @@ import {
   errorMessage,
   safeRealPath,
 } from "./runtime-utils.js";
+import { rewriteSessionHeaderCwd } from "./session-relocation.js";
 import { systemPromptLayerFiles } from "./system-prompt-layers.js";
 
 export abstract class RuntimeSessions extends RuntimeMcpConfig {
@@ -162,6 +164,33 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     const session = sessions.find((item) => safeRealPath(item.path) === safeRealPath(forkedPath));
     if (!session) throw new Error("分叉会话已创建，但未能出现在列表中。");
     return { sessions, session };
+  }
+
+  /**
+   * Move one session into another workspace.
+   *
+   * The caller must have released the session's runtime first: a live
+   * SessionManager appends to the same file and would overwrite the relocated
+   * header. Archived and pinned state is keyed by session path, which the move
+   * deliberately keeps, so both survive without extra bookkeeping.
+   */
+  async moveSession(cwd: string, sessionPath: string, targetCwd: string): Promise<MoveSessionResult> {
+    const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
+    const resolvedTarget = safeRealPath(targetCwd);
+    if (resolvedTarget === resolvedCwd) throw new Error("会话已经在该工作区中。");
+    if (!existsSync(resolvedTarget) || !statSync(resolvedTarget).isDirectory()) {
+      throw new Error("目标工作区不存在。");
+    }
+    const activeFile = this.active?.session.sessionFile ? safeRealPath(this.active.session.sessionFile) : undefined;
+    if (activeFile && activeFile === safeRealPath(resolvedSession)) {
+      throw new Error("该会话仍在运行，请先停止后再移动。");
+    }
+    rewriteSessionHeaderCwd(resolvedSession, resolvedTarget);
+    const sessions = await this.listSessions(resolvedCwd);
+    const targetSessions = await this.listSessions(resolvedTarget);
+    const session = targetSessions.find((item) => safeRealPath(item.path) === safeRealPath(resolvedSession));
+    if (!session) throw new Error("会话已移动，但未能出现在目标工作区中。");
+    return { sessions, targetSessions, session };
   }
 
   async openWorkspace(cwd: string): Promise<{ sessions: SessionSummary[]; snapshot?: SessionSnapshot; }> {

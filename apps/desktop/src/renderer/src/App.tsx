@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { FormEvent } from "react";
 import type {
   ChatMessage,
+  MoveSessionResult,
   PlanApprovalState,
   PlanExecutionTarget,
   ProjectSelection,
@@ -405,6 +406,60 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  const moveConversation = async (owner: ProjectSelection, session: SessionSummary, target: ProjectSelection): Promise<void> => {
+    if (sessionActivity[session.path]?.running) {
+      toastError("请先停止正在运行的会话，再移动到其他工作区。");
+      return;
+    }
+    try {
+      const result = await window.suocode.request<MoveSessionResult>({
+        type: "move_session",
+        cwd: owner.path,
+        sessionPath: session.path,
+        targetCwd: target.path,
+      });
+      // The conversation now belongs to another project, so everything cached
+      // against the old workspace is stale: the snapshot carries the previous
+      // cwd and file tree, and the runtime that produced it has been released.
+      // The runtime release also closes that session's browser tabs in main.
+      snapshotCacheRef.current.delete(session.path);
+      optimisticSessionsRef.current.delete(session.path);
+      for (const [runtimeId, path] of runtimeSessionRef.current) {
+        if (path === session.path) runtimeSessionRef.current.delete(runtimeId);
+      }
+      setSessionActivity((current) => {
+        const updated = { ...current };
+        delete updated[session.path];
+        return updated;
+      });
+      setSessionsByProject((current) => ({
+        ...current,
+        [owner.path]: result.sessions,
+        [target.path]: result.targetSessions,
+      }));
+      setExpandedProjects((current) => new Set(current).add(target.path));
+      // Following the conversation into its new workspace is less disorienting
+      // than dropping the user on a blank composer where it used to be.
+      if (owner.path === projectRef.current?.path && session.id === snapshotRef.current?.session.id) {
+        await openConversation(target, result.session);
+      }
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const reorderProjects = (fromPath: string, toPath: string): void => {
+    setProjects((current) => {
+      const from = current.findIndex((item) => item.path === fromPath);
+      const to = current.findIndex((item) => item.path === toPath);
+      if (from === -1 || to === -1 || from === to) return current;
+      const next = [...current];
+      next.splice(to, 0, ...next.splice(from, 1));
+      window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next.filter((item) => item.kind === "workspace")));
+      return next;
+    });
+  };
+
   const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[]): Promise<void> => {
     if (!message.entryId || !snapshot?.runtimeId) return;
     const previousConversationMessages = conversationMessages;
@@ -581,6 +636,7 @@ export default function App(): React.JSX.Element {
         setSettingsOpen, setSettingsSection, setLeftOpen, beginResize,
         startNewConversation, openProject, removeProject, openConversation,
         archiveConversation, renameConversation, pinConversation, forkConversation,
+        moveConversation, reorderProjects,
         rewindPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
         handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,
       }}

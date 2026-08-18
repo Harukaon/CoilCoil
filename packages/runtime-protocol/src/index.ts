@@ -884,6 +884,16 @@ export interface ProjectSnapshot {
   refreshedAt: number;
 }
 
+/**
+ * Result of relocating one session to another workspace. Both session lists are
+ * returned because the sidebar shows the source and the target at the same time.
+ */
+export interface MoveSessionResult {
+  sessions: SessionSummary[];
+  targetSessions: SessionSummary[];
+  session: SessionSummary;
+}
+
 export interface SessionSnapshot {
   runtimeId?: string;
   /** Monotonic within one live runtime; prevents an older async snapshot from replacing newer message events. */
@@ -989,6 +999,7 @@ export type RuntimeCommand =
   | { type: "rename_session"; cwd: string; sessionPath: string; name: string }
   | { type: "pin_session"; cwd: string; sessionPath: string; pinned: boolean }
   | { type: "fork_session"; cwd: string; sessionPath: string }
+  | { type: "move_session"; cwd: string; sessionPath: string; targetCwd: string }
   | { type: "create_session"; cwd: string; model?: SessionModelSelection }
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "open_workspace"; cwd: string }

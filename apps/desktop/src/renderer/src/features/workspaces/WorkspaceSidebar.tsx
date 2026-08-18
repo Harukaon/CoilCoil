@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Circle,
   Folder,
+  FolderInput,
   FolderOpen,
   GitFork,
   MessageSquarePlus,
@@ -88,6 +89,8 @@ export function WorkspaceSidebar({
   onRenameConversation,
   onPinConversation,
   onForkConversation,
+  onMoveConversation,
+  onReorderProjects,
   onRestoreSessions,
   onFocusPending,
   skillsOpen,
@@ -116,6 +119,8 @@ export function WorkspaceSidebar({
   onRenameConversation: (project: ProjectSelection, session: SessionSummary, name: string) => Promise<void> | void;
   onPinConversation: (project: ProjectSelection, session: SessionSummary, pinned: boolean) => void;
   onForkConversation: (project: ProjectSelection, session: SessionSummary) => void;
+  onMoveConversation: (project: ProjectSelection, session: SessionSummary, target: ProjectSelection) => void;
+  onReorderProjects: (fromPath: string, toPath: string) => void;
   onRestoreSessions: (project: ProjectSelection, sessions: SessionSummary[]) => void;
   onFocusPending: () => void;
   skillsOpen: boolean;
@@ -128,8 +133,13 @@ export function WorkspaceSidebar({
 }): React.JSX.Element {
   const [renamingPath, setRenamingPath] = useState<string>();
   const [renameDraft, setRenameDraft] = useState("");
+  const [draggingPath, setDraggingPath] = useState<string>();
+  const [dropTargetPath, setDropTargetPath] = useState<string>();
   const renameRef = useRef<HTMLInputElement>(null);
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
+  // The home project is recomputed as the first entry on every launch, so only
+  // the mounted workspaces have an order worth persisting.
+  const reorderable = (target: ProjectSelection): boolean => target.kind === "workspace";
 
   useEffect(() => {
     if (!renamingPath) return;
@@ -185,7 +195,33 @@ export function WorkspaceSidebar({
             <div className={`project-tree ${project.path === activeProject?.path ? "active" : ""}`} key={project.path}>
               <ContextMenu.Root>
                 <ContextMenu.Trigger asChild>
-                  <div className="project-row">
+                  <div
+                    className={`project-row ${draggingPath === project.path ? "dragging" : ""} ${dropTargetPath === project.path ? "drop-target" : ""}`}
+                    draggable={reorderable(project)}
+                    onDragStart={(event) => {
+                      if (!reorderable(project)) return;
+                      event.dataTransfer.effectAllowed = "move";
+                      // Firefox refuses to start a drag without payload, and a
+                      // plain-text path is also what an external drop expects.
+                      event.dataTransfer.setData("text/plain", project.path);
+                      setDraggingPath(project.path);
+                    }}
+                    onDragOver={(event) => {
+                      if (!draggingPath || draggingPath === project.path || !reorderable(project)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDropTargetPath(project.path);
+                    }}
+                    onDragLeave={() => setDropTargetPath((current) => current === project.path ? undefined : current)}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const from = draggingPath;
+                      setDraggingPath(undefined);
+                      setDropTargetPath(undefined);
+                      if (from && from !== project.path && reorderable(project)) onReorderProjects(from, project.path);
+                    }}
+                    onDragEnd={() => { setDraggingPath(undefined); setDropTargetPath(undefined); }}
+                  >
                     <button className="project-toggle" type="button" aria-expanded={expanded} onClick={() => onToggleProject(project.path)}>
                       <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
                       <span className="project-name">{project.name}</span>
@@ -295,6 +331,27 @@ export function WorkspaceSidebar({
                           >
                             <GitFork size={13} /><span>复制对话</span>
                           </ContextMenu.Item>
+                          <ContextMenu.Sub>
+                            <ContextMenu.SubTrigger
+                              className="conversation-context-item"
+                              disabled={activity?.running || projects.length < 2}
+                            >
+                              <FolderInput size={13} /><span>移动到工作区</span><ChevronRight className="conversation-context-more" size={13} />
+                            </ContextMenu.SubTrigger>
+                            <ContextMenu.Portal>
+                              <ContextMenu.SubContent className="conversation-context-menu" sideOffset={2} collisionPadding={8}>
+                                {projects.filter((target) => target.path !== project.path).map((target) => (
+                                  <ContextMenu.Item
+                                    className="conversation-context-item"
+                                    key={target.path}
+                                    onSelect={() => onMoveConversation(project, session, target)}
+                                  >
+                                    <Folder size={13} /><span className="conversation-context-label" title={target.path}>{target.name}</span>
+                                  </ContextMenu.Item>
+                                ))}
+                              </ContextMenu.SubContent>
+                            </ContextMenu.Portal>
+                          </ContextMenu.Sub>
                           <ContextMenu.Separator className="conversation-context-separator" />
                           <ContextMenu.Item className="conversation-context-item" disabled={activity?.running} onSelect={() => onArchiveConversation(project, session)}>归档对话</ContextMenu.Item>
                         </ContextMenu.Content>
