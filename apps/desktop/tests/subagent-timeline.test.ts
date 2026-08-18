@@ -74,6 +74,26 @@ test("ordinary tools remain grouped when no subagent activity owns the tool call
   assert.deepEqual(agentTurn.items.map((item) => item.kind), ["message", "tools", "message"]);
 });
 
+test("a running tool remains projected after the assistant preamble", () => {
+  const timeline = buildConversationTimeline(messages.slice(0, 2), [{
+    id: "bash-server",
+    order: 3,
+    name: "bash",
+    label: "启动本地测试服务",
+    args: { command: "python3 -m http.server 8765" },
+    output: "",
+    status: "running",
+    startedAt: 3,
+  }]);
+  const agentTurn = timeline[1];
+  assert.equal(agentTurn?.kind, "agent");
+  if (agentTurn?.kind !== "agent") return;
+  assert.deepEqual(agentTurn.items.map((item) => item.kind), ["message", "tools"]);
+  const projected = agentTurn.items[1];
+  assert.equal(projected?.kind, "tools");
+  if (projected?.kind === "tools") assert.equal(projected.tools[0]?.status, "running");
+});
+
 test("an approved plan occupies the original plan tool position in chat", () => {
   const planTool: ToolRun = {
     id: "plan-call-1",

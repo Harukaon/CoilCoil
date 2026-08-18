@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { selectWorkspaceSessionPath } from "./workspace-session.js";
 
 type WireSink = (message: RuntimeWireMessage) => void;
 type RuntimeFactory = (options: SuoCodeRuntimeOptions) => SuoCodeRuntime;
@@ -232,12 +233,19 @@ export class RuntimeServer {
     return this.runtime;
   }
 
-  private async openWorkspace(cwd: string): Promise<{ sessions: SessionSummary[]; snapshot: SessionSnapshot }> {
+  private async openWorkspace(cwd: string): Promise<{ sessions: SessionSummary[]; snapshot?: SessionSnapshot }> {
     const sessions = await this.runtime.listSessions(cwd);
-    const snapshot = sessions[0]
-      ? await this.openSession(cwd, sessions[0].path)
-      : await this.createSession(cwd);
-    return { sessions, snapshot };
+    const current = this.defaultRuntimeId ? this.runtimeSnapshots.get(this.defaultRuntimeId) : undefined;
+    const sessionPath = selectWorkspaceSessionPath(sessions, current, cwd, normalizeSessionPath);
+    if (!sessionPath) {
+      // A workspace restore without a valid current session is intentionally an
+      // empty composer state. Never let the pinned-first list order turn this
+      // into an unexpected navigation to a historical conversation.
+      this.defaultRuntimeId = undefined;
+      this.desiredSessionPath = undefined;
+      return { sessions };
+    }
+    return { sessions, snapshot: await this.openSession(cwd, sessionPath) };
   }
 
   private async createSession(cwd: string, model?: Extract<RuntimeCommand, { type: "create_session" }>["model"]): Promise<SessionSnapshot> {
@@ -430,10 +438,16 @@ export class RuntimeServer {
         return runtime.completeMcpAuth(command.name, command.input);
       case "logout_mcp_server":
         return runtime.logoutMcpServer(command.name);
+      case "get_memory_configuration":
+        return runtime.getMemoryConfiguration(command.cwd);
+      case "save_memory_configuration":
+        return runtime.saveMemoryConfiguration(command.input, command.cwd);
       case "get_skill_configuration":
         return runtime.getSkillConfiguration(command.cwd);
       case "set_skill_enabled":
         return runtime.setSkillEnabled(command.filePath, command.enabled, command.cwd);
+      case "delete_skill":
+        return runtime.deleteSkill(command.filePath, command.cwd);
       case "add_skill_path":
         return runtime.addSkillPath(command.path, command.cwd);
       case "remove_skill_path":

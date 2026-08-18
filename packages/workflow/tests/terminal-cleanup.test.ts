@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,11 +9,12 @@ import { redactSecrets } from "../extensions/secret-store.ts";
 
 function createHarness() {
   const handlers = new Map<string, Array<(...args: any[]) => any>>();
-  let terminalTool: any;
+  const tools = new Map<string, any>();
   const messages: any[] = [];
+  const entries: any[] = [];
   const pi = {
     registerTool(tool: any) {
-      terminalTool = tool;
+      tools.set(tool.name, tool);
     },
     on(name: string, handler: (...args: any[]) => any) {
       const current = handlers.get(name) ?? [];
@@ -23,19 +24,24 @@ function createHarness() {
     sendMessage(message: any, options: any) {
       messages.push({ message, options });
     },
+    appendEntry(customType: string, data: unknown) {
+      entries.push({ customType, data });
+    },
   };
 
   terminalExtension(pi as any);
   const ctx = { cwd: process.cwd() };
   const run = (params: Record<string, unknown>) =>
-    terminalTool.execute("test-call", params, undefined, undefined, ctx);
+    tools.get("terminal").execute("test-terminal-call", params, undefined, undefined, ctx);
+  const runBash = (params: Record<string, unknown>, onUpdate?: (result: any) => void) =>
+    tools.get("bash").execute("test-bash-call", params, undefined, onUpdate, ctx);
   const shutdown = async () => {
     for (const handler of handlers.get("session_shutdown") ?? []) {
       await handler({}, ctx);
     }
   };
 
-  return { run, shutdown, messages };
+  return { run, runBash, shutdown, messages, entries, tools };
 }
 
 function processRecord(pid: number): string | undefined {
@@ -50,6 +56,139 @@ function processRecord(pid: number): string | undefined {
     return undefined;
   }
 }
+
+test("bash exposes bounded foreground wait instead of a default hard timeout", async (context) => {
+  const { runBash, shutdown, tools, entries } = createHarness();
+  context.after(shutdown);
+
+  const properties = tools.get("bash").parameters.properties;
+  assert.equal(properties.block_until_ms.default, 30_000);
+  assert.equal(properties.timeout_ms.default, undefined);
+
+  const result = await runBash({
+    command: "sleep 0.05; printf DONE",
+    block_until_ms: 2_000,
+  });
+  assert.equal(result.details.wait, "exit");
+  assert.equal(result.details.popped_out_into_background, false);
+  assert.equal(result.details.is_running_in_background, false);
+  assert.equal(result.details.status, "exited");
+  assert.match(result.details.output, /DONE/);
+  assert.equal(entries.length, 0, "foreground completion is already represented by its tool result");
+});
+
+test("bash streams partial output while it is inside the foreground window", async (context) => {
+  const { runBash, shutdown } = createHarness();
+  context.after(shutdown);
+  const updates: any[] = [];
+
+  const result = await runBash({
+    command: "printf START; sleep 0.15; printf END",
+    block_until_ms: 2_000,
+  }, (update) => updates.push(update));
+
+  assert.ok(updates.some((update) => /START/.test(update.content[0]?.text ?? "")));
+  assert.equal(result.details.status, "exited");
+  assert.match(result.details.output, /START.*END/s);
+});
+
+test("bash automatically hands a long command to the terminal manager", async (context) => {
+  const { run, runBash, shutdown } = createHarness();
+  let terminalId: string | undefined;
+  context.after(async () => {
+    if (terminalId) await run({ action: "stop", id: terminalId, force: true, timeoutMs: 1_000 }).catch(() => undefined);
+    await shutdown();
+  });
+
+  const startedAt = Date.now();
+  const result = await runBash({
+    command: "printf READY; sleep 30",
+    block_until_ms: 50,
+  });
+  terminalId = result.details.background_shell_id;
+  assert.ok(Date.now() - startedAt < 2_000);
+  assert.match(terminalId ?? "", /^term-/);
+  assert.equal(result.details.wait, "timeout");
+  assert.equal(result.details.popped_out_into_background, true);
+  assert.equal(result.details.is_running_in_background, true);
+  assert.match(result.details.output, /READY/);
+
+  const listed = await run({ action: "list" });
+  assert.ok(listed.details.sessions.some((session: any) => session.id === terminalId && session.status === "running"));
+});
+
+test("is_background returns immediately without shell ampersands", async (context) => {
+  const { run, runBash, shutdown } = createHarness();
+  let terminalId: string | undefined;
+  context.after(async () => {
+    if (terminalId) await run({ action: "stop", id: terminalId, force: true, timeoutMs: 1_000 }).catch(() => undefined);
+    await shutdown();
+  });
+
+  const startedAt = Date.now();
+  const result = await runBash({ command: "sleep 30", is_background: true });
+  terminalId = result.details.background_shell_id;
+  assert.ok(Date.now() - startedAt < 1_000);
+  assert.equal(result.details.popped_out_into_background, false);
+  assert.equal(result.details.is_running_in_background, true);
+});
+
+test("timeout_ms is a separate hard lifetime and reports failure", async (context) => {
+  const { run, runBash, shutdown } = createHarness();
+  context.after(shutdown);
+
+  const started = await runBash({
+    command: "sleep 30",
+    is_background: true,
+    timeout_ms: 100,
+  });
+  const completed = await run({
+    action: "await",
+    id: started.details.background_shell_id,
+    timeoutMs: 5_000,
+  });
+  assert.equal(completed.details.wait, "exit");
+  assert.equal(completed.details.status, "failed");
+  assert.equal(completed.details.is_running_in_background, false);
+});
+
+test("background bash completion wakes the Agent and keeps a readable output file", async (context) => {
+  const { runBash, shutdown, messages, entries } = createHarness();
+  context.after(shutdown);
+
+  const started = await runBash({
+    command: "sleep 0.05; printf FINISHED",
+    is_background: true,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+
+  assert.ok(messages.some((entry) => entry.message.details.mode === "exit"));
+  assert.ok(messages.some((entry) => entry.options.triggerTurn === true));
+  assert.ok(entries.some((entry) => entry.customType === "suocode-terminal-run"
+    && entry.data.status === "succeeded"
+    && entry.data.ownerToolCallId === "test-bash-call"));
+  assert.match(await readFile(started.details.output_location, "utf8"), /FINISHED/);
+});
+
+test("notify_on_output uses a regular expression without ending the background shell", async (context) => {
+  const { run, runBash, shutdown, messages } = createHarness();
+  let terminalId: string | undefined;
+  context.after(async () => {
+    if (terminalId) await run({ action: "stop", id: terminalId, force: true, timeoutMs: 1_000 }).catch(() => undefined);
+    await shutdown();
+  });
+
+  const started = await runBash({
+    command: "printf 'Listening on 4321\\n'; sleep 30",
+    is_background: true,
+    notify_on_output: "Listening on \\d+",
+  });
+  terminalId = started.details.background_shell_id;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  assert.equal(started.details.is_running_in_background, true);
+  assert.ok(messages.some((entry) => entry.message.details.mode === "regex"));
+});
 
 test(
   "stop removes a background job in a separate process group",

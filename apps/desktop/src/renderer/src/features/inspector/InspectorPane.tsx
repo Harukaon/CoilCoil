@@ -36,7 +36,7 @@ export function InspectorPane<T extends string>({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   return (
     <aside className="inspector-pane">
-      <header className="inspector-header">
+      <header className="inspector-header window-drag">
         <nav className="inspector-nav no-drag" aria-label="右侧面板">
           {tabs.map((item) => {
             const Icon = item.icon;

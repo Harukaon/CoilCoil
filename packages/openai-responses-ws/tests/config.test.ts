@@ -23,8 +23,16 @@ test("publishes only compiled JavaScript as production entry points", () => {
 
 test("normalizes compatible service roots into model and inference endpoints", () => {
   assert.deepEqual(resolveOpenAIResponsesWsEndpoints("http://127.0.0.1:8317/v1"), {
-    inferenceBaseUrl: "http://127.0.0.1:8317/backend-api/",
+    inferenceBaseUrl: "http://127.0.0.1:8317/v1",
     modelsUrl: "http://127.0.0.1:8317/v1/models?client_version=pi",
+  });
+  assert.deepEqual(resolveOpenAIResponsesWsEndpoints("https://proxy.example"), {
+    inferenceBaseUrl: "https://proxy.example/v1",
+    modelsUrl: "https://proxy.example/v1/models?client_version=pi",
+  });
+  assert.deepEqual(resolveOpenAIResponsesWsEndpoints("https://proxy.example/v1/responses"), {
+    inferenceBaseUrl: "https://proxy.example/v1",
+    modelsUrl: "https://proxy.example/v1/models?client_version=pi",
   });
 });
 
@@ -60,8 +68,13 @@ test("adapts the Pi transport without an account id or SSE fallback", () => {
   const source = `
 const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai"]);
 function extractAccountId(token) {\n  throw new Error(token);\n}
+function resolveCodexUrl(baseUrl) {
+  const normalized = baseUrl.replace(/\\/+$/, "");
+  return \`\${normalized}/codex/responses\`;
+}
 const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(cacheSessionId);
 headers.set("chatgpt-account-id", accountId);
+headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
 const output = { api: "openai-codex-responses" };
 recordWebSocketFailure(cacheSessionId, error);
 if (websocketStarted) { throw error; }
@@ -72,6 +85,9 @@ break;
   assert.match(adapted, /return ""/);
   assert.match(adapted, /openai-responses-ws/);
   assert.match(adapted, /suocode-openai-responses-ws/);
+  assert.match(adapted, /https:\/\/api\.openai\.com\/v1/);
+  assert.doesNotMatch(adapted, /\/codex\/responses/);
+  assert.doesNotMatch(adapted, /headers\.set\("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS\)/);
   assert.doesNotMatch(adapted, /recordWebSocketSseFallback\(cacheSessionId\)/);
 });
 

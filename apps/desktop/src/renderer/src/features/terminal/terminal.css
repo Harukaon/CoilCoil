@@ -1,0 +1,20 @@
+.terminal-tab-panel { overflow: hidden; background: #171816; }
+.terminal-panel { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: 38px minmax(0, 1fr); color: #e7e7e2; background: #171816; }
+.terminal-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border-bottom: 1px solid #30312e; background: #20211e; font-size: 10px; }
+.terminal-header > div:first-child, .terminal-header-actions { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.terminal-header strong { color: #f0f0ea; font-size: 11px; font-weight: 550; }
+.terminal-header > div:first-child span { min-width: 0; overflow: hidden; color: #92948b; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-header-actions { flex: 0 0 auto; }
+.terminal-running { color: #9bc29a; font-size: 9px; }
+.terminal-exited { color: #979990; font-size: 9px; }
+.terminal-header-actions button { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 5px; color: #a5a69d; background: transparent; cursor: pointer; }
+.terminal-header-actions button:hover { color: #fff; background: #373934; }
+.terminal-surface { min-width: 0; min-height: 0; overflow: hidden; padding: 10px 8px 8px 12px; background: #171816; }
+.terminal-surface .xterm { height: 100%; }
+.terminal-surface .xterm-viewport { scrollbar-width: thin; scrollbar-color: #4a4a45 transparent; }
+.terminal-surface .xterm-viewport::-webkit-scrollbar { width: 6px; }
+.terminal-surface .xterm-viewport::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 6px; background: #4a4a45; background-clip: padding-box; }
+.terminal-empty { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; align-content: center; justify-items: center; gap: 9px; color: #8f9288; background: #171816; }
+.terminal-empty strong { color: #d7d8d0; font-size: 12px; font-weight: 550; }
+.terminal-empty button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 11px; border: 1px solid #40433c; border-radius: 7px; color: #d1d3ca; background: #242720; font-size: 10px; cursor: pointer; }
+.terminal-empty button:hover { background: #30342c; }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SkillEntry } from "@suocode/runtime-protocol";
 import {
+  canDeleteSkill,
   managedSkills,
   skillCountLabel,
   skillEnabledCount,
@@ -81,4 +82,11 @@ test("the label and the requested change always agree", () => {
     const wantsOn = skillToggleTarget(entry);
     assert.equal(skillToggleLabel(entry), wantsOn ? "启用" : "停用");
   }
+});
+
+test("only user skills copied into the managed directory can be deleted", () => {
+  assert.equal(canDeleteSkill(skill({ baseDir: "/agent/skills/mine" }), "/agent/skills"), true);
+  assert.equal(canDeleteSkill(skill({ source: "project", scope: "project", baseDir: "/project/.pi/skills/mine" }), "/agent/skills"), false);
+  assert.equal(canDeleteSkill(skill({ source: "agents", baseDir: "/home/.agents/skills/mine" }), "/agent/skills"), false);
+  assert.equal(canDeleteSkill(skill({ baseDir: "/agent/skills-other/mine" }), "/agent/skills"), false);
 });

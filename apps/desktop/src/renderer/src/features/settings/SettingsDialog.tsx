@@ -30,7 +30,7 @@ function storedSettingsSidebarWidth(): number {
     : DEFAULT_SETTINGS_SIDEBAR_WIDTH;
 }
 
-function ToolPurposePolicyCard({ configuration, runtimeId, onSaved }: {
+function ToolPurposePolicyToggle({ configuration, runtimeId, onSaved }: {
   configuration?: RuntimeConfiguration;
   runtimeId?: string;
   onSaved: (configuration: RuntimeConfiguration) => void;
@@ -52,9 +52,19 @@ function ToolPurposePolicyCard({ configuration, runtimeId, onSaved }: {
       setSaving(false);
     }
   };
-  return <section className="settings-policy-card">
-    <label className="checkbox-setting"><input type="checkbox" checked={enabled} disabled={saving || !runtimeId} onChange={(event) => { void toggle(event.target.checked); }} /><span><strong>强制工具调用填写目的</strong><small>开启后，Agent 每次调用工具都需要填写简短的直接目的，并在会话中记录；关闭后不注入或阻断工具调用。</small></span></label>
-  </section>;
+  return <label
+    className="settings-policy-toggle no-window-drag"
+    title="每次工具调用都要求填写简短的直接目的，并记录在会话中。"
+  >
+    <input
+      type="checkbox"
+      aria-label="强制工具调用填写目的"
+      checked={enabled}
+      disabled={saving || !runtimeId}
+      onChange={(event) => { void toggle(event.target.checked); }}
+    />
+    <span>工具目的</span>
+  </label>;
 }
 
 function blankMcpServer(): McpServerConfiguration {
@@ -483,7 +493,9 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
               </p>
             </div>
           </div>
-          {section === "mcp" ? (
+          {section === "models" ? (
+            <ToolPurposePolicyToggle configuration={configuration} runtimeId={runtimeId} onSaved={onSaved} />
+          ) : section === "mcp" ? (
             <button
               className="settings-header-action no-window-drag"
               type="button"
@@ -495,7 +507,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
         </header>
         <div className="settings-page-content">
           {section === "models" ? (
-            <><ToolPurposePolicyCard configuration={configuration} runtimeId={runtimeId} onSaved={onSaved} /><ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} /></>
+            <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} />
           ) : section === "mcp" ? (
             <McpSettings runtimeId={runtimeId} cwd={cwd} reloadKey={mcpReloadKey} />
           ) : (

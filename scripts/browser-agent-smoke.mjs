@@ -169,7 +169,7 @@ async function main() {
     if (setup.error) throw new Error(setup.error);
     await client.evaluate(`window.suocode.request({
       type: "prompt",
-      text: ${JSON.stringify(`For the page at "${fixtureUrl.slice(0, -1)}", use the browser debugging capability for Application Storage to inspect the origin's real storage usage and quota. Do not estimate it by evaluating JavaScript in the page and do not change any page data. Briefly report the measured values.`)}
+      text: ${JSON.stringify(`For the page at "${fixtureUrl.slice(0, -1)}", use the built-in browser's accessibility snapshot to read the visible heading. Do not evaluate JavaScript in the page and do not change page data. Briefly report the heading text.`)}
     }, ${JSON.stringify(setup.runtimeId)})`);
     await client.waitFor(
       `window.__browserAgentEvents.some((event) => event.type === "run_state" && event.running === false)`,
@@ -179,9 +179,9 @@ async function main() {
     diagnostics = JSON.stringify(events, null, 2);
     const mcpCalls = events.filter((event) => event.type === "tool_started" && event.toolName === "mcp");
     const mcpResults = events.filter((event) => event.type === "tool_finished" && event.toolName === "mcp");
-    assert.ok(mcpCalls.some((event) => JSON.stringify(event.toolArgs).includes("browser_application_storage")), "The Agent did not call the discovered advanced browser storage tool through MCP.");
-    assert.ok(mcpResults.some((event) => /quota|usage/i.test(String(event.toolOutput))), "The Agent did not execute the discovered browser storage tool.");
-    assert.equal(events.some((event) => event.toolName === "browser_application_storage"), false, "A hidden advanced browser tool leaked onto the direct tool surface.");
+    assert.ok(mcpCalls.some((event) => JSON.stringify(event.toolArgs).includes("take_snapshot")), "The Agent did not call the discovered Chrome DevTools snapshot tool through MCP.");
+    assert.ok(mcpResults.some((event) => /Browser agent fixture/i.test(String(event.toolOutput))), "The Agent did not read the fixture through the Chrome DevTools snapshot.");
+    assert.equal(events.some((event) => event.toolName !== "mcp" && /take_snapshot/.test(String(event.toolName))), false, "A browser tool leaked onto the direct tool surface.");
     process.stdout.write(`SuoCode browser Agent progressive-disclosure smoke passed with ${setup.model.provider}/${setup.model.id}.\n`);
   } catch (error) {
     throw new Error(`${error.stack || error.message}\nRuntime events:\n${diagnostics || "<unavailable>"}\nElectron stderr tail:\n${stderr.split("\n").slice(-30).join("\n")}`);

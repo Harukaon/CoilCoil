@@ -10,7 +10,7 @@ export type { ProjectSelection } from "@suocode/runtime-protocol";
 
 export type DesktopPlatform = "darwin" | "linux" | "win32";
 
-export type PreviewKind = "text" | "markdown" | "html" | "pdf";
+export type PreviewKind = "text" | "markdown" | "html" | "pdf" | "image";
 
 export interface FilePreviewDocument {
   id: string;
@@ -94,6 +94,11 @@ export interface TerminalSessionSnapshot {
   exitCode?: number;
 }
 
+export interface TerminalDataEvent {
+  id: string;
+  data: string;
+}
+
 export interface SuoCodeDesktopApi {
   platform: DesktopPlatform;
   homeProject(): Promise<ProjectSelection>;
@@ -126,11 +131,13 @@ export interface SuoCodeDesktopApi {
   onBrowserGuestRoster(listener: (roster: BrowserGuestRoster) => void): () => void;
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
   onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
+  getTerminalSessions(): Promise<TerminalSessionSnapshot[]>;
   createTerminal(cwd: string): Promise<TerminalSessionSnapshot[]>;
   writeTerminal(id: string, data: string): Promise<void>;
   resizeTerminal(id: string, cols: number, rows: number): Promise<void>;
   closeTerminal(id: string): Promise<TerminalSessionSnapshot[]>;
   onTerminalStateUpdated(listener: (state: TerminalSessionSnapshot[]) => void): () => void;
+  onTerminalData(listener: (event: TerminalDataEvent) => void): () => void;
   request<T = unknown>(command: RuntimeCommand, runtimeId?: string): Promise<T>;
   onRuntimeEvent(listener: (event: RuntimeEvent, runtimeId?: string) => void): () => void;
 }

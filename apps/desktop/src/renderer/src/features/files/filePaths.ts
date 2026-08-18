@@ -15,6 +15,11 @@ export function relativeProjectPath(root: string, value: string): string {
     : value;
 }
 
+export function previewFileNode(path: string): FileNode {
+  const name = path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? path;
+  return { name, path, kind: "file" };
+}
+
 export function replaceDirectoryChildren(nodes: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return nodes.map((node) => {
     if (node.path === path && node.kind === "directory") return { ...node, children };

@@ -28,7 +28,10 @@ export function minimumWindowWidth(leftOpen: boolean, rightOpen: boolean): numbe
     + (rightOpen ? MINIMUM_RIGHT_PANEL_WIDTH : 0);
 }
 
-export function usePanelLayout(): {
+export function usePanelLayout(options: {
+  rightOpen?: boolean;
+  onRightOpenChange?: (open: boolean) => void;
+} = {}): {
   leftOpen: boolean;
   rightOpen: boolean;
   leftWidth: number;
@@ -38,7 +41,12 @@ export function usePanelLayout(): {
   beginResize: (side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>) => void;
 } {
   const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(false);
+  const [localRightOpen, setLocalRightOpen] = useState(false);
+  const rightOpen = options.rightOpen ?? localRightOpen;
+  const setRightOpen = useCallback((open: boolean): void => {
+    if (options.onRightOpenChange) options.onRightOpenChange(open);
+    else setLocalRightOpen(open);
+  }, [options.onRightOpenChange]);
   const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT_WIDTH_KEY, 268, MINIMUM_LEFT_PANEL_WIDTH));
   const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT_WIDTH_KEY, 352, MINIMUM_RIGHT_PANEL_WIDTH));
   const preferredLeftWidthRef = useRef(leftWidth);

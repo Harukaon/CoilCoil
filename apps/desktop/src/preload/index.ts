@@ -16,6 +16,7 @@ import type {
   RuntimeRequestPayload,
   RuntimeRequestResult,
   SuoCodeDesktopApi,
+  TerminalDataEvent,
   TerminalSessionSnapshot,
 } from "../shared/desktop-api";
 
@@ -49,6 +50,8 @@ const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
 const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
 const BROWSER_GUEST_FAILED_CHANNEL = "browser:guest-failed";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
+const TERMINAL_DATA_CHANNEL = "terminal:data";
+const TERMINAL_GET_CHANNEL = "terminal:get";
 const TERMINAL_CREATE_CHANNEL = "terminal:create";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
 const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
@@ -116,6 +119,7 @@ const api: SuoCodeDesktopApi = {
     ipcRenderer.on(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
     return () => ipcRenderer.removeListener(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
   },
+  getTerminalSessions: () => ipcRenderer.invoke(TERMINAL_GET_CHANNEL) as Promise<TerminalSessionSnapshot[]>,
   createTerminal: (cwd: string) => ipcRenderer.invoke(TERMINAL_CREATE_CHANNEL, cwd) as Promise<TerminalSessionSnapshot[]>,
   writeTerminal: (id: string, data: string) => ipcRenderer.invoke(TERMINAL_WRITE_CHANNEL, id, data) as Promise<void>,
   resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke(TERMINAL_RESIZE_CHANNEL, id, cols, rows) as Promise<void>,
@@ -124,6 +128,11 @@ const api: SuoCodeDesktopApi = {
     const handler = (_event: Electron.IpcRendererEvent, state: TerminalSessionSnapshot[]): void => listener(state);
     ipcRenderer.on(TERMINAL_STATE_CHANNEL, handler);
     return () => ipcRenderer.removeListener(TERMINAL_STATE_CHANNEL, handler);
+  },
+  onTerminalData: (listener: (event: TerminalDataEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: TerminalDataEvent): void => listener(value);
+    ipcRenderer.on(TERMINAL_DATA_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(TERMINAL_DATA_CHANNEL, handler);
   },
   request: async <T>(command: RuntimeCommand, runtimeId?: string): Promise<T> => {
     const result = await ipcRenderer.invoke(

@@ -12,7 +12,7 @@ import {
 import type { SubagentChildMeta } from "./types.ts";
 import { SUBAGENT_META_ENTRY_TYPE } from "./types.ts";
 
-export const DEFAULT_CHILD_TOOLS = ["read", "bash", "edit", "write", "grep", "ls"];
+export const DEFAULT_CHILD_TOOLS = ["read", "bash", "terminal", "edit", "write", "grep", "ls"];
 export const CHILD_SESSION_SUBDIR = "subagents";
 
 export interface CreateChildSessionOptions {

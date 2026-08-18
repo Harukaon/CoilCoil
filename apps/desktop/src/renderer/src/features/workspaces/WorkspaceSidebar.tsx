@@ -1,9 +1,9 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import {
   Archive,
+  BookOpen,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   Circle,
   Folder,
   FolderOpen,
@@ -16,11 +16,9 @@ import {
   Plus,
   Settings,
   Sparkles,
-  Terminal as TerminalIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
-import type { TerminalSessionSnapshot } from "../../../../shared/desktop-api";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { collectPinnedSessions, collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, type PinnedSessionEntry } from "./sessionList";
@@ -82,15 +80,9 @@ export function WorkspaceSidebar({
   expandedSessionLimits,
   modelLabel,
   onNewConversation,
-  onNewTerminal,
-  onOpenTerminal,
-  onCloseTerminal,
-  terminals,
-  activeTerminalId,
   onOpenProject,
   onToggleProject,
   onShowMoreSessions,
-  onCollapseSessions,
   onOpenConversation,
   onArchiveConversation,
   onRenameConversation,
@@ -100,6 +92,8 @@ export function WorkspaceSidebar({
   onFocusPending,
   skillsOpen,
   onOpenSkills,
+  memoryOpen,
+  onOpenMemory,
   onOpenSettings,
   onRemoveProject,
   onError,
@@ -114,15 +108,9 @@ export function WorkspaceSidebar({
   expandedSessionLimits: Record<string, number>;
   modelLabel: string;
   onNewConversation: (project?: ProjectSelection) => void;
-  onNewTerminal: () => void;
-  onOpenTerminal: (id: string) => void;
-  onCloseTerminal: (id: string) => void;
-  terminals: TerminalSessionSnapshot[];
-  activeTerminalId?: string;
   onOpenProject: () => void;
   onToggleProject: (path: string) => void;
   onShowMoreSessions: (path: string, limit: number) => void;
-  onCollapseSessions: (path: string) => void;
   onOpenConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onArchiveConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onRenameConversation: (project: ProjectSelection, session: SessionSummary, name: string) => Promise<void> | void;
@@ -132,6 +120,8 @@ export function WorkspaceSidebar({
   onFocusPending: () => void;
   skillsOpen: boolean;
   onOpenSkills: () => void;
+  memoryOpen: boolean;
+  onOpenMemory: () => void;
   onOpenSettings: () => void;
   onRemoveProject: (project: ProjectSelection) => void;
   onError: (message: string) => void;
@@ -166,21 +156,21 @@ export function WorkspaceSidebar({
       <nav className="primary-nav">
         <button className="nav-button" type="button" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button>
         <button className={`nav-button ${skillsOpen ? "active" : ""}`} type="button" onClick={onOpenSkills}><Sparkles size={16} strokeWidth={1.7} /><span>技能</span></button>
-        <button className="nav-button" type="button" disabled={!activeProject} onClick={onNewTerminal}><TerminalIcon size={16} strokeWidth={1.7} /><span>终端</span></button>
+        <button className={`nav-button ${memoryOpen ? "active" : ""}`} type="button" onClick={onOpenMemory}><BookOpen size={16} strokeWidth={1.7} /><span>记忆</span></button>
       </nav>
-      {pinnedSessions.length ? <section className="pinned-sessions-section">
-        <div className="section-heading"><span>置顶</span><span className="pinned-count">{pinnedSessions.length}</span></div>
-        <div className="conversation-list pinned-conversation-list">
-          {pinnedSessions.map((entry) => <GlobalPinnedSessionRow
-            key={entry.session.path}
-            entry={entry}
-            onOpen={() => onOpenConversation(entry.project, entry.session)}
-            onUnpin={() => onPinConversation(entry.project, entry.session, false)}
-            onArchive={() => onArchiveConversation(entry.project, entry.session)}
-          />)}
-        </div>
-      </section> : null}
       <section className="project-section">
+        {pinnedSessions.length ? <section className="pinned-sessions-section">
+          <div className="section-heading"><span>置顶</span><span className="pinned-count">{pinnedSessions.length}</span></div>
+          <div className="conversation-list pinned-conversation-list">
+            {pinnedSessions.map((entry) => <GlobalPinnedSessionRow
+              key={entry.session.path}
+              entry={entry}
+              onOpen={() => onOpenConversation(entry.project, entry.session)}
+              onUnpin={() => onPinConversation(entry.project, entry.session, false)}
+              onArchive={() => onArchiveConversation(entry.project, entry.session)}
+            />)}
+          </div>
+        </section> : null}
         <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsDialog projects={projects} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></span></div>
         {projects.length ? projects.map((project) => {
           const expanded = expandedProjects.has(project.path);
@@ -312,7 +302,6 @@ export function WorkspaceSidebar({
                     </ContextMenu.Root>;
                   })}
                   {hiddenCount > 0 ? <button className="more-conversations" type="button" aria-label={`再显示 ${Math.min(SESSION_EXPANSION_BATCH, hiddenCount)} 个对话`} onClick={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleSessions.length, sessions.length))}><MoreHorizontal size={15} /></button> : null}
-                  {visibleLimit > collapsedLimit ? <button className="more-conversations" type="button" aria-label="收起更多对话" onClick={() => onCollapseSessions(project.path)}><ChevronUp size={14} /></button> : null}
                   {!allSessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
                 </div>
               </div>
@@ -322,17 +311,6 @@ export function WorkspaceSidebar({
           <button className="open-project-card" type="button" onClick={onOpenProject}><span className="open-project-icon"><Plus size={14} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
         )}
       </section>
-      {terminals.length ? <section className="terminal-session-section">
-        <div className="section-heading"><span>终端会话</span><span className="pinned-count">{terminals.length}</span></div>
-        <div className="terminal-session-list">
-          {terminals.map((terminal, index) => (
-            <div className={`terminal-session-row ${terminal.id === activeTerminalId ? "active" : ""}`} key={terminal.id}>
-              <button type="button" onClick={() => onOpenTerminal(terminal.id)}><TerminalIcon size={13} /><span>终端 {index + 1}</span><small>{terminal.status === "running" ? "运行中" : "已退出"}</small></button>
-              <button type="button" aria-label={`关闭终端 ${index + 1}`} title="关闭终端" onClick={() => onCloseTerminal(terminal.id)}>×</button>
-            </div>
-          ))}
-        </div>
-      </section> : null}
       <div className="sidebar-footer"><div className="brand-mark">S</div><div className="brand-copy"><strong>SuoCode</strong><span>{modelLabel}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={onOpenSettings}><Settings size={17} strokeWidth={1.7} /></button></div>
     </aside>
   );

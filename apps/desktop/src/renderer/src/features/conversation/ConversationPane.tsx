@@ -1,5 +1,5 @@
 import { ArrowDown, PanelLeft, PanelRight } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
@@ -37,6 +37,9 @@ function turnModelName(
   return configuration?.models.find((candidate) => candidate.provider === model.provider && candidate.id === model.id)?.name
     ?? model.id;
 }
+
+const INITIAL_VISIBLE_TURNS = 24;
+const LOAD_MORE_TURNS = 20;
 
 export function ConversationPane({
   fileDragActive,
@@ -138,6 +141,10 @@ export function ConversationPane({
   const { chatContentWidth, beginChatWidthResize } = useChatContentWidth();
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [visibleTimelineStart, setVisibleTimelineStart] = useState<number>();
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [showLoadEarlier, setShowLoadEarlier] = useState(false);
+  const pendingScrollRestore = useRef<{ height: number; top: number } | undefined>(undefined);
   const [selectedSubagentId, setSelectedSubagentId] = useState<string>();
   const selectedSubagent = subagents.find((activity) => activity.id === selectedSubagentId);
   const conversationTitle = pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话";
@@ -154,7 +161,23 @@ export function ConversationPane({
   useEffect(() => {
     setEditingMessageId(undefined);
     setSelectedSubagentId(undefined);
+    setVisibleTimelineStart(undefined);
+    setHistoryExpanded(false);
+    setShowLoadEarlier(false);
+    pendingScrollRestore.current = undefined;
   }, [activeConversation?.id, pendingProjectPath]);
+
+  useEffect(() => {
+    if (historyExpanded || !timeline.length) return;
+    setVisibleTimelineStart(Math.max(0, timeline.length - INITIAL_VISIBLE_TURNS));
+  }, [historyExpanded, timeline.length]);
+
+  const timelineStart = Math.min(
+    visibleTimelineStart ?? Math.max(0, timeline.length - INITIAL_VISIBLE_TURNS),
+    timeline.length,
+  );
+  const visibleTimeline = timeline.slice(timelineStart);
+  const hasEarlierTimeline = timelineStart > 0;
 
   const updateScrollDownVisibility = useCallback((): void => {
     const viewport = timelineRef.current;
@@ -166,14 +189,39 @@ export function ConversationPane({
     setShowScrollDown(distance > 48);
   }, [timelineRef]);
 
+  const updateLoadEarlierVisibility = useCallback((): void => {
+    const viewport = timelineRef.current;
+    setShowLoadEarlier(Boolean(hasEarlierTimeline && viewport && viewport.scrollTop <= 64));
+  }, [hasEarlierTimeline, timelineRef]);
+
+  useLayoutEffect(() => {
+    const restore = pendingScrollRestore.current;
+    const viewport = timelineRef.current;
+    if (!restore || !viewport) return;
+    viewport.scrollTop = Math.max(0, viewport.scrollHeight - restore.height + restore.top);
+    pendingScrollRestore.current = undefined;
+    updateLoadEarlierVisibility();
+  }, [timelineStart, timelineRef, updateLoadEarlierVisibility]);
+
   useEffect(() => {
     updateScrollDownVisibility();
-  }, [timeline, running, loading, updateScrollDownVisibility]);
+    updateLoadEarlierVisibility();
+  }, [timeline, running, loading, timelineStart, updateLoadEarlierVisibility, updateScrollDownVisibility]);
 
   const handleBodyScroll = useCallback((): void => {
     onTimelineScroll();
     updateScrollDownVisibility();
-  }, [onTimelineScroll, updateScrollDownVisibility]);
+    updateLoadEarlierVisibility();
+  }, [onTimelineScroll, updateLoadEarlierVisibility, updateScrollDownVisibility]);
+
+  const loadEarlierTimeline = useCallback((): void => {
+    if (!hasEarlierTimeline) return;
+    const viewport = timelineRef.current;
+    if (viewport) pendingScrollRestore.current = { height: viewport.scrollHeight, top: viewport.scrollTop };
+    setHistoryExpanded(true);
+    setVisibleTimelineStart(Math.max(0, timelineStart - LOAD_MORE_TURNS));
+    setShowLoadEarlier(false);
+  }, [hasEarlierTimeline, timelineRef, timelineStart]);
 
   const scrollToBottom = useCallback((): void => {
     const viewport = timelineRef.current;
@@ -197,7 +245,15 @@ export function ConversationPane({
         <div className="conversation-body" ref={timelineRef} onScroll={handleBodyScroll}>
           {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running || startingSession ? (
             <div className="timeline">
-              {timeline.map((item, index) => item.kind === "user" ? (
+              {showLoadEarlier && hasEarlierTimeline ? (
+                <div className="timeline-history-loader">
+                  <button type="button" onClick={loadEarlierTimeline}>
+                    加载更早的对话
+                    <span>还有 {timelineStart} 轮</span>
+                  </button>
+                </div>
+              ) : null}
+              {visibleTimeline.map((item, index) => item.kind === "user" ? (
                 <MessageView
                   key={`user-${item.message.id}`}
                   message={item.message}
@@ -206,7 +262,7 @@ export function ConversationPane({
                   project={project}
                   configuration={configuration}
                   selectedModel={selectedModel}
-                  thinkingLevel={snapshot?.thinkingLevel}
+                  thinkingLevel={snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel}
                   modelChanging={modelChanging}
                   runtimeId={snapshot?.runtimeId}
                   onEditingChange={(next) => setEditingMessageId(next ? item.message.id : undefined)}
@@ -219,7 +275,7 @@ export function ConversationPane({
                 <AgentTurnView
                   key={`agent-${item.order}`}
                   items={item.items}
-                  running={running && index === timeline.length - 1}
+                  running={running && index === visibleTimeline.length - 1}
                   modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")}
                   renderSubagent={(activity) => <SubagentCard activity={activity} onOpen={(selected) => setSelectedSubagentId(selected.id)} />}
                   renderPlan={(plan) => <PlanApprovalCard plan={plan} onApprove={onApprovePlan} onReject={onRejectPlan} />}
@@ -263,7 +319,7 @@ export function ConversationPane({
             inputRef={inputRef}
             configuration={configuration}
             selectedModel={selectedModel}
-            thinkingLevel={snapshot?.thinkingLevel}
+            thinkingLevel={snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel}
             fast={snapshot?.fast}
             modelMenuOpen={modelMenuOpen}
             modelChanging={modelChanging}
@@ -283,7 +339,7 @@ export function ConversationPane({
             onAbort={onAbort}
           />
         </div>
-        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} />
+        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />
       </div>
       <SubagentDetailDialog activity={selectedSubagent} onClose={() => setSelectedSubagentId(undefined)} />
     </section>

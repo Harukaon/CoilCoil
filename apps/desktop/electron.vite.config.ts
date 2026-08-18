@@ -17,7 +17,6 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
-          "browser-debug-mcp": resolve("src/main/browser-debug-mcp.ts"),
           runtime: resolve("src/runtime/index.ts"),
         },
       },

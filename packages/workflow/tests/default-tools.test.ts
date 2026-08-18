@@ -3,8 +3,10 @@ import test from "node:test";
 import defaultToolsExtension, {
   removePiDocumentationGuide,
   removeRedundantToolCatalog,
+  removeToolPromptGuidelines,
   trimNativeSystemPrompt,
 } from "../extensions/default-tools.ts";
+import { SUOCODE_ENGINEERING_STANDARDS } from "../extensions/system/engineering-standards.ts";
 
 function createHarness() {
   const handlers = new Map<string, Array<(...args: any[]) => any>>();
@@ -77,6 +79,26 @@ The following skills provide specialized instructions.
   );
 });
 
+test("tool prompt guidelines are replaced by the SuoCode engineering standards", () => {
+  const prompt = `Base
+
+Guidelines:
+- Use read instead of cat
+- Tool-specific duplicate
+- Be concise in your responses
+- Show file paths clearly when working with files
+
+Pi documentation (read only when asked about pi):
+- docs`;
+
+  assert.equal(removeToolPromptGuidelines(prompt), `Base
+
+${SUOCODE_ENGINEERING_STANDARDS}
+
+Pi documentation (read only when asked about pi):
+- docs`);
+});
+
 test("extension keeps extra tools active and strips the catalog per turn", async () => {
   const harness = createHarness();
   await harness.handlers.get("session_start")?.[0]({}, {});
@@ -89,7 +111,9 @@ Available tools:
 - read: Read
 
 Guidelines:
-- Concise
+- Tool-specific duplicate
+- Be concise in your responses
+- Show file paths clearly when working with files
 
 Pi documentation (read only when asked about pi):
 - Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)
@@ -100,8 +124,7 @@ Current working directory: /project`,
   assert.deepEqual(result, {
     systemPrompt: `Base
 
-Guidelines:
-- Concise
+${SUOCODE_ENGINEERING_STANDARDS}
 
 Current working directory: /project`,
   });

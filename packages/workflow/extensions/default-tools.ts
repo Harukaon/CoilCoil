@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { SUOCODE_ENGINEERING_STANDARDS } from "./system/engineering-standards.ts";
 
 const DEFAULT_EXTRA_TOOLS = ["grep", "ls"];
 const AVAILABLE_TOOLS_HEADING = "\n\nAvailable tools:\n";
@@ -6,6 +7,7 @@ const GUIDELINES_HEADING = "\n\nGuidelines:\n";
 const PI_DOCUMENTATION_HEADING = "\n\nPi documentation (";
 const PI_DOCUMENTATION_FOOTER =
   "- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)";
+const CORE_GUIDELINES = `\n\n${SUOCODE_ENGINEERING_STANDARDS}`;
 
 export function removeRedundantToolCatalog(systemPrompt: string): string {
   const start = systemPrompt.indexOf(AVAILABLE_TOOLS_HEADING);
@@ -31,8 +33,18 @@ export function removePiDocumentationGuide(systemPrompt: string): string {
   return `${systemPrompt.slice(0, start)}${systemPrompt.slice(end)}`;
 }
 
+export function removeToolPromptGuidelines(systemPrompt: string): string {
+  const start = systemPrompt.indexOf(GUIDELINES_HEADING);
+  if (start < 0) return systemPrompt;
+  const end = systemPrompt.indexOf(PI_DOCUMENTATION_HEADING, start);
+  if (end < 0) return systemPrompt;
+  return `${systemPrompt.slice(0, start)}${CORE_GUIDELINES}${systemPrompt.slice(end)}`;
+}
+
 export function trimNativeSystemPrompt(systemPrompt: string): string {
-  return removePiDocumentationGuide(removeRedundantToolCatalog(systemPrompt));
+  return removePiDocumentationGuide(
+    removeToolPromptGuidelines(removeRedundantToolCatalog(systemPrompt)),
+  );
 }
 
 export default function defaultToolsExtension(pi: ExtensionAPI): void {

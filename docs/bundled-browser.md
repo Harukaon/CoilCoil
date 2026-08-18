@@ -2,10 +2,11 @@
 
 SuoCode 的内置浏览器由 Renderer 中的 `<webview>` guest 渲染，元素挂在应用根部一个
 常驻图层里，主进程通过 `getWebContentsId()` 拿到 guest 的 WebContents 后接管全部
-控制。Agent 的高频网页操作以
-[`@playwright/mcp`](https://github.com/microsoft/playwright-mcp) 为语义层；
-[`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp) 与
-SuoCode 自有调试 MCP 通过搜索按需提供网络、性能、Sources 和存储等高级能力。
+控制。Agent 侧只接入官方
+[`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp)：服务器
+启动后预加载可搜索的工具元数据，但 `directTools: false` 保证浏览器工具 schema 不进入
+模型的默认工具面。Agent 必须通过统一 MCP 网关按需搜索、描述和调用，普通编码会话的
+浏览器直接工具数始终为零。
 
 ## 安全边界
 
@@ -64,8 +65,8 @@ API（[#1335](https://github.com/electron/electron/issues/1335) 2015 起、
 - **启用 `webviewTag` 是新增攻击面**，由上文「安全边界」中的加固措施补偿。
 - **Renderer 重载或崩溃会摧毁所有 agent 标签页**（guest 存活于 Renderer 文档中，
   dev HMR 下尤其明显）。主进程的处理方式是干净地向所有 CDP client 广播
-  `Target.targetDestroyed`，**不尝试用旧 `pageTargetId` 复活** —— 那会让 Playwright
-  的 Page 永久停留在半初始化状态。
+  `Target.targetDestroyed`，**不尝试用旧 `pageTargetId` 复活** —— 那会让 Puppeteer
+  持有绑定到旧 execution context 的无效 Page。
 
 **顺带修复的既有缺陷**：任何停止合成的隐藏方式都会让 `Page.captureScreenshot`
 永久挂起。旧架构的 `BACKGROUND_VIEWPORT + setVisible(false)`（非活动标签页）和
@@ -76,23 +77,38 @@ API（[#1335](https://github.com/electron/electron/issues/1335) 2015 起、
 
 ## 上游复用方式
 
-Playwright 和 Chrome DevTools MCP 均作为 Apache-2.0 npm 依赖保留，SuoCode 不复制
-它们的通用工具层。`apps/desktop/src/main/browser-runtime.ts` 实现 capability-scoped
-兼容层，把 Playwright/Puppeteer 需要的 browser → tab → page 目标层级映射到 Electron
-的单页 debugger。这样可继续升级上游 MCP，同时连接层始终由 SuoCode 控制。
+Chrome DevTools MCP 作为 Apache-2.0 npm 依赖保留，SuoCode 不复制它的通用工具层。
+浏览器实现按职责拆成三层，所有源文件都受 600 行架构上限约束：
 
-Playwright 的参数较少不是因为浏览器能力更少，而是它预先处理了原始 CDP 状态：
+- `browser-runtime.ts` 只管理标签页、guest 生命周期和 Renderer 状态；
+- `browser-cdp-bridge.ts` 把上游 Puppeteer 需要的 browser → tab → page 目标层级映射到
+  Electron 单页 debugger；
+- `browser-cdp-commands.ts` 保存可独立回归的协议改写规则。
 
-- `snapshot ref` / selector 被解析成 Locator 与具体 frame、node、execution context；
-- click/fill/drag 内置可见、稳定、未被遮挡、可编辑等 actionability 检查和自动等待；
-- Page/BrowserContext 管理导航、弹窗、下载和页面生命周期；
-- 调用者通常只需表达“对哪个语义元素做什么”，不用持续传递 CDP session、frame、
-  backend node、坐标和等待条件。
+当前固定使用 `chrome-devtools-mcp@1.7.0`。该版本有少量会破坏 Electron guest 的上游
+行为，由 `scripts/patch-chrome-devtools-mcp.mjs` 在安装后做版本锁定、幂等的兼容修正；
+版本不匹配会直接失败，避免升级后静默套错补丁。主要兼容点是：stale selected page
+不能阻塞 `list_pages`/`close_page` 的恢复，导航失败必须返回 MCP error，`wait_for.text`
+同时接受字符串和数组，以及 Network/Performance 的明确错误语义。`setup` 即使使用
+`npm ci --ignore-scripts` 也会显式执行该补丁。
 
-因此 SuoCode 将快照、查找、点击、输入、导航、标签页、等待和截图等高频能力直接
-提供给 Agent；Console、任意脚本求值、Network 明细以及更底层的 Debugger/Fetch/
-Storage 工具通过 MCP 搜索渐进披露。能力没有删除，只避免把低频 schema 和复杂参数
-常驻在每轮模型上下文中。
+Electron 的 `Page.reload` 可能替换 `<webview>` 主 frame，导致 Puppeteer 报
+`Navigating frame was detached`；移动端/触摸 viewport 又会由 Puppeteer 隐式触发
+同一 reload。因此 CDP 桥把 `Page.reload` 路由成当前 URL 的 `Page.navigate`，保持
+target identity 不变。Lighthouse 的临时 direct session 查询 target 时，桥接层返回
+合成的 `type: page` 身份（而不是 Electron 原生的 `webview`），使其 session 能进入
+Lighthouse TargetManager。MCP 同时开启 structured content 和可选 pageId routing，
+但仍保持 `directTools: false`，不会把 30 个 schema 注入模型默认上下文。
+
+同一套上游工具已经覆盖导航、页面快照、点击、输入、截图、Console、Network、
+Performance 与 Lighthouse。SuoCode 只额外增加一个页级 `intercept_network_request`
+工具，通过同一个 Chrome DevTools MCP 和 CDP `Fetch` 链路管理规则：`add/list/remove/clear`
+四种操作覆盖 Mock 响应、阻断请求、修改 URL/方法/Headers/Body 后继续请求；规则跨页面
+导航保留，关闭页面或 MCP 重连后释放，最新匹配规则优先，未匹配请求始终继续，避免页面
+被意外挂起。该工具仍只存在于可搜索的 MCP 元数据中，不改变默认零直接工具的设计。
+
+SuoCode 不再同时装载 Playwright MCP，也不再维护独立的 Debugger/Fetch/Storage MCP；
+能力缺口按真实需求逐项评估，不通过叠加整套控制框架补齐。
 
 ## 当前界面
 

@@ -2,7 +2,7 @@ import { FolderPlus, LoaderCircle, Power, RefreshCw, Sparkles, Trash2 } from "lu
 import { useCallback, useEffect, useState } from "react";
 import type { SkillConfigurationSnapshot, SkillEntry, SkillSource } from "@suocode/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
-import { managedSkills, skillCountLabel, skillToggleActionLabel, skillToggleLabel, skillToggleTarget } from "./skillPolicy";
+import { canDeleteSkill, managedSkills, skillCountLabel, skillToggleActionLabel, skillToggleLabel, skillToggleTarget } from "./skillPolicy";
 
 const sourceLabel: Record<SkillSource, string> = {
   user: "用户",
@@ -11,10 +11,30 @@ const sourceLabel: Record<SkillSource, string> = {
   bundled: "内置",
 };
 
+function diagnosticDisplayPath(path: string | undefined, userSkillsDir: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const normalizedPath = path.replaceAll("\\", "/");
+  const normalizedRoot = userSkillsDir?.replaceAll("\\", "/").replace(/\/+$/, "");
+  return normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : path;
+}
+
+function canDeleteDiagnostic(
+  configuration: SkillConfigurationSnapshot,
+  path: string | undefined,
+): path is string {
+  if (!path || configuration.skills.some((skill) => skill.filePath === path)) return false;
+  const normalizedPath = path.replaceAll("\\", "/");
+  const normalizedRoot = configuration.userSkillsDir.replaceAll("\\", "/").replace(/\/+$/, "");
+  return normalizedPath.startsWith(`${normalizedRoot}/`);
+}
+
 export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: string }): React.JSX.Element {
   const [configuration, setConfiguration] = useState<SkillConfigurationSnapshot>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [deleteArmed, setDeleteArmed] = useState<string>();
 
   const load = useCallback(async (surfaceError = false): Promise<void> => {
     setLoading(true);
@@ -72,6 +92,26 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
     );
   };
 
+  const deleteSkill = (skill: SkillEntry): void => {
+    if (!canDeleteSkill(skill, configuration?.userSkillsDir)) return;
+    if (deleteArmed !== skill.filePath) {
+      setDeleteArmed(skill.filePath);
+      return;
+    }
+    setDeleteArmed(undefined);
+    void withBusy(
+      () => window.suocode.request<SkillConfigurationSnapshot>({ type: "delete_skill", filePath: skill.filePath, cwd }, runtimeId),
+      `已删除 ${skill.name}`,
+    );
+  };
+
+  const deleteInvalidSkill = (filePath: string): void => {
+    void withBusy(
+      () => window.suocode.request<SkillConfigurationSnapshot>({ type: "delete_skill", filePath, cwd }, runtimeId),
+      "已删除无效 Skill",
+    );
+  };
+
   const skills = managedSkills(configuration?.skills);
 
   return (
@@ -117,7 +157,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
         {!loading && skills.map((skill) => (
           <article key={skill.filePath} className={skill.enabled ? "enabled" : "disabled"}>
             <span className="skills-list-icon"><Sparkles size={14} /></span>
-            <div>
+            <div className="skills-list-copy">
               <div className="skills-list-title">
                 <strong>{skill.name}</strong>
                 <span className="skills-source">{sourceLabel[skill.source]}</span>
@@ -125,17 +165,32 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
               </div>
               <p>{skill.description}</p>
             </div>
-            <button
-              type="button"
-              className={skill.enabled ? "active" : ""}
-              disabled={busy}
-              aria-pressed={skill.enabled}
-              aria-label={skillToggleActionLabel(skill)}
-              onClick={() => toggleSkill(skill)}
-            >
-              <Power size={13} />
-              {skillToggleLabel(skill)}
-            </button>
+            <div className="skills-list-actions">
+              <button
+                type="button"
+                className={skill.enabled ? "active" : ""}
+                disabled={busy}
+                aria-pressed={skill.enabled}
+                aria-label={skillToggleActionLabel(skill)}
+                onClick={() => toggleSkill(skill)}
+              >
+                <Power size={13} />
+                {skillToggleLabel(skill)}
+              </button>
+              {canDeleteSkill(skill, configuration?.userSkillsDir) ? (
+                <button
+                  type="button"
+                  className={`skill-delete${deleteArmed === skill.filePath ? " armed" : ""}`}
+                  disabled={busy}
+                  aria-label={deleteArmed === skill.filePath ? `再次确认删除 ${skill.name}` : `删除 ${skill.name}`}
+                  title={deleteArmed === skill.filePath ? "再次点击确认删除" : "删除技能"}
+                  onClick={() => deleteSkill(skill)}
+                >
+                  <Trash2 size={13} />
+                  {deleteArmed === skill.filePath ? "再次确认" : "删除"}
+                </button>
+              ) : null}
+            </div>
           </article>
         ))}
         {!loading && !skills.length ? (
@@ -145,9 +200,25 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
 
       {configuration?.diagnostics.length ? (
         <section className="skills-diagnostics" aria-label="Skills 诊断">
-          {configuration.diagnostics.map((item, index) => (
-            <p key={`${item.path ?? item.message}-${index}`}>{item.type}: {item.message}</p>
-          ))}
+          <header><strong>未能导入的 Skill</strong><small>修正源文件后重新导入，或删除已经遗留的无效副本。</small></header>
+          {configuration.diagnostics.map((item, index) => {
+            const diagnosticPath = item.path;
+            const displayPath = diagnosticDisplayPath(diagnosticPath, configuration.userSkillsDir);
+            const deletable = canDeleteDiagnostic(configuration, diagnosticPath);
+            return (
+              <article key={`${item.path ?? item.message}-${index}`}>
+                <div>
+                  {displayPath ? <code title={item.path}>{displayPath}</code> : null}
+                  <p>{item.message}</p>
+                </div>
+                {deletable ? (
+                  <button type="button" disabled={busy} onClick={() => deleteInvalidSkill(diagnosticPath)}>
+                    <Trash2 size={12} />删除无效副本
+                  </button>
+                ) : null}
+              </article>
+            );
+          })}
         </section>
       ) : null}
     </div>

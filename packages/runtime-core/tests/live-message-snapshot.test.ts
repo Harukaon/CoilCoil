@@ -5,11 +5,13 @@ import { join } from "node:path";
 import test from "node:test";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { RuntimeEvent, ToolRun } from "@suocode/runtime-protocol";
 import { SuoCodeRuntime } from "../src/index.js";
 
 interface RuntimeInternals {
   active?: Record<string, unknown>;
   handleSessionEvent(event: unknown): void;
+  reconstructState(session: AgentSession): { tools: Map<string, ToolRun> };
 }
 
 test("a mid-stream snapshot includes the in-progress assistant message instead of dropping it", async (context) => {
@@ -103,4 +105,157 @@ test("a mid-stream snapshot includes the in-progress assistant message instead o
   assert.equal(finishedAssistantMessages[0]?.text, "从前有座山，山里有座庙。");
   assert.equal(finishedAssistantMessages[0]?.status, "succeeded");
   assert.equal(active.activeAssistantMessage, undefined);
+});
+
+test("assistant tool calls stay visible before a result and survive a live snapshot", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-live-tool-snapshot-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const manager = SessionManager.inMemory(root);
+  manager.appendMessage({
+    role: "user",
+    content: [{ type: "text", text: "启动测试服务" }],
+    timestamp: Date.now(),
+  } as never);
+  const session = {
+    sessionManager: manager,
+    sessionId: "session-tools",
+    sessionFile: "",
+    sessionName: "",
+    messages: [],
+    model: undefined,
+    isStreaming: true,
+    systemPrompt: "",
+    getSessionStats: () => ({ contextUsage: undefined, tokens: {} }),
+    getActiveToolNames: () => [],
+    getAllTools: () => [],
+  } as unknown as AgentSession;
+  const events: RuntimeEvent[] = [];
+  const runtime = new SuoCodeRuntime({
+    agentDir: join(root, "agent"),
+    sessionDir: join(root, "sessions"),
+    onEvent: (event) => events.push(event),
+  });
+  const internals = runtime as unknown as RuntimeInternals;
+  internals.active = {
+    cwd: root,
+    session,
+    unsubscribe: () => undefined,
+    tools: new Map(),
+    subagents: new Map(),
+    terminals: new Map(),
+    plan: [],
+    project: { cwd: root, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
+    messageIds: new WeakMap(),
+    messageRevision: 0,
+    pendingUserMessageIds: [],
+    promptQueue: [],
+    promptDrainInProgress: false,
+    nextTimelineOrder: 1,
+    responseMetricsHistory: [],
+    sessionRevision: 1,
+    eventBus: createEventBus(),
+  };
+
+  const assistant: Record<string, unknown> = {
+    role: "assistant",
+    content: [],
+    timestamp: Date.now(),
+  };
+  internals.handleSessionEvent({ type: "message_start", message: assistant });
+  assistant.content = [
+    { type: "text", text: "改用本地 HTTP 服务再测。" },
+    {
+      type: "toolCall",
+      id: "bash-server",
+      name: "bash",
+      arguments: {
+        command: "python3 -m http.server 8765 --bind 127.0.0.1",
+        cwd: root,
+        purpose: "启动本地测试服务",
+      },
+    },
+  ];
+  assistant.stopReason = "toolUse";
+  internals.handleSessionEvent({ type: "message_end", message: assistant });
+  manager.appendMessage(assistant as never);
+
+  const active = internals.active as {
+    tools: Map<string, ToolRun>;
+    terminals: Map<string, { status: string }>;
+  };
+  const projected = active.tools.get("bash-server");
+  assert.equal(projected?.status, "running");
+  assert.equal(projected?.label, "启动本地测试服务");
+  assert.equal(active.terminals.get("bash-server")?.status, "running");
+  assert.ok(events.some((event) => event.type === "tool_started" && event.tool.id === "bash-server"));
+
+  const projectedOrder = projected?.order;
+  internals.handleSessionEvent({
+    type: "tool_execution_start",
+    toolCallId: "bash-server",
+    toolName: "bash",
+    args: {
+      command: "python3 -m http.server 8765 --bind 127.0.0.1",
+      cwd: root,
+      timeout: 120,
+    },
+  });
+  assert.equal(active.tools.size, 1, "the durable tool call and live execution must upsert by id");
+  assert.equal(active.tools.get("bash-server")?.order, projectedOrder);
+  assert.equal(active.tools.get("bash-server")?.args.timeout, 120);
+
+  const snapshot = await runtime.snapshot();
+  assert.equal(snapshot.tools.length, 1);
+  assert.equal(snapshot.tools[0]?.id, "bash-server");
+  assert.equal(snapshot.tools[0]?.status, "running", "a live snapshot must override the incomplete historical projection");
+
+  internals.handleSessionEvent({
+    type: "tool_execution_end",
+    toolCallId: "bash-server",
+    toolName: "bash",
+    result: {
+      content: [{ type: "text", text: "后台运行中" }],
+      details: {
+        id: "term-1",
+        background_shell_id: "term-1",
+        status: "running",
+        is_running_in_background: true,
+      },
+    },
+    isError: false,
+  });
+  assert.equal(active.tools.get("bash-server")?.status, "succeeded", "the handoff tool call itself has completed");
+  assert.equal(active.terminals.has("bash-server"), false, "the provisional tool id must be replaced by the stable shell id");
+  assert.equal(active.terminals.get("term-1")?.status, "running", "the handed-off process remains live");
+
+  internals.handleSessionEvent({
+    type: "entry_appended",
+    entry: {
+      type: "custom",
+      id: "terminal-finished",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      customType: "suocode-terminal-run",
+      data: {
+        id: "term-1",
+        ownerToolCallId: "bash-server",
+        command: "python3 -m http.server 8765 --bind 127.0.0.1",
+        cwd: root,
+        output: "stopped",
+        status: "stopped",
+        startedAt: Date.now() - 100,
+        endedAt: Date.now(),
+      },
+    },
+  });
+  assert.equal(active.terminals.get("term-1")?.status, "stopped", "async completion updates the same terminal row");
+
+  const restoredRuntime = new SuoCodeRuntime({
+    agentDir: join(root, "restored-agent"),
+    sessionDir: join(root, "restored-sessions"),
+  }) as unknown as RuntimeInternals;
+  const restored = restoredRuntime.reconstructState({ sessionManager: manager } as AgentSession);
+  assert.equal(restored.tools.get("bash-server")?.status, "failed");
+  assert.match(restored.tools.get("bash-server")?.output ?? "", /返回执行结果前中断/);
 });

@@ -1,23 +1,13 @@
-import {
-  BrainCircuit,
-  Files,
-  FileText,
-  Globe2,
-  PanelLeft,
-  Terminal as TerminalIcon,
-} from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import type {
   ChatMessage,
   PlanApprovalState,
   PlanExecutionTarget,
   ProjectSelection,
   ProjectSnapshot,
-  FileNode,
   RuntimeBootstrap,
   RuntimeConfiguration,
-  RuntimeEvent,
   PromptImage,
   SessionSnapshot,
   SessionSummary,
@@ -27,93 +17,32 @@ import type {
 } from "@suocode/runtime-protocol";
 import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
 import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
-import { ConversationPane } from "./features/conversation/ConversationPane";
+import { SettingsDialog } from "./features/settings/SettingsDialog";
+import { AppView } from "./AppView";
 import {
   conversationMessagesReducer,
   EMPTY_CONVERSATION_MESSAGES,
   selectConversationMessages,
 } from "./features/conversation/conversationMessages";
-import { SettingsDialog } from "./features/settings/SettingsDialog";
-import { SkillsWorkspace } from "./features/settings/SkillsWorkspace";
-import { WorkspaceSidebar, type SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
+import type { SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
-import { FilesPanel } from "./features/files/FilesPanel";
-import { InspectorPane } from "./features/inspector/InspectorPane";
-import { RuntimePanel } from "./features/runtime/RuntimePanel";
-import { BrowserPanel } from "./features/browser/BrowserPanel";
-import { TerminalPanel } from "./features/terminal/TerminalPanel";
+import { useWorkspaceInspector } from "./features/inspector/useWorkspaceInspector";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
+import { useRuntimeEventHandler } from "./hooks/useRuntimeEventHandler";
+import { useConversationViewport } from "./hooks/useConversationViewport";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
-import { toastError, toastInfo, toastSuccess } from "./ui/toast";
-import type { TerminalSessionSnapshot } from "../../shared/desktop-api";
+import { toastError } from "./ui/toast";
+import {
+  ACTIVE_PROJECT_STORAGE_KEY,
+  AGENT_ACTIVITY_PHRASES,
+  EMPTY_PROJECT,
+  loadStoredProjects,
+  PROJECTS_STORAGE_KEY,
+  uniqueProjects,
+} from "./appState";
 
-type InspectorTabKind = "files" | "browser" | "runtime" | "file";
-type InspectorTabId = string;
-type WorkspaceSurface = "conversation" | "skills" | "terminal";
-
-interface InspectorTabDefinition {
-  id: InspectorTabId;
-  kind: InspectorTabKind;
-  label: string;
-  icon: typeof Files;
-  path?: string;
-}
-
-function fileInspectorTabId(path: string): string {
-  return `file:${path}`;
-}
-
-const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
-const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
-const ACTIVE_PROJECT_STORAGE_KEY = "suocode.active-project";
-const AGENT_ACTIVITY_PHRASES = ["工作中…", "整理线索…", "翻找文件…", "冲浪中…", "组织思路…", "沿着思路前进…", "快收尾了…"];
-const EMPTY_PROJECT: ProjectSnapshot = {
-  cwd: "",
-  files: [],
-  changes: [],
-  terminals: [],
-  plan: [],
-  refreshedAt: 0,
-};
-
-function isWorkspace(value: Partial<ProjectSelection>): value is ProjectSelection {
-  return typeof value.name === "string" && typeof value.path === "string" && value.kind === "workspace";
-}
-
-function loadStoredProjects(): ProjectSelection[] {
-  try {
-    const stored = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored) as Array<Partial<ProjectSelection>>;
-      if (Array.isArray(parsed)) return parsed.filter(isWorkspace);
-    }
-    const legacy = window.localStorage.getItem(LEGACY_PROJECT_STORAGE_KEY);
-    if (!legacy) return [];
-    const parsed = JSON.parse(legacy) as Partial<ProjectSelection>;
-    return isWorkspace(parsed) ? [parsed] : [];
-  } catch {
-    return [];
-  }
-}
-
-function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
-  const seen = new Set<string>();
-  return projects.filter((project) => {
-    if (seen.has(project.path)) return false;
-    seen.add(project.path);
-    return true;
-  });
-}
-
-
-function upsertTool(tools: ToolRun[], tool: ToolRun): ToolRun[] {
-  const index = tools.findIndex((item) => item.id === tool.id);
-  if (index < 0) return [...tools, tool];
-  const next = [...tools];
-  next[index] = tool;
-  return next;
-}
+type WorkspaceSurface = "conversation" | "skills" | "memory";
 
 export default function App(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSelection[]>([]);
@@ -130,121 +59,19 @@ export default function App(): React.JSX.Element {
   const [subagents, setSubagents] = useState<SubagentActivity[]>([]);
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
   const [configuration, setConfiguration] = useState<RuntimeConfiguration>();
-  const [inspectorTabs, setInspectorTabs] = useState<InspectorTabDefinition[]>([]);
-  const [activeInspectorTabId, setActiveInspectorTabId] = useState<InspectorTabId>();
-  const [selectedFilePath, setSelectedFilePath] = useState<string>();
-  const [terminals, setTerminals] = useState<TerminalSessionSnapshot[]>([]);
-  const [activeTerminalId, setActiveTerminalId] = useState<string>();
+  const inspector = useWorkspaceInspector(project?.path);
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivityState>>({});
   const [pendingProjectPath, setPendingProjectPath] = useState<string>();
   const [expandedSessionLimits, setExpandedSessionLimits] = useState<Record<string, number>>({});
   const [startingSession, setStartingSession] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
-  const { leftOpen, rightOpen, leftWidth, rightWidth, setLeftOpen, setRightOpen, beginResize } = usePanelLayout();
+  const { leftOpen, leftWidth, rightWidth, setLeftOpen, beginResize } = usePanelLayout({
+    rightOpen: inspector.state.rightOpen,
+    onRightOpenChange: inspector.setRightOpen,
+  });
+  const rightOpen = inspector.state.rightOpen;
 
-  const openInspectorTab = useCallback((tab: InspectorTabDefinition): void => {
-    setInspectorTabs((current) => current.some((item) => item.id === tab.id) ? current : [...current, tab]);
-    setActiveInspectorTabId(tab.id);
-    if (tab.kind === "file") setSelectedFilePath(tab.path);
-    if (tab.kind === "files") setSelectedFilePath(undefined);
-    setRightOpen(true);
-  }, [setRightOpen]);
-
-  const openFilesTab = useCallback((): void => {
-    openInspectorTab({ id: "files", kind: "files", label: "文件", icon: Files });
-  }, [openInspectorTab]);
-
-  const openBrowserTab = useCallback((): void => {
-    openInspectorTab({ id: "browser", kind: "browser", label: "浏览器", icon: Globe2 });
-  }, [openInspectorTab]);
-
-  const openRuntimeTab = useCallback((): void => {
-    openInspectorTab({ id: "runtime", kind: "runtime", label: "运行时", icon: BrainCircuit });
-  }, [openInspectorTab]);
-
-  const openInspectorOption = useCallback((id: InspectorTabId): void => {
-    if (id === "files") openFilesTab();
-    else if (id === "browser") openBrowserTab();
-    else if (id === "runtime") openRuntimeTab();
-  }, [openBrowserTab, openFilesTab, openRuntimeTab]);
-
-  const openFileTab = useCallback((node: FileNode): void => {
-    openInspectorTab({ id: fileInspectorTabId(node.path), kind: "file", label: node.name, icon: FileText, path: node.path });
-  }, [openInspectorTab]);
-
-  const selectInspectorTab = useCallback((id: InspectorTabId): void => {
-    const tab = inspectorTabs.find((item) => item.id === id);
-    if (!tab) return;
-    setActiveInspectorTabId(id);
-    if (tab.kind === "file") setSelectedFilePath(tab.path);
-    else if (tab.kind === "files") setSelectedFilePath(undefined);
-    setRightOpen(true);
-  }, [inspectorTabs, setRightOpen]);
-
-  const closeInspectorTab = useCallback((id: InspectorTabId): void => {
-    setInspectorTabs((current) => current.filter((item) => item.id !== id));
-    setActiveInspectorTabId((current) => current === id ? undefined : current);
-    if (id.startsWith("file:")) {
-      setSelectedFilePath((current) => current === id.slice("file:".length) ? undefined : current);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (activeInspectorTabId && inspectorTabs.some((item) => item.id === activeInspectorTabId)) return;
-    setActiveInspectorTabId(inspectorTabs.at(-1)?.id);
-  }, [activeInspectorTabId, inspectorTabs]);
-
-  useEffect(() => {
-    const active = inspectorTabs.find((item) => item.id === activeInspectorTabId);
-    if (active?.kind === "file") setSelectedFilePath(active.path);
-    else if (active?.kind === "files") setSelectedFilePath(undefined);
-  }, [activeInspectorTabId, inspectorTabs]);
-
-  useEffect(() => window.suocode.onBrowserAgentActivated((scopeId) => {
-    if (scopeId !== snapshotRef.current?.runtimeId) return;
-    openBrowserTab();
-  }), [openBrowserTab]);
-
-  useEffect(() => window.suocode.onTerminalStateUpdated((next) => {
-    setTerminals(next);
-    setActiveTerminalId((current) => current && next.some((terminal) => terminal.id === current) ? current : next.at(-1)?.id);
-    if (!next.length) setWorkspaceSurface((current) => current === "terminal" ? "conversation" : current);
-  }), []);
-
-  const openNewTerminal = useCallback(async (): Promise<void> => {
-    if (!project?.path) return;
-    try {
-      const next = await window.suocode.createTerminal(project.path);
-      setTerminals(next);
-      setActiveTerminalId(next.at(-1)?.id);
-      setWorkspaceSurface("terminal");
-    } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    }
-  }, [project?.path]);
-
-  const openTerminal = useCallback((id: string): void => {
-    if (!terminals.some((terminal) => terminal.id === id)) return;
-    setActiveTerminalId(id);
-    setWorkspaceSurface("terminal");
-  }, [terminals]);
-
-  const closeTerminal = useCallback(async (id: string): Promise<void> => {
-    try {
-      const next = await window.suocode.closeTerminal(id);
-      setTerminals(next);
-      setActiveTerminalId((current) => current === id ? next.at(-1)?.id : current);
-      if (!next.length) setWorkspaceSurface("conversation");
-    } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    }
-  }, []);
-
-  const writeTerminal = useCallback((id: string, data: string): void => {
-    void window.suocode.writeTerminal(id, data).catch((caught) => toastError(caught instanceof Error ? caught.message : String(caught)));
-  }, []);
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
-  const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"models" | "mcp" | "skills">("models");
   const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("conversation");
@@ -252,7 +79,7 @@ export default function App(): React.JSX.Element {
   const composer = useComposerController({
     configuration,
     runtimeId: snapshot?.runtimeId,
-    sessionThinkingLevel: snapshot?.thinkingLevel,
+    sessionThinkingLevel: snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel,
     onConfigurationChange: setConfiguration,
     onError: (message) => { if (message) toastError(message); },
   });
@@ -276,6 +103,10 @@ export default function App(): React.JSX.Element {
   const runtimeSessionRef = useRef(new Map<string, string>());
   const optimisticSessionsRef = useRef(new Map<string, SessionSummary>());
   const selectionRequestRef = useRef(0);
+  useEffect(() => window.suocode.onBrowserAgentActivated((scopeId) => {
+    if (scopeId !== snapshotRef.current?.runtimeId) return;
+    inspector.openBrowserTab();
+  }), [inspector.openBrowserTab]);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
     onInsertPath: insertComposerPath,
     onError: (message) => { if (message) toastError(message); },
@@ -312,9 +143,6 @@ export default function App(): React.JSX.Element {
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(selection.path);
     setWorkspaceSurface("conversation");
-    setInspectorTabs([]);
-    setActiveInspectorTabId(undefined);
-    setSelectedFilePath(undefined);
     snapshotRef.current = undefined;
     setSnapshot(undefined);
     dispatchConversationMessages({ type: "reset" });
@@ -327,165 +155,22 @@ export default function App(): React.JSX.Element {
     focusComposer();
   }, [focusComposer, resetComposer]);
 
-  const handleRuntimeEvent = useCallback((event: RuntimeEvent, runtimeId?: string): void => {
-    if (event.type === "session_snapshot") {
-      const path = event.snapshot.session.path;
-      if (path) snapshotCacheRef.current.set(path, event.snapshot);
-      if (runtimeId && path) runtimeSessionRef.current.set(runtimeId, path);
-      if (path) {
-        setSessionActivity((current) => {
-          const active = snapshotRef.current?.runtimeId === runtimeId;
-          return { ...current, [path]: { runtimeId, running: event.snapshot.running, unread: active ? false : current[path]?.unread ?? false } };
-        });
-      }
-      if (runtimeId !== snapshotRef.current?.runtimeId) return;
-    } else if (event.type === "run_state" && runtimeId) {
-      const path = runtimeSessionRef.current.get(runtimeId);
-      if (path) {
-        setSessionActivity((current) => {
-          const active = snapshotRef.current?.runtimeId === runtimeId;
-          return { ...current, [path]: { runtimeId, running: event.running, unread: !event.running && !active ? true : active ? false : current[path]?.unread ?? false } };
-        });
-      }
-      if (runtimeId !== snapshotRef.current?.runtimeId) return;
-    } else if (runtimeId && runtimeId !== snapshotRef.current?.runtimeId && event.type !== "sessions_updated") {
-      return;
-    }
-    switch (event.type) {
-      case "runtime_ready":
-      case "configuration_updated":
-        setConfiguration(event.configuration);
-        break;
-      case "sessions_updated":
-        setSessionsByProject((current) => {
-          let sessions = event.sessions;
-          const confirmedPaths = new Set(event.sessions.map((session) => session.path));
-          for (const [path, optimistic] of optimisticSessionsRef.current) {
-            if (confirmedPaths.has(path)) {
-              optimisticSessionsRef.current.delete(path);
-            } else if (optimistic.cwd === event.cwd) {
-              sessions = upsertSessionSummary(sessions, optimistic);
-            }
-          }
-          return { ...current, [event.cwd]: sessions };
-        });
-        break;
-      case "session_snapshot":
-        applySnapshot(event.snapshot);
-        break;
-      case "session_fast_updated":
-        setSnapshot((current) => {
-          if (!current) return current;
-          const next = { ...current, fast: event.fast };
-          snapshotRef.current = next;
-          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
-          return next;
-        });
-        break;
-      case "prompt_queue_updated":
-        dispatchConversationMessages({
-          type: "prompt_queue",
-          queue: event.queue,
-          revision: event.revision,
-          sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
-        });
-        setSnapshot((current) => {
-          if (!current) return current;
-          const next = { ...current, promptQueue: event.queue };
-          snapshotRef.current = next;
-          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
-          return next;
-        });
-        break;
-      case "message_started":
-      case "message_finished":
-        dispatchConversationMessages({
-          type: "runtime_message",
-          message: event.message,
-          revision: event.revision,
-          sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
-        });
-        break;
-      case "message_delta":
-        setAgentPhase(event.field === "thinking" ? "思考" : "回复");
-        dispatchConversationMessages({
-          ...event,
-          timestamp: Date.now(),
-          sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
-        });
-        break;
-      case "message_rejected":
-        dispatchConversationMessages({ type: "reject", id: event.id, revision: event.revision });
-        break;
-      case "tool_started":
-        setAgentPhase("工具");
-        setTools((current) => upsertTool(current, event.tool));
-        break;
-      case "tool_updated":
-      case "tool_finished":
-        setTools((current) => upsertTool(current, event.tool));
-        if (event.type === "tool_finished") setAgentPhase("思考");
-        break;
-      case "plan_updated":
-        setProjectState((current) => ({ ...current, plan: event.plan }));
-        break;
-      case "plan_approval_updated":
-        setProjectState((current) => ({ ...current, planApproval: event.plan }));
-        setSnapshot((current) => {
-          if (!current) return current;
-          const next = { ...current, project: { ...current.project, planApproval: event.plan } };
-          snapshotRef.current = next;
-          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
-          return next;
-        });
-        break;
-      case "subagents_updated":
-        setSubagents(event.subagents);
-        setSnapshot((current) => {
-          if (!current) return current;
-          const next = { ...current, subagents: event.subagents };
-          snapshotRef.current = next;
-          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
-          return next;
-        });
-        break;
-      case "project_updated":
-        setProjectState(event.project);
-        break;
-      case "metrics_updated":
-        setSnapshot((current) => current ? {
-          ...current,
-          responseMetrics: event.responseMetrics,
-          responseMetricsHistory: event.responseMetricsHistory,
-          contextUsage: event.contextUsage,
-          tokenUsage: event.tokenUsage,
-        } : current);
-        break;
-      case "runtime_inspection_updated":
-        setSnapshot((current) => {
-          if (!current) return current;
-          const next = { ...current, runtimeInspection: event.inspection };
-          snapshotRef.current = next;
-          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
-          return next;
-        });
-        break;
-      case "runtime_notice":
-        if (event.level === "error") toastError(event.message);
-        else if (event.level === "success") toastSuccess(event.message);
-        else toastInfo(event.message);
-        break;
-      case "run_state":
-        setSnapshot((current) => current ? { ...current, running: event.running } : current);
-        setAgentPhase(event.running ? "思考" : undefined);
-        break;
-      case "runtime_error":
-        toastError(event.message);
-        break;
-      default:
-        break;
-    }
-  }, [applySnapshot]);
+  const handleRuntimeEvent = useRuntimeEventHandler({
+    snapshotRef,
+    snapshotCacheRef,
+    runtimeSessionRef,
+    optimisticSessionsRef,
+    applySnapshot,
+    dispatchConversationMessages,
+    setSnapshot,
+    setSessionActivity,
+    setConfiguration,
+    setSessionsByProject,
+    setAgentPhase,
+    setTools,
+    setProjectState,
+    setSubagents,
+  });
 
   const activateProject = useCallback(async (selection: ProjectSelection): Promise<void> => {
     const requestId = ++selectionRequestRef.current;
@@ -495,10 +180,10 @@ export default function App(): React.JSX.Element {
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(undefined);
     setDraftImages([]);
-    setInspectorTabs([]);
-    setActiveInspectorTabId(undefined);
-    setSelectedFilePath(undefined);
     setLoading(true);
+    setPendingProjectPath(undefined);
+    snapshotRef.current = undefined;
+    setSnapshot(undefined);
     dispatchConversationMessages({ type: "reset" });
     setTools([]);
     setSubagents([]);
@@ -507,7 +192,13 @@ export default function App(): React.JSX.Element {
       const { sessions, snapshot } = await window.suocode.request<WorkspaceSnapshot>({ type: "open_workspace", cwd: selection.path });
       if (requestId !== selectionRequestRef.current) return;
       setSessionsByProject((current) => ({ ...current, [selection.path]: sessions }));
-      applySnapshot(snapshot);
+      if (snapshot) {
+        applySnapshot(snapshot);
+      } else {
+        // Keep the project open with a blank composer. The first prompt will
+        // create a session; restoring a workspace must not pick a pinned tab.
+        setPendingProjectPath(selection.path);
+      }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
       if (requestId === selectionRequestRef.current && message !== SESSION_OPEN_SUPERSEDED_ERROR) toastError(message);
@@ -549,23 +240,19 @@ export default function App(): React.JSX.Element {
     return unsubscribe;
   }, [activateProject, handleRuntimeEvent]);
 
-  useLayoutEffect(() => {
-    const viewport = timelineRef.current;
-    if (viewport && shouldAutoScrollRef.current) viewport.scrollTop = viewport.scrollHeight;
-  }, [messages, tools, snapshot?.running]);
-
-  useLayoutEffect(() => {
-    if (settingsOpen || workspaceSurface !== "conversation") return;
-    const frame = window.requestAnimationFrame(() => {
-      const viewport = timelineRef.current;
-      if (viewport && shouldAutoScrollRef.current) viewport.scrollTop = viewport.scrollHeight;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [settingsOpen, workspaceSurface]);
+  const activityPhraseIndex = useConversationViewport({
+    timelineRef,
+    shouldAutoScrollRef,
+    messages,
+    tools,
+    running: snapshot?.running ?? false,
+    settingsOpen,
+    conversationVisible: workspaceSurface === "conversation",
+  });
 
   useEffect(() => {
     const runtimeId = snapshot?.runtimeId;
-    if (settingsOpen || workspaceSurface !== "conversation" || activeInspectorTabId !== "runtime" || !runtimeId) return;
+    if (settingsOpen || workspaceSurface !== "conversation" || inspector.state.activeTabId !== "runtime" || !runtimeId) return;
     let cancelled = false;
     void window.suocode.request<SessionSnapshot["runtimeInspection"]>({ type: "get_runtime_inspection" }, runtimeId)
       .then((inspection) => {
@@ -582,13 +269,7 @@ export default function App(): React.JSX.Element {
         if (!cancelled) toastError(caught instanceof Error ? caught.message : String(caught));
       });
     return () => { cancelled = true; };
-  }, [activeInspectorTabId, settingsOpen, snapshot?.runtimeId, workspaceSurface]);
-
-  useEffect(() => {
-    if (!snapshot?.running) return;
-    const timer = window.setInterval(() => setActivityPhraseIndex((current) => current + 1), 2_300);
-    return () => window.clearInterval(timer);
-  }, [snapshot?.running]);
+  }, [inspector.state.activeTabId, settingsOpen, snapshot?.runtimeId, workspaceSurface]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent): void => {
@@ -607,8 +288,9 @@ export default function App(): React.JSX.Element {
 
   const activeConversation = snapshot?.session;
   const running = snapshot?.running ?? false;
-  const selectedModel = configuration?.models.find((model) => snapshot?.model
-    ? model.provider === snapshot.model.provider && model.id === snapshot.model.id
+  const sessionModel = snapshot?.pendingModel ?? snapshot?.model;
+  const selectedModel = configuration?.models.find((model) => sessionModel
+    ? model.provider === sessionModel.provider && model.id === sessionModel.id
     : model.provider === configuration.provider && model.id === configuration.modelId);
   const modelConfigured = Boolean(
     selectedModel && configuration?.configuredProviders.includes(selectedModel.provider),
@@ -790,7 +472,7 @@ export default function App(): React.JSX.Element {
     setDraft("");
     setDraftImages([]);
     if (runtimeCommand) {
-      openRuntimeTab();
+      inspector.openRuntimeTab();
     }
     shouldAutoScrollRef.current = true;
     const clientMessageId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -878,194 +560,30 @@ export default function App(): React.JSX.Element {
     shouldAutoScrollRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1;
   };
 
-  const activeInspectorTab = inspectorTabs.find((item) => item.id === activeInspectorTabId);
-  const filesVisible = activeInspectorTab?.kind === "files" || activeInspectorTab?.kind === "file";
-  const activeTerminal = activeTerminalId ? terminals.find((terminal) => terminal.id === activeTerminalId) : undefined;
-  const inspectorAddOptions = [
-    { id: "files", label: "文件", icon: Files, disabled: inspectorTabs.some((item) => item.kind === "files") },
-    { id: "browser", label: "浏览器", icon: Globe2, disabled: inspectorTabs.some((item) => item.kind === "browser") },
-    { id: "runtime", label: "运行时", icon: BrainCircuit, disabled: inspectorTabs.some((item) => item.kind === "runtime") },
-  ];
-
   if (settingsOpen) {
-    return <SettingsDialog configuration={configuration} open onClose={() => { shouldAutoScrollRef.current = true; setSettingsOpen(false); }} onSaved={setConfiguration} runtimeId={snapshot?.runtimeId} cwd={project?.path} initialSection={settingsSection} />;
+    return <SettingsDialog
+      configuration={configuration} open onSaved={setConfiguration}
+      runtimeId={snapshot?.runtimeId} cwd={project?.path} initialSection={settingsSection}
+      onClose={() => { shouldAutoScrollRef.current = true; setSettingsOpen(false); }}
+    />;
   }
 
   return (
-    <>
-      <main className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "" : "right-collapsed"}`} style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as CSSProperties}>
-        <WorkspaceSidebar
-          projects={projects}
-          activeProject={project}
-          activeSessionId={activeConversation?.id}
-          pendingProjectPath={pendingProjectPath}
-          sessionsByProject={sessionsByProject}
-          sessionActivity={sessionActivity}
-          expandedProjects={expandedProjects}
-          expandedSessionLimits={expandedSessionLimits}
-          modelLabel={snapshot?.model ? `${snapshot.model.provider}/${snapshot.model.name}` : "本地 Agent"}
-          onNewConversation={(owner) => startNewConversation(owner)}
-          onNewTerminal={() => { void openNewTerminal(); }}
-          onOpenTerminal={(id) => openTerminal(id)}
-          onCloseTerminal={(id) => { void closeTerminal(id); }}
-          terminals={terminals}
-          activeTerminalId={activeTerminalId}
-          onOpenProject={() => { void openProject(); }}
-          onToggleProject={(path) => setExpandedProjects((current) => {
-            const next = new Set(current);
-            if (next.has(path)) next.delete(path); else next.add(path);
-            return next;
-          })}
-          onShowMoreSessions={(path, limit) => setExpandedSessionLimits((current) => ({ ...current, [path]: limit }))}
-          onCollapseSessions={(path) => setExpandedSessionLimits((current) => {
-            const next = { ...current };
-            delete next[path];
-            return next;
-          })}
-          onOpenConversation={(owner, session) => { void openConversation(owner, session); }}
-          onArchiveConversation={(owner, session) => { void archiveConversation(owner, session); }}
-          onRenameConversation={(owner, session, name) => renameConversation(owner, session, name)}
-          onPinConversation={(owner, session, pinned) => { void pinConversation(owner, session, pinned); }}
-          onForkConversation={(owner, session) => { void forkConversation(owner, session); }}
-          onRestoreSessions={(owner, sessions) => setSessionsByProject((current) => ({ ...current, [owner.path]: sessions }))}
-          onFocusPending={() => {
-            setWorkspaceSurface("conversation");
-            window.requestAnimationFrame(() => inputRef.current?.focus());
-          }}
-          skillsOpen={workspaceSurface === "skills"}
-          onOpenSkills={() => {
-            setModelMenuOpen(false);
-            setWorkspaceSurface("skills");
-          }}
-          onOpenSettings={() => {
-            setSettingsSection("models");
-            setSettingsOpen(true);
-          }}
-          onRemoveProject={(owner) => removeProject(owner)}
-          onError={(message) => { if (message) toastError(message); }}
-        />
-        {leftOpen ? <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}><span><PanelLeft size={17} /></span></button> : null}
-        {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
-
-        {workspaceSurface === "skills" ? (
-          <SkillsWorkspace
-            runtimeId={snapshot?.runtimeId}
-            cwd={project?.path}
-            leftOpen={leftOpen}
-            onOpenLeft={() => setLeftOpen(true)}
-            onClose={() => {
-              shouldAutoScrollRef.current = true;
-              setWorkspaceSurface("conversation");
-            }}
-          />
-        ) : <>
-        {workspaceSurface === "terminal" ? (
-          activeTerminal ? (
-            <TerminalPanel
-              session={activeTerminal}
-              onWrite={(data) => writeTerminal(activeTerminal.id, data)}
-              onClose={() => { void closeTerminal(activeTerminal.id); }}
-            />
-          ) : <div className="terminal-empty"><TerminalIcon size={28} /><strong>终端已关闭</strong><button type="button" onClick={() => { void openNewTerminal(); }}>新建终端</button></div>
-        ) : <ConversationPane
-          fileDragActive={fileDragActive}
-          leftOpen={leftOpen}
-          rightOpen={rightOpen}
-          pendingProjectPath={pendingProjectPath}
-          activeConversation={activeConversation}
-          project={project}
-          loading={loading}
-          timeline={timeline}
-          running={running}
-          timelineRef={timelineRef}
-          agentPhase={agentPhase}
-          activityPhrase={AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}
-          projectState={projectState}
-          subagents={subagents}
-          snapshot={snapshot}
-          startingSession={startingSession}
-          draft={draft}
-          draftImages={draftImages}
-          inputRef={inputRef}
-          configuration={configuration}
-          selectedModel={selectedModel}
-          modelMenuOpen={modelMenuOpen}
-          modelChanging={modelChanging}
-          onDragEnter={handleFileDragEnter}
-          onDragOver={handleFileDragOver}
-          onDragLeave={handleFileDragLeave}
-          onDrop={handleFileDrop}
-          onOpenLeft={() => setLeftOpen(true)}
-          onOpenRight={() => setRightOpen(true)}
-          onTimelineScroll={handleTimelineScroll}
-          onRewind={rewindPrompt}
-          onError={(message) => { if (message) toastError(message); }}
-          onSubmit={(event) => { void submitPrompt(event); }}
-          onDraftChange={setDraft}
-          onImagesChange={setDraftImages}
-          onPaste={composer.handlePaste}
-          onCompositionStart={composer.handleCompositionStart}
-          onCompositionEnd={composer.handleCompositionEnd}
-          onKeyDown={composer.handleKeyDown}
-          onModelMenuOpenChange={setModelMenuOpen}
-          onSelectModel={(model) => { void composer.selectModel(model); }}
-          onConfigureModelOptions={composer.configureModelOptions}
-          onFastChange={composer.setFast}
-          onOpenSettings={(section) => {
-            setModelMenuOpen(false);
-            setSettingsSection(section ?? "models");
-            setSettingsOpen(true);
-          }}
-          onAbort={() => { void window.suocode.request({ type: "abort" }, snapshot?.runtimeId); }}
-          onApprovePlan={approvePlan}
-          onRejectPlan={rejectPlan}
-        />}
-
-        <InspectorPane
-          tabs={inspectorTabs.map((item) => ({ ...item, closable: true }))}
-          activeTab={activeInspectorTabId ?? ""}
-          onSelectTab={selectInspectorTab}
-          onCloseTab={closeInspectorTab}
-          onClose={() => setRightOpen(false)}
-          addOptions={inspectorAddOptions}
-          onAddTab={openInspectorOption}
-          emptyState={(
-            <>
-              <div className="inspector-empty-icon"><Files size={18} strokeWidth={1.7} /></div>
-              <strong>打开一个面板</strong>
-              <p>选择文件、浏览器或运行时，内容会以标签页保留在这里。</p>
-              <div className="inspector-empty-actions">
-                <button type="button" onClick={openFilesTab}><Files size={14} />文件</button>
-                <button type="button" onClick={openBrowserTab}><Globe2 size={14} />浏览器</button>
-                <button type="button" onClick={openRuntimeTab}><BrainCircuit size={14} />运行时</button>
-              </div>
-            </>
-          )}
-        >
-          <div className={`inspector-tab-panel files-tab-panel ${filesVisible ? "active" : ""}`}>
-            <FilesPanel
-              key={`agent-files:${projectState.cwd}`}
-              project={projectState}
-              runtimeId={snapshot?.runtimeId}
-              activeFilePath={selectedFilePath}
-              onOpenFile={openFileTab}
-              onCloseFile={(path) => closeInspectorTab(fileInspectorTabId(path))}
-              onRemovePath={(path) => {
-                setInspectorTabs((current) => current.filter((tab) => tab.kind !== "file" || !(tab.path === path || tab.path?.startsWith(`${path}/`) || tab.path?.startsWith(`${path}\\`))));
-                setSelectedFilePath((current) => current && (current === path || current.startsWith(`${path}/`) || current.startsWith(`${path}\\`)) ? undefined : current);
-              }}
-            />
-          </div>
-          <div className={`inspector-tab-panel runtime-tab-panel ${activeInspectorTab?.kind === "runtime" ? "active" : ""}`}>
-            <RuntimePanel inspection={snapshot?.runtimeInspection} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} runtimeId={snapshot?.runtimeId} cwd={project?.path} />
-          </div>
-          <div className={`inspector-tab-panel browser-tab-panel ${activeInspectorTab?.kind === "browser" ? "active" : ""}`}>
-            <BrowserPanel active={rightOpen && activeInspectorTab?.kind === "browser"} scopeId={snapshot?.runtimeId ?? project?.path ?? "default"} />
-          </div>
-        </InspectorPane>
-        {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
-        </>}
-      </main>
-    </>
+    <AppView
+      controller={{
+        projects, project, activeConversation, pendingProjectPath, sessionsByProject,
+        sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
+        leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
+        timeline, running, agentPhase, activityPhraseIndex, projectState, subagents,
+        startingSession, configuration, selectedModel, fileDragActive, timelineRef,
+        shouldAutoScrollRef, composer, inspector, setExpandedProjects,
+        setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,
+        setSettingsOpen, setSettingsSection, setLeftOpen, beginResize,
+        startNewConversation, openProject, removeProject, openConversation,
+        archiveConversation, renameConversation, pinConversation, forkConversation,
+        rewindPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
+        handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,
+      }}
+    />
   );
 }

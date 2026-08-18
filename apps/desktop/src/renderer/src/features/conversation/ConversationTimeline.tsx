@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronRight, Copy, LoaderCircle } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Copy, FileText, LoaderCircle } from "lucide-react";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ClipboardEvent as ReactClipboardEvent, FormEvent } from "react";
@@ -19,6 +19,7 @@ import type {
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { ConfirmDialog } from "../../ui/dialog";
+import { parseMarkdownFileHref } from "./markdownFileLinks";
 
 export type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
@@ -38,6 +39,25 @@ const REWIND_WARNING_DISMISSED_KEY = "suocode.rewind-warning-dismissed";
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 const MARKDOWN_COMPONENTS: Components = {
   table: ({ node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props} /></div>,
+  a: ({ node: _node, children, className, href, ...props }) => {
+    const file = parseMarkdownFileHref(href);
+    if (!file) return <a className={className} href={href} {...props}>{children}</a>;
+    const location = file.line ? `L${file.line}${file.column ? `:${file.column}` : ""}` : undefined;
+    return (
+      <a
+        {...props}
+        className={[className, "markdown-file-link"].filter(Boolean).join(" ")}
+        data-file-path={file.path}
+        data-file-line={file.line}
+        href={href}
+        title={file.path}
+      >
+        <FileText size={13} />
+        <span className="markdown-file-link-label">{children}</span>
+        {location ? <span className="markdown-file-link-location">{location}</span> : null}
+      </a>
+    );
+  },
 };
 
 export { imageDataUrl, clipboardImage };

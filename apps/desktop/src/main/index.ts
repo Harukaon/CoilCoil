@@ -7,14 +7,16 @@ import type {
 } from "@suocode/runtime-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, watch, writeFileSync, type FSWatcher } from "node:fs";
-import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import { createRequire } from "node:module";
-import type { BrowserUiViewport, FilePreviewDocument, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import type { BrowserUiViewport, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
 import { hardenGuestPreferences } from "./browser-webview-policy";
+import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
+import { installHostNavigationGuard } from "./host-navigation";
 import { TerminalRuntimeManager } from "./terminal-runtime";
 
 // This is deliberately opt-in and development-only. It lets the desktop smoke
@@ -37,7 +39,6 @@ const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_CLOSE_CHANNEL = "preview:close";
-const PREVIEW_UPDATED_CHANNEL = "preview:updated";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 const BROWSER_STATE_CHANNEL = "browser:state";
@@ -57,6 +58,8 @@ const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
 const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
 const BROWSER_GUEST_FAILED_CHANNEL = "browser:guest-failed";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
+const TERMINAL_DATA_CHANNEL = "terminal:data";
+const TERMINAL_GET_CHANNEL = "terminal:get";
 const TERMINAL_CREATE_CHANNEL = "terminal:create";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
 const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
@@ -76,56 +79,11 @@ function chromeDevtoolsMcpEntry(): string {
   return existsSync(unpacked) ? unpacked : resolved;
 }
 
-function playwrightMcpEntry(): string {
-  const packageJson = moduleRequire.resolve("@playwright/mcp/package.json");
-  const resolved = join(dirname(packageJson), "cli.js");
-  if (!app.isPackaged) return resolved;
-  const unpacked = resolved.replace(`${join("app.asar", "node_modules")}`, `${join("app.asar.unpacked", "node_modules")}`);
-  return existsSync(unpacked) ? unpacked : resolved;
-}
-
-function browserDebugMcpEntry(): string {
-  const resolved = join(__dirname, "browser-debug-mcp.js");
-  return resolved;
-}
-
-function playwrightMcpConfigPath(): string {
-  const outputDir = join(app.getPath("userData"), "browser-artifacts", "playwright");
-  mkdirSync(outputDir, { recursive: true });
-  const path = join(outputDir, "mcp-config.json");
-  writeFileSync(path, `${JSON.stringify({
-    capabilities: ["core", "network", "storage", "testing", "vision", "pdf", "devtools"],
-    allowUnrestrictedFileAccess: true,
-    codegen: "none",
-  }, null, 2)}\n`, { mode: 0o600 });
-  return path;
-}
-
 function backgroundNodeExecutable(): string {
   const executableName = basename(process.execPath);
   const macHelperExecutable = join(dirname(dirname(process.execPath)), "Frameworks", `${executableName} Helper.app`, "Contents", "MacOS", `${executableName} Helper`);
   return process.platform === "darwin" && existsSync(macHelperExecutable) ? macHelperExecutable : process.execPath;
 }
-
-const TEXT_EXTENSIONS = new Set([
-  "", ".txt", ".log", ".md", ".mdx", ".markdown", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv",
-  ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".svelte", ".css", ".scss", ".sass", ".less",
-  ".py", ".pyi", ".rb", ".php", ".java", ".kt", ".kts", ".go", ".rs", ".swift", ".c", ".h", ".cc", ".cpp", ".hpp",
-  ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1", ".sql", ".graphql", ".gql", ".env", ".ini", ".conf",
-  ".dockerfile", ".gitignore", ".gitattributes", ".editorconfig", ".html", ".htm", ".svg",
-]);
-
-interface PreviewRecord {
-  id: string;
-  root: string;
-  path: string;
-  forceText: boolean;
-  owner: Electron.WebContents;
-  watcher?: FSWatcher;
-  document?: FilePreviewDocument;
-}
-
-const previews = new Map<string, PreviewRecord>();
 
 async function safeProjectPath(input: Pick<OpenFilePreviewInput, "root" | "path">): Promise<{ root: string; path: string }> {
   const root = await realpath(input.root);
@@ -201,79 +159,6 @@ async function listProjectDirectory(rootValue: string, relativePath = ""): Promi
     } satisfies FileNode));
 }
 
-function previewKind(path: string, forceText: boolean): FilePreviewDocument["kind"] | undefined {
-  const extension = extname(path).toLowerCase();
-  if (!forceText && extension === ".pdf") return "pdf";
-  if (!forceText && [".md", ".mdx", ".markdown"].includes(extension)) return "markdown";
-  if (!forceText && [".html", ".htm"].includes(extension)) return "html";
-  if (forceText || TEXT_EXTENSIONS.has(extension) || ["dockerfile", "makefile", "license", "readme"].includes(basename(path).toLowerCase())) return "text";
-  return undefined;
-}
-
-async function readPreview(record: PreviewRecord): Promise<FilePreviewDocument> {
-  const kind = previewKind(record.path, record.forceText);
-  if (!kind) throw new Error("此文件类型暂不支持预览。");
-  const buffer = await readFile(record.path);
-  const limit = kind === "pdf" ? 20 * 1024 * 1024 : 2 * 1024 * 1024;
-  const truncated = buffer.byteLength > limit;
-  const content = kind === "pdf"
-    ? `data:application/pdf;base64,${buffer.subarray(0, limit).toString("base64")}`
-    : buffer.subarray(0, limit).toString("utf8");
-  return { id: record.id, path: record.path, name: basename(record.path), kind, content, truncated, updatedAt: Date.now() };
-}
-
-async function updatePreview(record: PreviewRecord): Promise<void> {
-  try {
-    record.document = await readPreview(record);
-    if (record.owner.isDestroyed()) {
-      closePreviewRecord(record.id);
-      return;
-    }
-    record.owner.send(PREVIEW_UPDATED_CHANNEL, record.document);
-  } catch {
-    // The file may be in the middle of an atomic replace; the next watch event retries it.
-  }
-}
-
-function closePreviewRecord(id: string): void {
-  const record = previews.get(id);
-  if (!record) return;
-  record.watcher?.close();
-  previews.delete(id);
-}
-
-async function createPreviewRecord(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<FilePreviewDocument> {
-  const target = await safePreviewPath(input);
-  const id = randomUUID();
-  const record: PreviewRecord = {
-    id,
-    root: target.root,
-    path: target.path,
-    forceText: Boolean(input.forceText),
-    owner: event.sender,
-  };
-  previews.set(id, record);
-  try {
-    record.document = await readPreview(record);
-    record.watcher = watch(dirname(record.path), { persistent: false }, (_event, filename) => {
-      if (!filename || filename.toString() === basename(record.path)) void updatePreview(record);
-    });
-    event.sender.once("destroyed", () => closePreviewRecord(id));
-    return record.document;
-  } catch (error) {
-    closePreviewRecord(id);
-    throw error;
-  }
-}
-
-async function openFilePreview(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput): Promise<{ opened: boolean; document?: FilePreviewDocument; actions?: Array<"reveal" | "force-text" | "trash"> }> {
-  const target = await safePreviewPath(input);
-  if (previewKind(target.path, Boolean(input.forceText))) {
-    return { opened: true, document: await createPreviewRecord(event, input) };
-  }
-  return { opened: false, actions: ["reveal", "force-text", "trash"] };
-}
-
 function isEventEnvelope(message: RuntimeWireMessage): message is RuntimeEventEnvelope {
   return "event" in message;
 }
@@ -305,40 +190,19 @@ class RuntimeHost {
         ...(primaryBrowserRuntime ? {
           SUOCODE_BROWSER_MCP_COMMAND: nodeExecutable,
           SUOCODE_BROWSER_MCP_ARGS: JSON.stringify([
-            playwrightMcpEntry(),
-            "--config", playwrightMcpConfigPath(),
-            "--cdp-endpoint", primaryBrowserRuntime.playwrightEndpoint(),
-            "--cdp-header", `Authorization: Bearer ${primaryBrowserRuntime.token}`,
-            "--output-dir", join(app.getPath("userData"), "browser-artifacts", "playwright"),
-          ]),
-          SUOCODE_BROWSER_MCP_ENV: JSON.stringify({
-            ELECTRON_RUN_AS_NODE: "1",
-            PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1",
-          }),
-          SUOCODE_BROWSER_DEVTOOLS_MCP_COMMAND: nodeExecutable,
-          SUOCODE_BROWSER_DEVTOOLS_MCP_ARGS: JSON.stringify([
             chromeDevtoolsMcpEntry(),
             "--wsEndpoint", primaryBrowserRuntime.endpoint(),
             "--wsHeaders", JSON.stringify({ Authorization: `Bearer ${primaryBrowserRuntime.token}` }),
             "--allow-unrestricted-paths",
             "--no-usage-statistics",
             "--no-performance-crux",
+            "--experimentalStructuredContent",
+            "--experimentalPageIdRouting",
           ]),
-          SUOCODE_BROWSER_DEVTOOLS_MCP_ENV: JSON.stringify({
+          SUOCODE_BROWSER_MCP_ENV: JSON.stringify({
             CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1",
             CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
             ELECTRON_RUN_AS_NODE: "1",
-          }),
-          SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: primaryBrowserRuntime.endpoint(),
-          SUOCODE_BROWSER_DEBUG_CDP_TOKEN: primaryBrowserRuntime.token,
-          SUOCODE_BROWSER_DEBUG_OUTPUT_DIR: join(app.getPath("userData"), "browser-artifacts", "debug"),
-          SUOCODE_BROWSER_DEBUG_MCP_COMMAND: nodeExecutable,
-          SUOCODE_BROWSER_DEBUG_MCP_ARGS: JSON.stringify([browserDebugMcpEntry()]),
-          SUOCODE_BROWSER_DEBUG_MCP_ENV: JSON.stringify({
-            ELECTRON_RUN_AS_NODE: "1",
-            SUOCODE_BROWSER_DEBUG_CDP_ENDPOINT: primaryBrowserRuntime.endpoint(),
-            SUOCODE_BROWSER_DEBUG_CDP_TOKEN: primaryBrowserRuntime.token,
-            SUOCODE_BROWSER_DEBUG_OUTPUT_DIR: join(app.getPath("userData"), "browser-artifacts", "debug"),
           }),
         } : {}),
       },
@@ -500,14 +364,18 @@ async function createWindow(): Promise<void> {
   }, (roster) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_GUEST_ROSTER_CHANNEL, roster);
   });
-  await browserRuntime.start();
   const terminalRuntime = new TerminalRuntimeManager((state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_STATE_CHANNEL, state);
+  }, (id, data) => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_DATA_CHANNEL, { id, data });
   });
+  installHostNavigationGuard(mainWindow, browserRuntime, (scopeId) => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
+  });
+  await browserRuntime.start();
   if (process.env.SUOCODE_BROWSER_PROBE_LOG === "1") {
     console.error("[browser-probe]", JSON.stringify({
       devtoolsEndpoint: browserRuntime.endpoint(),
-      playwrightEndpoint: browserRuntime.playwrightEndpoint(),
       token: browserRuntime.token,
     }));
   }
@@ -588,11 +456,9 @@ app.whenReady().then(async () => {
     if (typeof text !== "string" || text.length > 1_000_000) throw new Error("剪贴板内容无效。");
     clipboard.writeText(text);
   });
-  ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openFilePreview(event, input));
+  ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openFilePreview(event, input, safePreviewPath));
   ipcMain.handle(PREVIEW_CLOSE_CHANNEL, (event, id: string): void => {
-    const record = previews.get(id);
-    if (!record || record.owner.id !== event.sender.id) return;
-    closePreviewRecord(id);
+    closeFilePreview(event.sender.id, id);
   });
   ipcMain.handle(PROJECT_FILE_ACTION_CHANNEL, (event, input: ProjectFileActionInput) => performProjectFileAction(event, input));
   ipcMain.handle(PROJECT_DIRECTORY_LIST_CHANNEL, (_event, root: string, path?: string) => listProjectDirectory(root, path));
@@ -628,6 +494,7 @@ app.whenReady().then(async () => {
     if (!value) throw new Error("终端运行时不可用。");
     return value;
   };
+  ipcMain.handle(TERMINAL_GET_CHANNEL, (event) => terminalFor(event).state());
   ipcMain.handle(TERMINAL_CREATE_CHANNEL, (event, cwd: string) => terminalFor(event).create(cwd));
   ipcMain.handle(TERMINAL_WRITE_CHANNEL, (event, id: string, data: string): void => terminalFor(event).write(id, data));
   ipcMain.handle(TERMINAL_RESIZE_CHANNEL, (event, id: string, cols: number, rows: number): void => terminalFor(event).resize(id, cols, rows));
@@ -648,29 +515,10 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", async (event) => {
+app.on("before-quit", () => {
   if (isQuitting) return;
-  const hasRunningTerminal = [...terminalRuntimes.values()].some((manager) => manager.hasRunning());
-  if (hasRunningTerminal) {
-    event.preventDefault();
-    const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    const result = owner
-      ? await dialog.showMessageBox(owner, {
-          type: "warning",
-          title: "终端仍在运行",
-          message: "关闭 SuoCode 会同时结束仍在运行的终端会话。",
-          buttons: ["取消", "关闭并结束终端"],
-          defaultId: 0,
-          cancelId: 0,
-        })
-      : { response: 0 };
-    if (result.response !== 1) return;
-    isQuitting = true;
-    app.quit();
-    return;
-  }
   isQuitting = true;
-  for (const id of [...previews.keys()]) closePreviewRecord(id);
+  closeAllFilePreviews();
   for (const browser of browserRuntimes.values()) void browser.dispose().catch(() => {});
   for (const terminal of terminalRuntimes.values()) terminal.dispose();
   browserRuntimes.clear();

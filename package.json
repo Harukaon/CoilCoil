@@ -17,7 +17,9 @@
     "packages/workflow"
   ],
   "scripts": {
-    "setup": "npm ci --prefix vendor/pi --ignore-scripts && npm run build:offline --prefix vendor/pi && npm ci --ignore-scripts && npm rebuild node-pty esbuild && node node_modules/electron/install.js",
+    "setup": "npm ci --prefix vendor/pi --ignore-scripts && npm run build:offline --prefix vendor/pi && npm ci --ignore-scripts && npm run patch:chrome-devtools-mcp && npm rebuild node-pty esbuild && node node_modules/electron/install.js",
+    "postinstall": "npm run patch:chrome-devtools-mcp",
+    "patch:chrome-devtools-mcp": "node scripts/patch-chrome-devtools-mcp.mjs",
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build:pi": "npm run build:offline --prefix vendor/pi",

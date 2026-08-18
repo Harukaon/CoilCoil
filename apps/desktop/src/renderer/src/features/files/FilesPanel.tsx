@@ -5,7 +5,7 @@ import type { FilePreviewDocument } from "../../../../shared/desktop-api";
 import { toastError } from "../../ui/toast";
 import { FilePreviewPane } from "./FilePreviewPane";
 import { FileTree } from "./FileTree";
-import { absoluteProjectPath, removeTreeNode, replaceDirectoryChildren } from "./filePaths";
+import { absoluteProjectPath, previewFileNode, removeTreeNode, replaceDirectoryChildren } from "./filePaths";
 import { useFilePanelSplit } from "./useFilePanelSplit";
 
 interface PreviewSelection {
@@ -133,8 +133,8 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
       return;
     }
     if (selectedNodeRef.current?.path === activeFilePath) return;
-    const node = findFileNode(tree, activeFilePath);
-    if (node) void openPreview(node);
+    const node = findFileNode(tree, activeFilePath) ?? previewFileNode(activeFilePath);
+    void openPreview(node);
   }, [activeFilePath, closePreview, openPreview, tree]);
 
   const removeNode = (path: string): void => {

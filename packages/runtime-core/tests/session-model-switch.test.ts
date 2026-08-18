@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
-import type { RuntimeConfiguration, RuntimeEvent, SessionSnapshot, ThinkingLevel } from "@suocode/runtime-protocol";
+import type { PendingSessionModel, RuntimeConfiguration, RuntimeEvent, SessionSnapshot, ThinkingLevel } from "@suocode/runtime-protocol";
 import { SuoCodeRuntime } from "../src/index.js";
 
 const EMPTY_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
@@ -20,9 +20,10 @@ interface ModelSessionDouble {
 }
 
 interface RuntimeInternals {
-  active?: { session: ModelSessionDouble };
+  active?: { session: ModelSessionDouble; pendingModel?: PendingSessionModel };
   snapshot(): Promise<SessionSnapshot>;
   getConfiguration(): Promise<RuntimeConfiguration>;
+  applyPendingSessionModel(active: { session: ModelSessionDouble; pendingModel?: PendingSessionModel }): Promise<void>;
 }
 
 function model(provider: string, id: string): Model<any> {
@@ -180,8 +181,22 @@ test("a running session records a model switch for the next request", async (con
   });
 
   await runtime.setSessionModel({ provider: "xai", modelId: "grok-4.5", thinkingLevel: "off" });
+  assert.equal(setModelCalls, 0);
+  assert.equal(session.model, current);
+  assert.equal(session.thinkingLevel, "high");
+  assert.equal(thinking, "high");
+  assert.deepEqual(internals.active?.pendingModel, {
+    provider: "xai",
+    id: "grok-4.5",
+    name: "grok-4.5",
+    reasoning: true,
+    thinkingLevel: "off",
+  });
+
+  await internals.applyPendingSessionModel(internals.active!);
   assert.equal(setModelCalls, 1);
   assert.equal(session.model, next);
   assert.equal(session.thinkingLevel, "off");
   assert.equal(thinking, "off");
+  assert.equal(internals.active?.pendingModel, undefined);
 });

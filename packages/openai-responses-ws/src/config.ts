@@ -53,15 +53,12 @@ export function resolveOpenAIResponsesWsEndpoints(input: string): OpenAIResponse
 
   const url = new URL(raw);
   let path = url.pathname.replace(/\/+$/, "");
-  if (!path || path === "/") path = "/backend-api";
-  else if (path === "/v1") path = "/backend-api";
-  else if (path.endsWith("/v1")) path = `${path.slice(0, -3)}/backend-api`;
-  else if (!path.endsWith("/backend-api")) path = `${path}/backend-api`;
-
-  const rootPath = path.replace(/\/backend-api$/, "");
-  const modelsPath = `${rootPath}/v1/models`.replace(/\/{2,}/g, "/");
+  if (path.endsWith("/responses")) path = path.slice(0, -10);
+  if (!path || path === "/") path = "/v1";
+  else if (!path.endsWith("/v1")) path = `${path}/v1`;
+  path = path.replace(/\/{2,}/g, "/");
   return {
-    inferenceBaseUrl: `${url.origin}${path}/`,
-    modelsUrl: `${url.origin}${modelsPath}?client_version=pi`,
+    inferenceBaseUrl: `${url.origin}${path}`,
+    modelsUrl: `${url.origin}${path}/models?client_version=pi`,
   };
 }

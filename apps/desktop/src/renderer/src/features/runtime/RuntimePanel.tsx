@@ -245,6 +245,17 @@ export function RuntimePanel({
             <small>{contextUsage ? `/ ${tokenNumber(contextUsage.contextWindow)} Token` : "当前上下文估算"}</small>
           </div>
           {tokenMetrics.length ? <dl className="runtime-metric-strip">{tokenMetrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl> : null}
+          {inspection?.tokenBreakdown ? (
+            <>
+              <dl className="runtime-token-grid">
+                <div><dt>用户提示词（当前）</dt><dd>{tokenNumber(inspection.tokenBreakdown.userPrompt)}</dd></div>
+                <div><dt>工具定义注入</dt><dd>{tokenNumber(inspection.tokenBreakdown.toolDefinitions)}</dd></div>
+                <div><dt>MCP 定义注入</dt><dd>{tokenNumber(inspection.tokenBreakdown.mcpDefinitions)}</dd></div>
+                <div><dt>模型输出（累计）</dt><dd>{tokenNumber(tokenUsage?.output ?? 0)}</dd></div>
+              </dl>
+              <p className="runtime-estimate-note">定义注入按当前启用的 Context.tools 统计；工具结果另计入当前上下文。模型输出来自实际 usage。</p>
+            </>
+          ) : null}
           {inspection?.estimates.systemPrompt || inspection?.estimates.toolDefinitions || inspection?.estimates.messages ? (
             <p className="runtime-estimate-note">估算：{[
               inspection.estimates.systemPrompt ? `系统提示词 ${tokenNumber(inspection.estimates.systemPrompt)}` : undefined,

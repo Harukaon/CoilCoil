@@ -314,7 +314,9 @@ test("builtin presets ship explore, reviewer, and worker", () => {
   const worker = merged.get("worker");
   assert.ok(explore && reviewer && worker);
   assert.ok(!explore.tools?.includes("edit") && !explore.tools?.includes("write"), "explore must stay read-only");
+  assert.ok(explore.tools?.includes("terminal") && reviewer.tools?.includes("terminal"), "profiles with bash must be able to control a background handoff");
   assert.ok(worker.tools?.includes("edit") && worker.tools?.includes("write"), "worker must be able to write");
+  assert.ok(worker.tools?.includes("terminal"), "worker must be able to control a background handoff");
   assert.equal(worker.worktree, true);
   assert.match(explore.systemPrompt ?? "", /只读/);
 });
@@ -425,7 +427,7 @@ test("resume preserves the tool allowlist captured by the original profile", () 
   assert.deepEqual(resumeToolsForRun(run, changedProfile), ["read", "grep", "ls"]);
   assert.deepEqual(resumeToolsForRun(makeRun({ tools: undefined }), changedProfile), ["read", "edit", "write"]);
   assert.equal(resumeToolsForRun(makeRun({ tools: undefined }), undefined), undefined, "a missing named profile must fail closed");
-  assert.deepEqual(resumeToolsForRun(makeRun({ agent: "default", tools: undefined }), undefined), ["read", "bash", "edit", "write", "grep", "ls"]);
+  assert.deepEqual(resumeToolsForRun(makeRun({ agent: "default", tools: undefined }), undefined), ["read", "bash", "terminal", "edit", "write", "grep", "ls"]);
 });
 
 test("resume fails closed when an isolated worktree disappeared", () => {

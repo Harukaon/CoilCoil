@@ -3,7 +3,7 @@ import { FileCode2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 import { summarizeCacheUsage } from "@suocode/runtime-protocol";
-import type { ContextUsage, ProjectSelection, ResponseMetrics, TokenUsage } from "@suocode/runtime-protocol";
+import type { ContextUsage, ProjectSelection, ResponseMetrics, RuntimeTokenBreakdown, TokenUsage } from "@suocode/runtime-protocol";
 
 function pathLabel(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
@@ -35,12 +35,14 @@ export function WorkspaceStatus({
   responseMetricsHistory,
   contextUsage,
   tokenUsage,
+  tokenBreakdown,
 }: {
   project: ProjectSelection | null;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   contextUsage?: ContextUsage;
   tokenUsage: TokenUsage;
+  tokenBreakdown?: RuntimeTokenBreakdown;
 }): React.JSX.Element {
   const [pathOpen, setPathOpen] = useState(false);
   const percent = Math.max(0, Math.min(100, contextUsage?.percent ?? 0));
@@ -105,6 +107,11 @@ export function WorkspaceStatus({
                 <div><dt>累计输入</dt><dd>{formatTokens(cumulativeCache.promptTokens)}</dd></div>
                 <div><dt>未缓存输入</dt><dd>{formatTokens(cumulativeCache.uncachedTokens)}</dd></div>
                 <div><dt>累计输出</dt><dd>{formatTokens(tokenUsage.output)}</dd></div>
+                {tokenBreakdown ? <>
+                  <div><dt>用户提示词（当前）</dt><dd>{formatTokens(tokenBreakdown.userPrompt)}</dd></div>
+                  <div><dt>工具定义注入</dt><dd>{formatTokens(tokenBreakdown.toolDefinitions)}</dd></div>
+                  <div><dt>MCP 定义注入</dt><dd>{formatTokens(tokenBreakdown.mcpDefinitions)}</dd></div>
+                </> : null}
                 <div><dt>缓存读取</dt><dd>{formatTokens(tokenUsage.cacheRead)}</dd></div>
                 <div><dt>缓存写入</dt><dd>{formatTokens(tokenUsage.cacheWrite)}</dd></div>
                 <div><dt>本次输出</dt><dd>{formatTokens(responseMetrics?.outputTokens)}</dd></div>

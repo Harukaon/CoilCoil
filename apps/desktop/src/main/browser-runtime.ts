@@ -1,104 +1,24 @@
-import { createServer, type Server as HttpServer } from "node:http";
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { BrowserWindow, session, webContents as webContentsRegistry, type WebContents } from "electron";
-import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
+import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { normalizeBrowserUrl } from "./browser-navigation";
+import {
+  DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
+  DEFAULT_BROWSER_URL as DEFAULT_URL,
+  DEFAULT_BROWSER_VIEWPORT as DEFAULT_VIEWPORT,
+  type BrowserTab,
+} from "./browser-runtime-types";
 import { BROWSER_PARTITION } from "./browser-webview-policy";
 
-const DEFAULT_URL = "about:blank";
-const DEFAULT_SCOPE_ID = "default";
-const BROWSER_TARGET_ID = "suocode-browser";
-const BROWSER_CONTEXT_ID = "suocode-browser-context";
 /**
- * Logical viewport for a tab the user is not looking at.
- *
- * A parked guest is a 1x1 element on screen, so without this every background
- * tab would report a 1x1 viewport to the page and to agents. Emulation gives it
- * a real size; the element stays tiny but composited, which is what keeps
- * Page.captureScreenshot working at all.
- */
-const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
-
-interface BrowserTab {
-  id: string;
-  scopeId: string;
-  tabTargetId: string;
-  pageTargetId: string;
-  /** Set once the renderer reports the <webview> it created for this tab. */
-  guest?: WebContents;
-  /** Travels with the roster entry so a stale report cannot satisfy a newer slot. */
-  guestNonce: string;
-  phase: "awaiting-guest" | "loading" | "ready" | "closing";
-  announced: boolean;
-  emulatedSize?: { width: number; height: number };
-}
-
-interface CdpRequest {
-  id: number;
-  method: string;
-  params?: Record<string, unknown>;
-  sessionId?: string;
-}
-
-interface ClientTabSessions {
-  tabSessionId: string;
-  pageSessionId: string;
-  pageAttached: boolean;
-}
-
-interface CdpClient {
-  id: string;
-  scopeId: string;
-  mode: "devtools" | "playwright";
-  socket: WebSocket;
-  discover: boolean;
-  autoAttach: boolean;
-  sessions: Map<string, ClientTabSessions>;
-  directSessions: Map<string, string>;
-  childSessions: Map<string, string>;
-  debuggerListeners: Map<string, (...args: unknown[]) => void>;
-}
-
-function browserContextId(scopeId: string): string {
-  return `${BROWSER_CONTEXT_ID}:${scopeId}`;
-}
-
-function targetInfo(tab: BrowserTab, kind: "tab" | "page"): Record<string, unknown> {
-  const contents = tab.guest!;
-  return {
-    targetId: kind === "tab" ? tab.tabTargetId : tab.pageTargetId,
-    type: kind,
-    title: contents.getTitle() || "新标签页",
-    url: contents.getURL() || DEFAULT_URL,
-    attached: true,
-    canAccessOpener: false,
-    browserContextId: browserContextId(tab.scopeId),
-  };
-}
-
-function responseError(error: unknown): { code: number; message: string } {
-  return { code: -32000, message: error instanceof Error ? error.message : String(error) };
-}
-
-/**
- * A capability-scoped browser-level CDP facade for Chrome DevTools MCP.
- *
- * Puppeteer expects Chrome's browser -> tab -> page target hierarchy. Electron
- * exposes only a debugger bound to one WebContents. This facade supplies the
- * missing target hierarchy and forwards page commands exclusively to the
- * <webview> guests owned by SuoCode. No global remote-debugging port is
- * opened and renderer WebContents are never addressable.
+ * Owns SuoCode browser tabs, guest WebContents and renderer-facing state.
+ * Browser-level CDP protocol adaptation lives in BrowserCdpBridge.
  */
 export class BrowserRuntimeManager {
-  readonly token = randomBytes(32).toString("base64url");
-  private readonly pathToken = randomBytes(24).toString("hex");
   private readonly tabs = new Map<string, BrowserTab>();
-  private readonly clients = new Map<string, CdpClient>();
-  private readonly server: HttpServer;
-  private readonly socketServer: WebSocketServer;
-  private port?: number;
+  private readonly cdp: BrowserCdpBridge;
   private readonly activeTabIds = new Map<string, string>();
   private uiScopeId = DEFAULT_SCOPE_ID;
   private uiViewport = { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height };
@@ -138,59 +58,39 @@ export class BrowserRuntimeManager {
     private readonly onAgentActivated: (scopeId: string) => void,
     private readonly publishGuestRoster: (roster: BrowserGuestRoster) => void = () => {},
   ) {
-    this.server = createServer((_request, response) => {
-      response.writeHead(404);
-      response.end();
-    });
-    this.socketServer = new WebSocketServer({ noServer: true });
-    this.server.on("upgrade", (request, socket, head) => {
-      const expected = Buffer.from(`Bearer ${this.token}`);
-      const actual = Buffer.from(request.headers.authorization ?? "");
-      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
-      const authorizedPath = requestUrl.pathname === `/devtools/browser/${this.pathToken}`
-        || requestUrl.pathname === `/playwright/browser/${this.pathToken}`;
-      const authorized = authorizedPath
-        && actual.length === expected.length
-        && timingSafeEqual(actual, expected);
-      if (!authorized) {
-        socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-      const mode = requestUrl.pathname.startsWith(`/playwright/browser/${this.pathToken}`) ? "playwright" : "devtools";
-      const scopeId = requestUrl.searchParams.get("scope")?.trim() || DEFAULT_SCOPE_ID;
-      this.socketServer.handleUpgrade(request, socket, head, (webSocket) => this.acceptClient(webSocket, mode, scopeId));
+    this.cdp = new BrowserCdpBridge({
+      onAgentActivated: (scopeId) => this.onAgentActivated(scopeId),
+      ensureActiveTab: (scopeId) => this.ensureActiveTab(scopeId),
+      createTab: (rawUrl, activate, scopeId) => this.createCdpTab(rawUrl, activate, scopeId),
+      selectTab: (id, scopeId) => { this.selectTab(id, scopeId); },
+      closeTab: (id, scopeId) => { this.closeTab(id, scopeId); },
+      cdpTabs: (scopeId) => this.cdpTabs(scopeId),
+      tabById: (id) => this.tabs.get(id),
+      guestOf: (tab) => this.guestOf(tab),
+      attachDebugger: (tab) => this.attachDebugger(tab),
+      applyViewportOverride: (tab) => this.applyViewportOverride(tab),
+      windowBounds: (tab) => this.windowBounds(tab),
+      windowForTab: (tab) => this.windowForTab(tab),
+      setContentsSize: (tab, params) => this.setContentsSize(tab, params),
     });
     // Guests live in the renderer's document, so a reload or crash destroys every
     // one of them. Tear the records down deliberately and tell clients their
-    // targets are gone; resurrecting them under the old page target id would
-    // leave Playwright with a permanently half-initialized Page.
+    // targets are gone; resurrecting them under an old page target id would
+    // leave any CDP client attached to stale execution contexts.
     this.window.webContents.on("did-start-navigation", this.handleHostNavigation);
     this.window.webContents.on("render-process-gone", this.handleHostGone);
   }
 
+  get token(): string {
+    return this.cdp.token;
+  }
+
   async start(): Promise<void> {
-    if (this.port) return;
-    await new Promise<void>((resolve, reject) => {
-      this.server.once("error", reject);
-      this.server.listen(0, "127.0.0.1", () => {
-        this.server.off("error", reject);
-        const address = this.server.address();
-        if (!address || typeof address === "string") return reject(new Error("无法启动内置浏览器 CDP 桥。"));
-        this.port = address.port;
-        resolve();
-      });
-    });
+    await this.cdp.start();
   }
 
   endpoint(): string {
-    if (!this.port) throw new Error("内置浏览器 CDP 桥尚未启动。");
-    return `ws://127.0.0.1:${this.port}/devtools/browser/${this.pathToken}`;
-  }
-
-  playwrightEndpoint(): string {
-    if (!this.port) throw new Error("内置浏览器 CDP 桥尚未启动。");
-    return `ws://127.0.0.1:${this.port}/playwright/browser/${this.pathToken}`;
+    return this.cdp.endpoint();
   }
 
   state(scopeId = this.uiScopeId): BrowserStateSnapshot {
@@ -328,19 +228,18 @@ export class BrowserRuntimeManager {
     tab.phase = "ready";
     tab.announced = true;
     this.refreshViewportOverrides();
-    this.announceCreated(tab);
+    this.cdp.announceCreated(tab);
     this.publish();
   }
 
   /**
    * Use Chromium's real page target id instead of inventing one.
    *
-   * Playwright correlates the page target, its main frame and execution
-   * contexts while constructing a Page. A synthetic target id lets the CDP
-   * connection open, but leaves the Page in a permanently half-initialized
-   * state (page.url() is empty and all semantic actions wait forever).
+   * Chrome DevTools MCP uses Puppeteer, which correlates the page target, its
+   * main frame and execution contexts while constructing a Page. A synthetic
+   * target id can leave that Page permanently half-initialized.
    * Electron exposes the real identity through the debugger attached to this
-   * exact WebContents, so using it preserves both Playwright's invariants and
+   * exact WebContents, so using it preserves Puppeteer's invariants and
    * SuoCode's single-WebContents isolation boundary.
    */
   private async refreshPageTargetIdentity(tab: BrowserTab): Promise<void> {
@@ -414,9 +313,7 @@ export class BrowserRuntimeManager {
   }
 
   releaseScope(scopeId: string): void {
-    for (const client of [...this.clients.values()]) {
-      if (client.scopeId === scopeId) client.socket.close(1008, "浏览器会话已释放");
-    }
+    this.cdp.releaseScope(scopeId);
     for (const tab of this.tabsForScope(scopeId)) this.closeTabRecord(tab);
     this.activeTabIds.delete(scopeId);
     if (this.uiScopeId === scopeId) {
@@ -525,11 +422,8 @@ export class BrowserRuntimeManager {
       this.window.webContents.off("did-start-navigation", this.handleHostNavigation);
       this.window.webContents.off("render-process-gone", this.handleHostGone);
     }
-    for (const client of this.clients.values()) client.socket.close(1001, "SuoCode 正在关闭");
-    this.clients.clear();
     for (const tab of [...this.tabs.values()]) this.closeTabRecord(tab);
-    await new Promise<void>((resolve) => this.socketServer.close(() => resolve()));
-    if (this.server.listening) await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    await this.cdp.dispose();
   }
 
   private tabsForScope(scopeId: string): BrowserTab[] {
@@ -539,7 +433,7 @@ export class BrowserRuntimeManager {
   /**
    * Tabs a CDP client is allowed to see. A tab exists internally before its page
    * has committed, while its target id is still a placeholder; announcing one
-   * would hand Playwright a `pending-page-` id it can never resolve. Every path
+   * would hand a CDP client a `pending-page-` id it can never resolve. Every path
    * that enumerates or resolves targets for a client must filter through here —
    * `tabsForScope` stays for the UI, which does show tabs while they load.
    */
@@ -576,6 +470,9 @@ export class BrowserRuntimeManager {
     // Frees the pending reservation and the guest binding; a late registration
     // for this tab is then refused rather than silently bound.
     this.guests.release(tab.id);
+    // Notify CDP clients while the guest still exists, so relay listeners can be
+    // detached from the exact debugger they were registered on.
+    this.cdp.announceDestroyed(tab);
     const guest = tab.guest;
     if (guest && !guest.isDestroyed()) {
       if (guest.debugger.isAttached()) guest.debugger.detach();
@@ -583,11 +480,6 @@ export class BrowserRuntimeManager {
       guest.close({ waitForBeforeUnload: false });
     }
     tab.guest = undefined;
-    // Announce before the roster drops the element, so clients see the target
-    // destroyed while its session bookkeeping is still intact.
-    for (const client of this.clients.values()) {
-      if (client.scopeId === tab.scopeId) this.announceDestroyed(client, tab);
-    }
     this.publishRoster();
   }
 
@@ -638,11 +530,7 @@ export class BrowserRuntimeManager {
     const contents = this.guestOf(tab);
     const update = (): void => {
       if (tab.scopeId === this.uiScopeId) this.publish();
-      if (tab.announced) {
-        for (const client of this.clients.values()) {
-          if (client.scopeId === tab.scopeId) this.announceChanged(client, tab);
-        }
-      }
+      if (tab.announced) this.cdp.announceChanged(tab);
     };
     contents.on("did-start-loading", update);
     contents.on("did-stop-loading", update);
@@ -655,362 +543,6 @@ export class BrowserRuntimeManager {
   private attachDebugger(tab: BrowserTab): void {
     const debug = this.guestOf(tab).debugger;
     if (!debug.isAttached()) debug.attach("1.3");
-  }
-
-  private acceptClient(socket: WebSocket, mode: CdpClient["mode"], scopeId: string): void {
-    const client: CdpClient = {
-      id: randomUUID(), scopeId, mode, socket, discover: false, autoAttach: false,
-      sessions: new Map(), directSessions: new Map(), childSessions: new Map(), debuggerListeners: new Map(),
-    };
-    this.clients.set(client.id, client);
-    this.onAgentActivated(scopeId);
-    for (const tab of this.cdpTabs(scopeId)) this.installDebuggerRelay(client, tab);
-    socket.on("message", (data) => { void this.handleClientMessage(client, data); });
-    socket.once("close", () => this.removeClient(client));
-    socket.once("error", () => this.removeClient(client));
-  }
-
-  private removeClient(client: CdpClient): void {
-    if (!this.clients.delete(client.id)) return;
-    for (const [tabId, listener] of client.debuggerListeners) {
-      const tab = this.tabs.get(tabId);
-      tab?.guest?.debugger.off("message", listener as never);
-    }
-    client.debuggerListeners.clear();
-    client.directSessions.clear();
-    client.childSessions.clear();
-  }
-
-  private installDebuggerRelay(client: CdpClient, tab: BrowserTab): void {
-    if (client.scopeId !== tab.scopeId) return;
-    if (client.debuggerListeners.has(tab.id)) return;
-    const listener = (_event: Electron.Event, method: string, params: unknown, sessionId?: string): void => {
-      const sessions = client.sessions.get(tab.id);
-      const directSessionIds = [...client.directSessions]
-        .filter(([, tabId]) => tabId === tab.id)
-        .map(([directSessionId]) => directSessionId);
-      const hasChildSession = sessionId ? client.childSessions.get(sessionId) === tab.id : false;
-      if (!sessions?.pageAttached && directSessionIds.length === 0 && !hasChildSession) return;
-      const payload = params && typeof params === "object" ? params as Record<string, unknown> : {};
-      const childSessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
-      if (method === "Target.attachedToTarget" && childSessionId) client.childSessions.set(childSessionId, tab.id);
-      if (sessionId && client.childSessions.get(sessionId) === tab.id) {
-        this.send(client, { method, params: payload, sessionId });
-      } else {
-        // Every flat CDP session attached to this target receives its own copy
-        // of page events. Lighthouse relies on those events while its
-        // short-lived session is active.
-        if (sessions?.pageAttached) this.send(client, { method, params: payload, sessionId: sessions.pageSessionId });
-        for (const directSessionId of directSessionIds) this.send(client, { method, params: payload, sessionId: directSessionId });
-      }
-      if (method === "Target.detachedFromTarget" && childSessionId) client.childSessions.delete(childSessionId);
-    };
-    this.guestOf(tab).debugger.on("message", listener);
-    client.debuggerListeners.set(tab.id, listener as (...args: unknown[]) => void);
-  }
-
-  private async handleClientMessage(client: CdpClient, data: RawData): Promise<void> {
-    let request: CdpRequest | undefined;
-    try {
-      request = JSON.parse(data.toString()) as CdpRequest;
-      if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error("[browser-cdp] ←", request.method, request.sessionId ?? "root");
-      if (!Number.isInteger(request.id) || typeof request.method !== "string") throw new Error("无效的 CDP 请求。");
-      const result = await this.executeCdp(client, request);
-      this.send(client, { id: request.id, result: result ?? {}, ...(request.sessionId ? { sessionId: request.sessionId } : {}) });
-    } catch (error) {
-      if (request?.id !== undefined) this.send(client, { id: request.id, error: responseError(error), ...(request.sessionId ? { sessionId: request.sessionId } : {}) });
-    }
-  }
-
-  private async executeCdp(client: CdpClient, request: CdpRequest): Promise<unknown> {
-    const params = request.params ?? {};
-    if (!request.sessionId) return this.executeRootCommand(client, request.method, params);
-    const located = this.tabForSession(client, request.sessionId);
-    if (!located) throw new Error(`未知的内置浏览器 CDP session：${request.sessionId}`);
-    const { tab, sessions, kind } = located;
-    if (kind === "tab") {
-      if (request.method === "Target.setAutoAttach") {
-        this.attachPage(client, tab, sessions);
-        return {};
-      }
-      if (request.method === "Runtime.runIfWaitingForDebugger") return {};
-      if (request.method === "Target.detachFromTarget") return {};
-    }
-    if (kind === "direct" && request.method === "Target.detachFromTarget") {
-      client.directSessions.delete(request.sessionId);
-      return {};
-    }
-    if (request.method === "Browser.close") return {};
-    if (request.method === "Browser.getWindowForTarget") return this.windowForTab(tab);
-    if (request.method === "Browser.setContentsSize") return this.setContentsSize(tab, params);
-    if (request.method === "Emulation.clearDeviceMetricsOverride") {
-      // Clearing outright would drop the guest back to its 1x1 element box, so
-      // restore the default logical viewport instead of leaving it unusable.
-      delete tab.emulatedSize;
-      await this.applyViewportOverride(tab);
-      return {};
-    }
-    // Electron's page-level debugger does not currently expose Chrome's
-    // experimental WebMCP domain. Puppeteer initializes it optimistically and
-    // treats an unavailable domain as optional, but Electron can leave the
-    // command pending instead of returning a method-not-found response. Reply
-    // with an empty capability set so page initialization can finish.
-    if (request.method === "WebMCP.enable" || request.method === "WebMCP.disable") return {};
-    if (request.method === "WebMCP.invokeTool" || request.method === "WebMCP.cancelInvocation") {
-      throw new Error("内置浏览器暂不支持网页注册的 WebMCP 工具。");
-    }
-    if (request.method === "Page.navigate" && typeof params.url === "string") {
-      params.url = normalizeBrowserUrl(params.url);
-    }
-    this.attachDebugger(tab);
-    const childSession = kind === "child" ? request.sessionId : undefined;
-    try {
-      const result = await this.guestOf(tab).debugger.sendCommand(request.method, params, childSession);
-      if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error("[browser-cdp] ✓", request.method, request.sessionId);
-      return result;
-    } catch (error) {
-      if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error("[browser-cdp] ✗", request.method, error);
-      throw error;
-    }
-  }
-
-  private async executeRootCommand(client: CdpClient, method: string, params: Record<string, unknown>): Promise<unknown> {
-    if (method === "SuoCode.getBrowserState") {
-      await this.ensureActiveTab(client.scopeId);
-      const activeTabId = this.activeTabIds.get(client.scopeId);
-      return {
-        activeTabId,
-        activePageTargetId: activeTabId ? this.tabs.get(activeTabId)?.pageTargetId : undefined,
-        tabs: this.cdpTabs(client.scopeId).map((tab) => ({
-          id: tab.id,
-          pageTargetId: tab.pageTargetId,
-          title: tab.guest?.getTitle() || "新标签页",
-          url: tab.guest?.getURL() || DEFAULT_URL,
-          active: tab.id === activeTabId,
-        })),
-      };
-    }
-    if (method === "Target.getBrowserContexts") return { browserContextIds: [browserContextId(client.scopeId)] };
-    if (method === "Browser.getVersion") {
-      const tab = await this.ensureActiveTab(client.scopeId);
-      this.installDebuggerRelay(client, tab);
-      return this.guestOf(tab).debugger.sendCommand(method, params);
-    }
-    if (method === "Target.setDiscoverTargets") {
-      client.discover = params.discover === true;
-      if (client.discover) {
-        await this.ensureActiveTab(client.scopeId);
-        this.announceAllTargets(client);
-      }
-      return {};
-    }
-    if (method === "Target.setAutoAttach") {
-      client.autoAttach = params.autoAttach === true;
-      if (client.autoAttach) for (const tab of this.cdpTabs(client.scopeId)) this.attachTab(client, tab);
-      return {};
-    }
-    if (method === "Target.getTargets") return { targetInfos: this.allTargetInfos(client) };
-    if (method === "Target.getTargetInfo") {
-      const requestedId = typeof params.targetId === "string" ? params.targetId : BROWSER_TARGET_ID;
-      return { targetInfo: this.findTargetInfo(requestedId, client.scopeId) };
-    }
-    if (method === "Target.createTarget") {
-      const tab = await this.createCdpTab(typeof params.url === "string" ? params.url : undefined, params.background !== true, client.scopeId);
-      // CDP's Target.createTarget returns the page target. The synthetic `tab`
-      // target only exists to reproduce Chrome's parent/child auto-attach
-      // hierarchy; returning it makes Puppeteer wait for a PageTarget that can
-      // never be initialized and is the source of the 30 second new_page stall.
-      return { targetId: tab.pageTargetId };
-    }
-    if (method === "Target.activateTarget") {
-      const tab = this.findTabByTarget(String(params.targetId ?? ""), client.scopeId);
-      if (tab) this.selectTab(tab.id, client.scopeId);
-      return {};
-    }
-    if (method === "Target.closeTarget") {
-      const tab = this.findTabByTarget(String(params.targetId ?? ""), client.scopeId);
-      if (tab) this.closeTab(tab.id, client.scopeId);
-      return { success: Boolean(tab) };
-    }
-    if (method === "Target.attachToTarget") {
-      const tab = this.findTabByTarget(String(params.targetId ?? ""), client.scopeId);
-      if (!tab) throw new Error("目标标签页不存在。");
-      // Lighthouse and other consumers may open a temporary CDP session on a
-      // page that Puppeteer already owns. Reusing Puppeteer's persistent tab
-      // session means the temporary consumer's detach also invalidates the
-      // persistent session, after which restore-emulation commands never
-      // resolve. A real browser allocates a fresh flat session for every
-      // explicit page attachment, so mirror that behavior here.
-      if (params.targetId === tab.pageTargetId) {
-        this.ensureClientSessions(client, tab);
-        const sessionId = `direct-session-${client.id.slice(0, 8)}-${randomUUID()}`;
-        client.directSessions.set(sessionId, tab.id);
-        this.send(client, {
-          method: "Target.attachedToTarget",
-          params: { sessionId, targetInfo: targetInfo(tab, "page"), waitingForDebugger: false },
-        });
-        return { sessionId };
-      }
-      const sessions = this.ensureClientSessions(client, tab);
-      this.attachTab(client, tab);
-      return { sessionId: sessions.tabSessionId };
-    }
-    if (method === "Target.detachFromTarget" && typeof params.sessionId === "string") {
-      client.directSessions.delete(params.sessionId);
-      return {};
-    }
-    if (method === "Browser.close") return {};
-    if (method === "Browser.getWindowBounds") {
-      const tab = this.findTabByWindowId(params.windowId, client.scopeId) ?? await this.ensureActiveTab(client.scopeId);
-      return { bounds: this.windowBounds(tab) };
-    }
-    if (method === "Browser.setWindowBounds") {
-      const tab = this.findTabByWindowId(params.windowId, client.scopeId) ?? await this.ensureActiveTab(client.scopeId);
-      const bounds = params.bounds && typeof params.bounds === "object" ? params.bounds as Record<string, unknown> : {};
-      if (typeof bounds.width === "number" && typeof bounds.height === "number") {
-        await this.setContentsSize(tab, bounds);
-      }
-      return {};
-    }
-    if (method === "Browser.getWindowForTarget") {
-      const requested = typeof params.targetId === "string" ? this.findTabByTarget(params.targetId, client.scopeId) : undefined;
-      return this.windowForTab(requested ?? await this.ensureActiveTab(client.scopeId));
-    }
-    if (method === "Browser.setContentsSize") {
-      const tab = this.findTabByWindowId(params.windowId, client.scopeId) ?? await this.ensureActiveTab(client.scopeId);
-      return this.setContentsSize(tab, params);
-    }
-    const tab = await this.ensureActiveTab(client.scopeId);
-    this.installDebuggerRelay(client, tab);
-    this.attachDebugger(tab);
-    return this.guestOf(tab).debugger.sendCommand(method, params);
-  }
-
-  private ensureClientSessions(client: CdpClient, tab: BrowserTab): ClientTabSessions {
-    let sessions = client.sessions.get(tab.id);
-    if (!sessions) {
-      const suffix = `${client.id.slice(0, 8)}-${tab.id.slice(0, 8)}`;
-      sessions = { tabSessionId: `tab-session-${suffix}`, pageSessionId: `page-session-${suffix}`, pageAttached: false };
-      client.sessions.set(tab.id, sessions);
-    }
-    return sessions;
-  }
-
-  private attachTab(client: CdpClient, tab: BrowserTab): void {
-    const sessions = this.ensureClientSessions(client, tab);
-    if (client.mode === "playwright") {
-      if (sessions.pageAttached) return;
-      sessions.pageAttached = true;
-      this.send(client, {
-        method: "Target.attachedToTarget",
-        params: { sessionId: sessions.pageSessionId, targetInfo: targetInfo(tab, "page"), waitingForDebugger: false },
-      });
-      return;
-    }
-    this.send(client, {
-      method: "Target.attachedToTarget",
-      params: { sessionId: sessions.tabSessionId, targetInfo: targetInfo(tab, "tab"), waitingForDebugger: false },
-    });
-  }
-
-  private attachPage(client: CdpClient, tab: BrowserTab, sessions = this.ensureClientSessions(client, tab)): void {
-    if (sessions.pageAttached) return;
-    sessions.pageAttached = true;
-    this.send(client, {
-      method: "Target.attachedToTarget",
-      sessionId: sessions.tabSessionId,
-      params: { sessionId: sessions.pageSessionId, targetInfo: targetInfo(tab, "page"), waitingForDebugger: false },
-    });
-  }
-
-  private announceAllTargets(client: CdpClient): void {
-    this.send(client, { method: "Target.targetCreated", params: { targetInfo: { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false } } });
-    for (const tab of this.cdpTabs(client.scopeId)) {
-      if (client.mode === "devtools") this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
-      this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "page") } });
-    }
-  }
-
-  private announceCreated(tab: BrowserTab): void {
-    if (!tab.announced) return;
-    for (const client of this.clients.values()) {
-      if (client.scopeId !== tab.scopeId) continue;
-      this.installDebuggerRelay(client, tab);
-      if (client.discover) {
-        if (client.mode === "devtools") this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "tab") } });
-        this.send(client, { method: "Target.targetCreated", params: { targetInfo: targetInfo(tab, "page") } });
-      }
-      if (client.autoAttach) this.attachTab(client, tab);
-    }
-  }
-
-  private announceChanged(client: CdpClient, tab: BrowserTab): void {
-    if (!client.discover) return;
-    if (client.mode === "devtools") this.send(client, { method: "Target.targetInfoChanged", params: { targetInfo: targetInfo(tab, "tab") } });
-    this.send(client, { method: "Target.targetInfoChanged", params: { targetInfo: targetInfo(tab, "page") } });
-  }
-
-  private announceDestroyed(client: CdpClient, tab: BrowserTab): void {
-    const sessions = client.sessions.get(tab.id);
-    if (sessions?.pageAttached) this.send(client, { method: "Target.detachedFromTarget", sessionId: sessions.tabSessionId, params: { sessionId: sessions.pageSessionId, targetId: tab.pageTargetId } });
-    if (sessions && client.mode === "devtools") this.send(client, { method: "Target.detachedFromTarget", params: { sessionId: sessions.tabSessionId, targetId: tab.tabTargetId } });
-    if (client.discover) {
-      this.send(client, { method: "Target.targetDestroyed", params: { targetId: tab.pageTargetId } });
-      if (client.mode === "devtools") this.send(client, { method: "Target.targetDestroyed", params: { targetId: tab.tabTargetId } });
-    }
-    client.sessions.delete(tab.id);
-    for (const [sessionId, tabId] of client.directSessions) {
-      if (tabId === tab.id) client.directSessions.delete(sessionId);
-    }
-    for (const [sessionId, tabId] of client.childSessions) {
-      if (tabId === tab.id) client.childSessions.delete(sessionId);
-    }
-    const listener = client.debuggerListeners.get(tab.id);
-    if (listener) tab.guest?.debugger.off("message", listener as never);
-    client.debuggerListeners.delete(tab.id);
-  }
-
-  private tabForSession(client: CdpClient, sessionId: string): { tab: BrowserTab; sessions: ClientTabSessions; kind: "tab" | "page" | "direct" | "child" } | undefined {
-    for (const [tabId, sessions] of client.sessions) {
-      const tab = this.tabs.get(tabId);
-      if (!tab || tab.scopeId !== client.scopeId) continue;
-      if (sessions.tabSessionId === sessionId) return { tab, sessions, kind: "tab" };
-      if (sessions.pageSessionId === sessionId) return { tab, sessions, kind: "page" };
-    }
-    const directTabId = client.directSessions.get(sessionId);
-    const directTab = directTabId ? this.tabs.get(directTabId) : undefined;
-    const directSessions = directTabId ? client.sessions.get(directTabId) : undefined;
-    if (directTab?.scopeId === client.scopeId && directSessions) return { tab: directTab, sessions: directSessions, kind: "direct" };
-    const childTabId = client.childSessions.get(sessionId);
-    const childTab = childTabId ? this.tabs.get(childTabId) : undefined;
-    const childSessions = childTabId ? client.sessions.get(childTabId) : undefined;
-    return childTab?.scopeId === client.scopeId && childSessions ? { tab: childTab, sessions: childSessions, kind: "child" } : undefined;
-  }
-
-  private allTargetInfos(client?: CdpClient): Array<Record<string, unknown>> {
-    const scopeId = client?.scopeId ?? this.uiScopeId;
-    return [
-      { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false },
-      ...this.cdpTabs(scopeId).flatMap((tab) => client?.mode === "playwright"
-        ? [targetInfo(tab, "page")]
-        : [targetInfo(tab, "tab"), targetInfo(tab, "page")]),
-    ];
-  }
-
-  private findTargetInfo(id: string, scopeId: string): Record<string, unknown> {
-    if (id === BROWSER_TARGET_ID) return this.allTargetInfos()[0];
-    const tab = this.findTabByTarget(id, scopeId);
-    if (!tab) throw new Error("目标不存在。");
-    return targetInfo(tab, id === tab.tabTargetId ? "tab" : "page");
-  }
-
-  private findTabByTarget(id: string, scopeId: string): BrowserTab | undefined {
-    return this.cdpTabs(scopeId).find((tab) => tab.tabTargetId === id || tab.pageTargetId === id);
-  }
-
-  private findTabByWindowId(value: unknown, scopeId: string): BrowserTab | undefined {
-    if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
-    return this.cdpTabs(scopeId).find((tab) => tab.guest?.id === value);
   }
 
   private windowBounds(tab: BrowserTab): Record<string, unknown> {
@@ -1044,8 +576,4 @@ export class BrowserRuntimeManager {
     return {};
   }
 
-  private send(client: CdpClient, value: Record<string, unknown>): void {
-    if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error("[browser-cdp] →", value.method ?? `#${value.id}`, value.sessionId ?? "root");
-    if (client.socket.readyState === 1) client.socket.send(JSON.stringify(value));
-  }
 }

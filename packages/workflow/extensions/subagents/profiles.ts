@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const ALLOWED_CHILD_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "ls", "find"] as const;
+export const ALLOWED_CHILD_TOOL_NAMES = ["read", "bash", "terminal", "edit", "write", "grep", "ls", "find"] as const;
 
 export type SubagentProfileSource = "builtin" | "user" | "project";
 

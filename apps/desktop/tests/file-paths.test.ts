@@ -3,6 +3,7 @@ import test from "node:test";
 import type { FileNode } from "@suocode/runtime-protocol";
 import {
   absoluteProjectPath,
+  previewFileNode,
   relativeProjectPath,
   removeTreeNode,
   replaceDirectoryChildren,
@@ -13,6 +14,11 @@ test("文件面板在绝对路径与项目相对路径之间稳定转换", () =>
   assert.equal(absoluteProjectPath("/workspace/", "/outside/file.ts"), "/outside/file.ts");
   assert.equal(relativeProjectPath("/workspace", "/workspace/src/index.ts"), "src/index.ts");
   assert.equal(relativeProjectPath("/workspace", "/outside/file.ts"), "/outside/file.ts");
+  assert.deepEqual(previewFileNode("/workspace/src/index.ts"), {
+    name: "index.ts",
+    path: "/workspace/src/index.ts",
+    kind: "file",
+  });
 });
 
 test("目录懒加载只替换目标目录的子节点", () => {

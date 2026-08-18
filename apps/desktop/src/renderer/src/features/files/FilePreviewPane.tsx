@@ -1,4 +1,4 @@
-import { Code2, Eye, FileText, LoaderCircle, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Code2, Eye, FileText, Image as ImageIcon, LoaderCircle, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -21,18 +21,20 @@ export function FilePreviewPane({ preview, loading, error, onClose }: {
   }, [preview?.id]);
 
   const canRender = preview?.kind === "markdown" || preview?.kind === "html";
-  const embeddedPreview = !loading && !error && (preview?.kind === "pdf" || (preview?.kind === "html" && rendered));
+  const embeddedPreview = !loading && !error && (preview?.kind === "pdf" || preview?.kind === "image" || (preview?.kind === "html" && rendered));
   const kindLabel = preview?.kind === "text"
     ? "文本"
     : preview?.kind === "markdown"
       ? "Markdown"
-      : preview?.kind.toUpperCase();
+      : preview?.kind === "image"
+        ? "图片"
+        : preview?.kind.toUpperCase();
 
   return (
     <section className={`inline-file-preview ${preview ? "has-document" : ""} ${preview?.truncated ? "has-warning" : ""}`}>
       <header className="inline-preview-header">
         <div className="inline-preview-title">
-          <FileText size={14} />
+          {preview?.kind === "image" ? <ImageIcon size={14} /> : <FileText size={14} />}
           <strong title={preview?.path}>{preview?.name || "文件预览"}</strong>
         </div>
         <div className="inline-preview-actions">
@@ -57,6 +59,7 @@ export function FilePreviewPane({ preview, loading, error, onClose }: {
         {loading ? <div className="preview-placeholder"><LoaderCircle className="spin" size={16} /><span>正在打开文件…</span></div> : null}
         {!loading && error ? <div className="preview-placeholder error"><FileText size={16} /><span>{error}</span></div> : null}
         {!loading && !error && preview?.kind === "pdf" ? <embed className="pdf-preview" src={preview.content} type="application/pdf" /> : null}
+        {!loading && !error && preview?.kind === "image" ? <div className="image-preview-shell"><img className="image-preview" src={preview.content} alt={preview.name} draggable={false} /></div> : null}
         {!loading && !error && preview?.kind === "markdown" && rendered ? <article className="preview-markdown markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.content}</ReactMarkdown></article> : null}
         {!loading && !error && preview?.kind === "html" && rendered ? <div className="html-preview-shell"><iframe className="html-preview" title={preview.name} sandbox="" srcDoc={preview.content} style={htmlZoomFrameStyle(htmlZoom)} /></div> : null}
         {!loading && !error && preview && (preview.kind === "text" || !rendered) ? <pre className="text-preview"><code>{preview.content}</code></pre> : null}

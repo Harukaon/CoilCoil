@@ -39,9 +39,9 @@ function rewriteRelativeImports(source: string, directory: string): string {
 }
 
 /**
- * Build SuoCode's extension transport from the bundled Pi protocol implementation.
- * The extension changes only the authentication assumption and transport policy:
- * ordinary proxy keys are valid, account-id is optional, and requests stay on WS.
+ * Build SuoCode's extension transport from Pi's Responses event implementation.
+ * Unlike Pi's ChatGPT Codex provider, this API provider follows the public OpenAI
+ * WebSocket endpoint: `/v1/responses`, ordinary Bearer auth, and `response.create`.
  */
 export function adaptPiCodexTransportSource(source: string): string {
   const accountFunction = /function extractAccountId\(token\) \{[\s\S]*?\n\}/;
@@ -58,6 +58,24 @@ export function adaptPiCodexTransportSource(source: string): string {
     `const CODEX_TOOL_CALL_PROVIDERS = new Set([${entries}, ${JSON.stringify(OPENAI_RESPONSES_WS_PROVIDER_ID)}]);`);
 
   source = source.replaceAll(`api: "openai-codex-responses"`, `api: ${JSON.stringify(OPENAI_RESPONSES_WS_API)}`);
+
+  const endpointFunction = /function resolveCodexUrl\(baseUrl\) \{[\s\S]*?\n\}/;
+  if (!endpointFunction.test(source)) throw new Error("Pi transport changed: resolveCodexUrl was not found.");
+  source = source.replace(endpointFunction, `function resolveCodexUrl(baseUrl) {
+\tconst raw = baseUrl && baseUrl.trim().length > 0 ? baseUrl : "https://api.openai.com/v1";
+\tconst url = new URL(raw);
+\tlet path = url.pathname.replace(/\\/+$/, "");
+\tif (!path || path === "/") path = "/v1";
+\tif (!path.endsWith("/responses")) path = \`\${path}/responses\`;
+\turl.pathname = path.replace(/\\/{2,}/g, "/");
+\turl.search = "";
+\turl.hash = "";
+\treturn url.toString();
+}`);
+
+  const betaHeader = `headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);`;
+  if (!source.includes(betaHeader)) throw new Error("Pi transport changed: private WebSocket beta header was not found.");
+  source = source.replace(betaHeader, "");
 
   const disabledFallback = /const websocketDisabledForSession\s*=\s*transport !== "sse" && isWebSocketSseFallbackActive\(cacheSessionId\);/;
   if (!disabledFallback.test(source)) throw new Error("Pi transport changed: WS fallback guard was not found.");
@@ -111,7 +129,7 @@ export async function loadOpenAIResponsesWsStream(fastModelIds: ReadonlySet<stri
 }
 
 /**
- * Registers the WS transport as a generic Pi api provider (`registerApiProvider`
+ * Registers the standards-based WS transport as a generic Pi api provider (`registerApiProvider`
  * from "@earendil-works/pi-ai/compat") rather than a single named provider, so
  * any custom/override provider can select it as a request protocol and supply
  * its own baseUrl/apiKey/models.

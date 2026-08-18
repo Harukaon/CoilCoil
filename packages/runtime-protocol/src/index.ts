@@ -36,6 +36,15 @@ export interface SessionModelSelection {
   thinkingLevel: ThinkingLevel;
 }
 
+/** A model choice waiting for the next prompt of a busy session. */
+export interface PendingSessionModel {
+  provider: string;
+  id: string;
+  name: string;
+  reasoning: boolean;
+  thinkingLevel: ThinkingLevel;
+}
+
 /** Configuration for SuoCode's own OpenAI Responses WebSocket Pi extension. */
 export interface OpenAIResponsesWsConfiguration {
   configPath: string;
@@ -638,6 +647,24 @@ export interface TokenUsage {
   total: number;
 }
 
+/**
+ * Estimated composition of the prompt that is currently visible to the
+ * model. Provider usage reports the whole prompt as one input bucket, so the
+ * categories below are intentionally marked as an estimate in the UI.
+ */
+export interface RuntimeTokenBreakdown {
+  userPrompt: number;
+  /** Active ordinary tool names, descriptions, and parameter schemas. */
+  toolDefinitions: number;
+  /** Active MCP proxy/direct tool names, descriptions, and parameter schemas. */
+  mcpDefinitions: number;
+  toolResults: number;
+  mcpResults: number;
+  systemPrompt: number;
+  history: number;
+  total: number;
+}
+
 export interface CacheUsageSummary {
   /** Full prompt volume. Pi exposes input/cacheRead/cacheWrite as non-overlapping buckets. */
   promptTokens: number;
@@ -723,6 +750,8 @@ export interface RuntimeInspectionSnapshot {
   };
   /** Cache-read share of the latest completed model request, not a lifetime average. */
   cacheHitRate?: number;
+  /** Estimated composition of the prompt currently sent to the model. */
+  tokenBreakdown?: RuntimeTokenBreakdown;
   tools: RuntimeToolDefinition[];
   skills: RuntimeSkillState[];
   mcp?: McpRuntimeStatus;
@@ -739,6 +768,8 @@ export interface RuntimeToolDefinition {
   description: string;
   source: string;
   active: boolean;
+  /** Built-in/workflow tool or MCP-provided tool. */
+  category?: "tool" | "mcp";
   estimatedTokens: number;
 }
 
@@ -776,6 +807,43 @@ export interface ProjectMemoryRuntimeStatus {
   durationMs?: number;
   message?: string;
   error?: string;
+}
+
+export interface MemorySettings {
+  version: 1;
+  projectMaxChars: number;
+  globalMaxChars: number;
+  generationRules: string;
+  autoSummarize: boolean;
+  globalEnabled: boolean;
+  projectEnabled: boolean;
+}
+
+export interface MemoryDocumentSnapshot {
+  scope: "global" | "project";
+  label: string;
+  filePath: string;
+  directory: string;
+  exists: boolean;
+  content: string;
+  contentChars: number;
+  maxChars: number;
+  projectRoot?: string;
+  projectName?: string;
+}
+
+export interface MemoryConfigurationSnapshot {
+  settings: MemorySettings;
+  settingsFile: string;
+  storageRoot: string;
+  global: MemoryDocumentSnapshot;
+  project?: MemoryDocumentSnapshot;
+}
+
+export interface SaveMemoryConfigurationInput {
+  settings: MemorySettings;
+  globalContent: string;
+  projectContent?: string;
 }
 
 export interface TerminalRun {
@@ -827,6 +895,8 @@ export interface SessionSnapshot {
   subagents: SubagentActivity[];
   project: ProjectSnapshot;
   model?: Pick<ModelOption, "provider" | "id" | "name" | "reasoning">;
+  /** Present when the user changed models while the current agent turn was busy. */
+  pendingModel?: PendingSessionModel;
   thinkingLevel: ThinkingLevel;
   fast: boolean;
   responseMetrics?: ResponseMetrics;
@@ -842,10 +912,10 @@ export interface RuntimeBootstrap {
   activeSession?: SessionSnapshot;
 }
 
-/** Returned by `open_workspace`: the session list and the opened/created snapshot in one round trip. */
+/** Returned by `open_workspace`: the session list and the currently opened snapshot, if any. */
 export interface WorkspaceSnapshot {
   sessions: SessionSummary[];
-  snapshot: SessionSnapshot;
+  snapshot?: SessionSnapshot;
 }
 
 export type RuntimeCommand =
@@ -867,7 +937,7 @@ export type RuntimeCommand =
       apiKey?: string;
     }
   | {
-      /** Switch one existing, idle session. A runtimeId is required by the server. */
+      /** Change one existing session; a busy turn queues the choice for the next prompt. */
       type: "set_session_model";
       provider: string;
       modelId: string;
@@ -894,8 +964,11 @@ export type RuntimeCommand =
   | { type: "start_mcp_auth"; name: string }
   | { type: "complete_mcp_auth"; name: string; input: string }
   | { type: "logout_mcp_server"; name: string }
+  | { type: "get_memory_configuration"; cwd?: string }
+  | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
   | { type: "get_skill_configuration"; cwd?: string }
   | { type: "set_skill_enabled"; filePath: string; enabled: boolean; cwd?: string }
+  | { type: "delete_skill"; filePath: string; cwd?: string }
   | { type: "add_skill_path"; path: string; cwd?: string }
   | { type: "remove_skill_path"; path: string; cwd?: string }
   | { type: "set_enable_skill_commands"; enabled: boolean; cwd?: string }

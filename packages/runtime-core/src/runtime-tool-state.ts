@@ -1,0 +1,473 @@
+import {
+  type AgentSession,
+} from "@earendil-works/pi-coding-agent";
+import {
+  type ChatMessage,
+  type PlanApprovalState,
+  type PlanExecutionTarget,
+  type PromptImage,
+  type SubagentActivity,
+  type TerminalRun,
+  type TodoItem,
+  type ToolRun,
+} from "@suocode/runtime-protocol";
+import {
+  AssistantToolCall,
+  assistantToolCalls,
+  contentParts,
+  extractExitCode,
+  mapMessage,
+  messageTimestamp,
+  normalizeTodoPlan,
+  restoredSubagentActivity,
+  subagentActivitiesFromPayload,
+  subagentActivityFromDetails,
+} from "./message-helpers.js";
+import {
+  MAX_TERMINAL_OUTPUT,
+  PLAN_ENTRY_TYPE,
+  PLAN_RPC_REQUEST_CHANNEL,
+  SUBAGENT_RPC_REQUEST_CHANNEL,
+  SUBAGENT_RUN_ENTRY_TYPE,
+} from "./runtime-constants.js";
+import { RuntimeSessions } from "./runtime-sessions.js";
+import {
+  ActiveSession,
+  ReconstructedSessionState,
+  planApprovalState,
+} from "./runtime-state.js";
+import {
+  clampText,
+  isRecord,
+  stringValue,
+} from "./runtime-utils.js";
+import {
+  liveToolPurpose,
+  purposeFromArgs,
+  restoredResponseMetrics,
+  restoredToolPurposes,
+} from "./session-values.js";
+import {
+  TERMINAL_RUN_ENTRY_TYPE,
+  terminalIdFromResult,
+  terminalOwnerToolIdFromData,
+  terminalOutputFromResult,
+  terminalRunFromData,
+  terminalStatusFromResult,
+} from "./terminal-values.js";
+
+export abstract class RuntimeToolState extends RuntimeSessions {
+  protected reconstructState(session: AgentSession): ReconstructedSessionState {
+    const messages: ChatMessage[] = [];
+    const tools = new Map<string, ToolRun>();
+    const subagents = new Map<string, SubagentActivity>();
+    const terminals = new Map<string, TerminalRun>();
+    let plan: TodoItem[] = [];
+    let planApproval: PlanApprovalState | undefined;
+    const calls = new Map<string, AssistantToolCall & { order: number; }>();
+    const purposes = restoredToolPurposes(session);
+    let order = 0;
+
+    const branchMessages = session.sessionManager.getBranch().filter((entry) => entry.type === "message");
+    for (const [index, entry] of branchMessages.entries()) {
+      const rawMessage = entry.message;
+      if (!isRecord(rawMessage)) continue;
+      const liveMessageId = this.active?.messageIds.get(rawMessage);
+      const mapped = mapMessage(rawMessage, liveMessageId ?? `history-${entry.id}`, order, entry.id);
+      if (mapped && mapped.role !== "tool" && (mapped.role === "user" || mapped.text || mapped.thinking)) {
+        messages.push(mapped);
+        order += 1;
+      }
+      for (const call of assistantToolCalls(rawMessage)) {
+        if (calls.has(call.id)) continue;
+        calls.set(call.id, { ...call, order: order++ });
+      }
+      if (rawMessage.role !== "toolResult") continue;
+      const id = stringValue(rawMessage.toolCallId) || `tool-${tools.size + 1}`;
+      const call = calls.get(id);
+      const name = stringValue(rawMessage.toolName) || call?.name || "tool";
+      const args = call?.args ?? {};
+      const output = clampText(contentParts(rawMessage.content).text, MAX_TERMINAL_OUTPUT);
+      const failed = rawMessage.isError === true;
+      tools.set(id, {
+        id,
+        order: call?.order ?? order++,
+        name,
+        label: this.toolLabel(name, args, id, purposes.get(id)),
+        args,
+        output,
+        status: failed ? "failed" : "succeeded",
+        startedAt: call?.timestamp ?? messageTimestamp(rawMessage),
+        endedAt: messageTimestamp(rawMessage),
+      });
+      const restoredPlan = normalizeTodoPlan(isRecord(rawMessage.details) ? rawMessage.details.plan : undefined);
+      if (name === "todo" && restoredPlan) plan = restoredPlan;
+      if (name === "plan") {
+        const restoredApproval = planApprovalState(isRecord(rawMessage.details) ? rawMessage.details.plan ?? rawMessage.details : undefined);
+        if (restoredApproval) planApproval = restoredApproval;
+      }
+      if (name === "subagent") {
+        const activity = subagentActivityFromDetails(rawMessage.details, id);
+        if (activity) subagents.set(activity.id, restoredSubagentActivity(activity));
+      }
+      if (name === "bash" || (name === "terminal" && args.action === "start")) {
+        const terminalId = terminalIdFromResult(rawMessage.details) ?? id;
+        const terminalStatus = terminalStatusFromResult(rawMessage.details, failed);
+        terminals.set(terminalId, {
+          id: terminalId,
+          command: stringValue(args.command) || name,
+          cwd: stringValue(args.cwd) || this.active?.cwd || session.sessionManager.getCwd(),
+          output: clampText(terminalOutputFromResult(rawMessage.details) ?? output, MAX_TERMINAL_OUTPUT),
+          status: terminalStatus,
+          startedAt: call?.timestamp ?? messageTimestamp(rawMessage),
+          endedAt: terminalStatus === "running" ? undefined : messageTimestamp(rawMessage),
+          exitCode: extractExitCode(rawMessage.details),
+        });
+      }
+    }
+    for (const call of calls.values()) {
+      if (tools.has(call.id)) continue;
+      const output = "工具调用未完成：会话在返回执行结果前中断。";
+      tools.set(call.id, {
+        id: call.id,
+        order: call.order,
+        name: call.name,
+        label: this.toolLabel(call.name, call.args, call.id, purposes.get(call.id)),
+        args: call.args,
+        output,
+        status: "failed",
+        startedAt: call.timestamp,
+        endedAt: call.timestamp,
+      });
+      if (call.name === "bash" || (call.name === "terminal" && call.args.action === "start")) {
+        terminals.set(call.id, {
+          id: call.id,
+          command: stringValue(call.args.command) || call.name,
+          cwd: stringValue(call.args.cwd) || this.active?.cwd || session.sessionManager.getCwd(),
+          output,
+          status: "failed",
+          startedAt: call.timestamp,
+          endedAt: call.timestamp,
+        });
+      }
+    }
+    for (const entry of session.sessionManager.getBranch()) {
+      if (entry.type !== "custom" || entry.customType !== SUBAGENT_RUN_ENTRY_TYPE) continue;
+      for (const activity of subagentActivitiesFromPayload({ activities: [entry.data] })) {
+        subagents.set(activity.id, restoredSubagentActivity(activity));
+      }
+    }
+    for (const entry of session.sessionManager.getBranch()) {
+      if (entry.type !== "custom" || entry.customType !== PLAN_ENTRY_TYPE) continue;
+      const restored = planApprovalState(entry.data);
+      if (restored) planApproval = restored;
+    }
+    for (const entry of session.sessionManager.getBranch()) {
+      if (entry.type !== "custom" || entry.customType !== TERMINAL_RUN_ENTRY_TYPE) continue;
+      const terminal = terminalRunFromData(entry.data);
+      if (terminal) {
+        const ownerToolCallId = terminalOwnerToolIdFromData(entry.data);
+        if (ownerToolCallId && ownerToolCallId !== terminal.id) terminals.delete(ownerToolCallId);
+        terminals.set(terminal.id, terminal);
+      }
+    }
+    const responseMetricsHistory = restoredResponseMetrics(session);
+    return {
+      messages,
+      tools,
+      subagents,
+      terminals,
+      plan,
+      nextTimelineOrder: order,
+      responseMetrics: responseMetricsHistory.at(-1),
+      responseMetricsHistory,
+      planApproval,
+    };
+  }
+
+  protected toolLabel(
+    name: string,
+    args: Record<string, unknown>,
+    toolCallId?: string,
+    restoredPurpose?: string,
+  ): string {
+    const purpose = restoredPurpose ?? liveToolPurpose(toolCallId) ?? purposeFromArgs(args);
+    if (purpose) return purpose;
+    if (name === "bash") return `运行 ${stringValue(args.command) || "命令"}`;
+    if (name === "read") return `查看 ${stringValue(args.path) || "文件"}`;
+    if (name === "write") return `写入 ${stringValue(args.path) || "文件"}`;
+    if (name === "edit") return `编辑 ${stringValue(args.path) || "文件"}`;
+    if (name === "grep") return `搜索 ${stringValue(args.pattern) || "项目"}`;
+    if (name === "ls") return `查看 ${stringValue(args.path) || "目录"}`;
+    if (name === "todo") return "更新 Todo";
+    if (name === "plan") return "创建执行计划";
+    if (name === "terminal") return `运行 ${stringValue(args.command) || stringValue(args.action) || "终端命令"}`;
+    return `调用 ${name.replace(/[_-]+/g, " ")}`;
+  }
+
+  protected projectToolStart(active: ActiveSession, call: AssistantToolCall): ToolRun {
+    const existing = active.tools.get(call.id);
+    const tool: ToolRun = {
+      id: call.id,
+      order: existing?.order ?? active.nextTimelineOrder++,
+      name: call.name,
+      label: this.toolLabel(call.name, call.args, call.id),
+      args: { ...call.args },
+      output: existing?.status === "running" ? existing.output : "",
+      status: "running",
+      startedAt: existing?.startedAt ?? call.timestamp,
+    };
+    active.tools.set(tool.id, tool);
+    if (call.name === "subagent" && (!stringValue(call.args.action) || call.args.action === "run" || call.args.action === "resume")) {
+      const placeholderId = `${tool.id}:0`;
+      if (!active.subagents.has(placeholderId)) {
+        const task = stringValue(call.args.task);
+        const agent = stringValue(call.args.agent) || "子 Agent";
+        active.subagents.set(placeholderId, {
+          id: placeholderId,
+          runId: tool.id,
+          parentToolId: tool.id,
+          index: 0,
+          agent,
+          task: task || undefined,
+          model: stringValue(call.args.model) || undefined,
+          status: "running",
+          background: call.args.background === true,
+          controlReady: false,
+          toolCount: 0,
+          tokens: 0,
+          durationMs: 0,
+          updatedAt: tool.startedAt,
+        });
+        this.publishSubagents();
+      }
+    }
+    if (call.name === "bash" || (call.name === "terminal" && call.args.action === "start")) {
+      const terminal = active.terminals.get(tool.id);
+      active.terminals.set(tool.id, {
+        id: tool.id,
+        command: stringValue(call.args.command) || this.toolLabel(call.name, call.args),
+        cwd: stringValue(call.args.cwd) || active.cwd,
+        output: terminal?.status === "running" ? terminal.output : "",
+        status: "running",
+        startedAt: terminal?.startedAt ?? tool.startedAt,
+      });
+    }
+    this.emitEvent({ type: "tool_started", tool: { ...tool } });
+    this.publishProjectFromMemory();
+    return tool;
+  }
+
+  protected messageId(message: unknown, prefix: string): string {
+    const active = this.active;
+    if (!active || !isRecord(message)) return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const existing = active.messageIds.get(message);
+    if (existing) return existing;
+    const id = `${prefix}-${messageTimestamp(message)}-${Math.random().toString(36).slice(2, 8)}`;
+    active.messageIds.set(message, id);
+    return id;
+  }
+
+  protected queueClientMessage(active: ActiveSession, clientMessageId?: string): void {
+    if (!clientMessageId || active.pendingUserMessageIds.includes(clientMessageId)) return;
+    active.pendingUserMessageIds.push(clientMessageId);
+  }
+
+  protected publishPromptQueue(active: ActiveSession): void {
+    this.emitEvent({
+      type: "prompt_queue_updated",
+      queue: active.promptQueue.map((item) => ({
+        ...item,
+        images: item.images?.map((image) => ({ ...image })),
+      })),
+      revision: ++active.messageRevision,
+    });
+  }
+
+  protected enqueuePrompt(
+    active: ActiveSession,
+    text: string,
+    images: PromptImage[] | undefined,
+    clientMessageId?: string,
+  ): void {
+    const id = clientMessageId || `queued-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    if (active.promptQueue.some((item) => item.id === id) || active.pendingUserMessageIds.includes(id)) return;
+    active.promptQueue.push({
+      id,
+      text,
+      images: images?.map((image) => ({ ...image })),
+      queuedAt: Date.now(),
+    });
+    this.publishPromptQueue(active);
+    // Protect this session runtime from idle retirement during the small gap
+    // between one Pi run settling and the next queued prompt starting.
+    this.emitEvent({ type: "run_state", running: true });
+  }
+
+  protected removeQueuedPrompt(active: ActiveSession, id: string): boolean {
+    const index = active.promptQueue.findIndex((item) => item.id === id);
+    if (index < 0) return false;
+    active.promptQueue.splice(index, 1);
+    this.publishPromptQueue(active);
+    return true;
+  }
+
+  protected rejectClientMessage(active: ActiveSession, clientMessageId?: string): void {
+    if (!clientMessageId) return;
+    const index = active.pendingUserMessageIds.indexOf(clientMessageId);
+    if (index >= 0) active.pendingUserMessageIds.splice(index, 1);
+    this.emitEvent({ type: "message_rejected", id: clientMessageId, revision: ++active.messageRevision });
+  }
+
+  protected publishSubagents(): void {
+    const active = this.active;
+    if (!active) return;
+    this.emitEvent({
+      type: "subagents_updated",
+      subagents: [...active.subagents.values()].sort((left, right) => left.updatedAt - right.updatedAt || left.index - right.index),
+    });
+  }
+
+  protected mergeSubagentActivities(activities: SubagentActivity[]): void {
+    const active = this.active;
+    if (!active || activities.length === 0) return;
+    for (const activity of activities) {
+      const existing = active.subagents.get(activity.id);
+      active.subagents.set(activity.id, existing ? {
+        ...existing,
+        ...activity,
+        task: activity.task ?? existing.task,
+        currentTool: activity.currentTool,
+        currentPath: activity.currentPath,
+        model: activity.model ?? existing.model,
+        recentTools: activity.recentTools ?? existing.recentTools,
+        recentOutput: activity.recentOutput ?? existing.recentOutput,
+        messages: activity.messages ?? existing.messages,
+        toolCalls: activity.toolCalls ?? existing.toolCalls,
+        timeline: activity.timeline ?? existing.timeline,
+        finalOutput: activity.finalOutput ?? existing.finalOutput,
+        transcriptPath: activity.transcriptPath ?? existing.transcriptPath,
+        sessionFile: activity.sessionFile ?? existing.sessionFile,
+        parentToolId: activity.parentToolId ?? existing.parentToolId,
+        turnCount: activity.turnCount ?? existing.turnCount,
+        error: activity.error ?? existing.error,
+      } : activity);
+    }
+    this.publishSubagents();
+  }
+
+  protected subagentRpc(method: "stop" | "status" | "resume", id: string): Promise<unknown> {
+    const active = this.requireActive();
+    const requestId = `suocode-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `suocode:subagents:rpc:v1:reply:${requestId}`;
+    return new Promise((resolvePromise, rejectPromise) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        callback();
+      };
+      const unsubscribe = active.eventBus.on(replyChannel, (raw) => {
+        if (!isRecord(raw)) return;
+        if (raw.success === true) {
+          finish(() => resolvePromise(raw.data));
+          return;
+        }
+        const rpcError = isRecord(raw.error) ? stringValue(raw.error.message) : "子 Agent 控制请求失败。";
+        finish(() => rejectPromise(new Error(rpcError || "子 Agent 控制请求失败。")));
+      });
+      const timer = setTimeout(() => finish(() => rejectPromise(new Error("子 Agent 控制请求超时。"))), 8_000);
+      active.eventBus.emit(SUBAGENT_RPC_REQUEST_CHANNEL, {
+        version: 1,
+        requestId,
+        method,
+        params: { id },
+        source: { client: "suocode-desktop" },
+      });
+    });
+  }
+
+  protected planRpc(method: "approve" | "reject", params: { planId: string; target?: PlanExecutionTarget; agent?: string; }): Promise<unknown> {
+    const active = this.requireActive();
+    const requestId = `suocode-plan-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `suocode:plan:rpc:v1:reply:${requestId}`;
+    return new Promise((resolvePromise, rejectPromise) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        callback();
+      };
+      const unsubscribe = active.eventBus.on(replyChannel, (raw) => {
+        if (!isRecord(raw)) return;
+        if (raw.success === true) {
+          finish(() => resolvePromise(raw.data));
+          return;
+        }
+        const rpcError = isRecord(raw.error) ? stringValue(raw.error.message) : "计划操作失败。";
+        finish(() => rejectPromise(new Error(rpcError || "计划操作失败。")));
+      });
+      const timer = setTimeout(() => finish(() => rejectPromise(new Error("计划操作请求超时。"))), 20_000);
+      active.eventBus.emit(PLAN_RPC_REQUEST_CHANNEL, {
+        version: 1,
+        requestId,
+        method,
+        params,
+        source: { client: "suocode-desktop" },
+      });
+    });
+  }
+
+  async approvePlan(planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState> {
+    const normalized = planId.trim();
+    if (!normalized) throw new Error("缺少计划标识。");
+    const reply = await this.planRpc("approve", { planId: normalized, target, agent });
+    const plan = isRecord(reply) && isRecord(reply.plan) ? planApprovalState(reply.plan) : undefined;
+    if (!plan) throw new Error("计划审批响应缺少有效状态。");
+    const active = this.requireActive();
+    if (active.planApproval?.id !== plan.id || active.planApproval.revision !== plan.revision) {
+      active.planApproval = plan;
+      active.project = { ...active.project, planApproval: plan, refreshedAt: Date.now() };
+      this.emitEvent({ type: "plan_approval_updated", plan });
+      this.emitEvent({ type: "project_updated", project: active.project });
+    }
+    return plan;
+  }
+
+  async rejectPlan(planId: string): Promise<PlanApprovalState> {
+    const normalized = planId.trim();
+    if (!normalized) throw new Error("缺少计划标识。");
+    const reply = await this.planRpc("reject", { planId: normalized });
+    const plan = isRecord(reply) && isRecord(reply.plan) ? planApprovalState(reply.plan) : undefined;
+    if (!plan) throw new Error("计划拒绝响应缺少有效状态。");
+    const active = this.requireActive();
+    if (active.planApproval?.id !== plan.id || active.planApproval.revision !== plan.revision) {
+      active.planApproval = plan;
+      active.project = { ...active.project, planApproval: plan, refreshedAt: Date.now() };
+      this.emitEvent({ type: "plan_approval_updated", plan });
+      this.emitEvent({ type: "project_updated", project: active.project });
+    }
+    return plan;
+  }
+
+  async stopSubagent(id: string, _background: boolean): Promise<{ stopped: true; }> {
+    if (!id.trim()) throw new Error("缺少子 Agent 标识。");
+    const reply = await this.subagentRpc("stop", id.trim());
+    const activity = isRecord(reply) && isRecord(reply.activity) ? subagentActivitiesFromPayload({ activities: [reply.activity] })[0] : undefined;
+    if (!activity) throw new Error("子 Agent 停止响应缺少运行状态。");
+    this.mergeSubagentActivities([activity]);
+    return { stopped: true };
+  }
+
+  async resumeSubagent(id: string): Promise<{ resumed: true; }> {
+    if (!id.trim()) throw new Error("缺少子 Agent 标识。");
+    const reply = await this.subagentRpc("resume", id.trim());
+    const activity = isRecord(reply) && isRecord(reply.activity) ? subagentActivitiesFromPayload({ activities: [reply.activity] })[0] : undefined;
+    if (activity) this.mergeSubagentActivities([activity]);
+    return { resumed: true };
+  }
+}

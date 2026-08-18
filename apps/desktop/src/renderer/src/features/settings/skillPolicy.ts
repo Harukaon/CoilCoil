@@ -35,3 +35,11 @@ export function skillToggleActionLabel(skill: Pick<SkillEntry, "enabled" | "name
 export function skillToggleTarget(skill: Pick<SkillEntry, "enabled">): boolean {
   return !skill.enabled;
 }
+
+/** Only skills copied into SuoCode's own user directory can be deleted here. */
+export function canDeleteSkill(skill: Pick<SkillEntry, "source" | "scope" | "baseDir">, userSkillsDir?: string): boolean {
+  if (skill.source !== "user" || skill.scope !== "user" || !userSkillsDir) return false;
+  const root = userSkillsDir.replaceAll("\\", "/").replace(/\/+$/, "");
+  const baseDir = skill.baseDir.replaceAll("\\", "/").replace(/\/+$/, "");
+  return Boolean(root && baseDir && baseDir !== root && baseDir.startsWith(`${root}/`));
+}

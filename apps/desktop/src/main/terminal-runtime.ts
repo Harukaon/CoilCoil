@@ -13,8 +13,13 @@ interface TerminalRecord {
 
 export class TerminalRuntimeManager {
   private readonly records = new Map<string, TerminalRecord>();
+  private readonly onState: (state: TerminalSessionSnapshot[]) => void;
+  private readonly onData: (id: string, data: string) => void;
 
-  constructor(private readonly onState: (state: TerminalSessionSnapshot[]) => void) {}
+  constructor(onState: (state: TerminalSessionSnapshot[]) => void, onData: (id: string, data: string) => void) {
+    this.onState = onState;
+    this.onData = onData;
+  }
 
   state(): TerminalSessionSnapshot[] {
     return [...this.records.values()]
@@ -24,14 +29,15 @@ export class TerminalRuntimeManager {
 
   create(cwd: string): TerminalSessionSnapshot[] {
     const resolvedCwd = resolve(cwd);
+    const running = [...this.records.values()].find((record) => (
+      record.snapshot.cwd === resolvedCwd && record.snapshot.status === "running"
+    ));
+    if (running) return this.state();
     if (!existsSync(resolvedCwd) || !statSync(resolvedCwd).isDirectory()) {
       throw new Error("终端工作目录不存在。");
     }
     const id = randomUUID();
-    const shell = process.platform === "win32"
-      ? process.env.ComSpec || "cmd.exe"
-      : process.env.SHELL || "/bin/zsh";
-    const args = process.platform === "win32" ? [] : ["-l"];
+    const shell = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : process.env.SHELL || "/bin/zsh";
     const snapshot: TerminalSessionSnapshot = {
       id,
       cwd: resolvedCwd,
@@ -39,10 +45,10 @@ export class TerminalRuntimeManager {
       status: "running",
       startedAt: Date.now(),
     };
-    const pty = spawn(shell, args, {
+    const pty = spawn(shell, process.platform === "win32" ? [] : ["-l"], {
       name: "xterm-256color",
-      cols: 120,
-      rows: 32,
+      cols: 80,
+      rows: 24,
       cwd: resolvedCwd,
       env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
     });
@@ -50,7 +56,7 @@ export class TerminalRuntimeManager {
     this.records.set(id, record);
     pty.onData((data) => {
       snapshot.output = `${snapshot.output}${data}`.slice(-MAX_TERMINAL_OUTPUT);
-      this.publish();
+      this.onData(id, data);
     });
     pty.onExit(({ exitCode }) => {
       if (this.records.get(id) !== record) return;
@@ -65,13 +71,12 @@ export class TerminalRuntimeManager {
 
   write(id: string, data: string): void {
     const record = this.records.get(id);
-    if (!record || record.snapshot.status !== "running") return;
-    record.pty.write(data);
+    if (record?.snapshot.status === "running") record.pty.write(data);
   }
 
   resize(id: string, cols: number, rows: number): void {
     const record = this.records.get(id);
-    if (!record || record.snapshot.status !== "running") return;
+    if (record?.snapshot.status !== "running") return;
     record.pty.resize(Math.max(20, Math.floor(cols)), Math.max(4, Math.floor(rows)));
   }
 
@@ -82,10 +87,6 @@ export class TerminalRuntimeManager {
     if (record.snapshot.status === "running") record.pty.kill();
     this.publish();
     return this.state();
-  }
-
-  hasRunning(): boolean {
-    return [...this.records.values()].some((record) => record.snapshot.status === "running");
   }
 
   dispose(): void {
