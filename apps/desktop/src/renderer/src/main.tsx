@@ -2,9 +2,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { BrowserGuestLayer } from "./features/browser/BrowserGuestLayer";
+import { initTheme } from "./theme";
 import { ToastHost } from "./ui/toast";
 import { UpdateDialog } from "./ui/update/UpdateDialog";
 import "./styles.css";
+
+initTheme();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root element");
