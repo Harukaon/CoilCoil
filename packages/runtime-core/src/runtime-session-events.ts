@@ -277,7 +277,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           break;
         }
         case "tool_execution_update": {
-          const tool = active.tools.get(event.toolCallId);
+          const tool = active.tools.get(active.toolRunIds.current(event.toolCallId));
           if (!tool) break;
           if (isRecord(event.args)) tool.args = { ...event.args };
           const output = toolResultText(event.partialResult);
@@ -297,8 +297,12 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           break;
         }
         case "tool_execution_end": {
-          const tool = active.tools.get(event.toolCallId) ?? {
-            id: event.toolCallId,
+          // Closing the run here is what lets a provider that restarts its tool
+          // call ids every turn (`call_0`, `call_1`, … on OpenAI-compatible chat
+          // completions) start a fresh card instead of overwriting this one.
+          const runId = active.toolRunIds.end(event.toolCallId);
+          const tool = active.tools.get(runId) ?? {
+            id: runId,
             order: active.nextTimelineOrder++,
             name: event.toolName,
             label: this.toolLabel(event.toolName, {}, event.toolCallId),

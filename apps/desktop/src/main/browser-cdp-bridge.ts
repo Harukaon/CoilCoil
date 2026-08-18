@@ -491,6 +491,8 @@ export class BrowserCdpBridge {
   }
 
   private log(direction: string, subject: unknown, detail: unknown): void {
-    if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error(`[browser-cdp] ${direction}`, subject, detail);
+    // The timestamp is what lets a reader line these up against the window
+    // activation log and see which command raised the app.
+    if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error(`[browser-cdp ${Date.now()}] ${direction}`, subject, detail);
   }
 }

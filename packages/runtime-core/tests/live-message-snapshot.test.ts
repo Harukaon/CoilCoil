@@ -7,6 +7,7 @@ import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent"
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { RuntimeEvent, ToolRun } from "@suocode/runtime-protocol";
 import { SuoCodeRuntime } from "../src/index.js";
+import { ToolRunIds } from "../src/tool-run-ids.js";
 
 interface RuntimeInternals {
   active?: Record<string, unknown>;
@@ -61,6 +62,7 @@ test("a mid-stream snapshot includes the in-progress assistant message instead o
     // Deliberately far from reconstructState's own local order counter (which starts at
     // 0 per call) to prove the splice recomputes order rather than trusting this value.
     nextTimelineOrder: 50,
+    toolRunIds: new ToolRunIds(),
     responseMetricsHistory: [],
     sessionRevision: 1,
     eventBus: createEventBus(),
@@ -152,6 +154,7 @@ test("assistant tool calls stay visible before a result and survive a live snaps
     promptQueue: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 1,
+    toolRunIds: new ToolRunIds(),
     responseMetricsHistory: [],
     sessionRevision: 1,
     eventBus: createEventBus(),

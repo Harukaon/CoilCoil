@@ -32,6 +32,7 @@ import {
   optionalString,
   stringArray
 } from "./runtime-utils.js";
+import { ToolRunIds } from "./tool-run-ids.js";
 
 export interface SuoCodeRuntimeOptions {
   agentDir: string;
@@ -66,6 +67,8 @@ export interface ActiveSession {
   activeAssistantOrder?: number;
   activeAssistantMessage?: ChatMessage;
   nextTimelineOrder: number;
+  /** Keeps repeated provider tool call ids from colliding; see ToolRunIds. */
+  toolRunIds: ToolRunIds;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   sessionRevision: number;
@@ -105,6 +108,8 @@ export interface ReconstructedSessionState {
   terminals: Map<string, TerminalRun>;
   plan: TodoItem[];
   nextTimelineOrder: number;
+  /** Seeded by the replay so live calls keep counting from the restored runs. */
+  toolRunIds: ToolRunIds;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   planApproval?: PlanApprovalState;

@@ -414,6 +414,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       promptQueue: [],
       promptDrainInProgress: false,
       nextTimelineOrder: reconstructed.nextTimelineOrder,
+      toolRunIds: reconstructed.toolRunIds,
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
       sessionRevision: 1,

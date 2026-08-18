@@ -7,6 +7,7 @@ import { createEventBus } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { RuntimeEvent } from "@suocode/runtime-protocol";
 import { SuoCodeRuntime } from "../src/index.js";
+import { ToolRunIds } from "../src/tool-run-ids.js";
 
 interface RuntimeInternals {
   active?: Record<string, unknown>;
@@ -44,6 +45,7 @@ test("a just-finished response is reflected before Pi persists its assistant mes
     promptQueue: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 0,
+    toolRunIds: new ToolRunIds(),
     responseMetricsHistory: [],
     sessionRevision: 1,
     eventBus: createEventBus(),

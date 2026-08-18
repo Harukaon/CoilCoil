@@ -395,6 +395,22 @@ async function createWindow(): Promise<void> {
     terminalRuntime.dispose();
   });
 
+  // Diagnostic for the report that an agent driving the browser raises — and even
+  // un-minimizes — the app window. Nothing in main calls focus/show/restore, so
+  // the activation has to come from Chromium promoting a guest. Pair this with
+  // SUOCODE_BROWSER_CDP_LOG=1 and read the last CDP command before the event.
+  if (process.env.SUOCODE_BROWSER_FOCUS_LOG === "1") {
+    const logActivation = (event: string) => () => {
+      console.error(`[browser-focus ${Date.now()}] window ${event}`, new Error("activation").stack);
+    };
+    mainWindow.on("focus", logActivation("focus"));
+    mainWindow.on("show", logActivation("show"));
+    mainWindow.on("restore", logActivation("restore"));
+    mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
+      guest.on("focus", () => console.error(`[browser-focus ${Date.now()}] guest focus`, guest.id));
+    });
+  }
+
   mainWindow.on("ready-to-show", () => mainWindow.show());
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);

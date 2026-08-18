@@ -41,6 +41,7 @@ import {
   isRecord,
   stringValue,
 } from "./runtime-utils.js";
+import { ToolRunIds } from "./tool-run-ids.js";
 import {
   liveToolPurpose,
   purposeFromArgs,
@@ -64,8 +65,14 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     const terminals = new Map<string, TerminalRun>();
     let plan: TodoItem[] = [];
     let planApproval: PlanApprovalState | undefined;
-    const calls = new Map<string, AssistantToolCall & { order: number; }>();
+    // `rawId` is kept because the tool-purpose audit entries are keyed by the id
+    // the provider reported, not by the run id derived from it.
+    const calls = new Map<string, AssistantToolCall & { order: number; rawId: string; }>();
     const purposes = restoredToolPurposes(session);
+    // Replaying in branch order reproduces exactly the begin/end sequence the
+    // live projection sees, so a restored session numbers repeated provider tool
+    // call ids the same way the running one will continue numbering them.
+    const toolRunIds = new ToolRunIds();
     let order = 0;
 
     const branchMessages = session.sessionManager.getBranch().filter((entry) => entry.type === "message");
@@ -79,11 +86,13 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         order += 1;
       }
       for (const call of assistantToolCalls(rawMessage)) {
-        if (calls.has(call.id)) continue;
-        calls.set(call.id, { ...call, order: order++ });
+        const runId = toolRunIds.begin(call.id);
+        if (calls.has(runId)) continue;
+        calls.set(runId, { ...call, id: runId, rawId: call.id, order: order++ });
       }
       if (rawMessage.role !== "toolResult") continue;
-      const id = stringValue(rawMessage.toolCallId) || `tool-${tools.size + 1}`;
+      const rawId = stringValue(rawMessage.toolCallId);
+      const id = rawId ? toolRunIds.end(rawId) : `tool-${tools.size + 1}`;
       const call = calls.get(id);
       const name = stringValue(rawMessage.toolName) || call?.name || "tool";
       const args = call?.args ?? {};
@@ -93,7 +102,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         id,
         order: call?.order ?? order++,
         name,
-        label: this.toolLabel(name, args, id, purposes.get(id)),
+        label: this.toolLabel(name, args, id, purposes.get(id) ?? purposes.get(rawId)),
         args,
         output,
         status: failed ? "failed" : "succeeded",
@@ -132,7 +141,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         id: call.id,
         order: call.order,
         name: call.name,
-        label: this.toolLabel(call.name, call.args, call.id, purposes.get(call.id)),
+        label: this.toolLabel(call.name, call.args, call.id, purposes.get(call.id) ?? purposes.get(call.rawId)),
         args: call.args,
         output,
         status: "failed",
@@ -179,6 +188,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
       terminals,
       plan,
       nextTimelineOrder: order,
+      toolRunIds,
       responseMetrics: responseMetricsHistory.at(-1),
       responseMetricsHistory,
       planApproval,
@@ -206,9 +216,13 @@ export abstract class RuntimeToolState extends RuntimeSessions {
   }
 
   protected projectToolStart(active: ActiveSession, call: AssistantToolCall): ToolRun {
-    const existing = active.tools.get(call.id);
+    // A call is projected twice — from its assistant message and from
+    // tool_execution_start — and `begin` is idempotent for exactly that reason.
+    // The purpose registry stays keyed by the provider's own id.
+    const id = active.toolRunIds.begin(call.id);
+    const existing = active.tools.get(id);
     const tool: ToolRun = {
-      id: call.id,
+      id,
       order: existing?.order ?? active.nextTimelineOrder++,
       name: call.name,
       label: this.toolLabel(call.name, call.args, call.id),
