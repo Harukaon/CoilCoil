@@ -1,20 +1,37 @@
-.terminal-tab-panel { overflow: hidden; background: #171816; }
-.terminal-panel { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: 38px minmax(0, 1fr); color: #e7e7e2; background: #171816; }
-.terminal-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border-bottom: 1px solid #30312e; background: #20211e; font-size: 10px; }
-.terminal-header > div:first-child, .terminal-header-actions { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.terminal-header strong { color: #f0f0ea; font-size: 11px; font-weight: 550; }
-.terminal-header > div:first-child span { min-width: 0; overflow: hidden; color: #92948b; text-overflow: ellipsis; white-space: nowrap; }
-.terminal-header-actions { flex: 0 0 auto; }
-.terminal-running { color: #9bc29a; font-size: 9px; }
-.terminal-exited { color: #979990; font-size: 9px; }
-.terminal-header-actions button { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 5px; color: #a5a69d; background: transparent; cursor: pointer; }
-.terminal-header-actions button:hover { color: #fff; background: #373934; }
-.terminal-surface { min-width: 0; min-height: 0; overflow: hidden; padding: 10px 8px 8px 12px; background: #171816; }
+/*
+ * The panel is deliberately just a tab strip over a shell. It used to carry a
+ * header repeating the word 终端, the full cwd, and a running/exited badge —
+ * all of it noise above a surface that already shows the prompt.
+ *
+ * Every terminal stays mounted and stacked in the same grid cell so switching
+ * tabs keeps each shell's xterm buffer instead of replaying it from scratch.
+ */
+.terminal-tab-panel { overflow: hidden; background: #2b2b29; }
+.terminal-panel { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: 30px minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); color: #e7e7e2; background: #2b2b29; }
+
+.terminal-tabs { display: flex; min-width: 0; align-items: center; gap: 2px; padding: 0 6px; overflow-x: auto; border-bottom: 1px solid #3b3b38; background: #262624; scrollbar-width: none; }
+.terminal-tabs::-webkit-scrollbar { display: none; }
+.terminal-tab { display: flex; flex: 0 0 auto; align-items: center; height: 22px; border-radius: 5px; color: #97978f; }
+.terminal-tab:hover { background: #333330; }
+.terminal-tab.active { color: #f0f0ea; background: #3a3a36; }
+.terminal-tab.exited { color: #6f6f69; }
+.terminal-tab > button:first-child { display: flex; align-items: center; gap: 5px; height: 100%; padding: 0 3px 0 8px; color: inherit; background: transparent; font-size: 10px; cursor: pointer; }
+.terminal-tab-close { display: grid; width: 16px; height: 16px; margin-right: 4px; place-items: center; border-radius: 4px; color: inherit; background: transparent; cursor: pointer; opacity: 0; }
+.terminal-tab:hover .terminal-tab-close, .terminal-tab.active .terminal-tab-close { opacity: .7; }
+.terminal-tab-close:hover { color: #fff; background: #4d4d47; opacity: 1; }
+.terminal-tab-new { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; border-radius: 5px; color: #97978f; background: transparent; cursor: pointer; }
+.terminal-tab-new:hover { color: #f0f0ea; background: #333330; }
+
+.terminal-stage { display: none; min-width: 0; min-height: 0; grid-row: 2; grid-column: 1; }
+.terminal-stage.active { display: block; }
+
+.terminal-surface { width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; padding: 8px 8px 8px 12px; background: #2b2b29; }
 .terminal-surface .xterm { height: 100%; }
-.terminal-surface .xterm-viewport { scrollbar-width: thin; scrollbar-color: #4a4a45 transparent; }
+.terminal-surface .xterm-viewport { scrollbar-width: thin; scrollbar-color: #565650 transparent; }
 .terminal-surface .xterm-viewport::-webkit-scrollbar { width: 6px; }
-.terminal-surface .xterm-viewport::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 6px; background: #4a4a45; background-clip: padding-box; }
-.terminal-empty { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; align-content: center; justify-items: center; gap: 9px; color: #8f9288; background: #171816; }
+.terminal-surface .xterm-viewport::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 6px; background: #565650; background-clip: padding-box; }
+
+.terminal-empty { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; align-content: center; justify-items: center; gap: 9px; color: #93938b; background: #2b2b29; }
 .terminal-empty strong { color: #d7d8d0; font-size: 12px; font-weight: 550; }
-.terminal-empty button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 11px; border: 1px solid #40433c; border-radius: 7px; color: #d1d3ca; background: #242720; font-size: 10px; cursor: pointer; }
-.terminal-empty button:hover { background: #30342c; }
+.terminal-empty button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 11px; border: 1px solid #4a4a44; border-radius: 7px; color: #d1d3ca; background: #35352f; font-size: 10px; cursor: pointer; }
+.terminal-empty button:hover { background: #41413a; }

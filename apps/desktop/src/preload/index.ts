@@ -53,6 +53,7 @@ const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_DATA_CHANNEL = "terminal:data";
 const TERMINAL_GET_CHANNEL = "terminal:get";
 const TERMINAL_CREATE_CHANNEL = "terminal:create";
+const TERMINAL_ENSURE_CHANNEL = "terminal:ensure";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
 const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
 const TERMINAL_CLOSE_CHANNEL = "terminal:close";
@@ -121,6 +122,7 @@ const api: SuoCodeDesktopApi = {
   },
   getTerminalSessions: () => ipcRenderer.invoke(TERMINAL_GET_CHANNEL) as Promise<TerminalSessionSnapshot[]>,
   createTerminal: (cwd: string) => ipcRenderer.invoke(TERMINAL_CREATE_CHANNEL, cwd) as Promise<TerminalSessionSnapshot[]>,
+  ensureTerminal: (cwd: string) => ipcRenderer.invoke(TERMINAL_ENSURE_CHANNEL, cwd) as Promise<TerminalSessionSnapshot[]>,
   writeTerminal: (id: string, data: string) => ipcRenderer.invoke(TERMINAL_WRITE_CHANNEL, id, data) as Promise<void>,
   resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke(TERMINAL_RESIZE_CHANNEL, id, cols, rows) as Promise<void>,
   closeTerminal: (id: string) => ipcRenderer.invoke(TERMINAL_CLOSE_CHANNEL, id) as Promise<TerminalSessionSnapshot[]>,

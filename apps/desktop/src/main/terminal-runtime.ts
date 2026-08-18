@@ -11,6 +11,24 @@ interface TerminalRecord {
   snapshot: TerminalSessionSnapshot;
 }
 
+/**
+ * Pick the interactive shell for this platform.
+ *
+ * `-l` makes a POSIX shell read the user's login profile, which is what puts
+ * nvm, homebrew, and friends on PATH. Windows has no equivalent flag, and
+ * PowerShell is preferred over cmd.exe because it is what a modern Windows
+ * developer's tooling expects.
+ */
+function defaultShell(): { file: string; args: string[] } {
+  if (process.platform !== "win32") {
+    return { file: process.env.SHELL || "/bin/zsh", args: ["-l"] };
+  }
+  const preferred = process.env.SUOCODE_SHELL
+    || (existsSync("C:\\Program Files\\PowerShell\\7\\pwsh.exe") ? "C:\\Program Files\\PowerShell\\7\\pwsh.exe" : undefined)
+    || "powershell.exe";
+  return { file: preferred, args: ["-NoLogo"] };
+}
+
 export class TerminalRuntimeManager {
   private readonly records = new Map<string, TerminalRecord>();
   private readonly onState: (state: TerminalSessionSnapshot[]) => void;
@@ -27,17 +45,27 @@ export class TerminalRuntimeManager {
       .sort((left, right) => left.startedAt - right.startedAt);
   }
 
-  create(cwd: string): TerminalSessionSnapshot[] {
+  /**
+   * Open a terminal for `cwd` only if it has none running.
+   *
+   * The panel calls this when it mounts, where an unconditional create would
+   * spawn a shell on every remount — including React's double-invoked effects.
+   */
+  ensure(cwd: string): TerminalSessionSnapshot[] {
     const resolvedCwd = resolve(cwd);
-    const running = [...this.records.values()].find((record) => (
+    const running = [...this.records.values()].some((record) => (
       record.snapshot.cwd === resolvedCwd && record.snapshot.status === "running"
     ));
-    if (running) return this.state();
+    return running ? this.state() : this.create(cwd);
+  }
+
+  create(cwd: string): TerminalSessionSnapshot[] {
+    const resolvedCwd = resolve(cwd);
     if (!existsSync(resolvedCwd) || !statSync(resolvedCwd).isDirectory()) {
       throw new Error("终端工作目录不存在。");
     }
     const id = randomUUID();
-    const shell = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : process.env.SHELL || "/bin/zsh";
+    const { file: shell, args: shellArgs } = defaultShell();
     const snapshot: TerminalSessionSnapshot = {
       id,
       cwd: resolvedCwd,
@@ -45,12 +73,15 @@ export class TerminalRuntimeManager {
       status: "running",
       startedAt: Date.now(),
     };
-    const pty = spawn(shell, process.platform === "win32" ? [] : ["-l"], {
+    const pty = spawn(shell, shellArgs, {
       name: "xterm-256color",
       cols: 80,
       rows: 24,
       cwd: resolvedCwd,
       env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
+      // ConPTY gives Windows real VT processing; without it xterm.js renders
+      // the legacy console's escape sequences as garbage.
+      useConpty: process.platform === "win32",
     });
     const record: TerminalRecord = { pty, snapshot };
     this.records.set(id, record);

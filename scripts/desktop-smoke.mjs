@@ -460,7 +460,7 @@ async function main() {
     await client.waitFor(`document.querySelector('.terminal-input input')?.value === "printf terminal-gui-smoke-ok"`, "The terminal input did not receive text.");
     await client.evaluate(`document.querySelector('.terminal-input')?.requestSubmit()`);
     await client.waitFor(`document.querySelector(".terminal-output")?.textContent.includes("terminal-gui-smoke-ok")`, "The terminal did not execute input through the packaged PTY.");
-    await client.evaluate(`document.querySelector('.terminal-header-actions button[aria-label="关闭终端"]')?.click()`);
+    await client.evaluate(`document.querySelector('.terminal-tab .terminal-tab-close')?.click()`);
     await client.waitFor(`!document.querySelector(".terminal-panel")`, "Closing the terminal did not release its session.");
     const globalScrollbar = await client.evaluate(`(() => {
       const probe = document.createElement("div");

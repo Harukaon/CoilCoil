@@ -61,6 +61,7 @@ const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_DATA_CHANNEL = "terminal:data";
 const TERMINAL_GET_CHANNEL = "terminal:get";
 const TERMINAL_CREATE_CHANNEL = "terminal:create";
+const TERMINAL_ENSURE_CHANNEL = "terminal:ensure";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
 const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
 const TERMINAL_CLOSE_CHANNEL = "terminal:close";
@@ -512,6 +513,7 @@ app.whenReady().then(async () => {
   };
   ipcMain.handle(TERMINAL_GET_CHANNEL, (event) => terminalFor(event).state());
   ipcMain.handle(TERMINAL_CREATE_CHANNEL, (event, cwd: string) => terminalFor(event).create(cwd));
+  ipcMain.handle(TERMINAL_ENSURE_CHANNEL, (event, cwd: string) => terminalFor(event).ensure(cwd));
   ipcMain.handle(TERMINAL_WRITE_CHANNEL, (event, id: string, data: string): void => terminalFor(event).write(id, data));
   ipcMain.handle(TERMINAL_RESIZE_CHANNEL, (event, id: string, cols: number, rows: number): void => terminalFor(event).resize(id, cols, rows));
   ipcMain.handle(TERMINAL_CLOSE_CHANNEL, (event, id: string) => terminalFor(event).close(id));
