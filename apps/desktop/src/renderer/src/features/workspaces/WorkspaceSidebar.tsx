@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
+import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { collectPinnedSessions, collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, type PinnedSessionEntry } from "./sessionList";
@@ -164,7 +165,7 @@ export function WorkspaceSidebar({
     <aside className="sidebar">
       <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
       <nav className="primary-nav">
-        <button className="nav-button" type="button" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>⌘N</kbd></button>
+        <button className="nav-button" type="button" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>{primaryModifierLabel(window.suocode.platform)}N</kbd></button>
         <button className={`nav-button ${skillsOpen ? "active" : ""}`} type="button" onClick={onOpenSkills}><Sparkles size={16} strokeWidth={1.7} /><span>技能</span></button>
         <button className={`nav-button ${memoryOpen ? "active" : ""}`} type="button" onClick={onOpenMemory}><BookOpen size={16} strokeWidth={1.7} /><span>记忆</span></button>
       </nav>

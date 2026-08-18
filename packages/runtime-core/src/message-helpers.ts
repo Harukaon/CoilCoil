@@ -18,6 +18,7 @@ import {
   isRecord,
   stringValue
 } from "./runtime-utils.js";
+import { splitInlineThinking } from "./inline-thinking.js";
 
 export function contentParts(content: unknown): { text: string; thinking: string; images: PromptImage[]; } {
   if (typeof content === "string") return { text: content, thinking: "", images: [] };
@@ -232,13 +233,16 @@ export function mapMessage(message: unknown, id: string, order: number, entryId?
     const failed = stopReason === "error" || stopReason === "aborted";
     const provider = stringValue(message.provider);
     const modelId = stringValue(message.model);
+    // Reasoning that a proxy inlined as <thinking> markup belongs in the
+    // thinking channel, not rendered as literal tags in the reply.
+    const split = splitInlineThinking(parts.text, parts.thinking);
     return {
       id,
       order,
       role: "assistant",
       model: provider && modelId ? { provider, id: modelId } : undefined,
-      text: parts.text || (failed ? stringValue(message.errorMessage) : ""),
-      thinking: parts.thinking || undefined,
+      text: split.text || (failed ? stringValue(message.errorMessage) : ""),
+      thinking: split.thinking || undefined,
       timestamp: messageTimestamp(message),
       isError: stopReason === "error",
       status: stopReason === "aborted" ? "aborted" : stopReason === "error" ? "failed" : "succeeded",

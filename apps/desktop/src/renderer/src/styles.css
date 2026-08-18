@@ -589,6 +589,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .context-popover dl div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .context-popover dt { color: #8c8c87; }
 .context-popover dd { margin: 0; color: #555550; font-family: "SFMono-Regular", Consolas, monospace; }
+.context-popover-group { margin: 0 0 6px; color: #9a9a94; font-size: 9px; font-weight: 600; letter-spacing: .04em; }
+.context-popover dl + .context-popover-group { margin-top: 11px; padding-top: 9px; border-top: 1px solid #e6e6e1; }
+.context-popover-note { margin: 10px 0 0; padding-top: 9px; border-top: 1px solid #e6e6e1; color: #9a9a94; font-size: 9px; line-height: 1.5; }
 .performance-trigger { display: grid; width: 22px; height: 22px; flex: 0 0 auto; padding: 0; place-items: center; border-radius: 6px; background: transparent; cursor: pointer; }
 .performance-trigger:hover { background: #ecece8; }
 .performance-signal { display: flex; width: 14px; height: 13px; align-items: flex-end; justify-content: center; gap: 1px; }

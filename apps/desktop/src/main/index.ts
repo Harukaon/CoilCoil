@@ -17,6 +17,7 @@ import { BrowserRuntimeManager } from "./browser-runtime";
 import { hardenGuestPreferences } from "./browser-webview-policy";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
+import { currentPlatform, trashLabel } from "../shared/platform-labels";
 import { TerminalRuntimeManager } from "./terminal-runtime";
 
 // This is deliberately opt-in and development-only. It lets the desktop smoke
@@ -127,11 +128,12 @@ async function performProjectFileAction(
   }
   if (input.action !== "trash") throw new Error("不支持的文件操作。");
   const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const trash = trashLabel(currentPlatform(process.platform));
   const options = {
     type: "warning" as const,
-    title: "移到废纸篓",
-    message: `确定要将“${basename(target.path)}”移到废纸篓吗？`,
-    buttons: ["取消", "移到废纸篓"],
+    title: `移到${trash}`,
+    message: `确定要将“${basename(target.path)}”移到${trash}吗？`,
+    buttons: ["取消", `移到${trash}`],
     defaultId: 0,
     cancelId: 0,
   };

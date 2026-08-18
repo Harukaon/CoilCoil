@@ -101,21 +101,38 @@ export function WorkspaceStatus({
           <Popover.Portal>
             <Popover.Content className="context-popover" side="top" align="end" sideOffset={7}>
               <strong>Token 使用情况</strong>
+              {/*
+                These are two different quantities and used to sit in one list,
+                which read as a contradiction: a 34k context next to a 120k
+                "累计输入". The first group is the prompt as it stands right now;
+                the second is every prompt this session has already paid for,
+                which grows by roughly the whole context on each turn.
+              */}
+              <p className="context-popover-group">当前上下文</p>
               <dl>
-                <div><dt>当前上下文</dt><dd>{formatTokens(contextUsage?.tokens)} / {formatTokens(contextUsage?.contextWindow)}</dd></div>
-                <div><dt>上下文占用</dt><dd>{contextUsage?.percent === null || contextUsage?.percent === undefined ? "—" : `${contextUsage.percent.toFixed(1)}%`}</dd></div>
-                <div><dt>累计输入</dt><dd>{formatTokens(cumulativeCache.promptTokens)}</dd></div>
-                <div><dt>未缓存输入</dt><dd>{formatTokens(cumulativeCache.uncachedTokens)}</dd></div>
-                <div><dt>累计输出</dt><dd>{formatTokens(tokenUsage.output)}</dd></div>
+                <div><dt>已占用</dt><dd>{formatTokens(contextUsage?.tokens)} / {formatTokens(contextUsage?.contextWindow)}</dd></div>
+                <div><dt>占用比例</dt><dd>{contextUsage?.percent === null || contextUsage?.percent === undefined ? "—" : `${contextUsage.percent.toFixed(1)}%`}</dd></div>
                 {tokenBreakdown ? <>
-                  <div><dt>用户提示词（当前）</dt><dd>{formatTokens(tokenBreakdown.userPrompt)}</dd></div>
+                  <div><dt>系统提示词</dt><dd>{formatTokens(tokenBreakdown.systemPrompt)}</dd></div>
+                  <div><dt>历史消息</dt><dd>{formatTokens(tokenBreakdown.history)}</dd></div>
+                  <div><dt>用户提示词</dt><dd>{formatTokens(tokenBreakdown.userPrompt)}</dd></div>
                   <div><dt>工具定义注入</dt><dd>{formatTokens(tokenBreakdown.toolDefinitions)}</dd></div>
                   <div><dt>MCP 定义注入</dt><dd>{formatTokens(tokenBreakdown.mcpDefinitions)}</dd></div>
+                  <div><dt>工具结果</dt><dd>{formatTokens(tokenBreakdown.toolResults)}</dd></div>
+                  <div><dt>MCP 结果</dt><dd>{formatTokens(tokenBreakdown.mcpResults)}</dd></div>
                 </> : null}
+              </dl>
+              <p className="context-popover-group">本会话累计（计费口径）</p>
+              <dl>
+                <div><dt>输入合计</dt><dd>{formatTokens(cumulativeCache.promptTokens)}</dd></div>
+                <div><dt>其中未缓存</dt><dd>{formatTokens(cumulativeCache.uncachedTokens)}</dd></div>
                 <div><dt>缓存读取</dt><dd>{formatTokens(tokenUsage.cacheRead)}</dd></div>
                 <div><dt>缓存写入</dt><dd>{formatTokens(tokenUsage.cacheWrite)}</dd></div>
+                <div><dt>缓存命中率</dt><dd>{cumulativeCache.hitRate === undefined ? "—" : `${(cumulativeCache.hitRate * 100).toFixed(1)}%`}</dd></div>
+                <div><dt>输出合计</dt><dd>{formatTokens(tokenUsage.output)}</dd></div>
                 <div><dt>本次输出</dt><dd>{formatTokens(responseMetrics?.outputTokens)}</dd></div>
               </dl>
+              <p className="context-popover-note">每一轮都会把整个上下文重发一次，所以「输入合计」远大于「当前上下文」属于正常。缓存命中率长期为 0 时才说明按全价重复计费。</p>
               <Popover.Arrow className="model-popover-arrow" />
             </Popover.Content>
           </Popover.Portal>
