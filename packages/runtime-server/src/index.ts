@@ -510,6 +510,8 @@ export class RuntimeServer {
         return runtime.steer(command.text, command.images, command.clientMessageId);
       case "abort":
         return runtime.abort();
+      case "cancel_queued_prompt":
+        return runtime.cancelQueuedPrompt(command.id);
       case "refresh_project":
         return runtime.refreshProject();
       case "list_directory":

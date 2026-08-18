@@ -1007,6 +1007,7 @@ export type RuntimeCommand =
   | { type: "rewind_prompt"; entryId: string; text: string; images?: PromptImage[]; clientMessageId?: string }
   | { type: "steer"; text: string; images?: PromptImage[]; clientMessageId?: string }
   | { type: "abort" }
+  | { type: "cancel_queued_prompt"; id: string }
   | { type: "refresh_project" }
   | { type: "list_directory"; path: string }
   | { type: "read_file"; path: string; maxBytes?: number };

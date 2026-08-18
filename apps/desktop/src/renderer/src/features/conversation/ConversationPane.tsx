@@ -87,6 +87,8 @@ export function ConversationPane({
   onFastChange,
   onOpenSettings,
   onAbort,
+  queuedPrompts,
+  onCancelQueuedPrompt,
   onApprovePlan,
   onRejectPlan,
 }: {
@@ -135,6 +137,8 @@ export function ConversationPane({
   onFastChange: (enabled: boolean) => Promise<void>;
   onOpenSettings: (section?: SettingsSection) => void;
   onAbort: () => void;
+  queuedPrompts: ChatMessage[];
+  onCancelQueuedPrompt: (id: string) => void;
   onApprovePlan: (planId: string, target: PlanExecutionTarget, agent?: string) => Promise<PlanApprovalState>;
   onRejectPlan: (planId: string) => Promise<PlanApprovalState>;
 }): React.JSX.Element {
@@ -312,6 +316,7 @@ export function ConversationPane({
             variant="footer"
             project={project}
             running={running}
+            queuedPrompts={queuedPrompts}
             loading={loading}
             startingSession={startingSession}
             draft={draft}
@@ -337,6 +342,7 @@ export function ConversationPane({
             onFastChange={onFastChange}
             onOpenSettings={() => onOpenSettings()}
             onAbort={onAbort}
+            onCancelQueuedPrompt={onCancelQueuedPrompt}
           />
         </div>
         <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />

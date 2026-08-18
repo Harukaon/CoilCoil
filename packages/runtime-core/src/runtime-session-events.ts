@@ -48,6 +48,9 @@ import {
   terminalStatusFromResult,
 } from "./terminal-values.js";
 
+/** How soon to re-check a queue that only Pi's streaming flag is holding. */
+const DRAIN_RETRY_MS = 200;
+
 export abstract class RuntimeSessionEvents extends RuntimeToolState {
   protected handleSessionEvent(event: AgentSessionEvent): void {
     const active = this.active;
@@ -65,6 +68,12 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           // The promise that owns the completed Pi run starts the next item only
           // after AgentSession.prompt() has fully resolved.
           if (active.promptQueue.length === 0) this.emitEvent({ type: "run_state", running: false });
+          // Settling is the second, independent chance to start queued work.
+          // Relying only on the owning run's `finally` deadlocks a prompt that
+          // was accepted after that callback had already been and gone, which
+          // happens because `isStreaming` can still read true at that point.
+          // The drain is guarded, so an early attempt is simply a no-op.
+          else queueMicrotask(() => { void this.drainPromptQueue(active); });
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
           this.scheduleProjectRefresh();
           void this.listSessions(active.cwd);
@@ -441,14 +450,35 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     }
   }
 
+  /**
+   * Re-check a queue that only Pi's streaming flag is holding back.
+   *
+   * `agent_settled` normally wakes the drain, but a prompt accepted in the
+   * window after a run resolved while `isStreaming` still reads true has
+   * already missed both that event and the run's own `finally`. Without a
+   * re-check such a prompt waits forever — the queue-stuck bug. The timer only
+   * exists while a queue is genuinely unowned, and is unref'd so it can never
+   * hold the process open.
+   */
+  private scheduleDrainRetry(active: ActiveSession): void {
+    if (active.drainRetryTimer) return;
+    const timer = setTimeout(() => {
+      active.drainRetryTimer = undefined;
+      void this.drainPromptQueue(active);
+    }, DRAIN_RETRY_MS);
+    timer.unref?.();
+    active.drainRetryTimer = timer;
+  }
+
   protected async drainPromptQueue(active: ActiveSession): Promise<void> {
-    if (
-      this.active !== active
-      || active.promptDrainInProgress
-      || active.session.isStreaming
-      || this.promptStarting
-      || active.promptQueue.length === 0
-    ) return;
+    if (this.active !== active || active.promptQueue.length === 0) return;
+    // Something already owns starting the next item; a second start would
+    // duplicate it.
+    if (active.promptDrainInProgress || this.promptStarting) return;
+    if (active.session.isStreaming) {
+      this.scheduleDrainRetry(active);
+      return;
+    }
     const next = active.promptQueue[0]!;
     active.promptDrainInProgress = true;
     try {

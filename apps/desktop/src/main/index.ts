@@ -98,10 +98,23 @@ async function safeProjectPath(input: Pick<OpenFilePreviewInput, "root" | "path"
   return { root, path };
 }
 
+/**
+ * Resolve a file to preview.
+ *
+ * Preview deliberately accepts a file the project does not contain. Agents cite
+ * absolute paths outside the workspace all the time — a dependency's source, a
+ * log, a config in the home directory — and refusing to open the very path the
+ * reply just linked was the wrong answer. Only the single named file is
+ * reachable this way: directory listing stays contained to the project, so an
+ * outside path can be read but never browsed. This grants the agent nothing it
+ * lacks, because its own read tool already reaches the whole filesystem.
+ */
 async function safePreviewPath(input: OpenFilePreviewInput): Promise<{ root: string; path: string }> {
-  const target = await safeProjectPath(input);
-  if (!(await stat(target.path)).isFile()) throw new Error("所选路径不是文件。");
-  return target;
+  const root = await realpath(input.root);
+  const candidate = isAbsolute(input.path) ? resolve(input.path) : resolve(root, input.path);
+  const path = await realpath(candidate);
+  if (!(await stat(path)).isFile()) throw new Error("所选路径不是文件。");
+  return { root, path };
 }
 
 async function safeProjectEntryPath(

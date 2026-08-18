@@ -53,6 +53,7 @@ export interface AppViewController {
   workspaceSurface: WorkspaceSurface;
   loading: boolean;
   timeline: ConversationProps["timeline"];
+  queuedPrompts: ChatMessage[];
   running: boolean;
   agentPhase?: "思考" | "回复" | "工具";
   activityPhraseIndex: number;
@@ -85,6 +86,7 @@ export interface AppViewController {
   moveConversation(owner: ProjectSelection, session: SessionSummary, target: ProjectSelection): Promise<void>;
   reorderProjects(fromPath: string, toPath: string): void;
   rewindPrompt(message: ChatMessage, text: string, images: PromptImage[]): Promise<void>;
+  cancelQueuedPrompt(id: string): Promise<void>;
   approvePlan(planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState>;
   rejectPlan(planId: string): Promise<PlanApprovalState>;
   submitPrompt(event: FormEvent): Promise<void>;
@@ -100,7 +102,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     projects, project, activeConversation, pendingProjectPath, sessionsByProject,
     sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
     leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
-    timeline, running, agentPhase, activityPhraseIndex, projectState, subagents,
+    timeline, queuedPrompts, running, agentPhase, activityPhraseIndex, projectState, subagents,
     startingSession, configuration, selectedModel, fileDragActive, timelineRef,
     shouldAutoScrollRef, composer, inspector, setExpandedProjects,
     setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,
@@ -108,7 +110,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     startNewConversation, openProject, removeProject, openConversation,
     archiveConversation, renameConversation, pinConversation, forkConversation,
     moveConversation, reorderProjects,
-    rewindPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
+    rewindPrompt, cancelQueuedPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
     handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,
   } = controller;
   const {
@@ -199,6 +201,8 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             project={project}
             loading={loading}
             timeline={timeline}
+            queuedPrompts={queuedPrompts}
+            onCancelQueuedPrompt={(id) => { void cancelQueuedPrompt(id); }}
             running={running}
             timelineRef={timelineRef}
             agentPhase={agentPhase}

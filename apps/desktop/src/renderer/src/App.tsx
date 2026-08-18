@@ -24,6 +24,7 @@ import {
   conversationMessagesReducer,
   EMPTY_CONVERSATION_MESSAGES,
   selectConversationMessages,
+  selectQueuedPrompts,
 } from "./features/conversation/conversationMessages";
 import type { SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
@@ -57,6 +58,7 @@ export default function App(): React.JSX.Element {
     EMPTY_CONVERSATION_MESSAGES,
   );
   const messages = useMemo(() => selectConversationMessages(conversationMessages), [conversationMessages]);
+  const queuedPrompts = useMemo(() => selectQueuedPrompts(conversationMessages), [conversationMessages]);
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [subagents, setSubagents] = useState<SubagentActivity[]>([]);
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
@@ -364,6 +366,15 @@ export default function App(): React.JSX.Element {
     setExpandedProjects, startPendingConversation, openConversation,
   });
 
+  const cancelQueuedPrompt = async (id: string): Promise<void> => {
+    if (!snapshot?.runtimeId) return;
+    try {
+      await window.suocode.request({ type: "cancel_queued_prompt", id }, snapshot.runtimeId);
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
   const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[]): Promise<void> => {
     if (!message.entryId || !snapshot?.runtimeId) return;
     const previousConversationMessages = conversationMessages;
@@ -533,7 +544,7 @@ export default function App(): React.JSX.Element {
         projects, project, activeConversation, pendingProjectPath, sessionsByProject,
         sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
         leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
-        timeline, running, agentPhase, activityPhraseIndex, projectState, subagents,
+        timeline, queuedPrompts, running, agentPhase, activityPhraseIndex, projectState, subagents,
         startingSession, configuration, selectedModel, fileDragActive, timelineRef,
         shouldAutoScrollRef, composer, inspector, setExpandedProjects,
         setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,
@@ -541,7 +552,7 @@ export default function App(): React.JSX.Element {
         startNewConversation, openProject, removeProject, openConversation,
         archiveConversation, renameConversation, pinConversation, forkConversation,
         moveConversation, reorderProjects,
-        rewindPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
+        rewindPrompt, cancelQueuedPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
         handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,
       }}
     />

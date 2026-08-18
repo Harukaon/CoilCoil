@@ -168,13 +168,23 @@ export function conversationMessagesReducer(
   }
 }
 
-/** Project the committed runtime state and local sends into one stable list. */
+/**
+ * Project the committed runtime state and local sends into one stable list.
+ *
+ * Queued prompts are deliberately absent. They have not been sent, they can
+ * still be withdrawn, and rendering them as chat bubbles claimed otherwise —
+ * they belong above the input, where `selectQueuedPrompts` feeds them.
+ */
 export function selectConversationMessages(state: ConversationMessagesState): ChatMessage[] {
   let projected = [...state.committed];
   for (const item of state.pending) {
     if (item.sessionPath && item.sessionPath !== state.sessionPath) continue;
     projected = upsert(projected, item.message);
   }
-  for (const message of state.queued) projected = upsert(projected, message);
   return projected;
+}
+
+/** The prompts waiting their turn, oldest first — the order they will be sent. */
+export function selectQueuedPrompts(state: ConversationMessagesState): ChatMessage[] {
+  return [...state.queued].sort(byOrder);
 }

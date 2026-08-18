@@ -60,6 +60,8 @@ export interface ActiveSession {
   pendingUserMessageIds: string[];
   promptQueue: QueuedPrompt[];
   promptDrainInProgress: boolean;
+  /** Pending re-check for a queue held back only by Pi's streaming flag. */
+  drainRetryTimer?: ReturnType<typeof setTimeout>;
   activeUserId?: string;
   activeUserOrder?: number;
   lastUserId?: string;

@@ -1,7 +1,8 @@
-import { ArrowUp, Square, X } from "lucide-react";
+import { ArrowUp, Clock, Square, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { DragEvent as ReactDragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import type {
+  ChatMessage,
   ModelOption,
   PromptImage,
   ProjectSelection,
@@ -18,6 +19,7 @@ export function ConversationComposer({
   variant = "footer",
   project,
   running,
+  queuedPrompts,
   loading,
   startingSession,
   draft,
@@ -46,10 +48,13 @@ export function ConversationComposer({
   onAbort,
   onEscape,
   onPathDropError,
+  onCancelQueuedPrompt,
 }: {
   variant?: ComposerVariant;
   project: ProjectSelection | null;
   running: boolean;
+  /** Accepted but not yet sent, oldest first. Empty for the inline variant. */
+  queuedPrompts?: ChatMessage[];
   loading: boolean;
   startingSession: boolean;
   draft: string;
@@ -78,6 +83,7 @@ export function ConversationComposer({
   onAbort?: () => void;
   onEscape?: () => void;
   onPathDropError?: (message: string) => void;
+  onCancelQueuedPrompt?: (id: string) => void;
 }): React.JSX.Element {
   const inline = variant === "inline";
   const draftRef = useRef(draft);
@@ -165,6 +171,26 @@ export function ConversationComposer({
       onDragOver={handlePathDragOver}
       onDrop={handlePathDrop}
     >
+      {queuedPrompts?.length ? (
+        <ol className="composer-queue" aria-label="排队中的消息">
+          {queuedPrompts.map((item, index) => (
+            <li className="composer-queue-item" key={item.id}>
+              <span className="composer-queue-index" aria-hidden="true">{index + 1}</span>
+              <span className="composer-queue-text" title={item.text}>{item.text}</span>
+              {item.images?.length ? <span className="composer-queue-badge">{item.images.length} 图</span> : null}
+              <button
+                type="button"
+                aria-label={`撤回第 ${index + 1} 条排队消息`}
+                title="撤回"
+                onClick={() => onCancelQueuedPrompt?.(item.id)}
+              >
+                <X size={11} />
+              </button>
+            </li>
+          ))}
+          <li className="composer-queue-hint"><Clock size={10} />当前回复结束后按顺序发送</li>
+        </ol>
+      ) : null}
       {images.length ? (
         <div className="composer-images">
           {images.map((image) => (

@@ -5,6 +5,7 @@ import {
   conversationMessagesReducer,
   EMPTY_CONVERSATION_MESSAGES,
   selectConversationMessages,
+  selectQueuedPrompts,
 } from "../src/renderer/src/features/conversation/conversationMessages.ts";
 
 function user(id: string, text: string, order: number): ChatMessage {
@@ -63,7 +64,9 @@ test("切换会话后仍从运行时快照恢复 FIFO 排队消息", () => {
     promptQueue: [queued],
     revision: 4,
   });
-  assert.equal(selectConversationMessages(state)[0]?.status, "queued");
+  // Queued prompts are projected separately: they are not in the transcript.
+  assert.deepEqual(selectConversationMessages(state), []);
+  assert.equal(selectQueuedPrompts(state)[0]?.status, "queued");
   state = conversationMessagesReducer(state, {
     type: "snapshot",
     sessionPath: "/sessions/b.jsonl",
@@ -78,7 +81,8 @@ test("切换会话后仍从运行时快照恢复 FIFO 排队消息", () => {
     promptQueue: [queued],
     revision: 5,
   });
-  assert.deepEqual(selectConversationMessages(state).map((message) => [message.id, message.status]), [["client-queued", "queued"]]);
+  assert.deepEqual(selectConversationMessages(state), []);
+  assert.deepEqual(selectQueuedPrompts(state).map((message) => [message.id, message.status]), [["client-queued", "queued"]]);
 });
 
 test("队列投影在正式 user message 到达时只保留一条消息", () => {
@@ -96,5 +100,7 @@ test("队列投影在正式 user message 到达时只保留一条消息", () => 
     revision: 2,
     sessionPath: "/sessions/a.jsonl",
   });
+  // Once Pi echoes the prompt it leaves the queue and becomes a real message.
   assert.deepEqual(selectConversationMessages(state).map((message) => message.id), ["client-queued"]);
+  assert.deepEqual(selectQueuedPrompts(state), []);
 });

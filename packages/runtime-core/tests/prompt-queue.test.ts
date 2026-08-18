@@ -129,3 +129,51 @@ test("a failed queued prompt is removed and does not block later messages", asyn
   assert.deepEqual(harness.events.filter((event) => event.type === "prompt_queue_updated").at(-1)?.queue, []);
   harness.gates[1]!.resolve();
 });
+
+test("a prompt accepted after its predecessor settled is still sent", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-prompt-queue-late-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const harness = createQueueHarness(root);
+
+  await harness.runtime.prompt("第一条", undefined, "client-1");
+  harness.gates[0]!.resolve();
+  await settleMicrotasks();
+
+  // The owning run has finished and its `finally` has already been and gone,
+  // but `isStreaming` still reads true — the exact window in which the queue
+  // used to deadlock, because nothing was left to drain it.
+  harness.session.isStreaming = true;
+  await harness.runtime.prompt("第二条", undefined, "client-2");
+  await settleMicrotasks();
+  assert.deepEqual(harness.calls, ["第一条"], "must not start while Pi reports streaming");
+
+  harness.session.isStreaming = false;
+  // Nothing else will wake the queue here, so the bounded re-check is the only
+  // thing that can start it. Wait past one retry interval.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.deepEqual(harness.calls, ["第一条", "第二条"]);
+});
+
+test("a queued prompt can be withdrawn before it starts", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-prompt-queue-cancel-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const harness = createQueueHarness(root);
+
+  await harness.runtime.prompt("第一条", undefined, "client-1");
+  await harness.runtime.prompt("第二条", undefined, "client-2");
+  await harness.runtime.prompt("第三条", undefined, "client-3");
+
+  assert.deepEqual(await harness.runtime.cancelQueuedPrompt("client-2"), { cancelled: true });
+  assert.deepEqual(
+    harness.events.filter((event) => event.type === "prompt_queue_updated").at(-1)?.queue.map((item) => item.text),
+    ["第三条"],
+  );
+  // Withdrawing must also retract the optimistic bubble the renderer showed.
+  assert.ok(harness.events.some((event) => event.type === "message_rejected" && event.id === "client-2"));
+
+  harness.gates[0]!.resolve();
+  await settleMicrotasks();
+  assert.deepEqual(harness.calls, ["第一条", "第三条"]);
+
+  assert.deepEqual(await harness.runtime.cancelQueuedPrompt("client-2"), { cancelled: false });
+});

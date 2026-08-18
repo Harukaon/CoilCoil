@@ -72,12 +72,42 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (prompt === "/memory" && !images?.length) return this.runMemoryNow();
-    if (active.session.isStreaming || this.promptStarting || active.promptQueue.length > 0) {
+    if (
+      active.session.isStreaming
+      || this.promptStarting
+      || active.promptDrainInProgress
+      || active.promptQueue.length > 0
+    ) {
       this.enqueuePrompt(active, prompt, images, clientMessageId);
+      // Nothing else is guaranteed to come along: the run this prompt is
+      // queueing behind may already have settled, in which case its `finally`
+      // will never fire again. Ask for a drain now and let the guard decide.
+      queueMicrotask(() => { void this.drainPromptQueue(active); });
       return { accepted: true };
     }
     await this.startPrompt(active, prompt, images, clientMessageId, false);
     return { accepted: true };
+  }
+
+  /**
+   * Withdraw a prompt that is still waiting its turn.
+   *
+   * Only an item that has not started counts: once `drainPromptQueue` hands one
+   * to Pi it stays in the queue until Pi echoes its user message, and pulling it
+   * out there would drop the running turn's own bookkeeping.
+   */
+  async cancelQueuedPrompt(id: string): Promise<{ cancelled: boolean; }> {
+    const active = this.requireActive();
+    const head = active.promptQueue[0];
+    if (active.promptDrainInProgress && head?.id === id) {
+      throw new Error("这条消息已经开始发送，无法撤回。");
+    }
+    if (!this.removeQueuedPrompt(active, id)) return { cancelled: false };
+    this.rejectClientMessage(active, id);
+    if (active.promptQueue.length === 0 && !active.session.isStreaming && !this.promptStarting) {
+      this.emitEvent({ type: "run_state", running: false });
+    }
+    return { cancelled: true };
   }
 
   async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true; }> {
