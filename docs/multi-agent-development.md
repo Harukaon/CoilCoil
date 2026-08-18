@@ -4,6 +4,12 @@
 
 本文规定多个 Agent 同时开发 SuoCode 时的统一操作流程。
 
+本文中的 `$PROJECT_ROOT` 代表本机存放项目的父目录，示例不会依赖任何特定用户的本机路径。
+
+```bash
+export PROJECT_ROOT="${PROJECT_ROOT:-/path/to/project}"
+```
+
 Agent A、Agent B、Agent C、Agent D 仅用于标识不同的开发环境，不代表任务类型、优先级或难度。具体任务由当前开发计划另行决定，所有 Agent 均遵循本文相同的规则。
 
 ## 核心规则
@@ -22,17 +28,17 @@ Agent A、Agent B、Agent C、Agent D 仅用于标识不同的开发环境，不
 
 | 环境 | 分支 | worktree | Electron 用户数据目录 |
 |---|---|---|---|
-| Agent A | `agent/a` | `/Users/hao/Desktop/project/SuoCode-agent-a` | `/Users/hao/Desktop/project/.suocode-dev-data/a` |
-| Agent B | `agent/b` | `/Users/hao/Desktop/project/SuoCode-agent-b` | `/Users/hao/Desktop/project/.suocode-dev-data/b` |
-| Agent C | `agent/c` | `/Users/hao/Desktop/project/SuoCode-agent-c` | `/Users/hao/Desktop/project/.suocode-dev-data/c` |
-| Agent D | `agent/d` | `/Users/hao/Desktop/project/SuoCode-agent-d` | `/Users/hao/Desktop/project/.suocode-dev-data/d` |
+| Agent A | `agent/a` | `$PROJECT_ROOT/SuoCode-agent-a` | `$PROJECT_ROOT/.suocode-dev-data/a` |
+| Agent B | `agent/b` | `$PROJECT_ROOT/SuoCode-agent-b` | `$PROJECT_ROOT/.suocode-dev-data/b` |
+| Agent C | `agent/c` | `$PROJECT_ROOT/SuoCode-agent-c` | `$PROJECT_ROOT/.suocode-dev-data/c` |
+| Agent D | `agent/d` | `$PROJECT_ROOT/SuoCode-agent-d` | `$PROJECT_ROOT/.suocode-dev-data/d` |
 
 ## 创建开发环境
 
 环境创建应由负责集成的操作者统一执行。创建前确认主工作区没有未提交内容，也没有 Agent 正在其中写文件。
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode
+cd $PROJECT_ROOT/SuoCode
 git status --short --branch
 git switch main
 git pull --ff-only
@@ -58,7 +64,7 @@ git worktree add ../SuoCode-agent-a agent/a
 Pi 的模型目录数据属于生成文件，不会随 Git worktree 一起出现。首次准备环境时先在当前 worktree 中生成模型数据，再执行完整安装：
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode-agent-a
+cd $PROJECT_ROOT/SuoCode-agent-a
 npm run hydrate:model-data --prefix vendor/pi
 npm run setup
 ```
@@ -70,7 +76,7 @@ npm run setup
 每个 Agent 收到任务后，首先进入自己的 worktree，并确认路径、分支和工作区状态。
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode-agent-a
+cd $PROJECT_ROOT/SuoCode-agent-a
 pwd
 git branch --show-current
 git status --short --branch
@@ -114,32 +120,32 @@ git merge main
 Agent A：
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode-agent-a
-ELECTRON_CLI_ARGS='["--user-data-dir=/Users/hao/Desktop/project/.suocode-dev-data/a"]' npm run dev
+cd $PROJECT_ROOT/SuoCode-agent-a
+ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/a\"]" npm run dev
 ```
 
 Agent B：
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode-agent-b
-ELECTRON_CLI_ARGS='["--user-data-dir=/Users/hao/Desktop/project/.suocode-dev-data/b"]' npm run dev
+cd $PROJECT_ROOT/SuoCode-agent-b
+ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/b\"]" npm run dev
 ```
 
 Agent C：
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode-agent-c
-ELECTRON_CLI_ARGS='["--user-data-dir=/Users/hao/Desktop/project/.suocode-dev-data/c"]' npm run dev
+cd $PROJECT_ROOT/SuoCode-agent-c
+ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/c\"]" npm run dev
 ```
 
 Agent D：
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode-agent-d
-ELECTRON_CLI_ARGS='["--user-data-dir=/Users/hao/Desktop/project/.suocode-dev-data/d"]' npm run dev
+cd $PROJECT_ROOT/SuoCode-agent-d
+ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/d\"]" npm run dev
 ```
 
-启动后还必须确认 APP 内打开的是当前 Agent 自己的 worktree。例如 Agent A 应选择 `/Users/hao/Desktop/project/SuoCode-agent-a`，不能让多个实例同时操作同一个项目目录。
+启动后还必须确认 APP 内打开的是当前 Agent 自己的 worktree。例如 Agent A 应选择 `$PROJECT_ROOT/SuoCode-agent-a`，不能让多个实例同时操作同一个项目目录。
 
 不同用户数据目录之间不会自动共享模型配置和凭据。需要测试真实模型时，应分别配置，或使用项目支持的环境变量注入凭据；不得把凭据写入仓库。
 
@@ -150,9 +156,9 @@ ELECTRON_CLI_ARGS='["--user-data-dir=/Users/hao/Desktop/project/.suocode-dev-dat
 并行测试 CLI 时也要隔离数据目录，并将 CLI 指向当前 Agent 自己的 worktree。
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode-agent-a
-SUOCODE_DATA_DIR=/Users/hao/Desktop/project/.suocode-dev-data/a-cli \
-  npm run cli -- /Users/hao/Desktop/project/SuoCode-agent-a
+cd $PROJECT_ROOT/SuoCode-agent-a
+SUOCODE_DATA_DIR=$PROJECT_ROOT/.suocode-dev-data/a-cli \
+  npm run cli -- $PROJECT_ROOT/SuoCode-agent-a
 ```
 
 其他 Agent 替换对应的环境标识和路径。
@@ -209,7 +215,7 @@ Agent 完成交付后应保持分支和 worktree 可用，等待集成完成。�
 集成应在原始 `SuoCode` 主工作区中进行，不要在任何 Agent 的活动 worktree 中合并全部分支。
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode
+cd $PROJECT_ROOT/SuoCode
 git status --short --branch
 git switch main
 git pull --ff-only
@@ -255,7 +261,7 @@ git merge --no-ff integration/multi-agent-batch
 如果其他分支已经完成集成并进入 `main`，仍在开发的 Agent 应在收到同步通知后执行：
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode-agent-a
+cd $PROJECT_ROOT/SuoCode-agent-a
 git status --short
 git merge main
 ```
@@ -269,7 +275,7 @@ git merge main
 只有在对应分支已经完成集成、worktree 没有未提交内容、相关开发进程已经停止后，才可以清理环境。
 
 ```bash
-cd /Users/hao/Desktop/project/SuoCode
+cd $PROJECT_ROOT/SuoCode
 git worktree list
 git worktree remove ../SuoCode-agent-a
 git branch -d agent/a

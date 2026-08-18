@@ -181,7 +181,7 @@ test("the origin ignores `source`, which points at SuoCode's own config for impo
   // pi-mcp-adapter sets `path` to the Pi-owned config for every import, because
   // that is where overrides get written. Reading it would label everything the
   // same — `importKind` is the only field that identifies the real origin.
-  const suocodeConfig = "/Users/x/Library/Application Support/@suocode/desktop/agent/mcp.json";
+  const suocodeConfig = "/tmp/suocode-test/Application Support/@suocode/desktop/agent/mcp.json";
   assert.equal(
     mcpOriginLabel({ source: suocodeConfig, sourceKind: "import", importKind: "codex" }),
     "Codex",

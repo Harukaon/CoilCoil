@@ -1,6 +1,6 @@
 # SuoCode 产品演进路线
 
-本文档把桌面端后续大型需求整理成可实施的阶段。SuoCode 始终是自包含产品：运行时、Pi、MCP、子 Agent 和工作流均由 SuoCode 安装包维护，不调用用户本机安装的 Pi，也不依赖 `/Users/hao/Desktop/project/hao-pi-workflow` 或 `/Users/hao/Desktop/project/shelf` 才能运行。这两个项目仅作为迁移来源和设计参考。
+本文档把桌面端后续大型需求整理成可实施的阶段。SuoCode 始终是自包含产品：运行时、Pi、MCP、子 Agent 和工作流均由 SuoCode 安装包维护，不调用用户本机安装的 Pi，也不依赖 `$PROJECT_ROOT/hao-pi-workflow` 或 `$PROJECT_ROOT/shelf` 才能运行。这两个项目仅作为迁移来源和设计参考。
 
 ## 总体实现原则：扩展优先
 
@@ -95,7 +95,7 @@ apps/desktop/src/renderer/src/
 
 > 当前决策：本轮暂缓 Terminal 会话化、浅色主题、文件拖入终端和会话清理等修改，保留现有实现，待产品形态重新确认后再继续。
 
-将 `/Users/hao/Desktop/project/shelf` 中已经验证的终端渲染与扫描逻辑迁移到 SuoCode，但最终代码、依赖和运行时都归 SuoCode 所有。
+将 `$PROJECT_ROOT/shelf` 中已经验证的终端渲染与扫描逻辑迁移到 SuoCode，但最终代码、依赖和运行时都归 SuoCode 所有。
 
 当前实现状态：首版已接入。PTY 由 Electron main 管理，桌面端使用 xterm/FitAddon；普通终端、Claude Code、Codex 和 SuoCode 内置 Pi 可以并行运行。内置 Pi 通过安装包路径启动并显式加载 SuoCode 自带扩展。完整应用退出后不恢复已经死亡的 PTY，后续若需要跨重启任务恢复，应采用可重连的后台会话服务，而不是伪造 PTY 重连。
 

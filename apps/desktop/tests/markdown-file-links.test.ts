@@ -3,21 +3,21 @@ import test from "node:test";
 import { parseMarkdownFileHref } from "../src/renderer/src/features/conversation/markdownFileLinks.ts";
 
 test("absolute Markdown paths expose file and source location", () => {
-  assert.deepEqual(parseMarkdownFileHref("/Users/hao/project/App.tsx:42:7"), {
-    path: "/Users/hao/project/App.tsx",
+  assert.deepEqual(parseMarkdownFileHref("/tmp/suocode-test/project/App.tsx:42:7"), {
+    path: "/tmp/suocode-test/project/App.tsx",
     line: 42,
     column: 7,
   });
-  assert.deepEqual(parseMarkdownFileHref("/Users/hao/project/App.tsx#L12"), {
-    path: "/Users/hao/project/App.tsx",
+  assert.deepEqual(parseMarkdownFileHref("/tmp/suocode-test/project/App.tsx#L12"), {
+    path: "/tmp/suocode-test/project/App.tsx",
     line: 12,
     column: undefined,
   });
 });
 
 test("file URLs and encoded spaces become local file targets", () => {
-  assert.deepEqual(parseMarkdownFileHref("file:///Users/hao/My%20Project/report.md:9"), {
-    path: "/Users/hao/My Project/report.md",
+  assert.deepEqual(parseMarkdownFileHref("file:///tmp/suocode-test/My%20Project/report.md:9"), {
+    path: "/tmp/suocode-test/My Project/report.md",
     line: 9,
     column: undefined,
   });
