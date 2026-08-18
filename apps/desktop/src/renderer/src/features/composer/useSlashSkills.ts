@@ -21,11 +21,11 @@ export type SlashMenuItem = {
   /** Insert into the composer when selected. */
   insert?: string;
   /** Open a settings section instead of inserting. */
-  openSettings?: "models" | "mcp" | "skills";
+  openSettings?: "models" | "mcp" | "skills" | "appearance";
   skill?: SkillEntry;
 };
 
-export type SettingsSection = "models" | "mcp" | "skills";
+export type SettingsSection = "models" | "mcp" | "skills" | "appearance";
 
 function isSlashChar(value: string): boolean {
   return value === "/" || value === "／";

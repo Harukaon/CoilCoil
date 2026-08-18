@@ -70,7 +70,7 @@ export interface AppViewController {
   setSessionsByProject: Dispatch<SetStateAction<Record<string, SessionSummary[]>>>;
   setWorkspaceSurface: Dispatch<SetStateAction<WorkspaceSurface>>;
   setSettingsOpen: Dispatch<SetStateAction<boolean>>;
-  setSettingsSection: Dispatch<SetStateAction<"models" | "mcp" | "skills">>;
+  setSettingsSection: Dispatch<SetStateAction<"models" | "mcp" | "skills" | "appearance">>;
   setLeftOpen(open: boolean): void;
   beginResize: ReturnType<typeof usePanelLayout>["beginResize"];
   startNewConversation(owner?: ProjectSelection): void;

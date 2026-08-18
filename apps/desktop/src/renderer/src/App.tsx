@@ -77,7 +77,7 @@ export default function App(): React.JSX.Element {
 
   const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"models" | "mcp" | "skills">("models");
+  const [settingsSection, setSettingsSection] = useState<"models" | "mcp" | "skills" | "appearance">("models");
   const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("conversation");
   const [loading, setLoading] = useState(true);
   const composer = useComposerController({

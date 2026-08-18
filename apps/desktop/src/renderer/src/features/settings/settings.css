@@ -777,3 +777,20 @@
 .settings-policy-toggle:has(input:disabled) { cursor: default; opacity: .55; }
 .settings-policy-toggle input { width: 14px !important; height: 14px !important; flex: 0 0 auto; margin: 0; padding: 0 !important; }
 .settings-policy-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 外观（主题）设置 */
+.appearance-settings { display: grid; gap: 14px; max-width: 720px; }
+.appearance-hint { margin: 0; color: hsl(var(--th) var(--ts) calc(var(--tlb) + var(--tla) * 54%)); font-size: 11px; line-height: 1.55; }
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.theme-card { display: grid; gap: 9px; padding: 9px; border: 1px solid hsl(var(--th) var(--ts) calc(var(--tlb) + var(--tla) * 86.1%)); border-radius: 12px; background: hsl(var(--th) var(--ts) calc(var(--tlb) + var(--tla) * 100%)); text-align: left; cursor: pointer; }
+.theme-card:hover { border-color: hsl(var(--th) var(--ts) calc(var(--tlb) + var(--tla) * 74.3%)); }
+.theme-card.active { border-color: hsl(var(--th) var(--ts) calc(var(--tlb) + var(--tla) * 33%)); box-shadow: 0 0 0 1px hsl(var(--th) var(--ts) calc(var(--tlb) + var(--tla) * 33%)); }
+.theme-preview { display: flex; height: 72px; gap: 5px; overflow: hidden; padding: 7px; border: 1px solid var(--preview-border); border-radius: 8px; background: var(--preview-shell); }
+.theme-preview-side { width: 22%; flex: 0 0 auto; border-radius: 4px; background: var(--preview-side); }
+.theme-preview-main { display: grid; flex: 1; align-content: start; gap: 5px; }
+.theme-preview-line { height: 5px; width: 62%; border-radius: 99px; background: var(--preview-muted); opacity: .55; }
+.theme-preview-line.wide { width: 86%; background: var(--preview-text); opacity: .8; }
+.theme-preview-bubble { height: 18px; width: 74%; border: 1px solid var(--preview-border); border-radius: 6px; background: var(--preview-card); }
+.theme-card-copy { display: grid; gap: 2px; }
+.theme-card-copy strong { display: flex; align-items: center; gap: 5px; color: hsl(var(--th) var(--ts) calc(var(--tlb) + var(--tla) * 21%)); font-size: 12px; font-weight: 600; }
+.theme-card-copy small { color: hsl(var(--th) var(--ts) calc(var(--tlb) + var(--tla) * 56%)); font-size: 10px; }
