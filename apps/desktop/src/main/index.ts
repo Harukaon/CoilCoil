@@ -19,6 +19,12 @@ import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
 import { TerminalRuntimeManager } from "./terminal-runtime";
+import {
+  checkForUpdate,
+  UPDATE_FIRST_CHECK_MS,
+  UPDATE_INTERVAL_MS,
+  type UpdateAvailable,
+} from "./update-check";
 
 // This is deliberately opt-in and development-only. It lets the desktop smoke
 // harness inspect the *running* renderer instead of proving layout solely with
@@ -65,6 +71,7 @@ const TERMINAL_CREATE_CHANNEL = "terminal:create";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
 const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
 const TERMINAL_CLOSE_CHANNEL = "terminal:close";
+const UPDATE_AVAILABLE_CHANNEL = "update:available";
 let isQuitting = false;
 const moduleRequire = createRequire(import.meta.url);
 const browserRuntimes = new Map<number, BrowserRuntimeManager>();
@@ -434,6 +441,39 @@ async function createWindow(): Promise<void> {
   }
 }
 
+/**
+ * Offer an update, once per build.
+ *
+ * Notify only: the macOS packages are unsigned, so nothing can install them for
+ * the user. Re-offering the same version on every six-hour tick would turn a
+ * helpful popup into a nuisance, so a declined version stays declined until a
+ * newer one is published.
+ */
+let offeredUpdate: string | undefined;
+
+function offerUpdate(update: UpdateAvailable): void {
+  if (offeredUpdate === update.latest) return;
+  offeredUpdate = update.latest;
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(UPDATE_AVAILABLE_CHANNEL, update);
+  }
+}
+
+
+function scheduleUpdateChecks(): void {
+  // A failed check is not worth telling anyone about: the user did not ask for
+  // it, and an offline machine would otherwise raise a dialog about GitHub.
+  const run = (): void => {
+    void checkForUpdate(app.getVersion())
+      .then((update) => { if (update) return offerUpdate(update); })
+      .catch(() => undefined);
+  };
+  const first = setTimeout(run, UPDATE_FIRST_CHECK_MS);
+  const repeat = setInterval(run, UPDATE_INTERVAL_MS);
+  first.unref?.();
+  repeat.unref?.();
+}
+
 app.whenReady().then(async () => {
   // Only the main window may host <webview> guests, and only through the handler
   // installed in createWindow. Preview windows and anything added later refuse
@@ -538,6 +578,7 @@ app.whenReady().then(async () => {
     }
   });
   await createWindow();
+  scheduleUpdateChecks();
   runtime.start();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

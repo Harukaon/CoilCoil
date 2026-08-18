@@ -99,6 +99,12 @@ export interface TerminalDataEvent {
   data: string;
 }
 
+export interface UpdateAvailable {
+  current: string;
+  latest: string;
+  url: string;
+}
+
 export interface SuoCodeDesktopApi {
   platform: DesktopPlatform;
   homeProject(): Promise<ProjectSelection>;
@@ -141,6 +147,7 @@ export interface SuoCodeDesktopApi {
   onTerminalData(listener: (event: TerminalDataEvent) => void): () => void;
   request<T = unknown>(command: RuntimeCommand, runtimeId?: string): Promise<T>;
   onRuntimeEvent(listener: (event: RuntimeEvent, runtimeId?: string) => void): () => void;
+  onUpdateAvailable(listener: (update: UpdateAvailable) => void): () => void;
 }
 
 

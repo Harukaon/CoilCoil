@@ -18,6 +18,7 @@ import type {
   SuoCodeDesktopApi,
   TerminalDataEvent,
   TerminalSessionSnapshot,
+  UpdateAvailable,
 } from "../shared/desktop-api";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
@@ -56,6 +57,7 @@ const TERMINAL_CREATE_CHANNEL = "terminal:create";
 const TERMINAL_WRITE_CHANNEL = "terminal:write";
 const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
 const TERMINAL_CLOSE_CHANNEL = "terminal:close";
+const UPDATE_AVAILABLE_CHANNEL = "update:available";
 
 const platform = ((): DesktopPlatform => {
   if (process.platform === "darwin") return "darwin";
@@ -146,6 +148,11 @@ const api: SuoCodeDesktopApi = {
     const handler = (_event: Electron.IpcRendererEvent, value: RuntimeEventPayload): void => listener(value.event, value.runtimeId);
     ipcRenderer.on(RUNTIME_EVENT_CHANNEL, handler);
     return () => ipcRenderer.removeListener(RUNTIME_EVENT_CHANNEL, handler);
+  },
+  onUpdateAvailable: (listener: (update: UpdateAvailable) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, update: UpdateAvailable): void => listener(update);
+    ipcRenderer.on(UPDATE_AVAILABLE_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(UPDATE_AVAILABLE_CHANNEL, handler);
   },
 };
 

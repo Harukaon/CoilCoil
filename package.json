@@ -1,6 +1,6 @@
 {
   "name": "suocode",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.0",
   "private": true,
   "description": "SuoCode coding agent product",
   "author": "Harukaon",
@@ -20,6 +20,7 @@
     "setup": "npm ci --prefix vendor/pi --ignore-scripts && npm run build:offline --prefix vendor/pi && npm ci --ignore-scripts && npm run patch:chrome-devtools-mcp && npm rebuild node-pty esbuild && node node_modules/electron/install.js",
     "postinstall": "npm run patch:chrome-devtools-mcp",
     "patch:chrome-devtools-mcp": "node scripts/patch-chrome-devtools-mcp.mjs",
+    "release:version": "node scripts/set-release-version.mjs",
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build:pi": "npm run build:offline --prefix vendor/pi",

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { BrowserGuestLayer } from "./features/browser/BrowserGuestLayer";
 import { ToastHost } from "./ui/toast";
+import { UpdateDialog } from "./ui/update/UpdateDialog";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -16,5 +17,6 @@ createRoot(root).render(
         agent's page if the guests lived inside it. */}
     <BrowserGuestLayer />
     <ToastHost />
+    <UpdateDialog />
   </StrictMode>,
 );
