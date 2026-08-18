@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useLayoutEffect } from "react";
 import type { MutableRefObject, RefObject } from "react";
 import type { ChatMessage, ToolRun } from "@suocode/runtime-protocol";
 
@@ -18,9 +18,7 @@ export function useConversationViewport({
   running: boolean;
   settingsOpen: boolean;
   conversationVisible: boolean;
-}): number {
-  const [activityPhraseIndex, setActivityPhraseIndex] = useState(0);
-
+}): void {
   useLayoutEffect(() => {
     const viewport = timelineRef.current;
     if (viewport && shouldAutoScrollRef.current) viewport.scrollTop = viewport.scrollHeight;
@@ -35,11 +33,4 @@ export function useConversationViewport({
     return () => window.cancelAnimationFrame(frame);
   }, [conversationVisible, settingsOpen, shouldAutoScrollRef, timelineRef]);
 
-  useEffect(() => {
-    if (!running) return;
-    const timer = window.setInterval(() => setActivityPhraseIndex((current) => current + 1), 2_300);
-    return () => window.clearInterval(timer);
-  }, [running]);
-
-  return activityPhraseIndex;
 }

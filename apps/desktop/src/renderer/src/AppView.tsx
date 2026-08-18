@@ -18,7 +18,6 @@ import type {
   SessionSummary,
   SubagentActivity,
 } from "@suocode/runtime-protocol";
-import { AGENT_ACTIVITY_PHRASES } from "./appState";
 import { useInAppBrowserLinks } from "./features/browser/useInAppBrowserLinks";
 import { ConversationPane } from "./features/conversation/ConversationPane";
 import { MemoryWorkspace } from "./features/memory/MemoryWorkspace";
@@ -55,8 +54,7 @@ export interface AppViewController {
   timeline: ConversationProps["timeline"];
   queuedPrompts: ChatMessage[];
   running: boolean;
-  agentPhase?: "思考" | "回复" | "工具";
-  activityPhraseIndex: number;
+  activityLine: string;
   projectState: ProjectSnapshot;
   subagents: SubagentActivity[];
   startingSession: boolean;
@@ -102,7 +100,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     projects, project, activeConversation, pendingProjectPath, sessionsByProject,
     sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
     leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
-    timeline, queuedPrompts, running, agentPhase, activityPhraseIndex, projectState, subagents,
+    timeline, queuedPrompts, running, activityLine, projectState, subagents,
     startingSession, configuration, selectedModel, fileDragActive, timelineRef,
     shouldAutoScrollRef, composer, inspector, setExpandedProjects,
     setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,
@@ -205,8 +203,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             onCancelQueuedPrompt={(id) => { void cancelQueuedPrompt(id); }}
             running={running}
             timelineRef={timelineRef}
-            agentPhase={agentPhase}
-            activityPhrase={AGENT_ACTIVITY_PHRASES[activityPhraseIndex % AGENT_ACTIVITY_PHRASES.length]}
+            activityLine={activityLine}
             projectState={projectState}
             subagents={subagents}
             snapshot={snapshot}
@@ -260,6 +257,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             onOpenBrowser={inspector.openBrowserTab}
             onOpenRuntime={inspector.openRuntimeTab}
             onOpenTerminal={inspector.openTerminalTab}
+            onRebindTerminal={inspector.rebindTerminalTab}
             onOpenFile={inspector.openFileTab}
             onSelectTab={inspector.selectTab}
             onCloseTab={inspector.closeTab}

@@ -4,16 +4,6 @@ const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
 export const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
 export const ACTIVE_PROJECT_STORAGE_KEY = "suocode.active-project";
 
-export const AGENT_ACTIVITY_PHRASES = [
-  "工作中…",
-  "整理线索…",
-  "翻找文件…",
-  "冲浪中…",
-  "组织思路…",
-  "沿着思路前进…",
-  "快收尾了…",
-];
-
 export const EMPTY_PROJECT: ProjectSnapshot = {
   cwd: "",
   files: [],

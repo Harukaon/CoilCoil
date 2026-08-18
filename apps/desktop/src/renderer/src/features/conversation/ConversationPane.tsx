@@ -52,8 +52,7 @@ export function ConversationPane({
   timeline,
   running,
   timelineRef,
-  agentPhase,
-  activityPhrase,
+  activityLine,
   projectState,
   subagents,
   snapshot,
@@ -102,8 +101,7 @@ export function ConversationPane({
   timeline: ConversationTimelineItem[];
   running: boolean;
   timelineRef: RefObject<HTMLDivElement | null>;
-  agentPhase?: "思考" | "回复" | "工具";
-  activityPhrase: string;
+  activityLine: string;
   projectState: ProjectSnapshot;
   subagents: SubagentActivity[];
   snapshot?: SessionSnapshot;
@@ -285,7 +283,7 @@ export function ConversationPane({
                   renderPlan={(plan) => <PlanApprovalCard plan={plan} onApprove={onApprovePlan} onReject={onRejectPlan} />}
                 />
               ))}
-              {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{agentPhase === "工具" ? "动手处理中…" : agentPhase === "回复" ? "组织回答中…" : activityPhrase}</span></div> : null}
+              {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{activityLine}</span></div> : null}
             </div>
           ) : (
             <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>

@@ -33,12 +33,12 @@ import { useWorkspaceInspector } from "./features/inspector/useWorkspaceInspecto
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
 import { useRuntimeEventHandler } from "./hooks/useRuntimeEventHandler";
+import { useAgentActivityLine } from "./hooks/useAgentActivityLine";
 import { useConversationViewport } from "./hooks/useConversationViewport";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
 import { toastError } from "./ui/toast";
 import {
   ACTIVE_PROJECT_STORAGE_KEY,
-  AGENT_ACTIVITY_PHRASES,
   EMPTY_PROJECT,
   loadStoredProjects,
   PROJECTS_STORAGE_KEY,
@@ -244,7 +244,8 @@ export default function App(): React.JSX.Element {
     return unsubscribe;
   }, [activateProject, handleRuntimeEvent]);
 
-  const activityPhraseIndex = useConversationViewport({
+  const activityLine = useAgentActivityLine(snapshot?.running ?? false, agentPhase);
+  useConversationViewport({
     timelineRef,
     shouldAutoScrollRef,
     messages,
@@ -544,7 +545,7 @@ export default function App(): React.JSX.Element {
         projects, project, activeConversation, pendingProjectPath, sessionsByProject,
         sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
         leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
-        timeline, queuedPrompts, running, agentPhase, activityPhraseIndex, projectState, subagents,
+        timeline, queuedPrompts, running, activityLine, projectState, subagents,
         startingSession, configuration, selectedModel, fileDragActive, timelineRef,
         shouldAutoScrollRef, composer, inspector, setExpandedProjects,
         setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,

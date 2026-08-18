@@ -304,7 +304,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .tool-execution-details section + section { margin-top: 8px; }
 .tool-execution-details section > span { display: block; margin: 0 0 4px 11px; color: #a0a09b; font-size: 9px; font-weight: 600; }
 .tool-activity-row pre, .tool-execution-details pre { max-height: 260px; margin: 0; overflow: auto; padding: 9px 11px; border-left: 2px solid #ddddda; color: #666661; background: transparent; font: 10px/1.55 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-activity { display: flex; align-items: center; gap: 8px; margin: -8px 0 25px; color: #858580; font-size: 12px; }
+.agent-activity { display: flex; min-width: 0; align-items: center; gap: 8px; margin: -8px 0 25px; color: #858580; font-size: 12px; }
+.agent-activity span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .subagent-card { display: grid; width: min(560px, 100%); min-width: 0; grid-template-columns: 30px minmax(0, 1fr) minmax(84px, auto) auto; align-items: center; gap: 9px; margin: 0 0 18px; padding: 9px 11px; border: 1px solid #deded9; border-radius: 12px; color: #686863; background: #fafaf8; text-align: left; cursor: pointer; }
 .subagent-card:hover { border-color: #c9c9c3; background: #f4f4f1; }
 .subagent-card.panel { width: 100%; margin: 0; padding: 6px 5px; border: 0; border-radius: 8px; background: transparent; }
