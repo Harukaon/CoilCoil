@@ -1,5 +1,5 @@
 import { ArrowDown, PanelLeft, PanelRight } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
@@ -25,6 +25,7 @@ import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
+import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
 import { SubagentCard, SubagentDetailDialog } from "../subagents/SubagentActivity";
 
@@ -147,6 +148,7 @@ export function ConversationPane({
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [showLoadEarlier, setShowLoadEarlier] = useState(false);
   const pendingScrollRestore = useRef<{ height: number; top: number } | undefined>(undefined);
+  const pendingAnchorScroll = useRef<string>(undefined);
   const [selectedSubagentId, setSelectedSubagentId] = useState<string>();
   const selectedSubagent = subagents.find((activity) => activity.id === selectedSubagentId);
   const conversationTitle = pendingProjectPath ? "新对话" : activeConversation?.title ?? "新建对话";
@@ -167,6 +169,7 @@ export function ConversationPane({
     setHistoryExpanded(false);
     setShowLoadEarlier(false);
     pendingScrollRestore.current = undefined;
+    pendingAnchorScroll.current = undefined;
   }, [activeConversation?.id, pendingProjectPath]);
 
   useEffect(() => {
@@ -231,6 +234,42 @@ export function ConversationPane({
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
   }, [timelineRef]);
 
+  const promptAnchors = useMemo((): PromptAnchor[] => {
+    const anchors: PromptAnchor[] = [];
+    timeline.forEach((item, index) => {
+      if (item.kind === "user") anchors.push({ id: item.message.id, text: item.message.text, index });
+    });
+    return anchors;
+  }, [timeline]);
+
+  const scrollToMessage = useCallback((id: string, behavior: ScrollBehavior): void => {
+    const target = timelineRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+    if (!target) return;
+    target.scrollIntoView({ block: "start", behavior });
+    target.classList.remove("anchor-flash");
+    void target.offsetWidth; // 重新触发高亮动画
+    target.classList.add("anchor-flash");
+    window.setTimeout(() => target.classList.remove("anchor-flash"), 1600);
+  }, [timelineRef]);
+
+  const jumpToAnchor = useCallback((anchor: PromptAnchor): void => {
+    if (anchor.index < timelineStart) {
+      // 目标还在未加载的历史里：先展开到该轮，再由 layout effect 定位。
+      pendingAnchorScroll.current = anchor.id;
+      setHistoryExpanded(true);
+      setVisibleTimelineStart(anchor.index);
+      return;
+    }
+    scrollToMessage(anchor.id, "smooth");
+  }, [scrollToMessage, timelineStart]);
+
+  useLayoutEffect(() => {
+    const pending = pendingAnchorScroll.current;
+    if (!pending) return;
+    pendingAnchorScroll.current = undefined;
+    scrollToMessage(pending, "instant");
+  }, [timelineStart, scrollToMessage]);
+
   const reportError = useCallback((message?: string): void => {
     if (message) onError(message);
   }, [onError]);
@@ -294,6 +333,7 @@ export function ConversationPane({
             <ArrowDown size={14} strokeWidth={2.2} />
           </button>
         ) : null}
+        {!loading ? <PromptAnchorRail anchors={promptAnchors} loadedFrom={timelineStart} onSelect={jumpToAnchor} /> : null}
       </div>
 
       <div className="composer-wrap">

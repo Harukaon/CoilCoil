@@ -188,7 +188,7 @@ export function MessageView({
 
   if (message.role === "user") {
     return (
-      <article className="timeline-message user-message">
+      <article className="timeline-message user-message" data-message-id={message.id}>
         {editing ? (
           <div className="user-message-editor-shell" ref={editorRef}>
             <ConversationComposer
