@@ -38,6 +38,8 @@ export const RUNTIME_BRIDGE_REPLY_PREFIX = "suocode:runtime-bridge:reply:v1:";
 
 export const RUNTIME_BRIDGE_STATE_EVENT = "suocode:runtime-bridge:state:v1";
 
+export const ABANDONED_TOOL_OUTPUT = "工具调用未完成：会话在返回执行结果前中断。";
+
 export const ORIGINAL_SESSION_MUTATION_UNSUPPORTED = "Pi 当前无法安全地从原会话中删除这段历史内容，未执行任何修改。";
 
 export const projectMemoryStatusByCwd = new Map<string, ProjectMemoryRuntimeStatus>();

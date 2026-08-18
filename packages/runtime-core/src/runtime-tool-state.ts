@@ -24,6 +24,7 @@ import {
   subagentActivityFromDetails,
 } from "./message-helpers.js";
 import {
+  ABANDONED_TOOL_OUTPUT,
   MAX_TERMINAL_OUTPUT,
   PLAN_ENTRY_TYPE,
   PLAN_RPC_REQUEST_CHANNEL,
@@ -136,7 +137,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     }
     for (const call of calls.values()) {
       if (tools.has(call.id)) continue;
-      const output = "工具调用未完成：会话在返回执行结果前中断。";
+      const output = ABANDONED_TOOL_OUTPUT;
       tools.set(call.id, {
         id: call.id,
         order: call.order,
@@ -270,6 +271,53 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     this.emitEvent({ type: "tool_started", tool: { ...tool } });
     this.publishProjectFromMemory();
     return tool;
+  }
+
+  /**
+   * Close tool cards for calls that were announced but never executed.
+   *
+   * A response that ends `stopReason: "error"` or `"aborted"` still streams the
+   * tool calls it had produced — a dropped stream leaves them with truncated
+   * arguments — and Pi's loop returns without running any of them, so no
+   * `tool_execution_end` ever arrives. Reopening the session already reports
+   * such a call as failed; the live projection has to say the same, or the card
+   * keeps spinning under a conversation that has visibly finished.
+   */
+  protected failAbandonedToolRuns(active: ActiveSession, runIds: Iterable<string>): void {
+    let touchedSubagent = false;
+    let touchedProject = false;
+    for (const runId of runIds) {
+      const tool = active.tools.get(runId);
+      if (!tool || tool.status !== "running") continue;
+      tool.status = "failed";
+      // Keep whatever partial output streamed in; it explains more than the notice.
+      tool.output = tool.output || ABANDONED_TOOL_OUTPUT;
+      tool.endedAt = Date.now();
+      active.tools.set(tool.id, tool);
+      const terminal = active.terminals.get(tool.id);
+      if (terminal && terminal.status === "running") {
+        terminal.output = terminal.output || ABANDONED_TOOL_OUTPUT;
+        terminal.status = "failed";
+        terminal.endedAt = tool.endedAt;
+        active.terminals.set(terminal.id, terminal);
+        touchedProject = true;
+      }
+      const placeholder = active.subagents.get(`${tool.id}:0`);
+      if (placeholder && placeholder.status === "running") {
+        active.subagents.set(placeholder.id, {
+          ...placeholder,
+          status: "failed",
+          controlReady: false,
+          error: placeholder.error ?? ABANDONED_TOOL_OUTPUT,
+          durationMs: tool.endedAt - placeholder.updatedAt,
+          updatedAt: tool.endedAt,
+        });
+        touchedSubagent = true;
+      }
+      this.emitEvent({ type: "tool_finished", tool: { ...tool } });
+    }
+    if (touchedSubagent) this.publishSubagents();
+    if (touchedProject) this.publishProjectFromMemory();
   }
 
   protected messageId(message: unknown, prefix: string): string {

@@ -61,6 +61,15 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           this.emitEvent({ type: "run_state", running: true });
           break;
         case "agent_settled":
+          // Nothing is in flight once the agent has settled, so any card still
+          // marked running belongs to a call that was announced and never
+          // executed. Sweep before the run_state below, so the UI never paints
+          // a frame where the composer is free but a tool still spins.
+          // `endAll` releases the raw provider ids so a repeated `call_0` opens a
+          // fresh card later; the sweep itself covers every running card, including
+          // any that no longer has an in-flight id.
+          active.toolRunIds.endAll();
+          this.failAbandonedToolRuns(active, [...active.tools.keys()]);
           active.activeAssistantId = undefined;
           active.activeAssistantOrder = undefined;
           active.activeAssistantMessage = undefined;
@@ -264,7 +273,19 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             this.emitEvent({ type: "message_finished", message: mapped, revision: ++active.messageRevision });
           }
           if (role === "assistant") {
-            for (const call of assistantToolCalls(raw)) this.projectToolStart(active, call);
+            // A response that ended in an error or an abort still carries the
+            // tool calls it had streamed, and Pi returns without executing any
+            // of them. Project them so the timeline shows what the model tried,
+            // then close them in the same breath — leaving them open is what
+            // used to spin a card forever under a finished conversation.
+            const stopReason = isRecord(raw) ? stringValue(raw.stopReason) : "";
+            const abandoned = stopReason === "error" || stopReason === "aborted";
+            const runIds: string[] = [];
+            for (const call of assistantToolCalls(raw)) {
+              this.projectToolStart(active, call);
+              if (abandoned) runIds.push(active.toolRunIds.end(call.id));
+            }
+            if (runIds.length) this.failAbandonedToolRuns(active, runIds);
           }
           if (role === "user") {
             active.lastUserId = id;

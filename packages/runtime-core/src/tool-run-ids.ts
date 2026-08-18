@@ -52,4 +52,18 @@ export class ToolRunIds {
     this.inFlight.delete(rawToolCallId);
     return id;
   }
+
+  /**
+   * Close every run still open, naming them.
+   *
+   * A settled agent has nothing in flight by definition, so anything left here
+   * is a call the provider announced and Pi never executed. Releasing the raw
+   * ids matters for the repeating-id providers above: the next `call_0` has to
+   * open a fresh card rather than resurrect the abandoned one.
+   */
+  endAll(): string[] {
+    const ids = [...this.inFlight.values()];
+    this.inFlight.clear();
+    return ids;
+  }
 }
