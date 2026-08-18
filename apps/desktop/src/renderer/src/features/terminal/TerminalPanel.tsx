@@ -1,10 +1,11 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { LoaderCircle, Play, Plus, Terminal as TerminalIcon, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LoaderCircle, Play, Terminal as TerminalIcon } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerminalSessionSnapshot } from "../../../../shared/desktop-api";
 import { toastError } from "../../ui/toast";
+import { openTerminalSession } from "./terminalSessions";
 import "./terminal.css";
 
 const MAX_TERMINAL_OUTPUT = 500_000;
@@ -108,71 +109,52 @@ function TerminalSurface({ session, active }: { session: TerminalSessionSnapshot
   return <div className="terminal-surface" ref={containerRef} />;
 }
 
-export function TerminalPanel({ cwd, active }: { cwd: string; active: boolean }): React.JSX.Element {
-  const [sessions, setSessions] = useState<TerminalSessionSnapshot[]>([]);
+export function TerminalPanel({ sessionId, cwd, active, onSessionOpened }: {
+  sessionId: string;
+  cwd: string;
+  active: boolean;
+  onSessionOpened(id: string): void;
+}): React.JSX.Element {
+  const [session, setSession] = useState<TerminalSessionSnapshot>();
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string>();
-  const workspaceSessions = useMemo(
-    () => sessions.filter((item) => item.cwd === cwd).sort((left, right) => left.startedAt - right.startedAt),
-    [cwd, sessions],
-  );
-  const session = workspaceSessions.find((item) => item.id === selectedId) ?? workspaceSessions.at(-1);
 
-  const create = useCallback(async (): Promise<void> => {
-    try {
-      const next = await window.suocode.createTerminal(cwd);
-      setSessions(next);
-      // Selecting by identity rather than position: the state is workspace-wide,
-      // so the newest shell for *this* cwd is the one that was just opened.
-      const opened = next.filter((item) => item.cwd === cwd).sort((left, right) => left.startedAt - right.startedAt).at(-1);
-      if (opened) setSelectedId(opened.id);
-    } catch (error) {
-      toastError(error instanceof Error ? error.message : String(error));
-    }
-  }, [cwd]);
-
+  // Each panel tracks only its own shell. The store publishes every session on
+  // every change, and a panel per tab that kept the whole list would hold one
+  // copy of every buffer and re-render on data meant for another tab.
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
     const unsubscribeState = window.suocode.onTerminalStateUpdated((next) => {
-      if (mounted) setSessions(next);
+      if (mounted) setSession(next.find((item) => item.id === sessionId));
     });
     const unsubscribeData = window.suocode.onTerminalData(({ id, data }) => {
-      if (!mounted) return;
-      setSessions((current) => current.map((item) => item.id === id
-        ? { ...item, output: `${item.output}${data}`.slice(-MAX_TERMINAL_OUTPUT) }
-        : item));
+      if (!mounted || id !== sessionId) return;
+      setSession((current) => current && { ...current, output: `${current.output}${data}`.slice(-MAX_TERMINAL_OUTPUT) });
     });
-    // `ensureTerminal` is idempotent in main, so a remount — including React's
-    // double-invoked effects — cannot leave a second orphaned shell behind.
-    void window.suocode.ensureTerminal(cwd).then((current) => {
+    void window.suocode.getTerminalSessions().then((current) => {
       if (!mounted) return;
-      setSessions(current);
+      setSession(current.find((item) => item.id === sessionId));
       setLoading(false);
     }).catch((error: unknown) => {
-      if (mounted) {
-        toastError(error instanceof Error ? error.message : String(error));
-        setLoading(false);
-      }
+      if (!mounted) return;
+      toastError(error instanceof Error ? error.message : String(error));
+      setLoading(false);
     });
     return () => {
       mounted = false;
       unsubscribeState();
       unsubscribeData();
     };
-  }, [cwd]);
+  }, [sessionId]);
 
-  const close = async (id: string): Promise<void> => {
+  const reopen = useCallback(async (): Promise<void> => {
     try {
-      const next = await window.suocode.closeTerminal(id);
-      setSessions(next);
-      if (id !== session?.id) return;
-      const remaining = next.filter((item) => item.cwd === cwd).sort((left, right) => left.startedAt - right.startedAt);
-      const closedIndex = workspaceSessions.findIndex((item) => item.id === id);
-      setSelectedId((remaining[closedIndex] ?? remaining.at(-1))?.id);
+      const opened = await openTerminalSession(cwd);
+      if (opened) onSessionOpened(opened);
     } catch (error) {
       toastError(error instanceof Error ? error.message : String(error));
     }
-  };
+  }, [cwd, onSessionOpened]);
 
   if (!session) {
     return (
@@ -181,49 +163,20 @@ export function TerminalPanel({ cwd, active }: { cwd: string; active: boolean })
         <strong>{loading ? "正在连接终端…" : "终端已关闭"}</strong>
         {loading
           ? <LoaderCircle className="spin" size={14} />
-          : <button type="button" onClick={() => void create()}><Play size={12} />新建终端</button>}
+          : <button type="button" onClick={() => void reopen()}><Play size={12} />新建终端</button>}
       </div>
     );
   }
 
   return (
     <section className="terminal-panel">
-      <div className="terminal-tabs" role="tablist" aria-label="终端">
-        {workspaceSessions.map((item, index) => (
-          <div
-            className={`terminal-tab ${item.id === session.id ? "active" : ""} ${item.status === "exited" ? "exited" : ""}`}
-            key={item.id}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={item.id === session.id}
-              title={item.status === "exited" ? `已退出 ${item.exitCode ?? ""}`.trim() : item.cwd}
-              onClick={() => setSelectedId(item.id)}
-            >
-              <TerminalIcon size={11} />
-              <span>{index + 1}</span>
-            </button>
-            <button
-              className="terminal-tab-close"
-              type="button"
-              aria-label={`关闭终端 ${index + 1}`}
-              title="关闭终端"
-              onClick={() => void close(item.id)}
-            >
-              <X size={10} />
-            </button>
-          </div>
-        ))}
-        <button className="terminal-tab-new" type="button" aria-label="新建终端" title="新建终端" onClick={() => void create()}>
-          <Plus size={12} />
-        </button>
-      </div>
-      {workspaceSessions.map((item) => (
-        <div className={`terminal-stage ${item.id === session.id ? "active" : ""}`} key={item.id}>
-          <TerminalSurface session={item} active={active && item.id === session.id} />
-        </div>
-      ))}
+      <TerminalSurface session={session} active={active} />
+      {session.status === "exited" ? (
+        <footer className="terminal-exit-bar">
+          <span>{`shell 已退出${session.exitCode === undefined ? "" : `（代码 ${session.exitCode}）`}`}</span>
+          <button type="button" onClick={() => void reopen()}><Play size={11} />重新打开</button>
+        </footer>
+      ) : null}
     </section>
   );
 }

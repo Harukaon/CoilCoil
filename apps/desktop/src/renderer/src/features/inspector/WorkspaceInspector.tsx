@@ -1,15 +1,30 @@
 import { BrainCircuit, Files, Globe2, Terminal } from "lucide-react";
+import { useCallback } from "react";
 import type { ProjectSnapshot, SessionSnapshot } from "@suocode/runtime-protocol";
 import { BrowserPanel } from "../browser/BrowserPanel";
 import { FilesPanel } from "../files/FilesPanel";
 import { RuntimePanel } from "../runtime/RuntimePanel";
 import { TerminalPanel } from "../terminal/TerminalPanel";
+import { openTerminalSession } from "../terminal/terminalSessions";
+import { toastError } from "../../ui/toast";
 import { InspectorPane } from "./InspectorPane";
 import {
   fileInspectorTabId,
   type InspectorTabDefinition,
   type InspectorTabId,
 } from "./useWorkspaceInspector";
+
+const TERMINAL_ORDINALS = ["", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+
+/**
+ * Name a terminal tab by its place in the strip.
+ *
+ * The label is derived rather than stored so closing 终端 renames 终端二 to
+ * 终端 instead of leaving a row that counts 终端二, 终端三 with no 终端.
+ */
+function terminalTabLabel(index: number): string {
+  return `终端${TERMINAL_ORDINALS[index] ?? index + 1}`;
+}
 
 export interface WorkspaceInspectorProps {
   tabs: InspectorTabDefinition[];
@@ -23,7 +38,8 @@ export interface WorkspaceInspectorProps {
   onOpenFiles(): void;
   onOpenBrowser(): void;
   onOpenRuntime(): void;
-  onOpenTerminal(): void;
+  onOpenTerminal(sessionId: string): void;
+  onRebindTerminal(tabId: InspectorTabId, sessionId: string): void;
   onOpenFile: Parameters<typeof FilesPanel>[0]["onOpenFile"];
   onSelectTab(id: InspectorTabId): void;
   onCloseTab(id: InspectorTabId): void;
@@ -45,6 +61,7 @@ export function WorkspaceInspector({
   onOpenBrowser,
   onOpenRuntime,
   onOpenTerminal,
+  onRebindTerminal,
   onOpenFile,
   onSelectTab,
   onCloseTab,
@@ -56,22 +73,47 @@ export function WorkspaceInspector({
   const hasFiles = tabs.some((item) => item.kind === "files" || item.kind === "file");
   const hasRuntime = tabs.some((item) => item.kind === "runtime");
   const hasBrowser = tabs.some((item) => item.kind === "browser");
-  const hasTerminal = tabs.some((item) => item.kind === "terminal");
+  const terminalTabs = tabs.filter((item) => item.kind === "terminal");
+  const openTerminal = useCallback(async (): Promise<void> => {
+    try {
+      const opened = await openTerminalSession(projectState.cwd);
+      if (opened) onOpenTerminal(opened);
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : String(error));
+    }
+  }, [onOpenTerminal, projectState.cwd]);
+  // Closing the tab is the only way a shell leaves the strip, so it has to be
+  // the thing that kills it — a tab dropped on its own would leave a pty
+  // running with nothing on screen able to reach it.
+  const closeTab = useCallback((id: InspectorTabId): void => {
+    const terminalId = tabs.find((item) => item.id === id)?.terminalId;
+    if (terminalId) {
+      void window.suocode.closeTerminal(terminalId).catch((error: unknown) => {
+        toastError(error instanceof Error ? error.message : String(error));
+      });
+    }
+    onCloseTab(id);
+  }, [onCloseTab, tabs]);
   const addOptions = [
     { id: "files", label: "文件", icon: Files, disabled: tabs.some((item) => item.kind === "files") },
     { id: "browser", label: "浏览器", icon: Globe2, disabled: hasBrowser },
     { id: "runtime", label: "运行时", icon: BrainCircuit, disabled: hasRuntime },
-    { id: "terminal", label: "终端", icon: Terminal, disabled: hasTerminal },
+    // Never disabled: picking it again is how a second shell is opened.
+    { id: "terminal", label: "终端", icon: Terminal },
   ];
   return (
     <InspectorPane
-      tabs={tabs.map((item) => ({ ...item, closable: true }))}
+      tabs={tabs.map((item) => ({
+        ...item,
+        label: item.kind === "terminal" ? terminalTabLabel(terminalTabs.indexOf(item)) : item.label,
+        closable: true,
+      }))}
       activeTab={activeTabId ?? ""}
       onSelectTab={onSelectTab}
-      onCloseTab={onCloseTab}
+      onCloseTab={closeTab}
       onClose={onClose}
       addOptions={addOptions}
-      onAddTab={onOpenOption}
+      onAddTab={(id) => { if (id === "terminal") void openTerminal(); else onOpenOption(id); }}
       emptyState={(
         <>
           <div className="inspector-empty-icon"><Files size={18} strokeWidth={1.7} /></div>
@@ -81,7 +123,7 @@ export function WorkspaceInspector({
             <button type="button" onClick={onOpenFiles}><Files size={14} />文件</button>
             <button type="button" onClick={onOpenBrowser}><Globe2 size={14} />浏览器</button>
             <button type="button" onClick={onOpenRuntime}><BrainCircuit size={14} />运行时</button>
-            <button type="button" onClick={onOpenTerminal}><Terminal size={14} />终端</button>
+            <button type="button" onClick={() => void openTerminal()}><Terminal size={14} />终端</button>
           </div>
         </>
       )}
@@ -118,11 +160,17 @@ export function WorkspaceInspector({
           />
         </div>
       ) : null}
-      {hasTerminal ? (
-        <div className={`inspector-tab-panel terminal-tab-panel ${activeTab?.kind === "terminal" ? "active" : ""}`}>
-          <TerminalPanel cwd={projectState.cwd} active={rightOpen && activeTab?.kind === "terminal"} />
+      {/* Every shell stays mounted so switching tabs keeps its xterm buffer. */}
+      {terminalTabs.map((tab) => (
+        <div className={`inspector-tab-panel terminal-tab-panel ${activeTabId === tab.id ? "active" : ""}`} key={tab.id}>
+          <TerminalPanel
+            sessionId={tab.terminalId ?? ""}
+            cwd={projectState.cwd}
+            active={rightOpen && activeTabId === tab.id}
+            onSessionOpened={(sessionId) => onRebindTerminal(tab.id, sessionId)}
+          />
         </div>
-      ) : null}
+      ))}
     </InspectorPane>
   );
 }

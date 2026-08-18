@@ -45,20 +45,6 @@ export class TerminalRuntimeManager {
       .sort((left, right) => left.startedAt - right.startedAt);
   }
 
-  /**
-   * Open a terminal for `cwd` only if it has none running.
-   *
-   * The panel calls this when it mounts, where an unconditional create would
-   * spawn a shell on every remount — including React's double-invoked effects.
-   */
-  ensure(cwd: string): TerminalSessionSnapshot[] {
-    const resolvedCwd = resolve(cwd);
-    const running = [...this.records.values()].some((record) => (
-      record.snapshot.cwd === resolvedCwd && record.snapshot.status === "running"
-    ));
-    return running ? this.state() : this.create(cwd);
-  }
-
   create(cwd: string): TerminalSessionSnapshot[] {
     const resolvedCwd = resolve(cwd);
     if (!existsSync(resolvedCwd) || !statSync(resolvedCwd).isDirectory()) {

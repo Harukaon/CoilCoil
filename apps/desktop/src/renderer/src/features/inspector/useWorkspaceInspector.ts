@@ -12,6 +12,14 @@ export interface InspectorTabDefinition {
   label: string;
   icon: LucideIcon;
   path?: string;
+  /**
+   * The shell a terminal tab shows.
+   *
+   * Terminals are one tab per shell rather than one panel holding its own
+   * strip: opening a second shell belongs in the same row as 文件 and 浏览器,
+   * not in a second row of chrome nested under a single 终端 tab.
+   */
+  terminalId?: string;
 }
 
 export interface WorkspaceInspectorState {
@@ -39,6 +47,10 @@ export function updateWorkspaceInspectorState(
 
 export function fileInspectorTabId(path: string): string {
   return `file:${path}`;
+}
+
+export function terminalInspectorTabId(sessionId: string): string {
+  return `terminal:${sessionId}`;
 }
 
 function fileName(path: string): string {
@@ -94,6 +106,29 @@ export function closeWorkspaceInspectorTab(
   };
 }
 
+/**
+ * Point a terminal tab at a different shell.
+ *
+ * A shell can die under its tab — the user types `exit`, or the app is asked
+ * to reopen one that main no longer has. Rebinding keeps the tab where it sits
+ * in the strip instead of making the user close it and open a replacement that
+ * lands at the far end of the row.
+ */
+export function rebindWorkspaceTerminalTab(
+  state: WorkspaceInspectorState,
+  tabId: InspectorTabId,
+  sessionId: string,
+): WorkspaceInspectorState {
+  const target = state.tabs.find((item) => item.id === tabId);
+  if (target?.kind !== "terminal") return state;
+  const id = terminalInspectorTabId(sessionId);
+  return {
+    ...state,
+    tabs: state.tabs.map((item) => item.id === tabId ? { ...item, id, terminalId: sessionId } : item),
+    activeTabId: state.activeTabId === tabId ? id : state.activeTabId,
+  };
+}
+
 export function removeWorkspaceInspectorPath(
   state: WorkspaceInspectorState,
   path: string,
@@ -120,7 +155,8 @@ export function useWorkspaceInspector(workspacePath?: string): {
   openFilesTab(): void;
   openBrowserTab(): void;
   openRuntimeTab(): void;
-  openTerminalTab(): void;
+  openTerminalTab(sessionId: string): void;
+  rebindTerminalTab(tabId: InspectorTabId, sessionId: string): void;
   openFileTab(node: FileNode): void;
   openFilePath(path: string): void;
   openOption(id: InspectorTabId): void;
@@ -140,7 +176,13 @@ export function useWorkspaceInspector(workspacePath?: string): {
   const openFilesTab = useCallback(() => openTab({ id: "files", kind: "files", label: "文件", icon: Files }), [openTab]);
   const openBrowserTab = useCallback(() => openTab({ id: "browser", kind: "browser", label: "浏览器", icon: Globe2 }), [openTab]);
   const openRuntimeTab = useCallback(() => openTab({ id: "runtime", kind: "runtime", label: "运行时", icon: BrainCircuit }), [openTab]);
-  const openTerminalTab = useCallback(() => openTab({ id: "terminal", kind: "terminal", label: "终端", icon: Terminal }), [openTab]);
+  const openTerminalTab = useCallback((sessionId: string) => openTab({
+    id: terminalInspectorTabId(sessionId),
+    kind: "terminal",
+    label: "终端",
+    icon: Terminal,
+    terminalId: sessionId,
+  }), [openTab]);
   const openFileTab = useCallback((node: FileNode) => openTab({
     id: fileInspectorTabId(node.path),
     kind: "file",
@@ -153,12 +195,13 @@ export function useWorkspaceInspector(workspacePath?: string): {
     path,
     kind: "file",
   }), [openFileTab]);
+  // 终端 is deliberately absent: a terminal tab is bound to a shell, and the
+  // shell has to be spawned before the tab exists. Its caller opens it.
   const openOption = useCallback((id: InspectorTabId): void => {
     if (id === "files") openFilesTab();
     else if (id === "browser") openBrowserTab();
     else if (id === "runtime") openRuntimeTab();
-    else if (id === "terminal") openTerminalTab();
-  }, [openBrowserTab, openFilesTab, openRuntimeTab, openTerminalTab]);
+  }, [openBrowserTab, openFilesTab, openRuntimeTab]);
   const activeTab = useMemo(
     () => state.tabs.find((item) => item.id === state.activeTabId),
     [state.activeTabId, state.tabs],
@@ -168,6 +211,9 @@ export function useWorkspaceInspector(workspacePath?: string): {
   }, [update]);
   const selectTab = useCallback((id: InspectorTabId): void => {
     update((current) => selectWorkspaceInspectorTab(current, id));
+  }, [update]);
+  const rebindTerminalTab = useCallback((tabId: InspectorTabId, sessionId: string): void => {
+    update((current) => rebindWorkspaceTerminalTab(current, tabId, sessionId));
   }, [update]);
   const closeTab = useCallback((id: InspectorTabId): void => {
     update((current) => closeWorkspaceInspectorTab(current, id));
@@ -183,6 +229,7 @@ export function useWorkspaceInspector(workspacePath?: string): {
     openBrowserTab,
     openRuntimeTab,
     openTerminalTab,
+    rebindTerminalTab,
     openFileTab,
     openFilePath,
     openOption,

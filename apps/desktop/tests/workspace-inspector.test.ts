@@ -6,6 +6,8 @@ import {
   closeWorkspaceInspectorTab,
   EMPTY_WORKSPACE_INSPECTOR,
   openWorkspaceInspectorTab,
+  rebindWorkspaceTerminalTab,
+  terminalInspectorTabId,
   updateWorkspaceInspectorState,
 } from "../src/renderer/src/features/inspector/useWorkspaceInspector.ts";
 
@@ -57,16 +59,52 @@ test("closing one workspace tab does not affect another workspace", () => {
   assert.deepEqual(states["/workspace/b"]?.tabs, []);
 });
 
-test("terminal is an ordinary workspace-isolated inspector tab", () => {
-  const terminal = openWorkspaceInspectorTab(EMPTY_WORKSPACE_INSPECTOR, {
-    id: "terminal",
+function openTerminal(state: typeof EMPTY_WORKSPACE_INSPECTOR, sessionId: string): typeof EMPTY_WORKSPACE_INSPECTOR {
+  return openWorkspaceInspectorTab(state, {
+    id: terminalInspectorTabId(sessionId),
     kind: "terminal",
     label: "终端",
     icon: Terminal,
+    terminalId: sessionId,
   });
-  assert.equal(terminal.rightOpen, true);
-  assert.equal(terminal.activeTabId, "terminal");
-  assert.deepEqual(terminal.tabs.map((tab) => tab.kind), ["terminal"]);
+}
+
+test("each shell gets its own terminal tab in the strip", () => {
+  const first = openTerminal(EMPTY_WORKSPACE_INSPECTOR, "shell-a");
+  assert.equal(first.rightOpen, true);
+  assert.equal(first.activeTabId, terminalInspectorTabId("shell-a"));
+
+  // Opening a second terminal must add a tab beside the first rather than
+  // replace it: that multiplicity is the whole point of hoisting the strip.
+  const second = openTerminal(first, "shell-b");
+  assert.deepEqual(second.tabs.map((tab) => tab.terminalId), ["shell-a", "shell-b"]);
+  assert.equal(second.activeTabId, terminalInspectorTabId("shell-b"));
+
+  // Reopening the same shell selects its tab instead of duplicating it.
+  const again = openTerminal(second, "shell-a");
+  assert.deepEqual(again.tabs.map((tab) => tab.terminalId), ["shell-a", "shell-b"]);
+  assert.equal(again.activeTabId, terminalInspectorTabId("shell-a"));
+
+  const closed = closeWorkspaceInspectorTab(again, terminalInspectorTabId("shell-a"));
+  assert.deepEqual(closed.tabs.map((tab) => tab.terminalId), ["shell-b"]);
+});
+
+test("a terminal tab whose shell died is rebound in place", () => {
+  const state = openTerminal(openTerminal(EMPTY_WORKSPACE_INSPECTOR, "shell-a"), "shell-b");
+  const rebound = rebindWorkspaceTerminalTab(state, terminalInspectorTabId("shell-a"), "shell-c");
+
+  // Position is what must survive: a replacement shell that jumped to the end
+  // of the strip would renumber every terminal tab after it.
+  assert.deepEqual(rebound.tabs.map((tab) => tab.terminalId), ["shell-c", "shell-b"]);
+  assert.equal(rebound.tabs[0]?.id, terminalInspectorTabId("shell-c"));
+  assert.equal(rebound.activeTabId, terminalInspectorTabId("shell-b"), "rebinding another tab must not steal focus");
+
+  const focused = rebindWorkspaceTerminalTab(
+    { ...rebound, activeTabId: terminalInspectorTabId("shell-b") },
+    terminalInspectorTabId("shell-b"),
+    "shell-d",
+  );
+  assert.equal(focused.activeTabId, terminalInspectorTabId("shell-d"), "the focused tab keeps focus through its new id");
 });
 
 test("refactored App modules stay within the 600 line architecture limit", async () => {
