@@ -78,10 +78,10 @@ jobs:
         shell: pwsh
         run: |
           $required = @(
-            "node_modules/node-pty/prebuilds/win32-x64/pty.node",
-            "node_modules/node-pty/prebuilds/win32-arm64/pty.node",
             "node_modules/node-pty/prebuilds/win32-x64/conpty.node",
-            "node_modules/node-pty/prebuilds/win32-arm64/conpty.node"
+            "node_modules/node-pty/prebuilds/win32-arm64/conpty.node",
+            "node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node",
+            "node_modules/node-pty/prebuilds/win32-arm64/conpty_console_list.node"
           )
           foreach ($file in $required) {
             if (-not (Test-Path $file)) { throw "Missing node-pty prebuild: $file" }
