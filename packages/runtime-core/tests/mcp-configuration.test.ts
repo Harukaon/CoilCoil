@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +54,7 @@ test("bundled Chrome DevTools MCP is scoped per session with zero direct tools",
   });
 });
 
-test("legacy removed-server tombstones are migrated out of Pi's configuration", async () => {
+test("a removed server is swept from SuoCode's own files and never from the workspace", async () => {
   const root = mkdtempSync(join(tmpdir(), "suocode-mcp-removal-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -91,7 +91,9 @@ test("legacy removed-server tombstones are migrated out of Pi's configuration", 
     const projectConfig = JSON.parse(readFileSync(join(projectPiDir, "mcp.json"), "utf8"));
     const disabled = JSON.parse(readFileSync(join(agentDir, "mcp-disabled-servers.json"), "utf8"));
     assert.equal(globalConfig.mcpServers.node_repl, undefined);
-    assert.equal(projectConfig.mcpServers.node_repl, undefined);
+    // The workspace file belongs to the project, not to SuoCode: a refresh
+    // reads it and leaves it exactly as it found it.
+    assert.deepEqual(projectConfig.mcpServers.node_repl, { disabled: true });
     assert.deepEqual(disabled.servers, ["workspace-off"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -126,4 +128,56 @@ test("an idle MCP configuration change waits for the live session reload", async
   finishReload?.();
   await request;
   assert.equal(returned, true);
+});
+
+test("a workspace's own servers are stored in the agent directory, not in the workspace", async () => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-mcp-workspace-"));
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "project");
+  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(join(agentDir, "mcp.json"), `${JSON.stringify({ imports: [], mcpServers: { shared: { command: "shared-server" } } }, null, 2)}\n`);
+
+  const runtime = Object.create(SuoCodeRuntime.prototype) as {
+    agentDir: string;
+    workspaceMcpConfigPath(cwd: string): string;
+    writeWorkspaceMcpServer(cwd: string, name: string, definition: Record<string, unknown> | undefined): void;
+    refreshAgentMcpConfiguration(events: object, cwd: string): Promise<void>;
+  };
+  Object.defineProperty(runtime, "agentDir", { value: agentDir });
+  const events = {};
+  try {
+    runtime.writeWorkspaceMcpServer(cwd, "workspace-only", { command: "workspace-server" });
+
+    const storedPath = runtime.workspaceMcpConfigPath(cwd);
+    assert.ok(storedPath.startsWith(join(agentDir, "workspaces")), storedPath);
+    assert.equal(existsSync(join(cwd, ".pi")), false, "nothing may be written into the workspace");
+
+    await runtime.refreshAgentMcpConfiguration(events, cwd);
+    const registry = (globalThis as Record<PropertyKey, unknown>)[Symbol.for("suocode-workflow.mcp-agent-config-registry")];
+    assert.ok(registry instanceof WeakMap);
+    const agentConfiguration = registry.get(events) as { mcpServers: Record<string, unknown> };
+    assert.deepEqual(agentConfiguration.mcpServers["workspace-only"], { command: "workspace-server" });
+    assert.ok(agentConfiguration.mcpServers.shared);
+
+    runtime.writeWorkspaceMcpServer(cwd, "workspace-only", undefined);
+    const stored = JSON.parse(readFileSync(storedPath, "utf8")) as { mcpServers: Record<string, unknown> };
+    assert.deepEqual(stored.mcpServers, {});
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("each workspace gets its own stored configuration", () => {
+  const runtime = Object.create(SuoCodeRuntime.prototype) as {
+    agentDir: string;
+    workspaceMcpConfigPath(cwd: string): string;
+  };
+  Object.defineProperty(runtime, "agentDir", { value: "/agent" });
+  const first = runtime.workspaceMcpConfigPath("/tmp/alpha");
+  const second = runtime.workspaceMcpConfigPath("/tmp/beta");
+  const sameName = runtime.workspaceMcpConfigPath("/elsewhere/alpha");
+  assert.notEqual(first, second);
+  assert.notEqual(first, sameName, "two workspaces sharing a folder name must not share a file");
+  assert.match(first, /alpha-[0-9a-f]{12}\/mcp\.json$/);
 });

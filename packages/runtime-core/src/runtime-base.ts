@@ -142,6 +142,12 @@ export abstract class RuntimeBase {
 
   protected abstract cleanRemovedMcpServerState(adapter: McpAdapterConfigModule, cwd?: string): boolean;
 
+  /** Lay the workspace's own MCP servers, stored in the agent directory, over the shared ones. */
+  protected abstract withWorkspaceMcpServers<T extends { mcpServers: Record<string, Record<string, unknown>> }>(
+    configuration: T,
+    cwd?: string,
+  ): T;
+
   abstract getMcpConfiguration(cwd?: string): Promise<McpConfigurationSnapshot>;
 
   protected abstract reconstructState(session: AgentSession): ReconstructedSessionState;

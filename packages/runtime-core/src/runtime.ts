@@ -11,7 +11,6 @@ import {
   type SessionSnapshot,
   type SessionSummary,
   type ThinkingLevel,
-  summarizeCacheUsage,
 } from "@suocode/runtime-protocol";
 import {
   existsSync,
@@ -34,6 +33,7 @@ import {
   gitChanges,
 } from "./project-helpers.js";
 import {
+  ABORT_STALL_NOTICE_MS,
   ORIGINAL_SESSION_MUTATION_UNSUPPORTED,
   projectMemoryStatusByCwd,
 } from "./runtime-constants.js";
@@ -57,6 +57,7 @@ import {
   safeRealPath,
 } from "./runtime-utils.js";
 import {
+  sessionCacheInspection,
   sessionUsage,
 } from "./session-values.js";
 import {
@@ -72,6 +73,13 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
     const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (prompt === "/memory" && !images?.length) return this.runMemoryNow();
+    // A goal loop starts the next round as soon as this one settles, so a
+    // queued message would sit behind rounds that keep coming. Everything the
+    // user sends during goal mode joins the turn that is running instead.
+    if (this.goalSteers(active)) {
+      await this.steerNow(active, prompt, images, clientMessageId);
+      return { accepted: true };
+    }
     if (
       active.session.isStreaming
       || this.promptStarting
@@ -150,17 +158,191 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
     }
   }
 
-  async steer(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true; }> {
-    // Keep the legacy wire command compatible, but never let it bypass SuoCode's
-    // per-session FIFO semantics by inserting work into Pi's active turn.
-    return this.prompt(text, images, clientMessageId);
+  /**
+   * Interject a message into the turn that is already running.
+   *
+   * Pi delivers a steered message at the next turn boundary of the live agent
+   * loop, so the correction reaches the model without aborting tool calls,
+   * terminals, or subagents the way stopping does. With nothing streaming there
+   * is no turn to interject into, and the message takes the ordinary path.
+   */
+  async steer(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true; steered: boolean; }> {
+    const active = this.requireActive();
+    if (this.modelTransition) await this.modelTransition;
+    const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
+    if (!prompt) throw new Error("消息不能为空。");
+    if (!this.canSteer(active)) {
+      await this.prompt(text, images, clientMessageId);
+      return { accepted: true, steered: false };
+    }
+    await this.steerNow(active, prompt, images, clientMessageId);
+    return { accepted: true, steered: true };
   }
 
-  async abort(): Promise<{ aborted: boolean; }> {
+  /** Whether a live turn exists for a message to join right now. */
+  private canSteer(active: ActiveSession): boolean {
+    return active.session.isStreaming && !this.promptStarting;
+  }
+
+  /** During a running `/goal` loop the queue is bypassed entirely. */
+  private goalSteers(active: ActiveSession): boolean {
+    return active.goal?.status === "running" && this.canSteer(active);
+  }
+
+  private async steerNow(
+    active: ActiveSession,
+    prompt: string,
+    images: PromptImage[] | undefined,
+    clientMessageId: string | undefined,
+  ): Promise<void> {
+    const prepared = await preparePromptImages(images);
+    const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
+    this.queueClientMessage(active, clientMessageId);
+    try {
+      await active.session.prompt(expandedPrompt, {
+        images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
+        streamingBehavior: "steer",
+      });
+    } catch (error) {
+      this.rejectClientMessage(active, clientMessageId);
+      throw error;
+    }
+  }
+
+  /**
+   * Move a queued prompt out of the FIFO and into the running turn.
+   *
+   * The queue is the safe default; this is the explicit opt-out for a user who
+   * wants the message to land now. Without a live turn to join, the prompt only
+   * moves to the head of the queue so it is never lost.
+   */
+  async promoteQueuedPrompt(id: string): Promise<{ promoted: boolean; steered: boolean; }> {
     const active = this.requireActive();
-    if (!active.session.isStreaming) return { aborted: false };
-    await active.session.abort();
-    return { aborted: true };
+    const index = active.promptQueue.findIndex((item) => item.id === id);
+    if (index < 0) return { promoted: false, steered: false };
+    if (active.promptDrainInProgress && index === 0) {
+      throw new Error("这条消息已经开始发送，无法介入。");
+    }
+    const item = active.promptQueue[index]!;
+    if (!this.canSteer(active)) {
+      if (index === 0) return { promoted: false, steered: false };
+      active.promptQueue.splice(index, 1);
+      active.promptQueue.unshift(item);
+      this.publishPromptQueue(active);
+      return { promoted: true, steered: false };
+    }
+    this.removeQueuedPrompt(active, id);
+    const result = await this.steer(item.text, item.images, item.id).catch((error) => {
+      // Put it back rather than dropping a message the user still expects to be sent.
+      this.enqueuePrompt(active, item.text, item.images, item.id);
+      throw error;
+    });
+    return { promoted: true, steered: result.steered };
+  }
+
+  /**
+   * Stop everything this session is doing.
+   *
+   * The request returns as soon as the abort is delivered. Pi's own `abort()`
+   * signals the run and then waits for it to settle, and a tool that is slow to
+   * honour the signal — a long command, a request already in flight — can hold
+   * that wait for a long time. Awaiting it here left the button pressed with
+   * nothing to show for it, which reads as "stop did nothing"; the run state
+   * events report when the turn has actually ended.
+   */
+  async abort(): Promise<{ aborted: boolean; aborting: boolean; cancelledQueue: number; }> {
+    const active = this.requireActive();
+    // Stopping is how a user ends a `/goal` loop: without this the loop would
+    // simply start the next round after the aborted turn settles.
+    const stoppedGoal = await this.stopGoalIfRunning(active);
+    // Stopping means the conversation stops. Anything still waiting in the FIFO
+    // would otherwise start the moment the aborted turn settles, which looks
+    // exactly like the stop having been ignored.
+    const cancelledQueue = this.dropQueuedPrompts(active);
+    if (!active.session.isStreaming) {
+      // A stop pressed against a run this session no longer has still has a job
+      // to do: publish what is actually true, so a stale spinner clears.
+      this.publishRunState(active);
+      return { aborted: stoppedGoal || cancelledQueue > 0, aborting: false, cancelledQueue };
+    }
+    active.aborting = true;
+    this.publishRunState(active);
+    const stallNotice = setTimeout(() => this.reportSlowAbort(active), ABORT_STALL_NOTICE_MS);
+    stallNotice.unref?.();
+    void active.session.abort()
+      .catch((error) => {
+        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
+      })
+      .finally(() => {
+        clearTimeout(stallNotice);
+        active.aborting = false;
+        if (this.active === active) this.publishRunState(active);
+      });
+    return { aborted: true, aborting: true, cancelledQueue };
+  }
+
+  /**
+   * Say why a stop is taking so long.
+   *
+   * The abort itself was delivered; what is left is a tool call that has not
+   * come back yet. Naming it is the difference between "stop is broken" and
+   * "stop is waiting for this command".
+   */
+  private reportSlowAbort(active: ActiveSession): void {
+    if (this.active !== active || !active.aborting) return;
+    const running = [...new Set(
+      [...active.tools.values()].filter((tool) => tool.status === "running").map((tool) => tool.name),
+    )];
+    this.emitEvent({
+      type: "runtime_notice",
+      level: "info",
+      message: running.length
+        ? `正在停止：还在等 ${running.join("、")} 收尾`
+        : "正在停止：已经发出中断，正在等这一轮收尾",
+    });
+  }
+
+  /** Emit the run state this session actually has, whatever the UI believes. */
+  private publishRunState(active: ActiveSession): void {
+    this.emitEvent({
+      type: "run_state",
+      running: active.session.isStreaming || this.promptStarting || active.promptQueue.length > 0,
+      aborting: active.aborting === true,
+    });
+    void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot })).catch(() => undefined);
+  }
+
+  /**
+   * Drop every prompt that has not started yet.
+   *
+   * The head is kept while a drain owns it: that one is the turn being aborted,
+   * and Pi still has to echo its user message.
+   */
+  private dropQueuedPrompts(active: ActiveSession): number {
+    const keepHead = active.promptDrainInProgress && active.promptQueue.length > 0;
+    const dropped = active.promptQueue.splice(keepHead ? 1 : 0);
+    if (!dropped.length) return 0;
+    this.publishPromptQueue(active);
+    for (const item of dropped) this.rejectClientMessage(active, item.id);
+    this.emitEvent({
+      type: "runtime_notice",
+      level: "info",
+      message: `已停止，${dropped.length} 条排队消息未发送`,
+    });
+    return dropped.length;
+  }
+
+  /** End the `/goal` loop of this session, if one is running. */
+  async stopGoal(): Promise<{ stopped: boolean; }> {
+    const active = this.requireActive();
+    return { stopped: await this.stopGoalIfRunning(active) };
+  }
+
+  private async stopGoalIfRunning(active: ActiveSession): Promise<boolean> {
+    if (active.goal?.status !== "running") return false;
+    // Extension commands run immediately, even while a turn is streaming.
+    await active.session.prompt("/goal stop").catch(() => undefined);
+    return active.goal?.status !== "running";
   }
 
   protected requireActive(): ActiveSession {
@@ -279,6 +461,8 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
       pendingModel: active.pendingModel,
       thinkingLevel: active.session.thinkingLevel as ThinkingLevel,
       fast: active.fastState?.enabled ?? false,
+      goal: active.goal,
+      aborting: active.aborting === true,
       responseMetrics: active.responseMetrics,
       responseMetricsHistory: active.responseMetricsHistory,
       contextUsage: usage.contextUsage,
@@ -349,19 +533,7 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
       mcpServerNames,
     );
     const usage = sessionUsage(active.session);
-    // A lifetime average permanently penalizes a healthy session for its first
-    // cache-building request. Pi's own footer reports the latest request, while
-    // billing totals below continue to include every provider response.
-    const latestCache = active.responseMetrics
-      ? summarizeCacheUsage(
-        active.responseMetrics.inputTokens,
-        active.responseMetrics.cacheReadTokens,
-        active.responseMetrics.cacheWriteTokens,
-      )
-      : undefined;
-    const cacheHitRate = latestCache && (latestCache.cacheReadTokens > 0 || latestCache.cacheWriteTokens > 0)
-      ? latestCache.hitRate
-      : undefined;
+    const { cacheHitRate, cache } = sessionCacheInspection(active.session, active.responseMetrics);
     const sharedMemoryStatus = projectMemoryStatusByCwd.get(safeRealPath(active.cwd));
     const memoryStatus = memoryStatusForInspection(active.memoryStatus, sharedMemoryStatus);
     return {
@@ -375,6 +547,7 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
         total: usage.contextUsage?.tokens ?? (((systemPromptTokens ?? 0) + toolDefinitionTokens + estimatedMessages) || undefined),
       },
       cacheHitRate,
+      cache,
       tokenBreakdown,
       tools,
       skills,

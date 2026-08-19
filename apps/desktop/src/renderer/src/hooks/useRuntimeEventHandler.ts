@@ -112,6 +112,15 @@ export function useRuntimeEventHandler({
           return next;
         });
         break;
+      case "goal_updated":
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = { ...current, goal: event.goal };
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
+        break;
       case "prompt_queue_updated":
         dispatchConversationMessages({
           type: "prompt_queue",
@@ -206,7 +215,7 @@ export function useRuntimeEventHandler({
         else toastInfo(event.message);
         break;
       case "run_state":
-        setSnapshot((current) => current ? { ...current, running: event.running } : current);
+        setSnapshot((current) => current ? { ...current, running: event.running, aborting: event.aborting } : current);
         setAgentPhase(event.running ? "思考" : undefined);
         break;
       case "runtime_error":

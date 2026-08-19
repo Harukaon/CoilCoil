@@ -69,6 +69,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           // fresh card later; the sweep itself covers every running card, including
           // any that no longer has an in-flight id.
           active.toolRunIds.endAll();
+          // The run this stop was aimed at is over, whatever the abort promise
+          // is still waiting on.
+          active.aborting = false;
           this.failAbandonedToolRuns(active, [...active.tools.keys()]);
           active.activeAssistantId = undefined;
           active.activeAssistantOrder = undefined;

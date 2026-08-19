@@ -10,6 +10,7 @@ import {
   createEventBus,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type GoalState,
   type MoveSessionResult,
   type PlanApprovalState,
   type ProjectMemoryRuntimeStatus,
@@ -33,6 +34,7 @@ import {
 } from "./project-helpers.js";
 import {
   FAST_STATE_EVENT,
+  GOAL_STATE_CHANNEL,
   PLAN_STATE_CHANNEL,
   PROJECT_MEMORY_STATUS_EVENT,
   RUNTIME_BRIDGE_STATE_EVENT,
@@ -45,6 +47,7 @@ import {
   FastRuntimeState,
   RuntimeBridgeState,
   fastRuntimeState,
+  goalState,
   hydrateProjectMemoryStatus,
   mergeWorkspaceMemoryStatus,
   planApprovalState,
@@ -256,6 +259,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     let pendingFastState: FastRuntimeState | undefined;
     let pendingMemoryStatus: ProjectMemoryRuntimeStatus | undefined;
     let pendingPlanApproval: PlanApprovalState | undefined;
+    let pendingGoal: GoalState | undefined;
     eventBus.on(RUNTIME_BRIDGE_STATE_EVENT, (value) => {
       const next = runtimeBridgeState(value);
       if (!next) return;
@@ -291,6 +295,14 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       else if (next.state === "succeeded") this.emitEvent({ type: "runtime_notice", level: "success", message: next.message || "项目记忆整理完成" });
       else if (next.state === "busy") this.emitEvent({ type: "runtime_notice", level: "info", message: next.message || "当前项目已有记忆整理正在运行" });
       else if (next.state === "failed") this.emitEvent({ type: "runtime_notice", level: "error", message: next.error || "项目记忆整理失败" });
+    });
+    eventBus.on(GOAL_STATE_CHANNEL, (value) => {
+      const next = goalState(value);
+      if (value !== null && value !== undefined && !next) return;
+      pendingGoal = next;
+      if (!installedActive) return;
+      installedActive.goal = next;
+      this.emitEvent({ type: "goal_updated", goal: next });
     });
     eventBus.on(PLAN_STATE_CHANNEL, (value) => {
       const next = planApprovalState(value);
@@ -422,6 +434,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       fastState: pendingFastState,
       memoryStatus: pendingMemoryStatus ?? projectMemoryStatusByCwd.get(safeRealPath(cwd)),
       planApproval: reconstructed.planApproval ?? pendingPlanApproval,
+      goal: pendingGoal,
       eventBus,
     };
     installedActive = active;

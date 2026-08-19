@@ -38,6 +38,9 @@ export interface OpenFilePreviewResult {
 
 export type ProjectFileAction = "reveal" | "trash";
 
+/** What an absolute path in the transcript points at. */
+export type PathKind = "file" | "directory" | "missing";
+
 export interface ProjectFileActionInput {
   root: string;
   path: string;
@@ -107,11 +110,17 @@ export interface UpdateAvailable {
 
 export interface SuoCodeDesktopApi {
   platform: DesktopPlatform;
+  /** The running build's version, as packaged. */
+  appVersion(): Promise<string>;
   homeProject(): Promise<ProjectSelection>;
   selectProject(): Promise<ProjectSelection | null>;
   pickDirectory(options?: { title?: string }): Promise<string | null>;
   setWindowMinimumWidth(width: number): Promise<void>;
   openExternal(url: string): Promise<void>;
+  /** Classify absolute paths so a link can be drawn and routed correctly. */
+  classifyPaths(paths: string[]): Promise<Record<string, PathKind>>;
+  /** Show the path in the operating system's file manager. */
+  revealPath(path: string): Promise<boolean>;
   copyText(text: string): Promise<void>;
   openFilePreview(input: OpenFilePreviewInput): Promise<OpenFilePreviewResult>;
   closeFilePreview(id: string): Promise<void>;

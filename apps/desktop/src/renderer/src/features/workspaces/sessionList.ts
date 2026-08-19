@@ -40,3 +40,38 @@ export function collectPinnedSessions(
     .map((session) => ({ project, session })))
     .sort((left, right) => Date.parse(right.session.pinnedAt ?? right.session.updatedAt) - Date.parse(left.session.pinnedAt ?? left.session.updatedAt));
 }
+
+export interface WorkspaceActivitySummary {
+  running: number;
+  /** Finished while the user was looking somewhere else. */
+  unread: number;
+}
+
+/**
+ * Roll a workspace's conversations up into one indicator.
+ *
+ * A running conversation inside a collapsed workspace is otherwise invisible,
+ * which is how a long job gets forgotten. The folder row carries the same state
+ * its conversations do.
+ */
+export function summarizeWorkspaceActivity(
+  sessions: readonly SessionSummary[] | undefined,
+  activity: Record<string, { running: boolean; unread: boolean } | undefined>,
+): WorkspaceActivitySummary {
+  let running = 0;
+  let unread = 0;
+  for (const session of sessions ?? []) {
+    const state = session.path ? activity[session.path] : undefined;
+    if (!state) continue;
+    if (state.running) running += 1;
+    else if (state.unread) unread += 1;
+  }
+  return { running, unread };
+}
+
+/** What the folder row should show, or nothing when the workspace is quiet. */
+export function workspaceActivityLabel(summary: WorkspaceActivitySummary): string | undefined {
+  if (summary.running) return `${summary.running} 个对话运行中`;
+  if (summary.unread) return `${summary.unread} 个对话有新回复`;
+  return undefined;
+}

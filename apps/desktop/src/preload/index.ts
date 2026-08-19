@@ -9,6 +9,7 @@ import type {
   FilePreviewDocument,
   OpenFilePreviewInput,
   OpenFilePreviewResult,
+  PathKind,
   ProjectFileActionInput,
   ProjectFileActionResult,
   ProjectSelection,
@@ -23,6 +24,9 @@ import type {
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
+const APP_VERSION_CHANNEL = "app:version";
+const PATH_CLASSIFY_CHANNEL = "path:classify";
+const PATH_REVEAL_CHANNEL = "path:reveal";
 const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const EXTERNAL_OPEN_CHANNEL = "external:open";
@@ -67,6 +71,7 @@ const platform = ((): DesktopPlatform => {
 
 const api: SuoCodeDesktopApi = {
   platform,
+  appVersion: () => ipcRenderer.invoke(APP_VERSION_CHANNEL) as Promise<string>,
   homeProject: () =>
     ipcRenderer.invoke(PROJECT_HOME_CHANNEL) as Promise<ProjectSelection>,
   selectProject: () =>
@@ -77,6 +82,10 @@ const api: SuoCodeDesktopApi = {
     ipcRenderer.invoke(WINDOW_MINIMUM_WIDTH_CHANNEL, width) as Promise<void>,
   openExternal: (url: string) =>
     ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url) as Promise<void>,
+  classifyPaths: (paths: string[]) =>
+    ipcRenderer.invoke(PATH_CLASSIFY_CHANNEL, paths) as Promise<Record<string, PathKind>>,
+  revealPath: (path: string) =>
+    ipcRenderer.invoke(PATH_REVEAL_CHANNEL, path) as Promise<boolean>,
   copyText: (text: string) =>
     ipcRenderer.invoke(CLIPBOARD_WRITE_CHANNEL, text) as Promise<void>,
   openFilePreview: (input: OpenFilePreviewInput) =>

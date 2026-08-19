@@ -489,11 +489,20 @@ export interface QueuedPrompt {
   queuedAt: number;
 }
 
+/** A Pi custom message, carried so the UI can render it as its own card. */
+export interface ChatMessageCustom {
+  /** Pi `customType`, e.g. `terminal-notification`. */
+  type: string;
+  details?: Record<string, unknown>;
+}
+
 export interface ChatMessage {
   id: string;
   entryId?: string;
   order: number;
   role: ChatRole;
+  /** Present when this message came from an extension rather than the model. */
+  custom?: ChatMessageCustom;
   model?: Pick<ModelOption, "provider" | "id">;
   text: string;
   images?: PromptImage[];
@@ -508,6 +517,22 @@ export interface ChatMessage {
 export interface TodoItem {
   text: string;
   status: "pending" | "in_progress" | "completed";
+}
+
+/** Status of a `/goal` loop: the Agent keeps working until it completes or is stopped. */
+export type GoalStatus = "running" | "paused" | "completed" | "stopped";
+
+export interface GoalState {
+  status: GoalStatus;
+  goal: string;
+  /** Rounds the loop has sent so far; the first prompt is round 1. */
+  iteration: number;
+  startedAt: number;
+  updatedAt: number;
+  /** Written by the Agent when it declares the goal reached. */
+  summary?: string;
+  /** Last turn error; the loop keeps running and tells the Agent about it. */
+  lastError?: string;
 }
 
 export type PlanApprovalStatus =
@@ -668,21 +693,26 @@ export interface RuntimeTokenBreakdown {
 export interface CacheUsageSummary {
   /** Full prompt volume. Pi exposes input/cacheRead/cacheWrite as non-overlapping buckets. */
   promptTokens: number;
-  /** Tokens billed as fresh input, including tokens written into the prompt cache. */
+  /** Tokens the cache could not serve. Writes are not counted here: they are new. */
   uncachedTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
-  /** Read share of the full prompt. Undefined when the prompt is empty. */
+  /** Share of the reusable prompt that came from cache. Undefined when there was none. */
   hitRate?: number;
 }
 
 /**
  * Normalize Pi's provider-independent cache buckets for display.
  *
- * Pi deliberately stores `input`, `cacheRead`, and `cacheWrite` as mutually
- * exclusive buckets, even for providers such as OpenAI that report cached
- * tokens as a subset of their input total. Do not display `input` alone as the
- * full prompt size and do not add output tokens to the cache denominator.
+ * Pi maps every provider onto three non-overlapping buckets: `input` is the part
+ * of the prompt the cache could not serve, `cacheRead` is what it did serve, and
+ * `cacheWrite` is what this request put into the cache for later.
+ *
+ * The hit rate is therefore `cacheRead / (cacheRead + input)`, matching what
+ * other agents report. Writes stay out of the denominator on purpose: a request
+ * that fills the cache is the investment that makes the next ones cheap, and
+ * charging it as a miss made a healthy session look broken every time the
+ * context crossed a new cache breakpoint.
  */
 export function summarizeCacheUsage(
   inputTokens: number | null | undefined,
@@ -693,13 +723,13 @@ export function summarizeCacheUsage(
   const input = safe(inputTokens);
   const cacheRead = safe(cacheReadTokens);
   const cacheWrite = safe(cacheWriteTokens);
-  const promptTokens = input + cacheRead + cacheWrite;
+  const reusable = input + cacheRead;
   return {
-    promptTokens,
-    uncachedTokens: input + cacheWrite,
+    promptTokens: input + cacheRead + cacheWrite,
+    uncachedTokens: input,
     cacheReadTokens: cacheRead,
     cacheWriteTokens: cacheWrite,
-    hitRate: promptTokens > 0 ? cacheRead / promptTokens : undefined,
+    hitRate: reusable > 0 ? cacheRead / reusable : undefined,
   };
 }
 
@@ -750,6 +780,8 @@ export interface RuntimeInspectionSnapshot {
   };
   /** Cache-read share of the latest completed model request, not a lifetime average. */
   cacheHitRate?: number;
+  /** This session's model responses, added up. Context compaction is deliberately left out. */
+  cache?: CacheUsageSummary;
   /** Estimated composition of the prompt currently sent to the model. */
   tokenBreakdown?: RuntimeTokenBreakdown;
   tools: RuntimeToolDefinition[];
@@ -909,6 +941,10 @@ export interface SessionSnapshot {
   pendingModel?: PendingSessionModel;
   thinkingLevel: ThinkingLevel;
   fast: boolean;
+  /** Present while a `/goal` loop exists in this session. */
+  goal?: GoalState;
+  /** A stop was delivered; the turn is winding down and may still be finishing a tool. */
+  aborting?: boolean;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   contextUsage?: ContextUsage;
@@ -1007,7 +1043,9 @@ export type RuntimeCommand =
   | { type: "rewind_prompt"; entryId: string; text: string; images?: PromptImage[]; clientMessageId?: string }
   | { type: "steer"; text: string; images?: PromptImage[]; clientMessageId?: string }
   | { type: "abort" }
+  | { type: "stop_goal" }
   | { type: "cancel_queued_prompt"; id: string }
+  | { type: "promote_queued_prompt"; id: string }
   | { type: "refresh_project" }
   | { type: "list_directory"; path: string }
   | { type: "read_file"; path: string; maxBytes?: number };
@@ -1029,6 +1067,7 @@ export type RuntimeEvent =
   | { type: "tool_finished"; tool: ToolRun }
   | { type: "plan_updated"; plan: TodoItem[] }
   | { type: "plan_approval_updated"; plan?: PlanApprovalState }
+  | { type: "goal_updated"; goal?: GoalState }
   | { type: "subagents_updated"; subagents: SubagentActivity[] }
   | { type: "project_updated"; project: ProjectSnapshot }
   | {
@@ -1040,7 +1079,7 @@ export type RuntimeEvent =
     }
   | { type: "runtime_inspection_updated"; inspection: RuntimeInspectionSnapshot }
   | { type: "runtime_notice"; level: "info" | "success" | "error"; message: string }
-  | { type: "run_state"; running: boolean }
+  | { type: "run_state"; running: boolean; aborting?: boolean }
   | { type: "runtime_released" }
   | { type: "runtime_error"; message: string; detail?: string };
 

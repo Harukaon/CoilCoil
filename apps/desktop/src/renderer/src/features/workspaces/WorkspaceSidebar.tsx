@@ -23,7 +23,7 @@ import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol
 import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { SuoLoader } from "../../ui/SuoLoader";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
-import { collectPinnedSessions, collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, type PinnedSessionEntry } from "./sessionList";
+import { collectPinnedSessions, collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
   runtimeId?: string;
@@ -170,8 +170,9 @@ export function WorkspaceSidebar({
         <button className={`nav-button ${memoryOpen ? "active" : ""}`} type="button" onClick={onOpenMemory}><BookOpen size={16} strokeWidth={1.7} /><span>记忆</span></button>
       </nav>
       <section className="project-section">
+        {/* No heading and no count: the pin on each row already says what these are,
+            and a 36px section title only costs vertical space. */}
         {pinnedSessions.length ? <section className="pinned-sessions-section">
-          <div className="section-heading"><span>置顶</span><span className="pinned-count">{pinnedSessions.length}</span></div>
           <div className="conversation-list pinned-conversation-list">
             {pinnedSessions.map((entry) => <GlobalPinnedSessionRow
               key={entry.session.path}
@@ -188,6 +189,10 @@ export function WorkspaceSidebar({
           const allSessions = sessionsByProject[project.path] ?? [];
           const sessions = allSessions.filter((session) => !session.pinned);
           const hasPending = pendingProjectPath === project.path;
+          // Collapsed workspaces hide their running conversations; the folder
+          // row carries their state so nothing is forgotten in there.
+          const workspaceActivity = summarizeWorkspaceActivity(allSessions, sessionActivity);
+          const workspaceActivityText = workspaceActivityLabel(workspaceActivity);
           const collapsedLimit = collapsedSessionLimit(hasPending);
           const visibleLimit = Math.max(collapsedLimit, expandedSessionLimits[project.path] ?? collapsedLimit);
           const visibleSessions = sessions.slice(0, visibleLimit);
@@ -226,6 +231,14 @@ export function WorkspaceSidebar({
                     <button className="project-toggle" type="button" aria-expanded={expanded} onClick={() => onToggleProject(project.path)}>
                       <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
                       <span className="project-name">{project.name}</span>
+                      {workspaceActivityText ? (
+                        <i
+                          className={`project-activity ${workspaceActivity.running ? "running" : "unread"}`}
+                          role="img"
+                          aria-label={workspaceActivityText}
+                          title={workspaceActivityText}
+                        />
+                      ) : null}
                     </button>
                     <span className="project-row-actions">
                       <button className="project-action" type="button" aria-label={`在 ${project.name} 中新建对话`} onClick={() => onNewConversation(project)}><Plus size={14} /></button>

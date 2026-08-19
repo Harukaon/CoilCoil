@@ -85,9 +85,13 @@ export interface AppViewController {
   reorderProjects(fromPath: string, toPath: string): void;
   rewindPrompt(message: ChatMessage, text: string, images: PromptImage[]): Promise<void>;
   cancelQueuedPrompt(id: string): Promise<void>;
+  promoteQueuedPrompt(id: string): Promise<void>;
+  abortRun(): Promise<void>;
+  stopSubagent(activity: SubagentActivity): Promise<void>;
+  resumeSubagent(activity: SubagentActivity): Promise<void>;
   approvePlan(planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState>;
   rejectPlan(planId: string): Promise<PlanApprovalState>;
-  submitPrompt(event: FormEvent): Promise<void>;
+  submitPrompt(event?: FormEvent, intent?: "queue" | "steer"): Promise<void>;
   handleTimelineScroll(): void;
   handleFileDragEnter: ConversationProps["onDragEnter"];
   handleFileDragOver: ConversationProps["onDragOver"];
@@ -108,7 +112,8 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     startNewConversation, openProject, removeProject, openConversation,
     archiveConversation, renameConversation, pinConversation, forkConversation,
     moveConversation, reorderProjects,
-    rewindPrompt, cancelQueuedPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
+    rewindPrompt, cancelQueuedPrompt, promoteQueuedPrompt, abortRun, stopSubagent, resumeSubagent,
+    approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
     handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,
   } = controller;
   const {
@@ -201,6 +206,9 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             timeline={timeline}
             queuedPrompts={queuedPrompts}
             onCancelQueuedPrompt={(id) => { void cancelQueuedPrompt(id); }}
+            onPromoteQueuedPrompt={(id) => { void promoteQueuedPrompt(id); }}
+            onStopSubagent={(activity) => { void stopSubagent(activity); }}
+            onResumeSubagent={(activity) => { void resumeSubagent(activity); }}
             running={running}
             timelineRef={timelineRef}
             activityLine={activityLine}
@@ -240,7 +248,9 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
               setSettingsSection(section ?? "models");
               setSettingsOpen(true);
             }}
-            onAbort={() => { void window.suocode.request({ type: "abort" }, snapshot?.runtimeId); }}
+            onAbort={() => { void abortRun(); }}
+            onStopGoal={() => { void window.suocode.request({ type: "stop_goal" }, snapshot?.runtimeId); }}
+            onSteerPrompt={() => { void submitPrompt(undefined, "steer"); }}
             onApprovePlan={approvePlan}
             onRejectPlan={rejectPlan}
           />

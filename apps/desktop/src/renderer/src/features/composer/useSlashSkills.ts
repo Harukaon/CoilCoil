@@ -196,6 +196,13 @@ export function useSlashMenu({
         openSettings: "skills",
       },
       {
+        id: "command:goal",
+        kind: "command",
+        title: "/goal",
+        description: "设定必须完成的目标，进入不会自行停止的 Agent 循环",
+        insert: "/goal ",
+      },
+      {
         id: "command:memory",
         kind: "command",
         title: "/memory",

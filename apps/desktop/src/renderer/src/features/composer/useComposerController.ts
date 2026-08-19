@@ -39,12 +39,18 @@ export function useComposerController({
   runtimeId,
   sessionThinkingLevel,
   onConfigurationChange,
+  onEmptyEnter,
   onError,
 }: {
   configuration?: RuntimeConfiguration;
   runtimeId?: string;
   sessionThinkingLevel?: RuntimeConfiguration["thinkingLevel"];
   onConfigurationChange: (configuration: RuntimeConfiguration) => void;
+  /**
+   * Enter on an empty composer. Returning true consumes the key, which is how
+   * a second Enter promotes the message the first one queued.
+   */
+  onEmptyEnter?: () => boolean;
   onError: (message?: string) => void;
 }): ComposerController {
   const [draft, setDraft] = useState("");
@@ -53,6 +59,12 @@ export function useComposerController({
   const [modelChanging, setModelChanging] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const emptyEnterRef = useRef(onEmptyEnter);
+  emptyEnterRef.current = onEmptyEnter;
 
   const reset = useCallback((): void => {
     setDraft("");
@@ -88,6 +100,7 @@ export function useComposerController({
     if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
+      if (!draftRef.current.trim() && !imagesRef.current.length && emptyEnterRef.current?.()) return;
       event.currentTarget.form?.requestSubmit();
     }
   }, []);

@@ -1,8 +1,7 @@
-import { ArrowUp, Clock, Square, X } from "lucide-react";
+import { ArrowUp, CornerRightUp, LoaderCircle, Square, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { DragEvent as ReactDragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import type {
-  ChatMessage,
   ModelOption,
   PromptImage,
   ProjectSelection,
@@ -19,7 +18,8 @@ export function ConversationComposer({
   variant = "footer",
   project,
   running,
-  queuedPrompts,
+  aborting,
+  goalActive,
   loading,
   startingSession,
   draft,
@@ -46,15 +46,17 @@ export function ConversationComposer({
   onFastChange,
   onOpenSettings,
   onAbort,
+  onSteer,
   onEscape,
   onPathDropError,
-  onCancelQueuedPrompt,
 }: {
   variant?: ComposerVariant;
   project: ProjectSelection | null;
   running: boolean;
-  /** Accepted but not yet sent, oldest first. Empty for the inline variant. */
-  queuedPrompts?: ChatMessage[];
+  /** A stop was pressed and the turn has not finished winding down. */
+  aborting?: boolean;
+  /** A `/goal` loop owns the session: every message interjects, nothing queues. */
+  goalActive?: boolean;
   loading: boolean;
   startingSession: boolean;
   draft: string;
@@ -81,9 +83,10 @@ export function ConversationComposer({
   onFastChange?: (enabled: boolean) => Promise<void>;
   onOpenSettings: () => void;
   onAbort?: () => void;
+  /** Send the draft into the running turn instead of the queue. */
+  onSteer?: () => void;
   onEscape?: () => void;
   onPathDropError?: (message: string) => void;
-  onCancelQueuedPrompt?: (id: string) => void;
 }): React.JSX.Element {
   const inline = variant === "inline";
   const draftRef = useRef(draft);
@@ -171,26 +174,6 @@ export function ConversationComposer({
       onDragOver={handlePathDragOver}
       onDrop={handlePathDrop}
     >
-      {queuedPrompts?.length ? (
-        <ol className="composer-queue" aria-label="排队中的消息">
-          {queuedPrompts.map((item, index) => (
-            <li className="composer-queue-item" key={item.id}>
-              <span className="composer-queue-index" aria-hidden="true">{index + 1}</span>
-              <span className="composer-queue-text" title={item.text}>{item.text}</span>
-              {item.images?.length ? <span className="composer-queue-badge">{item.images.length} 图</span> : null}
-              <button
-                type="button"
-                aria-label={`撤回第 ${index + 1} 条排队消息`}
-                title="撤回"
-                onClick={() => onCancelQueuedPrompt?.(item.id)}
-              >
-                <X size={11} />
-              </button>
-            </li>
-          ))}
-          <li className="composer-queue-hint"><Clock size={10} />当前回复结束后按顺序发送</li>
-        </ol>
-      ) : null}
       {images.length ? (
         <div className="composer-images">
           {images.map((image) => (
@@ -212,7 +195,7 @@ export function ConversationComposer({
           inline
             ? "编辑历史消息…"
             : project
-              ? (running ? "消息将排队发送…" : "让 SuoCode 处理这个项目…")
+              ? (running ? (goalActive ? "消息会介入当前轮次…" : "消息将排队发送…") : "让 SuoCode 处理这个项目…")
               : "请先打开项目"
         }
         disabled={!project || loading || startingSession || modelChanging}
@@ -240,14 +223,35 @@ export function ConversationComposer({
           onOpenSettings={onOpenSettings}
         />
         {!inline && running && onAbort ? (
-          <button className="stop-button" type="button" aria-label="停止 Agent" onClick={onAbort}>
-            <Square size={12} fill="currentColor" />
+          <button
+            className={`stop-button ${aborting ? "aborting" : ""}`}
+            type="button"
+            aria-label={aborting ? "正在停止 Agent" : "停止 Agent"}
+            title={aborting ? "正在停止：还在等一个已经发出的工具调用收尾" : "停止"}
+            disabled={aborting}
+            onClick={onAbort}
+          >
+            {aborting ? <LoaderCircle className="spin" size={13} /> : <Square size={12} fill="currentColor" />}
+          </button>
+        ) : null}
+        {!inline && running && onSteer && !goalActive ? (
+          <button
+            className="steer-button"
+            type="button"
+            aria-label="介入当前轮次"
+            title="介入：不打断工具和子 Agent，直接把这条消息插进当前轮次"
+            disabled={!project || startingSession || modelChanging || (!draft.trim() && !images.length)}
+            onClick={onSteer}
+          >
+            <CornerRightUp size={14} strokeWidth={2.2} />
+            <span>介入</span>
           </button>
         ) : null}
         <button
           className="send-button"
           type="submit"
-          aria-label={inline ? "从这里重新开始" : running ? "加入队列" : "发送消息"}
+          aria-label={inline ? "从这里重新开始" : running ? (goalActive ? "介入当前轮次" : "加入队列") : "发送消息"}
+          title={!inline && running && goalActive ? "目标模式：消息会插进当前轮次，不排队" : undefined}
           disabled={!project || startingSession || modelChanging || (!draft.trim() && !images.length)}
         >
           <ArrowUp size={17} strokeWidth={2.2} />

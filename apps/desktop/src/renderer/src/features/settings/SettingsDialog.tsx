@@ -434,6 +434,14 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
   const [sidebarWidth, setSidebarWidth] = useState(storedSettingsSidebarWidth);
   const [mcpJsonOpen, setMcpJsonOpen] = useState(false);
   const [mcpReloadKey, setMcpReloadKey] = useState(0);
+  const [appVersion, setAppVersion] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    void window.suocode.appVersion()
+      .then((version) => { if (!cancelled) setAppVersion(version); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => {
     if (open) setSection(initialSection);
     else {
@@ -478,6 +486,9 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
           <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />技能</button>
           <button className={section === "appearance" ? "active" : ""} type="button" onClick={() => setSection("appearance")}><Palette size={15} />外观</button>
         </nav>
+        <div className="settings-version" title={appVersion ? `SuoCode ${appVersion}` : undefined}>
+          {appVersion ? `SuoCode ${appVersion}` : ""}
+        </div>
       </aside>
       <div className="settings-sidebar-resizer" role="separator" aria-label="调整设置侧栏宽度" aria-orientation="vertical" onPointerDown={beginSidebarResize} />
       <section className="settings-page" role="region">

@@ -5,8 +5,10 @@ import {
   collectPinnedSessions,
   collapsedSessionLimit,
   nextExpandedSessionLimit,
+  summarizeWorkspaceActivity,
   titleFromPrompt,
   upsertSessionSummary,
+  workspaceActivityLabel,
 } from "../src/renderer/src/features/workspaces/sessionList.ts";
 
 function session(overrides: Partial<SessionSummary>): SessionSummary {
@@ -80,4 +82,32 @@ test("更多会话每次只追加四行并且不会超过总数", () => {
   assert.equal(nextExpandedSessionLimit(4, 20), 8);
   assert.equal(nextExpandedSessionLimit(8, 20), 12);
   assert.equal(nextExpandedSessionLimit(12, 14), 14);
+});
+
+test("a workspace reports the running conversations hidden inside it", () => {
+  const sessions = [
+    session({ id: "a", path: "/sessions/a.jsonl" }),
+    session({ id: "b", path: "/sessions/b.jsonl" }),
+    session({ id: "c", path: "/sessions/c.jsonl" }),
+  ];
+  const summary = summarizeWorkspaceActivity(sessions, {
+    "/sessions/a.jsonl": { running: true, unread: false },
+    "/sessions/b.jsonl": { running: false, unread: true },
+    "/sessions/c.jsonl": { running: false, unread: false },
+  });
+  assert.deepEqual(summary, { running: 1, unread: 1 });
+  assert.equal(workspaceActivityLabel(summary), "1 个对话运行中");
+});
+
+test("a finished conversation only counts as unread once it stops running", () => {
+  const sessions = [session({ id: "a", path: "/sessions/a.jsonl" })];
+  const running = summarizeWorkspaceActivity(sessions, { "/sessions/a.jsonl": { running: true, unread: true } });
+  assert.deepEqual(running, { running: 1, unread: 0 });
+  const done = summarizeWorkspaceActivity(sessions, { "/sessions/a.jsonl": { running: false, unread: true } });
+  assert.equal(workspaceActivityLabel(done), "1 个对话有新回复");
+});
+
+test("a quiet workspace shows nothing", () => {
+  assert.equal(workspaceActivityLabel(summarizeWorkspaceActivity([], {})), undefined);
+  assert.equal(workspaceActivityLabel(summarizeWorkspaceActivity(undefined, {})), undefined);
 });

@@ -50,6 +50,11 @@ export const SUBAGENT_RPC_REQUEST_CHANNEL = "suocode:subagents:rpc:v1:request";
 
 export const SUBAGENT_RUN_ENTRY_TYPE = "subagent-run";
 
+/** How long a stop may take before the runtime explains what it is waiting on. */
+export const ABORT_STALL_NOTICE_MS = 10_000;
+
+export const GOAL_STATE_CHANNEL = "suocode:goal:state:v1";
+
 export const PLAN_STATE_CHANNEL = "suocode:plan:state:v1";
 
 export const PLAN_RPC_REQUEST_CHANNEL = "suocode:plan:rpc:v1:request";

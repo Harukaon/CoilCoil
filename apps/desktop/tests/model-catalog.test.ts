@@ -7,6 +7,9 @@ import {
   lookupModelMetaInIndex,
   mergeCatalogEntries,
   mergeSelectedUpstreamModels,
+  thinkingLevelMapFromLevels,
+  thinkingLevelsFromMap,
+  thinkingLevelsFromReasoningOptions,
 } from "../src/renderer/src/features/settings/modelCatalog.ts";
 
 test("candidateKeys normalizes provider prefixes and free variants", () => {
@@ -116,4 +119,58 @@ test("mergeSelectedUpstreamModels keeps existing fields and only adds new ids", 
     { id: "shared", note: "original" },
     { id: "new-one", note: "created" },
   ]);
+});
+
+test("models.dev effort options become Pi thinking levels", () => {
+  assert.deepEqual(
+    thinkingLevelsFromReasoningOptions([{ type: "effort", values: ["none", "low", "medium", "high"] }]),
+    ["off", "low", "medium", "high"],
+  );
+  assert.deepEqual(
+    thinkingLevelsFromReasoningOptions([{ type: "effort", values: ["high", "max"] }]),
+    ["high", "max"],
+  );
+  // A toggle or a token budget says nothing about the effort vocabulary.
+  assert.equal(thinkingLevelsFromReasoningOptions([{ type: "toggle" }]), undefined);
+  assert.equal(thinkingLevelsFromReasoningOptions([{ type: "budget_tokens", min: 1024 }]), undefined);
+  assert.equal(thinkingLevelsFromReasoningOptions([]), undefined);
+  assert.equal(thinkingLevelsFromReasoningOptions(undefined), undefined);
+});
+
+test("a models.dev index carries the levels a model accepts", () => {
+  const index = buildCatalogIndexFromSources({
+    openai: {
+      models: {
+        "gpt-5.6": {
+          id: "gpt-5.6",
+          name: "GPT-5.6",
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["none", "low", "medium", "high", "xhigh"] }],
+          limit: { context: 400_000, output: 128_000 },
+        },
+      },
+    },
+  });
+  const meta = lookupModelMetaInIndex(index, "gpt-5.6");
+  assert.deepEqual(meta.thinkingLevels, ["off", "low", "medium", "high", "xhigh"]);
+});
+
+test("a level set round-trips through Pi's thinkingLevelMap", () => {
+  const map = thinkingLevelMapFromLevels(["off", "medium", "high", "max"]);
+  assert.deepEqual(map, {
+    off: "off",
+    minimal: null,
+    low: null,
+    medium: "medium",
+    high: "high",
+    xhigh: null,
+    max: "max",
+  });
+  assert.deepEqual(thinkingLevelsFromMap(map, true), ["off", "medium", "high", "max"]);
+});
+
+test("an unstated map keeps Pi's default ladder and a non-reasoning model has none", () => {
+  assert.deepEqual(thinkingLevelsFromMap(undefined, true), ["off", "minimal", "low", "medium", "high"]);
+  assert.deepEqual(thinkingLevelsFromMap({}, true), ["off", "minimal", "low", "medium", "high"]);
+  assert.deepEqual(thinkingLevelsFromMap(undefined, false), ["off"]);
 });

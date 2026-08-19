@@ -20,6 +20,7 @@ import type {
 } from "@suocode/runtime-protocol";
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
 import { ActivityPanel } from "../activity/ActivityPanel";
+import { GoalBanner } from "./GoalBanner";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
@@ -87,6 +88,11 @@ export function ConversationPane({
   onFastChange,
   onOpenSettings,
   onAbort,
+  onStopGoal,
+  onSteerPrompt,
+  onPromoteQueuedPrompt,
+  onStopSubagent,
+  onResumeSubagent,
   queuedPrompts,
   onCancelQueuedPrompt,
   onApprovePlan,
@@ -136,6 +142,11 @@ export function ConversationPane({
   onFastChange: (enabled: boolean) => Promise<void>;
   onOpenSettings: (section?: SettingsSection) => void;
   onAbort: () => void;
+  onStopGoal: () => void;
+  onSteerPrompt: () => void;
+  onPromoteQueuedPrompt: (id: string) => void;
+  onStopSubagent: (activity: SubagentActivity) => void;
+  onResumeSubagent: (activity: SubagentActivity) => void;
   queuedPrompts: ChatMessage[];
   onCancelQueuedPrompt: (id: string) => void;
   onApprovePlan: (planId: string, target: PlanExecutionTarget, agent?: string) => Promise<PlanApprovalState>;
@@ -160,7 +171,7 @@ export function ConversationPane({
     onDraftChange,
     onOpenSettings,
   });
-  const hasComposerActivity = projectState.plan.length > 0 || subagents.length > 0 || slashMenu.slashActive;
+  const hasComposerActivity = projectState.plan.length > 0 || subagents.length > 0 || queuedPrompts.length > 0 || slashMenu.slashActive;
 
   useEffect(() => {
     setEditingMessageId(undefined);
@@ -303,7 +314,7 @@ export function ConversationPane({
                   project={project}
                   configuration={configuration}
                   selectedModel={selectedModel}
-                  thinkingLevel={snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel}
+                  thinkingLevel={snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel ?? configuration?.thinkingLevel}
                   modelChanging={modelChanging}
                   runtimeId={snapshot?.runtimeId}
                   onEditingChange={(next) => setEditingMessageId(next ? item.message.id : undefined)}
@@ -341,20 +352,27 @@ export function ConversationPane({
         <div className="composer-width-resizer right" role="separator" aria-label="调整对话宽度" aria-orientation="vertical" onPointerDown={(event) => beginChatWidthResize("right", event)} />
         <div className="composer-stack">
           <div className="composer-overlays">
+            <GoalBanner goal={snapshot?.goal} onStop={onStopGoal} />
             <ActivityPanel
               todo={projectState.plan}
               subagents={subagents}
+              queued={queuedPrompts}
               commands={slashMenu.slashActive ? slashMenu.filteredItems : undefined}
               commandIndex={slashMenu.itemIndex}
               onSelectCommand={slashMenu.selectItem}
               onOpenSubagent={(activity) => setSelectedSubagentId(activity.id)}
+              onCancelQueued={onCancelQueuedPrompt}
+              onPromoteQueued={onPromoteQueuedPrompt}
+              onStopSubagent={onStopSubagent}
+              onResumeSubagent={onResumeSubagent}
             />
           </div>
           <ConversationComposer
             variant="footer"
             project={project}
             running={running}
-            queuedPrompts={queuedPrompts}
+            aborting={snapshot?.aborting}
+            goalActive={snapshot?.goal?.status === "running"}
             loading={loading}
             startingSession={startingSession}
             draft={draft}
@@ -362,7 +380,7 @@ export function ConversationPane({
             inputRef={inputRef}
             configuration={configuration}
             selectedModel={selectedModel}
-            thinkingLevel={snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel}
+            thinkingLevel={snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel ?? configuration?.thinkingLevel}
             fast={snapshot?.fast}
             modelMenuOpen={modelMenuOpen}
             modelChanging={modelChanging}
@@ -380,10 +398,10 @@ export function ConversationPane({
             onFastChange={onFastChange}
             onOpenSettings={() => onOpenSettings()}
             onAbort={onAbort}
-            onCancelQueuedPrompt={onCancelQueuedPrompt}
+            onSteer={onSteerPrompt}
           />
         </div>
-        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />
+        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />
       </div>
       <SubagentDetailDialog activity={selectedSubagent} onClose={() => setSelectedSubagentId(undefined)} />
     </section>

@@ -2,9 +2,11 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type CacheUsageSummary,
   type ContextUsage,
   type ResponseMetrics,
   type TokenUsage,
+  summarizeCacheUsage,
 } from "@suocode/runtime-protocol";
 import {
   RESPONSE_METRICS_ENTRY_TYPE,
@@ -127,6 +129,51 @@ export function sessionUsage(session: AgentSession): { contextUsage?: ContextUsa
   return {
     contextUsage: stats.contextUsage,
     tokenUsage: { ...stats.tokens },
+  };
+}
+
+/**
+ * Add up what the model responses in this session actually consumed.
+ *
+ * Pi's own totals also fold in context compaction and branch summaries. Those
+ * are separate requests built from a fresh prompt, so they can never hit the
+ * cache; counting them made the session's hit rate look far worse than the
+ * conversation it describes.
+ */
+export function sessionResponseCacheUsage(session: AgentSession): CacheUsageSummary {
+  let input = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  for (const entry of session.sessionManager.getEntries()) {
+    if (entry.type !== "message") continue;
+    const message = entry.message as { role?: string; usage?: { input?: number; cacheRead?: number; cacheWrite?: number } };
+    if (message.role !== "assistant" || !message.usage) continue;
+    input += Math.max(0, message.usage.input ?? 0);
+    cacheRead += Math.max(0, message.usage.cacheRead ?? 0);
+    cacheWrite += Math.max(0, message.usage.cacheWrite ?? 0);
+  }
+  return summarizeCacheUsage(input, cacheRead, cacheWrite);
+}
+
+/**
+ * The two cache figures the inspector shows.
+ *
+ * `cacheHitRate` is the latest request alone — a lifetime average would
+ * permanently hold a healthy session down for the request that first filled the
+ * cache — while `cache` sums this session's model responses.
+ */
+export function sessionCacheInspection(
+  session: AgentSession,
+  latest: ResponseMetrics | undefined,
+): { cacheHitRate?: number; cache: CacheUsageSummary } {
+  const latestCache = latest
+    ? summarizeCacheUsage(latest.inputTokens, latest.cacheReadTokens, latest.cacheWriteTokens)
+    : undefined;
+  return {
+    cacheHitRate: latestCache && (latestCache.cacheReadTokens > 0 || latestCache.cacheWriteTokens > 0)
+      ? latestCache.hitRate
+      : undefined,
+    cache: sessionResponseCacheUsage(session),
   };
 }
 

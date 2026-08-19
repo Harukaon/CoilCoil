@@ -12,7 +12,7 @@ import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import { createRequire } from "node:module";
-import type { BrowserUiViewport, OpenFilePreviewInput, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import type { BrowserUiViewport, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
 import { hardenGuestPreferences } from "./browser-webview-policy";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
@@ -38,9 +38,12 @@ if (!app.isPackaged && rendererDebugPort && /^\d{2,5}$/.test(rendererDebugPort))
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
+const APP_VERSION_CHANNEL = "app:version";
 const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const EXTERNAL_OPEN_CHANNEL = "external:open";
+const PATH_CLASSIFY_CHANNEL = "path:classify";
+const PATH_REVEAL_CHANNEL = "path:reveal";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
@@ -488,6 +491,7 @@ app.whenReady().then(async () => {
     });
   });
 
+  ipcMain.handle(APP_VERSION_CHANNEL, (): string => app.getVersion());
   ipcMain.handle(PROJECT_HOME_CHANNEL, async (): Promise<ProjectSelection> => {
     const path = join(app.getPath("userData"), "Home");
     await mkdir(path, { recursive: true });
@@ -516,6 +520,36 @@ app.whenReady().then(async () => {
     if (!window || !Number.isFinite(requestedWidth)) return;
     const [, minimumHeight] = window.getMinimumSize();
     window.setMinimumSize(Math.max(315, Math.ceil(requestedWidth)), minimumHeight);
+  });
+  // What an absolute path in the transcript actually is, so a link can be drawn
+  // and routed as the file or the folder it points at.
+  ipcMain.handle(PATH_CLASSIFY_CHANNEL, async (_event, paths: string[]): Promise<Record<string, PathKind>> => {
+    if (!Array.isArray(paths)) throw new Error("路径列表无效。");
+    const entries = await Promise.all(paths.slice(0, 200).map(async (candidate): Promise<[string, PathKind]> => {
+      if (typeof candidate !== "string" || !candidate.trim() || !isAbsolute(candidate)) return [String(candidate), "missing"];
+      try {
+        const stats = await stat(candidate);
+        return [candidate, stats.isDirectory() ? "directory" : "file"];
+      } catch {
+        return [candidate, "missing"];
+      }
+    }));
+    return Object.fromEntries(entries);
+  });
+  // A folder belongs to the file manager: the right-hand panel is the workspace
+  // tree and single-file previews, not a second file browser.
+  ipcMain.handle(PATH_REVEAL_CHANNEL, async (_event, rawPath: string): Promise<boolean> => {
+    if (typeof rawPath !== "string" || !rawPath.trim() || !isAbsolute(rawPath)) throw new Error("路径无效。");
+    const target = resolve(rawPath);
+    const stats = await stat(target).catch(() => undefined);
+    if (!stats) throw new Error("路径不存在或已被移动。");
+    if (stats.isDirectory()) {
+      const error = await shell.openPath(target);
+      if (error) throw new Error(error);
+      return true;
+    }
+    shell.showItemInFolder(target);
+    return true;
   });
   ipcMain.handle(EXTERNAL_OPEN_CHANNEL, async (_event, rawUrl: string): Promise<void> => {
     if (typeof rawUrl !== "string") throw new Error("授权地址无效。");

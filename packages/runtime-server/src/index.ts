@@ -57,6 +57,7 @@ function eventChangesSnapshot(event: RuntimeEvent): boolean {
     || event.type === "tool_finished"
     || event.type === "plan_updated"
     || event.type === "plan_approval_updated"
+    || event.type === "goal_updated"
     || event.type === "subagents_updated"
     || event.type === "project_updated"
     || event.type === "metrics_updated"
@@ -510,8 +511,12 @@ export class RuntimeServer {
         return runtime.steer(command.text, command.images, command.clientMessageId);
       case "abort":
         return runtime.abort();
+      case "stop_goal":
+        return runtime.stopGoal();
       case "cancel_queued_prompt":
         return runtime.cancelQueuedPrompt(command.id);
+      case "promote_queued_prompt":
+        return runtime.promoteQueuedPrompt(command.id);
       case "refresh_project":
         return runtime.refreshProject();
       case "list_directory":

@@ -17,6 +17,7 @@
       "./extensions/compact-tool-render.ts",
       "./extensions/default-tools.ts",
       "./extensions/fast.ts",
+      "./extensions/goal.ts",
       "./extensions/mcp-adapter.ts",
       "./extensions/mcp-health.ts",
       "./extensions/project-memory.ts",

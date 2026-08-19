@@ -273,7 +273,17 @@ export function mapMessage(message: unknown, id: string, order: number, entryId?
     };
   }
   if (role === "custom" && message.display !== false) {
-    return { id, order, role: "system", text: parts.text, timestamp: messageTimestamp(message) };
+    const customType = stringValue(message.customType);
+    return {
+      id,
+      order,
+      role: "system",
+      text: parts.text,
+      timestamp: messageTimestamp(message),
+      custom: customType
+        ? { type: customType, details: isRecord(message.details) ? message.details : undefined }
+        : undefined,
+    };
   }
   return undefined;
 }

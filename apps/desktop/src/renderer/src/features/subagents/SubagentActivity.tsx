@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Circle,
   LoaderCircle,
+  Play,
   Square,
   X,
 } from "lucide-react";
@@ -51,13 +52,20 @@ function activitySummary(activity: SubagentActivity): string {
 export function SubagentCard({
   activity,
   onOpen,
+  onStop,
+  onResume,
   variant = "timeline",
 }: {
   activity: SubagentActivity;
   onOpen: (activity: SubagentActivity) => void;
+  /** Stop this subagent alone, leaving the parent turn running. */
+  onStop?: (activity: SubagentActivity) => void;
+  onResume?: (activity: SubagentActivity) => void;
   variant?: "timeline" | "panel";
 }): React.JSX.Element {
-  return (
+  const stoppable = Boolean(onStop) && subagentIsActive(activity) && activity.controlReady === true;
+  const resumable = Boolean(onResume) && activity.status === "stopped" && activity.resumable === true;
+  const card = (
     <button
       className={`subagent-card ${variant} ${activity.status}`}
       type="button"
@@ -74,6 +82,35 @@ export function SubagentCard({
       </small>
       <ChevronRight size={15} />
     </button>
+  );
+  if (!stoppable && !resumable) return card;
+  // Controls sit beside the card rather than inside it: a card is itself a button.
+  return (
+    <div className="subagent-card-row">
+      {card}
+      {stoppable ? (
+        <button
+          className="subagent-card-control"
+          type="button"
+          aria-label={`停止子 Agent ${activity.agent}`}
+          title="停止这个子 Agent"
+          onClick={() => onStop?.(activity)}
+        >
+          <Square size={11} fill="currentColor" />
+        </button>
+      ) : null}
+      {resumable ? (
+        <button
+          className="subagent-card-control"
+          type="button"
+          aria-label={`继续子 Agent ${activity.agent}`}
+          title="继续这个子 Agent"
+          onClick={() => onResume?.(activity)}
+        >
+          <Play size={11} fill="currentColor" />
+        </button>
+      ) : null}
+    </div>
   );
 }
 

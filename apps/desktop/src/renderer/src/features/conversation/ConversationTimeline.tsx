@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronRight, Copy, FileText, LoaderCircle } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Copy, FileText, Folder, LoaderCircle } from "lucide-react";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ClipboardEvent as ReactClipboardEvent, FormEvent } from "react";
@@ -19,7 +19,10 @@ import type {
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { ConfirmDialog } from "../../ui/dialog";
-import { parseMarkdownFileHref } from "./markdownFileLinks";
+import { parseMarkdownFileHref, type MarkdownFileTarget } from "./markdownFileLinks";
+import { useFileLinkKind } from "./fileLinkKinds";
+import { TerminalNoticeCard } from "./TerminalNoticeCard";
+import { TERMINAL_NOTIFICATION_TYPE } from "./terminalNotice";
 
 export type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
@@ -37,26 +40,50 @@ type ActivityEntry =
 
 const REWIND_WARNING_DISMISSED_KEY = "suocode.rewind-warning-dismissed";
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
+/**
+ * A path in the transcript, drawn as the file or folder it points at.
+ *
+ * The kind arrives a moment after the first paint; until then the neutral file
+ * icon stands in, and `data-file-kind` is what routes the click.
+ */
+function MarkdownFileLink({
+  file,
+  className,
+  children,
+  href,
+  ...props
+}: {
+  file: MarkdownFileTarget;
+  className?: string;
+  children?: ReactNode;
+  href?: string;
+} & Record<string, unknown>): React.JSX.Element {
+  const kind = useFileLinkKind(file.path);
+  const location = file.line ? `L${file.line}${file.column ? `:${file.column}` : ""}` : undefined;
+  const directory = kind === "directory";
+  return (
+    <a
+      {...props}
+      className={[className, "markdown-file-link", directory ? "directory" : ""].filter(Boolean).join(" ")}
+      data-file-path={file.path}
+      data-file-line={file.line}
+      data-file-kind={kind ?? "unknown"}
+      href={href}
+      title={directory ? `${file.path}（在文件管理器中打开）` : file.path}
+    >
+      {directory ? <Folder size={13} /> : <FileText size={13} />}
+      <span className="markdown-file-link-label">{children}</span>
+      {location ? <span className="markdown-file-link-location">{location}</span> : null}
+    </a>
+  );
+}
+
 const MARKDOWN_COMPONENTS: Components = {
   table: ({ node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props} /></div>,
   a: ({ node: _node, children, className, href, ...props }) => {
     const file = parseMarkdownFileHref(href);
     if (!file) return <a className={className} href={href} {...props}>{children}</a>;
-    const location = file.line ? `L${file.line}${file.column ? `:${file.column}` : ""}` : undefined;
-    return (
-      <a
-        {...props}
-        className={[className, "markdown-file-link"].filter(Boolean).join(" ")}
-        data-file-path={file.path}
-        data-file-line={file.line}
-        href={href}
-        title={file.path}
-      >
-        <FileText size={13} />
-        <span className="markdown-file-link-label">{children}</span>
-        {location ? <span className="markdown-file-link-location">{location}</span> : null}
-      </a>
-    );
+    return <MarkdownFileLink {...props} file={file} className={className} href={href}>{children}</MarkdownFileLink>;
   },
 };
 
@@ -438,6 +465,11 @@ export function AgentTurnView({
     }
     if (item.kind === "tools") {
       activity.push(...item.tools.map((tool) => ({ kind: "tool" as const, id: tool.id, tool })));
+      continue;
+    }
+    if (item.message.custom?.type === TERMINAL_NOTIFICATION_TYPE) {
+      flushActivity();
+      rendered.push(<TerminalNoticeCard key={`terminal-notice-${item.message.id}`} message={item.message} />);
       continue;
     }
     if (item.message.thinking?.trim()) activity.push({ kind: "thinking", id: `${item.message.id}-thinking`, text: item.message.thinking });

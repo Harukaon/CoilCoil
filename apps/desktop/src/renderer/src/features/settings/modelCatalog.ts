@@ -1,10 +1,17 @@
+import type { ThinkingLevel } from "@suocode/runtime-protocol";
+
 export type CatalogSourceLabel = "models.dev" | "LiteLLM";
+
+/** Pi's thinking ladder, in the order it presents the levels. */
+export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 export interface ModelCatalogMeta {
   contextWindow?: number;
   maxTokens?: number;
   input?: Array<"text" | "image">;
   reasoning?: boolean;
+  /** Thinking levels the model actually accepts, when the catalogue states them. */
+  thinkingLevels?: ThinkingLevel[];
   name?: string;
   sources: CatalogSourceLabel[];
 }
@@ -14,6 +21,7 @@ export interface CatalogIndexEntry {
   maxTokens?: number;
   input?: Array<"text" | "image">;
   reasoning?: boolean;
+  thinkingLevels?: ThinkingLevel[];
   name?: string;
   source: CatalogSourceLabel;
 }
@@ -77,6 +85,62 @@ function addEntry(index: Map<string, CatalogIndexEntry[]>, keys: string[], entry
   }
 }
 
+/**
+ * Read models.dev `reasoning_options` into Pi's thinking ladder.
+ *
+ * Only `effort` options carry a vocabulary SuoCode can map; a `toggle` or a
+ * `budget_tokens` model says nothing about which effort words it accepts, so
+ * those stay unstated and keep Pi's own default ladder.
+ */
+export function thinkingLevelsFromReasoningOptions(value: unknown): ThinkingLevel[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const levels = new Set<ThinkingLevel>();
+  let sawEffort = false;
+  for (const option of value) {
+    if (!isRecord(option) || option.type !== "effort" || !Array.isArray(option.values)) continue;
+    sawEffort = true;
+    for (const raw of option.values) {
+      if (typeof raw !== "string") continue;
+      const level = raw.trim().toLowerCase();
+      // models.dev spells "thinking disabled" as `none`; Pi calls it `off`.
+      if (level === "none") levels.add("off");
+      else if ((THINKING_LEVELS as readonly string[]).includes(level)) levels.add(level as ThinkingLevel);
+    }
+  }
+  if (!sawEffort || levels.size === 0) return undefined;
+  return THINKING_LEVELS.filter((level) => levels.has(level));
+}
+
+/** Levels Pi offers for a reasoning model that states no explicit mapping. */
+export const DEFAULT_THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
+
+/**
+ * Write a level set as Pi's `thinkingLevelMap`.
+ *
+ * Every level is listed: a supported one maps to its own effort word, an
+ * unsupported one to `null`, which is how Pi is told to hide it.
+ */
+export function thinkingLevelMapFromLevels(levels: readonly ThinkingLevel[]): Record<string, string | null> {
+  const supported = new Set(levels);
+  return Object.fromEntries(THINKING_LEVELS.map((level) => [level, supported.has(level) ? level : null]));
+}
+
+/** Read the levels a `thinkingLevelMap` leaves available, mirroring Pi's own rule. */
+export function thinkingLevelsFromMap(
+  map: Partial<Record<string, string | null>> | undefined,
+  reasoning: boolean,
+): ThinkingLevel[] {
+  if (!reasoning) return ["off"];
+  if (!map || Object.keys(map).length === 0) return [...DEFAULT_THINKING_LEVELS];
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = map[level];
+    if (mapped === null) return false;
+    // Pi only offers xhigh and max when a mapping names them.
+    if (level === "xhigh" || level === "max") return mapped !== undefined;
+    return true;
+  });
+}
+
 export function indexModelsDev(payload: unknown, index: Map<string, CatalogIndexEntry[]> = new Map()): Map<string, CatalogIndexEntry[]> {
   if (!isRecord(payload)) return index;
   for (const provider of Object.values(payload)) {
@@ -93,6 +157,7 @@ export function indexModelsDev(payload: unknown, index: Map<string, CatalogIndex
         contextWindow: positiveInt(limit.context),
         maxTokens: positiveInt(limit.output),
         reasoning: typeof model.reasoning === "boolean" ? model.reasoning : undefined,
+        thinkingLevels: thinkingLevelsFromReasoningOptions(model.reasoning_options),
         input: hasImage ? ["text", "image"] : inputMods.includes("text") || inputMods.length === 0 ? ["text"] : undefined,
       };
       const id = typeof model.id === "string" && model.id.trim() ? model.id : modelId;
@@ -201,6 +266,7 @@ export function mergeCatalogEntries(entries: CatalogIndexEntry[]): ModelCatalogM
     if (meta.contextWindow === undefined && entry.contextWindow !== undefined) meta.contextWindow = entry.contextWindow;
     if (meta.maxTokens === undefined && entry.maxTokens !== undefined) meta.maxTokens = entry.maxTokens;
     if (meta.reasoning === undefined && entry.reasoning !== undefined) meta.reasoning = entry.reasoning;
+    if (meta.thinkingLevels === undefined && entry.thinkingLevels?.length) meta.thinkingLevels = entry.thinkingLevels;
     if (meta.input === undefined && entry.input) meta.input = entry.input;
   }
   return meta;

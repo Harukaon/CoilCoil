@@ -262,7 +262,9 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     const resolvedCwd = this.mcpCwd(cwd);
     this.cleanRemovedMcpServerState(adapter, resolvedCwd);
     const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    const configuration = adapter.loadMcpConfig(configPath, resolvedCwd);
+    // The workspace's own servers live in SuoCode's agent directory, so they are
+    // merged here rather than read back out of the workspace by the adapter.
+    const configuration = this.withWorkspaceMcpServers(adapter.loadMcpConfig(configPath, resolvedCwd), resolvedCwd);
     const hiddenNames = new Set([
       ...this.readRemovedMcpServers(),
       ...this.readDisabledMcpServers(),

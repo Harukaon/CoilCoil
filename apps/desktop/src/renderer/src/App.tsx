@@ -28,6 +28,7 @@ import {
 } from "./features/conversation/conversationMessages";
 import type { SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
+import { useSessionControls } from "./hooks/useSessionControls";
 import { useConversationActions } from "./features/workspaces/useConversationActions";
 import { useWorkspaceInspector } from "./features/inspector/useWorkspaceInspector";
 import { useComposerController } from "./features/composer/useComposerController";
@@ -59,6 +60,11 @@ export default function App(): React.JSX.Element {
   );
   const messages = useMemo(() => selectConversationMessages(conversationMessages), [conversationMessages]);
   const queuedPrompts = useMemo(() => selectQueuedPrompts(conversationMessages), [conversationMessages]);
+  // The composer is created before the send helpers exist; refs keep its
+  // keyboard handler pointed at the current queue and promotion helper.
+  const queuedPromptsRef = useRef(queuedPrompts);
+  queuedPromptsRef.current = queuedPrompts;
+  const promoteQueuedPromptRef = useRef<(id: string) => Promise<void>>(async () => undefined);
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [subagents, setSubagents] = useState<SubagentActivity[]>([]);
   const [projectState, setProjectState] = useState<ProjectSnapshot>(EMPTY_PROJECT);
@@ -83,8 +89,16 @@ export default function App(): React.JSX.Element {
   const composer = useComposerController({
     configuration,
     runtimeId: snapshot?.runtimeId,
-    sessionThinkingLevel: snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel,
+    sessionThinkingLevel: snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel ?? configuration?.thinkingLevel,
     onConfigurationChange: setConfiguration,
+    // Enter queues; a second Enter on the now-empty composer interjects that
+    // message into the running turn instead of waiting for it to finish.
+    onEmptyEnter: () => {
+      const latest = queuedPromptsRef.current.at(-1);
+      if (!latest) return false;
+      void promoteQueuedPromptRef.current(latest.id);
+      return true;
+    },
     onError: (message) => { if (message) toastError(message); },
   });
   const {
@@ -245,7 +259,7 @@ export default function App(): React.JSX.Element {
   }, [activateProject, handleRuntimeEvent]);
 
   const activityLine = useAgentActivityLine(snapshot?.running ?? false, agentPhase);
-  useConversationViewport({
+  const { handleTimelineScroll } = useConversationViewport({
     timelineRef,
     shouldAutoScrollRef,
     messages,
@@ -253,6 +267,8 @@ export default function App(): React.JSX.Element {
     running: snapshot?.running ?? false,
     settingsOpen,
     conversationVisible: workspaceSurface === "conversation",
+    conversationKey: snapshot?.session.path ?? pendingProjectPath ?? project?.path,
+    loading,
   });
 
   useEffect(() => {
@@ -367,14 +383,10 @@ export default function App(): React.JSX.Element {
     setExpandedProjects, startPendingConversation, openConversation,
   });
 
-  const cancelQueuedPrompt = async (id: string): Promise<void> => {
-    if (!snapshot?.runtimeId) return;
-    try {
-      await window.suocode.request({ type: "cancel_queued_prompt", id }, snapshot.runtimeId);
-    } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
+  const {
+    cancelQueuedPrompt, promoteQueuedPrompt, abortRun, stopSubagent, resumeSubagent,
+  } = useSessionControls(snapshot?.runtimeId);
+  promoteQueuedPromptRef.current = promoteQueuedPrompt;
 
   const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[]): Promise<void> => {
     if (!message.entryId || !snapshot?.runtimeId) return;
@@ -417,8 +429,15 @@ export default function App(): React.JSX.Element {
     return plan;
   };
 
-  const submitPrompt = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
+  /**
+   * Send the draft.
+   *
+   * `intent: "steer"` interjects it into the turn already running instead of
+   * queueing it behind that turn; the runtime falls back to the queue when
+   * nothing is streaming, so the caller never has to check first.
+   */
+  const submitPrompt = async (event: FormEvent | undefined, intent: "queue" | "steer" = "queue"): Promise<void> => {
+    event?.preventDefault();
     const prompt = draft.trim();
     const images = draftImages;
     const runtimeCommand = prompt === "/memory" && images.length === 0;
@@ -507,6 +526,7 @@ export default function App(): React.JSX.Element {
         target = activeSnapshot;
       }
       if (runtimeCommand) await window.suocode.request({ type: "run_memory_now" }, target.runtimeId);
+      else if (intent === "steer") await window.suocode.request({ type: "steer", text: prompt, images, clientMessageId }, target.runtimeId);
       else await window.suocode.request({ type: "prompt", text: prompt, images, clientMessageId }, target.runtimeId);
     } catch (caught) {
       setDraft(prompt);
@@ -523,12 +543,6 @@ export default function App(): React.JSX.Element {
     } finally {
       setStartingSession(false);
     }
-  };
-
-  const handleTimelineScroll = (): void => {
-    const viewport = timelineRef.current;
-    if (!viewport) return;
-    shouldAutoScrollRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1;
   };
 
   if (settingsOpen) {
@@ -553,7 +567,8 @@ export default function App(): React.JSX.Element {
         startNewConversation, openProject, removeProject, openConversation,
         archiveConversation, renameConversation, pinConversation, forkConversation,
         moveConversation, reorderProjects,
-        rewindPrompt, cancelQueuedPrompt, approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
+        rewindPrompt, cancelQueuedPrompt, promoteQueuedPrompt, abortRun, stopSubagent, resumeSubagent,
+        approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
         handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,
       }}
     />

@@ -36,6 +36,14 @@ export function useInAppBrowserLinks({
       if (filePath) {
         event.preventDefault();
         event.stopPropagation();
+        // The right-hand panel is the workspace tree and single-file previews.
+        // A folder belongs to the operating system's file manager instead.
+        if (fileLink?.dataset.fileKind === "directory") {
+          void window.suocode.revealPath(filePath).catch((error: unknown) => {
+            reportError(error instanceof Error ? error.message : String(error));
+          });
+          return;
+        }
         openFile(filePath);
         return;
       }
@@ -48,5 +56,5 @@ export function useInAppBrowserLinks({
     };
     document.addEventListener("click", routeMarkdownLink, true);
     return () => document.removeEventListener("click", routeMarkdownLink, true);
-  }, [openFile, openLink]);
+  }, [openFile, openLink, reportError]);
 }

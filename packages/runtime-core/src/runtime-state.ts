@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   type ChatMessage,
+  type GoalState,
   type McpRuntimeStatus,
   type PlanApprovalState,
   type ProjectMemoryRuntimeStatus,
@@ -81,6 +82,10 @@ export interface ActiveSession {
   skillConfiguration?: SkillConfigurationSnapshot;
   mcpStatus?: McpRuntimeStatus;
   planApproval?: PlanApprovalState;
+  /** Live `/goal` loop state, mirrored from the workflow extension. */
+  goal?: GoalState;
+  /** A stop was delivered and the run has not settled yet. */
+  aborting?: boolean;
   /** Model selected while a turn was already running; applied before the next prompt. */
   pendingModel?: PendingSessionModel;
   eventBus: EventBusController;
@@ -151,6 +156,26 @@ export function fastRuntimeState(value: unknown): FastRuntimeState | undefined {
     enabled: value.enabled,
     supported: value.supported,
     modelId: optionalString(value, "modelId"),
+  };
+}
+
+export function goalState(value: unknown): GoalState | undefined {
+  if (!isRecord(value)) return undefined;
+  const statuses = new Set<GoalState["status"]>(["running", "paused", "completed", "stopped"]);
+  if (!statuses.has(value.status as GoalState["status"])) return undefined;
+  const goal = optionalString(value, "goal");
+  if (!goal) return undefined;
+  const number = (key: string, fallback: number): number => (
+    typeof value[key] === "number" && Number.isFinite(value[key]) ? value[key] as number : fallback
+  );
+  return {
+    status: value.status as GoalState["status"],
+    goal,
+    iteration: Math.max(0, Math.floor(number("iteration", 0))),
+    startedAt: number("startedAt", Date.now()),
+    updatedAt: number("updatedAt", Date.now()),
+    summary: optionalString(value, "summary"),
+    lastError: optionalString(value, "lastError"),
   };
 }
 

@@ -16,7 +16,14 @@ import type {
   ThinkingLevel,
 } from "@suocode/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
-import { loadModelCatalog, mergeSelectedUpstreamModels, type ModelCatalogMeta } from "./modelCatalog";
+import {
+  loadModelCatalog,
+  mergeSelectedUpstreamModels,
+  THINKING_LEVELS,
+  thinkingLevelMapFromLevels,
+  thinkingLevelsFromMap,
+  type ModelCatalogMeta,
+} from "./modelCatalog";
 import { SettingsSelect } from "./SettingsSelect";
 import { UpstreamModelPicker, type UpstreamModelOption } from "./UpstreamModelPicker";
 import { ProviderOAuthDialog } from "./ProviderOAuthDialog";
@@ -144,6 +151,11 @@ function modelFromUpstream(option: UpstreamModelOption, meta: ModelCatalogMeta):
     id: option.id,
     name: meta.name || option.name || option.id,
     reasoning: meta.reasoning ?? base.reasoning,
+    // A catalogue that states the effort words is the only reliable source for
+    // which thinking levels this model actually accepts.
+    thinkingLevelMap: meta.thinkingLevels?.length
+      ? thinkingLevelMapFromLevels(meta.thinkingLevels) as EditableModel["thinkingLevelMap"]
+      : base.thinkingLevelMap,
     input: meta.input ?? base.input,
     contextWindow: meta.contextWindow ?? base.contextWindow,
     maxTokens: meta.maxTokens ?? base.maxTokens,
@@ -196,10 +208,7 @@ function apiOptions(snapshot: ModelProviderConfigurationSnapshot | undefined): S
 function modelThinkingLevels(model: EditableModel, configuration: RuntimeConfiguration | undefined, providerId: string): ThinkingLevel[] {
   const runtimeModel = configuration?.models.find((item) => item.provider === providerId && item.id === model.id);
   if (runtimeModel?.supportedThinkingLevels.length) return runtimeModel.supportedThinkingLevels;
-  if (!model.reasoning) return ["off"];
-  const map = model.thinkingLevelMap;
-  if (map && Object.keys(map).length) return THINKING_OPTIONS.map((item) => item.value as ThinkingLevel).filter((level) => map[level] !== null);
-  return ["off", "minimal", "low", "medium", "high"];
+  return thinkingLevelsFromMap(model.thinkingLevelMap, Boolean(model.reasoning));
 }
 
 function sourceLabel(source: ModelProviderConfiguration["source"]): string {
@@ -338,6 +347,28 @@ function ProviderModelCard({
   };
   const supportsImages = model.input?.includes("image") ?? false;
   const toggleImage = (): void => onChange({ ...model, input: supportsImages ? ["text"] : ["text", "image"] });
+  // The checkbox row and the advanced JSON edit the same field; the JSON text is
+  // the single source of truth so the two can never disagree.
+  const mappedLevels = (() => {
+    try {
+      const parsed = JSON.parse(advanced.thinkingLevelMap.trim() || "{}") as Partial<Record<string, string | null>>;
+      return thinkingLevelsFromMap(parsed, Boolean(model.reasoning));
+    } catch {
+      return undefined;
+    }
+  })();
+  const toggleThinkingLevel = (level: ThinkingLevel): void => {
+    if (!mappedLevels) return;
+    const next = mappedLevels.includes(level)
+      ? mappedLevels.filter((item) => item !== level)
+      : [...mappedLevels, level];
+    // Pi needs at least one level to clamp to; an empty set would leave the
+    // model with nothing to send.
+    onAdvancedChange({
+      ...advanced,
+      thinkingLevelMap: JSON.stringify(thinkingLevelMapFromLevels(next.length ? next : ["off"]), null, 2),
+    });
+  };
   return (
     <article className="provider-model-card">
       <header><span><CircleDot size={14} />模型 {index + 1}</span><button type="button" aria-label={`移除模型 ${index + 1}`} onClick={onRemove}><Trash2 size={14} />移除</button></header>
@@ -345,6 +376,18 @@ function ProviderModelCard({
       <div className="settings-grid"><label>协议覆盖<SettingsSelect value={model.api ?? ""} options={options} ariaLabel={`模型 ${index + 1} 的协议`} onChange={(api) => onChange({ ...model, api: api || undefined })} searchable /></label><label>模型专用 Base URL<input value={model.baseUrl ?? ""} placeholder="可选，默认继承服务商 Base URL" onChange={(event) => onChange({ ...model, baseUrl: event.target.value })} /></label></div>
       <div className="settings-grid provider-model-capabilities"><label>上下文窗口<NumberInput value={model.contextWindow} placeholder="128000" onChange={(contextWindow) => onChange({ ...model, contextWindow })} /></label><label>最大输出 Token<NumberInput value={model.maxTokens} placeholder="16384" onChange={(maxTokens) => onChange({ ...model, maxTokens })} /></label></div>
       <div className="provider-checkbox-row"><label className="checkbox-setting"><input type="checkbox" checked={Boolean(model.reasoning)} onChange={(event) => onChange({ ...model, reasoning: event.target.checked })} />支持 Thinking / 推理</label><label className="checkbox-setting"><input type="checkbox" checked={supportsImages} onChange={toggleImage} />支持图片输入</label></div>
+      {model.reasoning ? <div className="provider-thinking-levels">
+        <span>可用 Thinking 强度<small>只有勾选的强度会出现在模型选择器里，也只有它们会被发送给服务商</small></span>
+        {mappedLevels ? <div className="provider-thinking-options">
+          {THINKING_LEVELS.map((level) => <button
+            className={mappedLevels.includes(level) ? "active" : ""}
+            type="button"
+            key={level}
+            aria-pressed={mappedLevels.includes(level)}
+            onClick={() => toggleThinkingLevel(level)}
+          >{level}</button>)}
+        </div> : <small className="provider-thinking-invalid">Thinking 映射 JSON 当前无法解析，请在下方高级参数中修正。</small>}
+      </div> : null}
       <details className="provider-advanced">
         <summary>高级模型参数 <ChevronRight size={14} /></summary>
         <p>这些字段直接写入 <code>models.json</code> 模型定义；适合网关兼容性、采样和精确的 Thinking 映射。</p>

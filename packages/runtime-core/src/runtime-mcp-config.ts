@@ -13,9 +13,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import {
+  basename,
   dirname,
   join,
+  resolve,
 } from "node:path";
+import { createHash } from "node:crypto";
 import {
   McpAdapterConfigModule,
   loadMcpAdapterConfigModule,
@@ -26,6 +29,7 @@ import { RuntimeInspectionMcp } from "./runtime-inspection-mcp.js";
 import {
   isRecord,
   recordOfStrings,
+  safeRealPath,
   stringArray,
 } from "./runtime-utils.js";
 
@@ -36,6 +40,89 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
 
   protected disabledMcpServersPath(): string {
     return join(this.agentDir, "mcp-disabled-servers.json");
+  }
+
+  /**
+   * Where a workspace's own MCP configuration lives.
+   *
+   * Inside SuoCode's private agent directory, never in the workspace itself: a
+   * config file written into someone's repository gets committed by accident,
+   * travels to other machines, and is not SuoCode's to place there.
+   */
+  protected workspaceMcpConfigPath(cwd: string): string {
+    // Normalised here so a workspace keeps one file however its path is spelled
+    // — a symlinked temp dir and its real path must not become two workspaces.
+    const resolved = safeRealPath(resolve(cwd));
+    const label = basename(resolved).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 40) || "workspace";
+    const digest = createHash("sha256").update(resolved).digest("hex").slice(0, 12);
+    return join(this.agentDir, "workspaces", `${label}-${digest}`, "mcp.json");
+  }
+
+  /** The servers this workspace defines or overrides, keyed by name. */
+  protected workspaceMcpServers(cwd?: string): Record<string, Record<string, unknown>> {
+    if (!cwd) return {};
+    const path = this.workspaceMcpConfigPath(this.mcpCwd(cwd));
+    if (!existsSync(path)) return {};
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) return {};
+      return Object.fromEntries(
+        Object.entries(parsed.mcpServers).filter(([, value]) => isRecord(value)),
+      ) as Record<string, Record<string, unknown>>;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Lay the workspace's servers over the ones every workspace shares.
+   *
+   * An entry that only carries `disabled` is an override of a global server;
+   * anything richer is a definition this workspace owns.
+   */
+  protected withWorkspaceMcpServers<T extends { mcpServers: Record<string, Record<string, unknown>> }>(
+    configuration: T,
+    cwd?: string,
+  ): T {
+    const overlay = this.workspaceMcpServers(cwd);
+    if (!Object.keys(overlay).length) return configuration;
+    const merged = { ...configuration.mcpServers };
+    for (const [name, entry] of Object.entries(overlay)) {
+      const existing = merged[name];
+      if (!existing && Object.keys(entry).every((key) => key === "disabled")) continue;
+      merged[name] = { ...existing, ...entry };
+    }
+    return { ...configuration, mcpServers: merged };
+  }
+
+  /** Names this workspace defines outright, as opposed to merely overriding. */
+  protected workspaceMcpDefinitions(cwd?: string): Set<string> {
+    return new Set(
+      Object.entries(this.workspaceMcpServers(cwd))
+        .filter(([, entry]) => Object.keys(entry).some((key) => key !== "disabled"))
+        .map(([name]) => name),
+    );
+  }
+
+  protected writeWorkspaceMcpServer(cwd: string, name: string, definition: Record<string, unknown> | undefined): void {
+    const path = this.workspaceMcpConfigPath(this.mcpCwd(cwd));
+    let parsed: Record<string, unknown> = {};
+    if (existsSync(path)) {
+      try {
+        const current = JSON.parse(readFileSync(path, "utf8")) as unknown;
+        if (isRecord(current)) parsed = current;
+      } catch {
+        parsed = {};
+      }
+    }
+    const servers = isRecord(parsed.mcpServers) ? { ...parsed.mcpServers } : {};
+    if (definition) servers[name] = definition;
+    else delete servers[name];
+    parsed.mcpServers = servers;
+    mkdirSync(dirname(path), { recursive: true });
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
   }
 
   protected readNamedMcpServerSet(path: string): Set<string> {
@@ -122,29 +209,28 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     if (changed) this.writeDisabledMcpServers(disabled);
 
     const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    const projectConfigPath = cwd ? adapter.getProjectPiConfigPath(cwd) : undefined;
+    // Only SuoCode's own files are swept here. A marker left in a workspace is
+    // harmless for a removed server — it stays hidden either way — and sweeping
+    // it would mean writing into someone's repository on every refresh.
+    const workspaceConfigPath = cwd ? this.workspaceMcpConfigPath(cwd) : undefined;
     for (const name of removed) {
       if (this.removeBareMcpServerTombstone(globalConfigPath, name)) changed = true;
-      if (projectConfigPath && this.removeBareMcpServerTombstone(projectConfigPath, name)) changed = true;
+      if (workspaceConfigPath && this.removeBareMcpServerTombstone(workspaceConfigPath, name)) changed = true;
     }
     return changed;
   }
 
-  protected async syncMcpOptOutDisabledState(cwd?: string): Promise<boolean> {
+  /**
+   * Clear a stale `{ "disabled": true }` marker an older build wrote into the
+   * workspace itself.
+   *
+   * SuoCode no longer writes there, but a marker left behind still outranks
+   * every other layer, so re-enabling a server would silently do nothing.
+   * Only a bare marker is touched — never a definition the repository owns.
+   */
+  protected clearProjectDisabledTombstone(adapter: McpAdapterConfigModule, cwd: string | undefined, name: string): boolean {
     if (!cwd) return false;
-    const adapter = await loadMcpAdapterConfigModule();
-    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    const resolvedCwd = this.mcpCwd(cwd);
-    const config = adapter.loadMcpConfig(globalConfigPath, resolvedCwd);
-    const disabled = this.readDisabledMcpServers();
-    const removed = this.readRemovedMcpServers();
-    let changed = false;
-    for (const name of Object.keys(config.mcpServers)) {
-      if (removed.has(name)) continue;
-      const result = adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, name, disabled.has(name));
-      if (result.changed) changed = true;
-    }
-    return changed;
+    return this.removeBareMcpServerTombstone(adapter.getProjectPiConfigPath(this.mcpCwd(cwd)), name);
   }
 
   async getMcpConfiguration(cwd?: string): Promise<McpConfigurationSnapshot> {
@@ -152,13 +238,15 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     const resolvedCwd = this.mcpCwd(cwd);
     const cleaned = this.cleanRemovedMcpServerState(adapter, resolvedCwd);
-    const synchronized = await this.syncMcpOptOutDisabledState(cwd);
-    if (cleaned || synchronized) this.reloadMcpExtension();
-    const projectConfigPath = cwd ? adapter.getProjectPiConfigPath(resolvedCwd) : undefined;
-    const config = adapter.loadMcpConfig(configPath, resolvedCwd);
+    if (cleaned) this.reloadMcpExtension();
+    const projectConfigPath = cwd ? this.workspaceMcpConfigPath(resolvedCwd) : undefined;
+    const config = this.withWorkspaceMcpServers(adapter.loadMcpConfig(configPath, resolvedCwd), cwd);
     const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
     const provenance = adapter.getServerProvenance(configPath, resolvedCwd);
-    const projectDefinitions = mcpServerDefinitions(projectConfigPath);
+    const projectDefinitions = new Set([
+      ...mcpServerDefinitions(adapter.getProjectPiConfigPath(resolvedCwd)),
+      ...this.workspaceMcpDefinitions(cwd),
+    ]);
     const enabledImports = new Set(config.imports ?? []);
     const removed = this.readRemovedMcpServers();
     const optedOut = this.readDisabledMcpServers();
@@ -172,7 +260,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
           name,
           // A project file may contain only { disabled: true } for a global or
           // imported server. That override changes enablement, not ownership.
-          scope: source?.kind === "project" && projectDefinitions.has(name) ? "project" : "global",
+          scope: projectDefinitions.has(name) || source?.kind === "project" && projectDefinitions.has(name) ? "project" : "global",
           transport: typeof raw.url === "string" ? "http" : "stdio",
           command: typeof raw.command === "string" ? raw.command : undefined,
           args: stringArray(raw.args),
@@ -239,11 +327,16 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const adapter = await loadMcpAdapterConfigModule();
     const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     const resolvedCwd = this.mcpCwd(cwd);
-    const configPath = server.scope === "project" ? adapter.getProjectPiConfigPath(resolvedCwd) : globalConfigPath;
+    const projectScoped = server.scope === "project";
+    const configPath = projectScoped ? this.workspaceMcpConfigPath(resolvedCwd) : globalConfigPath;
     if (previousName) {
       const previous = (await this.getMcpConfiguration(cwd)).servers.find((item) => item.name === previousName);
-      const previousPath = previous?.scope === "project" ? adapter.getProjectPiConfigPath(resolvedCwd) : globalConfigPath;
-      if (previousName !== name || previousPath !== configPath) this.removeMcpServerFromFile(previousPath, previousName);
+      const previouslyProjectScoped = previous?.scope === "project";
+      const previousPath = previouslyProjectScoped ? this.workspaceMcpConfigPath(resolvedCwd) : globalConfigPath;
+      if (previousName !== name || previousPath !== configPath) {
+        if (previouslyProjectScoped) this.writeWorkspaceMcpServer(resolvedCwd, previousName, undefined);
+        else this.removeMcpServerFromFile(previousPath, previousName);
+      }
     }
     const definition: Record<string, unknown> = server.transport === "http"
       ? { url: server.url?.trim(), ...(Object.keys(server.headers).length ? { headers: server.headers } : {}), ...(server.auth !== undefined ? { auth: server.auth } : {}) }
@@ -257,7 +350,8 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     if (server.excludeTools.length) definition.excludeTools = server.excludeTools;
     if (server.debug) definition.debug = true;
     if (server.disabled) definition.disabled = true;
-    adapter.writeSharedServerEntry(configPath, name, definition);
+    if (projectScoped) this.writeWorkspaceMcpServer(resolvedCwd, name, definition);
+    else adapter.writeSharedServerEntry(configPath, name, definition);
     this.clearMcpServerRemovedLocally(name);
     if (previousName && previousName !== name) {
       this.clearMcpServerRemovedLocally(previousName);
@@ -265,9 +359,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     }
     // Saving keeps the current state: a server is available unless explicitly 停用.
     this.setMcpServerOptOut(name, server.disabled === true);
-    if (cwd) {
-      adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, name, server.disabled === true);
-    }
+    if (server.disabled !== true) this.clearProjectDisabledTombstone(adapter, cwd, name);
     await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(cwd);
   }
@@ -291,7 +383,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     const resolvedCwd = cwd ? this.mcpCwd(cwd) : undefined;
     if (scope === "project" && !resolvedCwd) throw new Error("项目级 MCP 需要当前工作区。");
-    const projectConfigPath = resolvedCwd ? adapter.getProjectPiConfigPath(resolvedCwd) : undefined;
+    const projectConfigPath = resolvedCwd ? this.workspaceMcpConfigPath(resolvedCwd) : undefined;
     const before = await this.getMcpConfiguration(cwd);
     if (!before.servers.some((server) => server.name === normalizedName)) {
       throw new Error(`MCP Server 不存在：${normalizedName}`);
@@ -332,10 +424,13 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const adapter = await loadMcpAdapterConfigModule();
     const resolvedCwd = this.mcpCwd(cwd);
     const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    const effective = adapter.loadMcpConfig(globalConfigPath, resolvedCwd);
+    const effective = this.withWorkspaceMcpServers(adapter.loadMcpConfig(globalConfigPath, resolvedCwd), cwd);
     if (!effective.mcpServers[normalizedName]) throw new Error(`MCP Server 不存在：${normalizedName}`);
+    // Enablement lives in SuoCode's own opt-out list, and the effective
+    // configuration handed to the Agent is filtered by it. Nothing has to be
+    // written into a workspace to make it take effect.
     this.setMcpServerOptOut(normalizedName, !enabled);
-    adapter.writeProjectServerDisabledOverride(globalConfigPath, resolvedCwd, normalizedName, !enabled);
+    if (enabled) this.clearProjectDisabledTombstone(adapter, cwd, normalizedName);
     await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(resolvedCwd);
   }

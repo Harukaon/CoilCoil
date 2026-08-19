@@ -28,3 +28,16 @@ test("relative, web, and malformed links fall back to ordinary Markdown", () => 
   assert.equal(parseMarkdownFileHref("https://example.com/file.ts"), undefined);
   assert.equal(parseMarkdownFileHref("not a link"), undefined);
 });
+
+test("a folder path is a target of its own, with or without a trailing separator", () => {
+  assert.deepEqual(parseMarkdownFileHref("/tmp/suocode-test/project/src"), {
+    path: "/tmp/suocode-test/project/src",
+    line: undefined,
+    column: undefined,
+  });
+  assert.deepEqual(parseMarkdownFileHref("file:///tmp/suocode-test/My%20Project/"), {
+    path: "/tmp/suocode-test/My Project/",
+    line: undefined,
+    column: undefined,
+  });
+});

@@ -68,6 +68,8 @@
       "output": "release"
     },
     "mac": {
+      "identity": "-",
+      "hardenedRuntime": false,
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
       "target": [
