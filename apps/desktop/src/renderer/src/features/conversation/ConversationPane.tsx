@@ -89,7 +89,6 @@ export function ConversationPane({
   onOpenSettings,
   onAbort,
   onStopGoal,
-  onSteerPrompt,
   onPromoteQueuedPrompt,
   onStopSubagent,
   onResumeSubagent,
@@ -143,7 +142,6 @@ export function ConversationPane({
   onOpenSettings: (section?: SettingsSection) => void;
   onAbort: () => void;
   onStopGoal: () => void;
-  onSteerPrompt: () => void;
   onPromoteQueuedPrompt: (id: string) => void;
   onStopSubagent: (activity: SubagentActivity) => void;
   onResumeSubagent: (activity: SubagentActivity) => void;
@@ -398,10 +396,9 @@ export function ConversationPane({
             onFastChange={onFastChange}
             onOpenSettings={() => onOpenSettings()}
             onAbort={onAbort}
-            onSteer={onSteerPrompt}
           />
         </div>
-        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />
+        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />
       </div>
       <SubagentDetailDialog activity={selectedSubagent} onClose={() => setSelectedSubagentId(undefined)} />
     </section>

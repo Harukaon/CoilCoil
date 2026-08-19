@@ -58,6 +58,24 @@ import {
   terminalStatusFromResult,
 } from "./terminal-values.js";
 
+/**
+ * Present a persisted `custom_message` entry in the shape `mapMessage` reads.
+ *
+ * Pi stores these with the payload on the entry itself instead of under a
+ * `message` field, so reconstruction has to rebuild the message around it.
+ */
+function customEntryMessage(entry: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(entry) || entry.type !== "custom_message") return undefined;
+  return {
+    role: "custom",
+    customType: entry.customType,
+    content: entry.content,
+    display: entry.display,
+    details: entry.details,
+    timestamp: entry.timestamp,
+  };
+}
+
 export abstract class RuntimeToolState extends RuntimeSessions {
   protected reconstructState(session: AgentSession): ReconstructedSessionState {
     const messages: ChatMessage[] = [];
@@ -76,9 +94,15 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     const toolRunIds = new ToolRunIds();
     let order = 0;
 
-    const branchMessages = session.sessionManager.getBranch().filter((entry) => entry.type === "message");
+    // `custom_message` entries carry the cards the workflow raises on its own —
+    // a finished background terminal, for one. They are persisted under their own
+    // entry type rather than as a message, so a walk that only took `message`
+    // rebuilt the transcript without them: the card appeared while the turn ran
+    // and vanished the moment the turn's end replaced it with a fresh snapshot.
+    const branchMessages = session.sessionManager.getBranch()
+      .filter((entry) => entry.type === "message" || entry.type === "custom_message");
     for (const [index, entry] of branchMessages.entries()) {
-      const rawMessage = entry.message;
+      const rawMessage = customEntryMessage(entry) ?? (entry as { message?: unknown }).message;
       if (!isRecord(rawMessage)) continue;
       const liveMessageId = this.active?.messageIds.get(rawMessage);
       const mapped = mapMessage(rawMessage, liveMessageId ?? `history-${entry.id}`, order, entry.id);
@@ -103,7 +127,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         id,
         order: call?.order ?? order++,
         name,
-        label: this.toolLabel(name, args, id, purposes.get(id) ?? purposes.get(rawId)),
+        label: this.toolLabel(name, args, id, purposes.get(id) ?? purposes.get(rawId), session.sessionId),
         args,
         output,
         status: failed ? "failed" : "succeeded",
@@ -142,7 +166,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         id: call.id,
         order: call.order,
         name: call.name,
-        label: this.toolLabel(call.name, call.args, call.id, purposes.get(call.id) ?? purposes.get(call.rawId)),
+        label: this.toolLabel(call.name, call.args, call.id, purposes.get(call.id) ?? purposes.get(call.rawId), session.sessionId),
         args: call.args,
         output,
         status: "failed",
@@ -201,8 +225,9 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     args: Record<string, unknown>,
     toolCallId?: string,
     restoredPurpose?: string,
+    sessionId?: string,
   ): string {
-    const purpose = restoredPurpose ?? liveToolPurpose(toolCallId) ?? purposeFromArgs(args);
+    const purpose = restoredPurpose ?? liveToolPurpose(sessionId, toolCallId) ?? purposeFromArgs(args);
     if (purpose) return purpose;
     if (name === "bash") return `运行 ${stringValue(args.command) || "命令"}`;
     if (name === "read") return `查看 ${stringValue(args.path) || "文件"}`;
@@ -226,7 +251,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
       id,
       order: existing?.order ?? active.nextTimelineOrder++,
       name: call.name,
-      label: this.toolLabel(call.name, call.args, call.id),
+      label: this.toolLabel(call.name, call.args, call.id, undefined, active.session.sessionId),
       args: { ...call.args },
       output: existing?.status === "running" ? existing.output : "",
       status: "running",

@@ -243,9 +243,13 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const config = this.withWorkspaceMcpServers(adapter.loadMcpConfig(configPath, resolvedCwd), cwd);
     const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
     const provenance = adapter.getServerProvenance(configPath, resolvedCwd);
+    // Pi's provenance only covers the files Pi itself knows about, so a server
+    // that lives in SuoCode's own per-workspace mcp.json came back with no
+    // source at all — the UI could not say which file it belonged to.
+    const workspaceDefinitions = this.workspaceMcpDefinitions(cwd);
     const projectDefinitions = new Set([
       ...mcpServerDefinitions(adapter.getProjectPiConfigPath(resolvedCwd)),
-      ...this.workspaceMcpDefinitions(cwd),
+      ...workspaceDefinitions,
     ]);
     const enabledImports = new Set(config.imports ?? []);
     const removed = this.readRemovedMcpServers();
@@ -255,7 +259,10 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
       projectConfigPath,
       imports: discovery.imports.map((entry) => ({ ...entry, enabled: enabledImports.has(entry.kind) })),
       servers: Object.entries(config.mcpServers).filter(([name]) => !removed.has(name)).map(([name, raw]) => {
-        const source = provenance.get(name);
+        const workspaceOwned = workspaceDefinitions.has(name) && projectConfigPath !== undefined;
+        const source = workspaceOwned
+          ? { path: projectConfigPath, kind: "project" as const, importKind: undefined }
+          : provenance.get(name);
         return {
           name,
           // A project file may contain only { disabled: true } for a global or

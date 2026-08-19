@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const PATCH_STATE = Symbol.for("suocode-workflow.compact-tool-render.patch");
 const PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
+const PURPOSE_SCOPE = Symbol.for("suocode-workflow.tool-purpose-scope");
 const PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"];
 const OUTPUT_TAIL_LINES = 3;
 
@@ -87,8 +88,19 @@ function getPurposeRegistry(): Map<string, PurposeRecord> | undefined {
     : undefined;
 }
 
+/**
+ * This patch is installed once per process but draws whichever session is
+ * active, so it has to ask for the same session-scoped key the audit policy
+ * writes under. Tool call ids alone repeat across conversations.
+ */
+function activeScope(): string | undefined {
+  const scope = (globalThis as Record<PropertyKey, unknown>)[PURPOSE_SCOPE];
+  return typeof scope === "string" && scope ? scope : undefined;
+}
+
 function getPurpose(toolCallId: string, args: unknown): string | undefined {
-  const recorded = getPurposeRegistry()?.get(toolCallId)?.purpose;
+  const scope = activeScope();
+  const recorded = scope ? getPurposeRegistry()?.get(`${scope}\u0000${toolCallId}`)?.purpose : undefined;
   if (recorded) return recorded;
   if (!isRecord(args)) return undefined;
 

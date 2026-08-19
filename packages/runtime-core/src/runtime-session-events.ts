@@ -338,7 +338,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             id: runId,
             order: active.nextTimelineOrder++,
             name: event.toolName,
-            label: this.toolLabel(event.toolName, {}, event.toolCallId),
+            label: this.toolLabel(event.toolName, {}, event.toolCallId, undefined, active.session.sessionId),
             args: {},
             output: "",
             status: "running" as const,
@@ -504,6 +504,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
       return;
     }
     const next = active.promptQueue[0]!;
+    // A promoted entry is mid-steer and still sitting in the queue so the UI can
+    // show it leaving; starting it here would send the same message twice.
+    if (next.promoting) return;
     active.promptDrainInProgress = true;
     try {
       if (this.modelTransition) await this.modelTransition;

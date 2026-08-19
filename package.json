@@ -34,6 +34,7 @@
     "smoke:concurrency:live": "npm run build --workspace @suocode/desktop && node scripts/runtime-concurrency-smoke.mjs --live",
     "smoke:desktop": "node scripts/desktop-smoke.mjs",
     "smoke:desktop:layout": "node scripts/desktop-layout-smoke.mjs",
+    "smoke:desktop:timeline": "node scripts/desktop-timeline-smoke.mjs",
     "smoke:desktop:browser-scope": "node scripts/browser-scope-smoke.mjs",
     "smoke:desktop:browser-guest": "node scripts/browser-guest-security-smoke.mjs",
     "smoke:desktop:browser-agent": "node scripts/browser-agent-smoke.mjs",

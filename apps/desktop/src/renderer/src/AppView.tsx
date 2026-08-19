@@ -250,7 +250,6 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             }}
             onAbort={() => { void abortRun(); }}
             onStopGoal={() => { void window.suocode.request({ type: "stop_goal" }, snapshot?.runtimeId); }}
-            onSteerPrompt={() => { void submitPrompt(undefined, "steer"); }}
             onApprovePlan={approvePlan}
             onRejectPlan={rejectPlan}
           />

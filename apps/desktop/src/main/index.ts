@@ -10,10 +10,15 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
 import { createRequire } from "node:module";
 import type { BrowserUiViewport, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
+import {
+  browserContextMenuItems,
+  runContextMenuAction,
+  type GuestContextMenuParams,
+} from "./browser-context-menu";
 import { hardenGuestPreferences } from "./browser-webview-policy";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
@@ -331,6 +336,62 @@ class RuntimeBridge {
 
 const runtime = new RuntimeBridge();
 
+/**
+ * Give a browser guest the right-click menu Electron does not provide.
+ *
+ * Chromium raises `context-menu` for every right-click but shows nothing on its
+ * own, which is why the built-in browser appeared to have no menu at all.
+ */
+function installGuestContextMenu(guest: Electron.WebContents, window: BrowserWindow): void {
+  guest.on("context-menu", (_event, params) => {
+    if (guest.isDestroyed()) return;
+    const menuParams: GuestContextMenuParams = {
+      x: params.x,
+      y: params.y,
+      linkURL: params.linkURL,
+      srcURL: params.srcURL,
+      mediaType: params.mediaType,
+      selectionText: params.selectionText,
+      isEditable: params.isEditable,
+      pageURL: params.pageURL,
+      editFlags: {
+        canCut: params.editFlags.canCut,
+        canCopy: params.editFlags.canCopy,
+        canPaste: params.editFlags.canPaste,
+        canSelectAll: params.editFlags.canSelectAll,
+      },
+    };
+    const history = guest.navigationHistory;
+    const items = browserContextMenuItems(menuParams, {
+      canGoBack: history.canGoBack(),
+      canGoForward: history.canGoForward(),
+    });
+    const template = items.map((item) => item.type === "separator"
+      ? { type: "separator" as const }
+      : {
+        label: item.label,
+        enabled: item.enabled,
+        click: () => {
+          if (guest.isDestroyed() || !item.action) return;
+          runContextMenuAction(item.action, menuParams, {
+            copyToClipboard: (text) => clipboard.writeText(text),
+            copyImageAt: (x, y) => guest.copyImageAt(x, y),
+            cut: () => guest.cut(),
+            copy: () => guest.copy(),
+            paste: () => guest.paste(),
+            selectAll: () => guest.selectAll(),
+            goBack: () => { if (history.canGoBack()) history.goBack(); },
+            goForward: () => { if (history.canGoForward()) history.goForward(); },
+            reload: () => guest.reload(),
+            inspectElement: (x, y) => guest.inspectElement(x, y),
+          });
+        },
+      });
+    if (window.isDestroyed()) return;
+    Menu.buildFromTemplate(template).popup({ window });
+  });
+}
+
 async function createWindow(): Promise<void> {
   const isMac = process.platform === "darwin";
   const mainWindow = new BrowserWindow({
@@ -380,6 +441,7 @@ async function createWindow(): Promise<void> {
   // a guest must never be able to open an OS window.
   mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
     guest.setWindowOpenHandler(() => ({ action: "deny" }));
+    installGuestContextMenu(guest, mainWindow);
   });
 
   const browserRuntime = new BrowserRuntimeManager(mainWindow, (state) => {

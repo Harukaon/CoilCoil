@@ -271,7 +271,7 @@ export function MessageView({
             disabled={disabled || !message.entryId}
             onClick={() => onEditingChange(true)}
           >
-            {value ? <span>{value}</span> : null}
+            {value ? <span className="user-bubble-text">{value}</span> : null}
             <ImageStrip images={images} />
             {message.status === "queued" ? (
               <span className="user-message-queue-status"><LoaderCircle className="spin" size={12} />排队中</span>
@@ -387,8 +387,17 @@ function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX
     return { additions: total.additions + next.additions, deletions: total.deletions + next.deletions };
   }, { additions: 0, deletions: 0 });
   const running = tools.some((tool) => tool.status === "running");
+  // Whether this group is open belongs to the reader. Binding `open` to
+  // `running` made the group pop open the moment a tool started and snap shut
+  // when it finished, throwing away whatever the reader had chosen; `running`
+  // is only consulted for the state the group is born in.
+  const [open, setOpen] = useState(running);
   return (
-    <details className="tool-activity" open={running}>
+    <details
+      className="tool-activity"
+      open={open}
+      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary>
         <span>{running ? "正在执行工具" : toolSummary(tools, thinkingCount)}</span>
         {stats.additions ? <b className="additions">+{stats.additions}</b> : null}

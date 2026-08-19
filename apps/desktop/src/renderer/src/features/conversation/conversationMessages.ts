@@ -49,7 +49,10 @@ function queuedMessages(queue: QueuedPrompt[]): ChatMessage[] {
     text: item.text,
     images: item.images,
     timestamp: item.queuedAt,
-    status: "queued",
+    // A promoted entry stays in the queue until its steer actually lands, so the
+    // row can show it leaving instead of vanishing into a gap with the message
+    // neither queued nor yet in the transcript.
+    status: item.promoting ? "running" : "queued",
   }));
 }
 

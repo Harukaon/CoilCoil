@@ -487,6 +487,8 @@ export interface QueuedPrompt {
   text: string;
   images?: PromptImage[];
   queuedAt: number;
+  /** The user asked this one to interject and the steer has not landed yet. */
+  promoting?: boolean;
 }
 
 /** A Pi custom message, carried so the UI can render it as its own card. */
@@ -723,13 +725,18 @@ export function summarizeCacheUsage(
   const input = safe(inputTokens);
   const cacheRead = safe(cacheReadTokens);
   const cacheWrite = safe(cacheWriteTokens);
-  const reusable = input + cacheRead;
+  // The three buckets do not overlap, so the whole prompt is their sum and a
+  // hit rate is the share of it that came back from cache. Cache writes belong
+  // in the denominator and in "uncached": they were paid for at full price on
+  // this request, and leaving them out reports a healthy-looking rate for a
+  // turn that in fact re-uploaded everything.
+  const promptTokens = input + cacheRead + cacheWrite;
   return {
-    promptTokens: input + cacheRead + cacheWrite,
-    uncachedTokens: input,
+    promptTokens,
+    uncachedTokens: input + cacheWrite,
     cacheReadTokens: cacheRead,
     cacheWriteTokens: cacheWrite,
-    hitRate: reusable > 0 ? cacheRead / reusable : undefined,
+    hitRate: promptTokens > 0 ? cacheRead / promptTokens : undefined,
   };
 }
 

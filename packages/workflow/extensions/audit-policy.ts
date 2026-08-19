@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
 const SCHEMA_MARKER = Symbol.for("suocode-workflow.tool-purpose-field");
 const PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
+const PURPOSE_SCOPE = Symbol.for("suocode-workflow.tool-purpose-scope");
 const POLICY_STATE = Symbol.for("suocode-workflow.tool-purpose-policy-state");
 const MAX_PURPOSE_LENGTH = 100;
 const PURPOSE_DESCRIPTION = `本次工具调用的具体目的，1至${MAX_PURPOSE_LENGTH}字`;
@@ -38,9 +39,27 @@ function getPurposeRegistry(): Map<string, AuditEntryData> {
   return registry;
 }
 
-function rememberPurpose(data: AuditEntryData): void {
+/**
+ * Registry key for one tool call.
+ *
+ * Tool call ids are NOT unique across sessions: several providers number them
+ * per response, so `call_0` is handed out again by every new conversation. The
+ * registry lives on globalThis and is shared by every session open in this
+ * process, so keying it on the bare id let one conversation's purpose text be
+ * rendered on another conversation's tool card. The session id disambiguates.
+ */
+function purposeKey(sessionId: string, toolCallId: string): string {
+  return `${sessionId}\u0000${toolCallId}`;
+}
+
+/** The session whose cards the process-wide renderer patch is drawing. */
+function setActiveScope(sessionId: string): void {
+  (globalThis as Record<PropertyKey, unknown>)[PURPOSE_SCOPE] = sessionId;
+}
+
+function rememberPurpose(sessionId: string, data: AuditEntryData): void {
   const registry = getPurposeRegistry();
-  registry.set(data.toolCallId, data);
+  registry.set(purposeKey(sessionId, data.toolCallId), data);
   while (registry.size > MAX_PURPOSE_RECORDS) {
     const oldest = registry.keys().next().value as string | undefined;
     if (!oldest) break;
@@ -297,9 +316,11 @@ export default function auditPolicyExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", (_event, ctx) => {
     if (!auditEnabled()) return;
-    // toolCallId is already globally unique across sessions, and rememberPurpose()
-    // self-bounds via MAX_PURPOSE_RECORDS eviction — clearing here would wipe live
-    // entries belonging to any OTHER concurrently open session.
+    // Entries are keyed by session, so seeding this one cannot overwrite the
+    // live entries of any other conversation open in the same process, and
+    // rememberPurpose() self-bounds via MAX_PURPOSE_RECORDS eviction.
+    const sessionId = ctx.sessionManager.getSessionId();
+    setActiveScope(sessionId);
     for (const entry of ctx.sessionManager.getEntries()) {
       if (
         entry.type === "custom" &&
@@ -310,7 +331,7 @@ export default function auditPolicyExtension(pi: ExtensionAPI): void {
         typeof entry.data.purpose === "string" &&
         typeof entry.data.timestamp === "number"
       ) {
-        rememberPurpose(entry.data as unknown as AuditEntryData);
+        rememberPurpose(sessionId, entry.data as unknown as AuditEntryData);
       }
     }
 
@@ -374,7 +395,9 @@ export default function auditPolicyExtension(pi: ExtensionAPI): void {
       purpose,
       timestamp: Date.now(),
     };
-    rememberPurpose(auditEntry);
+    const sessionId = ctx.sessionManager.getSessionId();
+    setActiveScope(sessionId);
+    rememberPurpose(sessionId, auditEntry);
     pi.appendEntry<AuditEntryData>(AUDIT_ENTRY_TYPE, auditEntry);
 
     if (field) delete input[field];

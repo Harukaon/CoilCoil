@@ -7,15 +7,8 @@ import type { TerminalSessionSnapshot } from "../shared/desktop-api";
 const MAX_TERMINAL_OUTPUT = 500_000;
 
 interface TerminalRecord {
-  pty?: IPty;
+  pty: IPty;
   snapshot: TerminalSessionSnapshot;
-  dataDisposable?: { dispose(): void };
-  exitDisposable?: { dispose(): void };
-}
-
-function destroyPty(pty: IPty | undefined): void {
-  try { (pty as (IPty & { destroy?: () => void }) | undefined)?.destroy?.(); }
-  catch { /* The native handle may already be closed. */ }
 }
 
 /**
@@ -78,20 +71,11 @@ export class TerminalRuntimeManager {
     });
     const record: TerminalRecord = { pty, snapshot };
     this.records.set(id, record);
-    record.dataDisposable = pty.onData((data) => {
+    pty.onData((data) => {
       snapshot.output = `${snapshot.output}${data}`.slice(-MAX_TERMINAL_OUTPUT);
       this.onData(id, data);
     });
-    record.exitDisposable = pty.onExit(({ exitCode }) => {
-      // node-pty can retain the native stream through its event listeners even
-      // after the child exits. Detach listeners and drop the PTY reference as
-      // soon as the session becomes a completed snapshot.
-      record.dataDisposable?.dispose();
-      record.exitDisposable?.dispose();
-      record.dataDisposable = undefined;
-      record.exitDisposable = undefined;
-      destroyPty(pty);
-      record.pty = undefined;
+    pty.onExit(({ exitCode }) => {
       if (this.records.get(id) !== record) return;
       snapshot.status = "exited";
       snapshot.endedAt = Date.now();
@@ -104,34 +88,27 @@ export class TerminalRuntimeManager {
 
   write(id: string, data: string): void {
     const record = this.records.get(id);
-    if (record?.snapshot.status === "running") record.pty?.write(data);
+    if (record?.snapshot.status === "running") record.pty.write(data);
   }
 
   resize(id: string, cols: number, rows: number): void {
     const record = this.records.get(id);
     if (record?.snapshot.status !== "running") return;
-    record.pty?.resize(Math.max(20, Math.floor(cols)), Math.max(4, Math.floor(rows)));
+    record.pty.resize(Math.max(20, Math.floor(cols)), Math.max(4, Math.floor(rows)));
   }
 
   close(id: string): TerminalSessionSnapshot[] {
     const record = this.records.get(id);
     if (!record) return this.state();
     this.records.delete(id);
-    record.dataDisposable?.dispose();
-    record.exitDisposable?.dispose();
-    destroyPty(record.pty);
-    record.pty = undefined;
+    if (record.snapshot.status === "running") record.pty.kill();
     this.publish();
     return this.state();
   }
 
   dispose(): void {
     for (const record of this.records.values()) {
-      if (record.snapshot.status === "running") record.pty?.kill();
-      record.dataDisposable?.dispose();
-      record.exitDisposable?.dispose();
-      destroyPty(record.pty);
-      record.pty = undefined;
+      if (record.snapshot.status === "running") record.pty.kill();
     }
     this.records.clear();
   }

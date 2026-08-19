@@ -48,11 +48,21 @@ export function purposeFromArgs(args: Record<string, unknown>): string | undefin
   return undefined;
 }
 
-export function liveToolPurpose(toolCallId: string | undefined): string | undefined {
-  if (!toolCallId) return undefined;
+/**
+ * The purpose recorded for a live tool call, before its audit entry is readable.
+ *
+ * Scoped by session: tool call ids repeat across conversations (several
+ * providers number them per response, so `call_0` comes back every time), and
+ * the registry is shared by every session in this process.
+ */
+export function liveToolPurpose(
+  sessionId: string | undefined,
+  toolCallId: string | undefined,
+): string | undefined {
+  if (!sessionId || !toolCallId) return undefined;
   const registry = (globalThis as Record<PropertyKey, unknown>)[WORKFLOW_PURPOSE_REGISTRY];
   if (!(registry instanceof Map)) return undefined;
-  const record = registry.get(toolCallId);
+  const record = registry.get(`${sessionId}\u0000${toolCallId}`);
   if (!isRecord(record)) return undefined;
   const purpose = stringValue(record.purpose).trim();
   return purpose || undefined;

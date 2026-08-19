@@ -451,17 +451,49 @@ async function main() {
     assert.deepEqual(fixedNavSizing, [
       { label: "新建对话", height: 34, fontSize: "13px", iconWidth: 16 },
       { label: "技能", height: 34, fontSize: "13px", iconWidth: 16 },
-      { label: "终端", height: 34, fontSize: "13px", iconWidth: 16 },
+      { label: "记忆", height: 34, fontSize: "13px", iconWidth: 16 },
     ]);
-    await client.evaluate(`([...document.querySelectorAll(".primary-nav .nav-button")].find((button) => button.textContent.includes("终端")))?.click()`);
-    await client.waitFor(`Boolean(document.querySelector(".terminal-panel"))`, "The terminal surface did not open.");
-    await client.evaluate(`document.querySelector('.terminal-input input')?.focus()`);
-    await client.send("Input.insertText", { text: "printf terminal-gui-smoke-ok" });
-    await client.waitFor(`document.querySelector('.terminal-input input')?.value === "printf terminal-gui-smoke-ok"`, "The terminal input did not receive text.");
-    await client.evaluate(`document.querySelector('.terminal-input')?.requestSubmit()`);
-    await client.waitFor(`document.querySelector(".terminal-output")?.textContent.includes("terminal-gui-smoke-ok")`, "The terminal did not execute input through the packaged PTY.");
+    // The inspector starts empty and every surface is a tab you open: the old
+    // primary-nav 终端 button is gone, and no runtime tab exists up front.
+    const openInspectorTab = async (label, ready) => {
+      const quoted = JSON.stringify(label);
+      if (!(await client.evaluate(`Boolean(document.querySelector(".inspector-pane"))`))) {
+        await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+        await client.waitFor(`Boolean(document.querySelector(".inspector-pane"))`, "Inspector did not open.");
+      }
+      // Either the empty state offers it directly, or it lives behind the + menu.
+      await client.evaluate(
+        "(() => { const label = " + quoted + ";"
+        + " const empty = [...document.querySelectorAll('.inspector-empty-actions button')]"
+        + "   .find((button) => button.textContent.includes(label));"
+        + " if (empty) return empty.click();"
+        + " document.querySelector('.inspector-add-tab')?.click(); })()",
+      );
+      await client.evaluate(
+        "(() => { const label = " + quoted + ";"
+        + " [...document.querySelectorAll('.inspector-add-popover button')]"
+        + "   .find((button) => button.textContent.includes(label) && !button.disabled)?.click(); })()",
+      );
+      await client.waitFor(ready, `The ${label} tab did not open.`, 20_000);
+    };
+    await openInspectorTab("终端", `Boolean(document.querySelector(".terminal-panel"))`);
+    // The terminal is a live xterm surface now, not a command box: type into its
+    // helper textarea and read the rendered rows back.
+    await client.waitFor(`Boolean(document.querySelector(".terminal-panel .xterm-helper-textarea"))`, "The terminal surface did not mount.", 20_000);
+    await client.evaluate(`document.querySelector('.terminal-panel .xterm-helper-textarea')?.focus()`);
+    // The echoed command must not itself contain the asserted string, or the echo
+    // alone would satisfy the wait without the PTY ever running anything.
+    await client.send("Input.insertText", { text: "printf 'gui-smoke-%s\\n' ok" });
+    const enter = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+    await client.send("Input.dispatchKeyEvent", { type: "keyDown", text: "\r", ...enter });
+    await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...enter });
+    await client.waitFor(`document.querySelector(".terminal-panel .xterm-rows")?.textContent.includes("gui-smoke-ok")`, "The terminal did not execute input through the packaged PTY.", 20_000);
     await client.evaluate(`document.querySelector('.inspector-tab.active .inspector-tab-close')?.click()`);
     await client.waitFor(`!document.querySelector(".terminal-panel")`, "Closing the terminal did not release its session.");
+    // Closing the last tab leaves the pane open on its empty state; the checks
+    // further down describe a collapsed work bar, so put it back.
+    await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
+    await client.waitFor(`document.querySelector(".app-shell")?.classList.contains("right-collapsed") === true`, "The work bar did not collapse again.");
     const globalScrollbar = await client.evaluate(`(() => {
       const probe = document.createElement("div");
       probe.style.cssText = "position:fixed;left:-100px;top:-100px;width:40px;height:40px;overflow:scroll";
@@ -939,7 +971,8 @@ async function main() {
     assert.equal(isolation.rightClosed, true);
     assert.equal(isolation.rightResizer, false);
     assert.equal(isolation.inspector, "");
-    assert.equal(await client.evaluate(`document.querySelectorAll(".inspector-empty-actions button").length`), 3);
+    // 文件 / 浏览器 / 运行时 / 终端 — the terminal surface became a tab of its own.
+    assert.equal(await client.evaluate(`document.querySelectorAll(".inspector-empty-actions button").length`), 4);
     const emptyMetricState = await client.evaluate(`({
       summary: document.querySelector(".response-metrics")?.textContent || "",
       performance: Boolean(document.querySelector(".performance-trigger")),

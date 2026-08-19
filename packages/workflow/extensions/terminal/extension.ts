@@ -32,7 +32,13 @@ import {
   snapshotOutput,
 } from "./output.ts";
 import { scanTerminalProcesses, stopTerminal } from "./process-cleanup.ts";
-import { outputPathFor, serializeSession, toolResult } from "./results.ts";
+import {
+  createTerminalRunToken,
+  outputPathFor,
+  pruneTerminalOutput,
+  serializeSession,
+  toolResult,
+} from "./results.ts";
 import { waitForTerminal, waitForTerminalExit } from "./wait.ts";
 
 interface StartRequest {
@@ -71,11 +77,6 @@ interface StartResult {
 
 const TERMINAL_RUN_ENTRY_TYPE = "suocode-terminal-run";
 
-function destroyPty(pty: ManagedTerminal["pty"]): void {
-  try { (pty as ManagedTerminal["pty"] & { destroy?: () => void }).destroy?.(); }
-  catch { /* The native handle may already be closed. */ }
-}
-
 function notificationReason(session: ManagedTerminal, event: { mode: string; pattern?: string }): string {
   if (event.mode === "exit") {
     if (session.timeoutRequested) return `进程达到硬超时并已停止（${session.status}）`;
@@ -89,6 +90,10 @@ function notificationReason(session: ManagedTerminal, event: { mode: string; pat
 
 export default function terminalExtension(pi: ExtensionAPI): void {
   const sessions = new Map<string, ManagedTerminal>();
+  // Terminal ids restart at term-1 in every extension instance, so the run token
+  // is what keeps this session's output files apart from every other project's.
+  const runToken = createTerminalRunToken();
+  pruneTerminalOutput();
   let nextId = 1;
 
   const publishTerminalState = (session: ManagedTerminal): void => {
@@ -189,8 +194,8 @@ export default function terminalExtension(pi: ExtensionAPI): void {
       cwd,
       env: { ...process.env, TERM: "xterm-256color", ...resolvedSecrets.values },
     });
-    const outputPath = outputPathFor(id);
-    const outputStream = createWriteStream(outputPath, { flags: "a", mode: 0o600 });
+    const outputPath = outputPathFor(runToken, id);
+    const outputStream = createWriteStream(outputPath, { flags: "w", mode: 0o600 });
     outputStream.on("error", () => undefined);
     const session: ManagedTerminal = {
       id,
@@ -282,11 +287,6 @@ export default function terminalExtension(pi: ExtensionAPI): void {
       scheduleUpdate();
     });
     session.exitDisposable = child.onExit(({ exitCode, signal: exitSignal }) => {
-      // node-pty keeps the PTY master open after the child exits. Destroy it
-      // here rather than waiting for the managed-session retention window;
-      // long-running agents can otherwise exhaust macOS PTY devices even
-      // though all their shells have already finished.
-      destroyPty(child);
       flushTerminalOutput(session);
       if (session.hardTimeoutTimer) clearTimeout(session.hardTimeoutTimer);
       session.hardTimeoutTimer = undefined;

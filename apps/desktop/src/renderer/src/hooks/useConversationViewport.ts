@@ -22,11 +22,19 @@ export function autoFollowAfterScroll({
   distanceFromBottom,
   msSinceGesture,
   following,
+  programmatic = false,
 }: {
   distanceFromBottom: number;
   msSinceGesture: number;
   following: boolean;
+  /** This scroll came from `pinToBottom`, not from the reader. */
+  programmatic?: boolean;
 }): boolean {
+  // A scroll the app performed itself says nothing about what the reader wants.
+  // While a reply streams, pinToBottom runs on every delta; counting its own
+  // landing as "the reader is at the bottom" re-armed following a frame after
+  // the reader had scrolled up, and dragged them back down.
+  if (programmatic) return following;
   if (distanceFromBottom <= 1) return true;
   if (msSinceGesture > GESTURE_WINDOW_MS) return following;
   return false;
@@ -70,11 +78,17 @@ export function useConversationViewport({
   loading: boolean;
 }): ConversationViewport {
   const lastGestureAt = useRef(0);
+  const programmaticScroll = useRef(false);
 
   const pinToBottom = useCallback((): void => {
     const viewport = timelineRef.current;
     if (!viewport) return;
-    viewport.scrollTop = viewport.scrollHeight;
+    const bottom = viewport.scrollHeight - viewport.clientHeight;
+    // Only flag a move that will actually emit a scroll event, or the flag would
+    // outlive this call and swallow the reader's next real scroll.
+    if (Math.abs(viewport.scrollTop - bottom) < 1) return;
+    programmaticScroll.current = true;
+    viewport.scrollTop = bottom;
   }, [timelineRef]);
 
   useEffect(() => {
@@ -112,10 +126,13 @@ export function useConversationViewport({
   const handleTimelineScroll = useCallback((): void => {
     const viewport = timelineRef.current;
     if (!viewport) return;
+    const programmatic = programmaticScroll.current;
+    programmaticScroll.current = false;
     shouldAutoScrollRef.current = autoFollowAfterScroll({
       distanceFromBottom: viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight,
       msSinceGesture: performance.now() - lastGestureAt.current,
       following: shouldAutoScrollRef.current,
+      programmatic,
     });
   }, [shouldAutoScrollRef, timelineRef]);
 

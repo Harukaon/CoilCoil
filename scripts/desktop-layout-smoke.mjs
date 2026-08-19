@@ -147,20 +147,45 @@ async function main() {
     assert.ok(Math.abs(narrowActivity.expandedWidth - narrowActivity.stackWidth) <= 2, `Narrow activity panel did not align with the composer (${narrowActivity.expandedWidth}px vs ${narrowActivity.stackWidth}px).`);
     assert.ok(narrowActivity.collapsedWidth >= narrowActivity.stackWidth - 26, `Collapsed activity panel remained excessively narrow (${narrowActivity.collapsedWidth}px vs ${narrowActivity.stackWidth}px).`);
 
-    await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
-    await client.waitFor(`Boolean(document.querySelector(".inspector-pane"))`, "Inspector did not open.");
-    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
+    // The inspector starts empty and every surface is a tab you open: the old
+    // primary-nav 终端 button is gone, and no runtime tab exists up front.
+    const openInspectorTab = async (label, ready) => {
+      const quoted = JSON.stringify(label);
+      if (!(await client.evaluate(`Boolean(document.querySelector(".inspector-pane"))`))) {
+        await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+        await client.waitFor(`Boolean(document.querySelector(".inspector-pane"))`, "Inspector did not open.");
+      }
+      // Either the empty state offers it directly, or it lives behind the + menu.
+      await client.evaluate(
+        "(() => { const label = " + quoted + ";"
+        + " const empty = [...document.querySelectorAll('.inspector-empty-actions button')]"
+        + "   .find((button) => button.textContent.includes(label));"
+        + " if (empty) return empty.click();"
+        + " document.querySelector('.inspector-add-tab')?.click(); })()",
+      );
+      await client.evaluate(
+        "(() => { const label = " + quoted + ";"
+        + " [...document.querySelectorAll('.inspector-add-popover button')]"
+        + "   .find((button) => button.textContent.includes(label) && !button.disabled)?.click(); })()",
+      );
+      await client.waitFor(ready, `The ${label} tab did not open.`, 20_000);
+    };
+    await openInspectorTab("运行时", `Boolean(document.querySelector('.inspector-nav button[aria-label="运行时"]'))`);
+    // The tab is a container now: a select button plus, for closable tabs, a
+    // close button. Measuring only the select button no longer says whether the
+    // tab was squeezed down to its icon.
     const tabs = await client.evaluate(`(() => {
       const runtime = document.querySelector('.inspector-nav button[aria-label="运行时"]');
+      const tab = runtime?.closest(".inspector-tab") ?? runtime;
       const label = runtime?.querySelector("span");
       return {
-        buttonWidth: runtime?.getBoundingClientRect().width ?? 0,
+        tabWidth: tab?.getBoundingClientRect().width ?? 0,
         labelWidth: label?.getBoundingClientRect().width ?? 0,
         labelScrollWidth: label?.scrollWidth ?? Infinity,
         contextComposition: document.body.textContent.includes("上下文构成"),
       };
     })()`);
-    assert.ok(tabs.buttonWidth > 45);
+    assert.ok(tabs.tabWidth > 45, `Runtime tab collapsed to ${tabs.tabWidth}px.`);
     assert.ok(tabs.labelWidth >= tabs.labelScrollWidth);
     assert.equal(tabs.contextComposition, false);
 
@@ -174,9 +199,7 @@ async function main() {
     if (await client.evaluate(`Boolean(document.querySelector('button[aria-label="返回工作区"]'))`)) {
       await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
     }
-    await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
-    await client.waitFor(`Boolean(document.querySelector(".inspector-pane"))`, "Inspector did not reopen.");
-    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="文件"]')?.click()`);
+    await openInspectorTab("文件", `Boolean(document.querySelector('.inspector-nav button[aria-label="文件"]'))`);
     await client.waitFor(`[...document.querySelectorAll(".file-leaf")].some((item) => item.textContent.includes("layout-preview.html"))`, "Fixture file did not appear.");
     await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("layout-preview.html"))?.click()`);
     await client.waitFor(`Boolean(document.querySelector(".inline-preview-content.embedded iframe.html-preview"))`, "HTML preview did not render.");

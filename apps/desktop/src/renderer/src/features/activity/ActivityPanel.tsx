@@ -8,6 +8,7 @@ import {
   Circle,
   CircleDot,
   Clock,
+  LoaderCircle,
   Sparkles,
   Terminal,
   X,
@@ -218,7 +219,9 @@ export function ActivityPanel({
           )
         ) : tab === "queue" ? (
           <ol className="composer-queue-list" aria-label="排队中的消息">
-            {queuedItems.map((item, index) => (
+            {queuedItems.map((item, index) => {
+              const promoting = item.status === "running";
+              return (
               <li key={item.id}>
                 <span className="composer-queue-index" aria-hidden="true">{index + 1}</span>
                 <span className="composer-queue-text" title={item.text}>{item.text}</span>
@@ -226,25 +229,28 @@ export function ActivityPanel({
                 {onPromoteQueued ? (
                   <button
                     type="button"
-                    aria-label={`让第 ${index + 1} 条排队消息介入当前轮次`}
-                    title="介入当前轮次"
+                    aria-label={promoting ? `第 ${index + 1} 条排队消息正在介入` : `让第 ${index + 1} 条排队消息介入当前轮次`}
+                    title={promoting ? "正在介入当前轮次…" : "介入当前轮次"}
+                    disabled={promoting}
                     onClick={() => onPromoteQueued(item.id)}
                   >
-                    <ArrowUp size={12} />
+                    {promoting ? <LoaderCircle className="spin" size={12} /> : <ArrowUp size={12} />}
                   </button>
                 ) : null}
                 {onCancelQueued ? (
                   <button
                     type="button"
                     aria-label={`撤回第 ${index + 1} 条排队消息`}
-                    title="撤回"
+                    title={promoting ? "正在发送，无法撤回" : "撤回"}
+                    disabled={promoting}
                     onClick={() => onCancelQueued(item.id)}
                   >
                     <X size={12} />
                   </button>
                 ) : null}
               </li>
-            ))}
+              );
+            })}
             <li className="composer-queue-hint"><Clock size={10} />当前回复结束后按顺序发送；↑ 立即介入这一轮</li>
           </ol>
         ) : tab === "todo" ? (

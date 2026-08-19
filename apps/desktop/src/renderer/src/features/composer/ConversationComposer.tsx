@@ -1,4 +1,4 @@
-import { ArrowUp, CornerRightUp, LoaderCircle, Square, X } from "lucide-react";
+import { ArrowUp, LoaderCircle, Square, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { DragEvent as ReactDragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import type {
@@ -46,7 +46,6 @@ export function ConversationComposer({
   onFastChange,
   onOpenSettings,
   onAbort,
-  onSteer,
   onEscape,
   onPathDropError,
 }: {
@@ -84,7 +83,6 @@ export function ConversationComposer({
   onOpenSettings: () => void;
   onAbort?: () => void;
   /** Send the draft into the running turn instead of the queue. */
-  onSteer?: () => void;
   onEscape?: () => void;
   onPathDropError?: (message: string) => void;
 }): React.JSX.Element {
@@ -232,19 +230,6 @@ export function ConversationComposer({
             onClick={onAbort}
           >
             {aborting ? <LoaderCircle className="spin" size={13} /> : <Square size={12} fill="currentColor" />}
-          </button>
-        ) : null}
-        {!inline && running && onSteer && !goalActive ? (
-          <button
-            className="steer-button"
-            type="button"
-            aria-label="介入当前轮次"
-            title="介入：不打断工具和子 Agent，直接把这条消息插进当前轮次"
-            disabled={!project || startingSession || modelChanging || (!draft.trim() && !images.length)}
-            onClick={onSteer}
-          >
-            <CornerRightUp size={14} strokeWidth={2.2} />
-            <span>介入</span>
           </button>
         ) : null}
         <button

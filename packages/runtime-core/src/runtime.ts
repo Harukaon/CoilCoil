@@ -110,6 +110,9 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
     if (active.promptDrainInProgress && head?.id === id) {
       throw new Error("这条消息已经开始发送，无法撤回。");
     }
+    if (active.promptQueue.find((item) => item.id === id)?.promoting) {
+      throw new Error("这条消息正在介入当前轮次，无法撤回。");
+    }
     if (!this.removeQueuedPrompt(active, id)) return { cancelled: false };
     this.rejectClientMessage(active, id);
     if (active.promptQueue.length === 0 && !active.session.isStreaming && !this.promptStarting) {
@@ -224,6 +227,7 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
       throw new Error("这条消息已经开始发送，无法介入。");
     }
     const item = active.promptQueue[index]!;
+    if (item.promoting) return { promoted: true, steered: false };
     if (!this.canSteer(active)) {
       if (index === 0) return { promoted: false, steered: false };
       active.promptQueue.splice(index, 1);
@@ -231,13 +235,27 @@ export class SuoCodeRuntime extends RuntimeSessionEvents {
       this.publishPromptQueue(active);
       return { promoted: true, steered: false };
     }
-    this.removeQueuedPrompt(active, id);
-    const result = await this.steer(item.text, item.images, item.id).catch((error) => {
-      // Put it back rather than dropping a message the user still expects to be sent.
-      this.enqueuePrompt(active, item.text, item.images, item.id);
+    // Steering is not instant, and taking the row out first left a stretch where
+    // the message was gone from the queue and not yet in the transcript — it
+    // read as a message that had been swallowed. Keep the row, flagged, so the
+    // UI can show it is on its way, and drop it only once the steer landed.
+    item.promoting = true;
+    this.publishPromptQueue(active);
+    try {
+      const result = await this.steer(item.text, item.images, item.id);
+      // A steer that could not join a live turn fell back to the queue, which
+      // re-uses this very entry; removing it would drop the message instead.
+      if (result.steered) this.removeQueuedPrompt(active, id);
+      else {
+        delete item.promoting;
+        this.publishPromptQueue(active);
+      }
+      return { promoted: true, steered: result.steered };
+    } catch (error) {
+      delete item.promoting;
+      this.publishPromptQueue(active);
       throw error;
-    });
-    return { promoted: true, steered: result.steered };
+    }
   }
 
   /**
