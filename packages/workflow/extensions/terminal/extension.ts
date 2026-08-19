@@ -71,6 +71,11 @@ interface StartResult {
 
 const TERMINAL_RUN_ENTRY_TYPE = "suocode-terminal-run";
 
+function destroyPty(pty: ManagedTerminal["pty"]): void {
+  try { (pty as ManagedTerminal["pty"] & { destroy?: () => void }).destroy?.(); }
+  catch { /* The native handle may already be closed. */ }
+}
+
 function notificationReason(session: ManagedTerminal, event: { mode: string; pattern?: string }): string {
   if (event.mode === "exit") {
     if (session.timeoutRequested) return `进程达到硬超时并已停止（${session.status}）`;
@@ -277,6 +282,11 @@ export default function terminalExtension(pi: ExtensionAPI): void {
       scheduleUpdate();
     });
     session.exitDisposable = child.onExit(({ exitCode, signal: exitSignal }) => {
+      // node-pty keeps the PTY master open after the child exits. Destroy it
+      // here rather than waiting for the managed-session retention window;
+      // long-running agents can otherwise exhaust macOS PTY devices even
+      // though all their shells have already finished.
+      destroyPty(child);
       flushTerminalOutput(session);
       if (session.hardTimeoutTimer) clearTimeout(session.hardTimeoutTimer);
       session.hardTimeoutTimer = undefined;
