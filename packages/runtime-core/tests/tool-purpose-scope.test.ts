@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WORKFLOW_PURPOSE_REGISTRY } from "../src/runtime-constants.ts";
-import { liveToolPurpose } from "../src/session-values.ts";
+import { WORKFLOW_PURPOSE_REGISTRY } from "../src/runtime-constants.js";
+import { liveToolPurpose } from "../src/session-values.js";
 
 const SEPARATOR = "\0";
 
