@@ -122,11 +122,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: v0.1.0-beta.${{ github.run_number }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release/* --clobber
-            gh release edit "$TAG" --prerelease --title "SuoCode $TAG"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber --repo "${{ github.repository }}"
+            gh release edit "$TAG" --prerelease --title "SuoCode $TAG" --repo "${{ github.repository }}"
           else
             gh release create "$TAG" release/* \
+              --repo "${{ github.repository }}" \
               --target "${{ github.sha }}" \
               --prerelease \
               --title "SuoCode $TAG" \
