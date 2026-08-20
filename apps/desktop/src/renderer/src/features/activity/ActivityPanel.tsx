@@ -10,15 +10,17 @@ import {
   Clock,
   LoaderCircle,
   Sparkles,
+  Square,
   Terminal,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, SubagentActivity, TodoItem } from "@suocode/runtime-protocol";
+import type { ChatMessage, GoalState, SubagentActivity, TodoItem } from "@suocode/runtime-protocol";
 import type { SlashMenuItem } from "../composer/useSlashSkills";
 import { SubagentCard } from "../subagents/SubagentActivity";
+import { goalStatusLine, goalToggleLabel } from "./goalPresentation";
 
-type PermanentTab = "queue" | "todo" | "subagents";
+type PermanentTab = "goal" | "queue" | "todo" | "subagents";
 type ActivityTab = PermanentTab | "commands";
 
 function commandIcon(item: SlashMenuItem): React.JSX.Element {
@@ -29,6 +31,7 @@ function commandIcon(item: SlashMenuItem): React.JSX.Element {
 }
 
 export function ActivityPanel({
+  goal,
   todo,
   subagents,
   queued,
@@ -38,9 +41,11 @@ export function ActivityPanel({
   onOpenSubagent,
   onCancelQueued,
   onPromoteQueued,
+  onStopGoal,
   onStopSubagent,
   onResumeSubagent,
 }: {
+  goal?: GoalState;
   todo: TodoItem[];
   subagents: SubagentActivity[];
   /** Accepted but not yet sent, oldest first. */
@@ -52,17 +57,20 @@ export function ActivityPanel({
   onCancelQueued?: (id: string) => void;
   /** Interject a queued message into the turn that is already running. */
   onPromoteQueued?: (id: string) => void;
+  onStopGoal?: () => void;
   onStopSubagent?: (activity: SubagentActivity) => void;
   onResumeSubagent?: (activity: SubagentActivity) => void;
 }): React.JSX.Element | null {
   const commandsActive = commands !== undefined;
   const commandItems = commands ?? [];
   const queuedItems = useMemo(() => queued ?? [], [queued]);
+  const goalLive = goal !== undefined;
   const permanentTabs = useMemo<PermanentTab[]>(() => [
+    ...(goalLive ? ["goal" as const] : []),
     ...(queuedItems.length ? ["queue" as const] : []),
     ...(todo.length ? ["todo" as const] : []),
     ...(subagents.length ? ["subagents" as const] : []),
-  ], [queuedItems.length, subagents.length, todo.length]);
+  ], [goalLive, queuedItems.length, subagents.length, todo.length]);
   const availableTabs = useMemo<ActivityTab[]>(() => [
     ...permanentTabs,
     ...(commandsActive ? ["commands" as const] : []),
@@ -76,6 +84,17 @@ export function ActivityPanel({
   useEffect(() => {
     if (tab !== "commands") previousPermanentTab.current = tab;
   }, [tab]);
+
+  // A goal loop governs everything the agent does next, so starting one opens
+  // its tab the way the banner used to announce itself.
+  const hadGoal = useRef(goalLive);
+  useEffect(() => {
+    if (goalLive && !hadGoal.current && !commandsActive) {
+      setTab("goal");
+      setExpanded(true);
+    }
+    hadGoal.current = goalLive;
+  }, [commandsActive, goalLive]);
 
   // A message the user just queued is the thing they want to act on, so the
   // panel surfaces it rather than waiting to be opened.
@@ -134,10 +153,12 @@ export function ActivityPanel({
   const failedAgents = subagents.filter((item) => item.status === "failed").length;
   const stoppedAgents = subagents.filter((item) => item.status === "stopped").length;
   const showTabs = availableTabs.length > 1;
-  const title = tab === "commands" ? "命令" : tab === "subagents" ? "代理" : tab === "queue" ? "队列" : "Todo";
+  const title = tab === "commands" ? "命令" : tab === "goal" ? "目标" : tab === "subagents" ? "代理" : tab === "queue" ? "队列" : "Todo";
   const toggleExpanded = (): void => setExpanded((value) => !value);
   const toggleLabel = tab === "commands"
     ? `${commandItems.length}`
+    : tab === "goal" && goal
+      ? goalToggleLabel(goal)
     : tab === "queue"
       ? `${queuedItems.length} 条待发`
     : tab === "subagents"
@@ -171,6 +192,9 @@ export function ActivityPanel({
       >
         {showTabs ? (
           <div className="composer-activity-tabs" role="tablist" aria-label="活动类型">
+            {permanentTabs.includes("goal") ? (
+              <button className={tab === "goal" ? "active" : ""} type="button" role="tab" aria-selected={tab === "goal"} onClick={() => { setTab("goal"); setExpanded(true); }}>目标</button>
+            ) : null}
             {permanentTabs.includes("queue") ? (
               <button className={tab === "queue" ? "active" : ""} type="button" role="tab" aria-selected={tab === "queue"} onClick={() => { setTab("queue"); setExpanded(true); }}>队列 <small>{queuedItems.length}</small></button>
             ) : null}
@@ -217,6 +241,19 @@ export function ActivityPanel({
           ) : (
             <div className="composer-command-empty">没有匹配的命令。</div>
           )
+        ) : tab === "goal" && goal ? (
+          <div className="composer-goal">
+            <p className="composer-goal-text">{goal.goal}</p>
+            <div className="composer-goal-meta">
+              <small>{goalStatusLine(goal)}</small>
+              {goal.status === "running" && onStopGoal ? (
+                <button className="composer-goal-stop" type="button" onClick={onStopGoal}>
+                  <Square size={11} fill="currentColor" />
+                  <span>停止</span>
+                </button>
+              ) : null}
+            </div>
+          </div>
         ) : tab === "queue" ? (
           <ol className="composer-queue-list" aria-label="排队中的消息">
             {queuedItems.map((item, index) => {

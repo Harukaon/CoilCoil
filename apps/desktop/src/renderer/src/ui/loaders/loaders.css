@@ -1,0 +1,243 @@
+/* 加载指示合集。
+   每个都照抄给定实现，几何与动画一字不改；只做三件必要的适配：
+   1. 容器改为 position: relative——原实现用 absolute 是为了在演示页里居中，放进布局会脱流；
+   2. 颜色统一走 currentColor，这样深色主题下自动反白，滤镜里也不需要区分两套；
+   3. 每个都按自己的原始尺寸书写，再由外层 wrapper 用 transform 整体缩放。
+      这是关键：ooze/goo 滤镜里的 stdDeviation 是绝对像素，跟着 --uib-size 缩几何
+      会让模糊与形状失比（糊成一团或者完全不融合），跟着 transform 缩才等比。 */
+
+/* 缩放必须落在一层自己不做动画的中间层上：orbit 和 jelly 的容器本身带 transform
+   动画（rotate），而动画的优先级高于普通声明，写在同一个元素上会被整条覆盖掉。 */
+.suo-loader-scaler { display: inline-block; flex: 0 0 auto; overflow: visible; vertical-align: middle; }
+.suo-loader-frame { display: block; transform: scale(var(--suo-loader-scale)); transform-origin: top left; }
+
+/* ---- 墨滴穿行（blobs）---- */
+.suo-blobs {
+  display: block;
+  position: relative;
+  width: 300px;
+  height: 300px;
+  overflow: hidden;
+  border-radius: 70px;
+  color: inherit;
+  filter: url(#suo-goo-blobs);
+  transform-style: preserve-3d;
+}
+.suo-blobs .suo-blob-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 -10px 40px -5px currentColor;
+  transform: scale(.9) translate(-50%, -50%);
+  transform-origin: left top;
+  transform-style: preserve-3d;
+  animation: suo-blob-grow linear 3.4s infinite;
+}
+.suo-blobs .suo-blob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0;
+  transform: scale(.9) translate(-50%, -50%);
+  transform-origin: center top;
+  animation: suo-blobs-travel ease-out 3.4s infinite;
+}
+.suo-blobs .suo-blob:nth-child(2) { animation-delay: .2s; }
+.suo-blobs .suo-blob:nth-child(3) { animation-delay: .4s; }
+.suo-blobs .suo-blob:nth-child(4) { animation-delay: .6s; }
+.suo-blobs .suo-blob:nth-child(5) { animation-delay: .8s; }
+.suo-blobs .suo-blob:nth-child(6) { animation-delay: 1s; }
+
+@keyframes suo-blobs-travel {
+  0% { opacity: 0; transform: scale(0) translate(calc(-330px - 50%), -50%); }
+  1% { opacity: 1; }
+  35%, 65% { opacity: 1; transform: scale(.9) translate(-50%, -50%); }
+  99% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0) translate(calc(330px - 50%), -50%); }
+}
+
+@keyframes suo-blob-grow {
+  0%, 39% { transform: scale(0) translate(-50%, -50%); }
+  40%, 42% { transform: scale(1, .9) translate(-50%, -50%); }
+  43%, 44% { transform: scale(1.2, 1.1) translate(-50%, -50%); }
+  45%, 46% { transform: scale(1.3, 1.2) translate(-50%, -50%); }
+  47%, 48% { transform: scale(1.4, 1.3) translate(-50%, -50%); }
+  52% { transform: scale(1.5, 1.4) translate(-50%, -50%); }
+  54% { transform: scale(1.7, 1.6) translate(-50%, -50%); }
+  58% { transform: scale(1.8, 1.7) translate(-50%, -50%); }
+  68%, 70% { transform: scale(1.7, 1.5) translate(-50%, -50%); }
+  78% { transform: scale(1.6, 1.4) translate(-50%, -50%); }
+  80%, 81% { transform: scale(1.5, 1.4) translate(-50%, -50%); }
+  82%, 83% { transform: scale(1.4, 1.3) translate(-50%, -50%); }
+  84%, 85% { transform: scale(1.3, 1.2) translate(-50%, -50%); }
+  86%, 87% { transform: scale(1.2, 1.1) translate(-50%, -50%); }
+  90%, 91% { transform: scale(1, .9) translate(-50%, -50%); }
+  92%, 100% { transform: scale(0) translate(-50%, -50%); }
+}
+
+/* ---- 双点乱轨（chaotic orbit）：没有滤镜，纯几何 ---- */
+.suo-orbit {
+  --uib-size: 25px;
+  --uib-speed: 1.5s;
+  position: relative;
+  display: flex;
+  width: var(--uib-size);
+  height: var(--uib-size);
+  align-items: center;
+  justify-content: center;
+  animation: suo-orbit-spin calc(var(--uib-speed) * 1.667) infinite linear;
+}
+/* 原实现靠 flex 的对齐来决定绝对定位子元素的静态位置，脱开演示页后不可靠，
+   所以这里显式居中：60% 的盒子用 -30% 的负 margin 拉回中心，keyframes 里的
+   translate 仍然是从中心出发的偏移，动画本身一字未改。 */
+.suo-orbit::before, .suo-orbit::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 60%;
+  height: 60%;
+  margin: -30% 0 0 -30%;
+  border-radius: 50%;
+  background-color: currentColor;
+  will-change: transform;
+}
+.suo-orbit::before { animation: suo-orbit-path var(--uib-speed) linear infinite; }
+.suo-orbit::after { animation: suo-orbit-path var(--uib-speed) linear calc(var(--uib-speed) / -2) infinite; }
+
+@keyframes suo-orbit-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes suo-orbit-path {
+  0% { transform: translate(calc(var(--uib-size) * .5)) scale(.73684); opacity: .65; }
+  5% { transform: translate(calc(var(--uib-size) * .4)) scale(.684208); opacity: .58; }
+  10% { transform: translate(calc(var(--uib-size) * .3)) scale(.631576); opacity: .51; }
+  15% { transform: translate(calc(var(--uib-size) * .2)) scale(.578944); opacity: .44; }
+  20% { transform: translate(calc(var(--uib-size) * .1)) scale(.526312); opacity: .37; }
+  25% { transform: translate(0%) scale(.47368); opacity: .3; }
+  30% { transform: translate(calc(var(--uib-size) * -.1)) scale(.526312); opacity: .37; }
+  35% { transform: translate(calc(var(--uib-size) * -.2)) scale(.578944); opacity: .44; }
+  40% { transform: translate(calc(var(--uib-size) * -.3)) scale(.631576); opacity: .51; }
+  45% { transform: translate(calc(var(--uib-size) * -.4)) scale(.684208); opacity: .58; }
+  50% { transform: translate(calc(var(--uib-size) * -.5)) scale(.73684); opacity: .65; }
+  55% { transform: translate(calc(var(--uib-size) * -.4)) scale(.789472); opacity: .72; }
+  60% { transform: translate(calc(var(--uib-size) * -.3)) scale(.842104); opacity: .79; }
+  65% { transform: translate(calc(var(--uib-size) * -.2)) scale(.894736); opacity: .86; }
+  70% { transform: translate(calc(var(--uib-size) * -.1)) scale(.947368); opacity: .93; }
+  75% { transform: translate(0%) scale(1); opacity: 1; }
+  80% { transform: translate(calc(var(--uib-size) * .1)) scale(.947368); opacity: .93; }
+  85% { transform: translate(calc(var(--uib-size) * .2)) scale(.894736); opacity: .86; }
+  90% { transform: translate(calc(var(--uib-size) * .3)) scale(.842104); opacity: .79; }
+  95% { transform: translate(calc(var(--uib-size) * .4)) scale(.789472); opacity: .72; }
+  100% { transform: translate(calc(var(--uib-size) * .5)) scale(.73684); opacity: .65; }
+}
+
+/* ---- 果冻（jelly）---- */
+.suo-jelly {
+  --uib-size: 40px;
+  --uib-speed: .8s;
+  display: block;
+  position: relative;
+  width: var(--uib-size);
+  height: calc(var(--uib-size) / 2);
+  filter: url(#suo-goo-jelly);
+  animation: suo-jelly-flip calc(var(--uib-speed) * 2) linear infinite;
+}
+.suo-jelly::before, .suo-jelly::after {
+  content: '';
+  position: absolute;
+  top: 0%;
+  left: 25%;
+  width: 50%;
+  height: 100%;
+  border-radius: 100%;
+  background: currentColor;
+}
+.suo-jelly::before { animation: suo-jelly-left var(--uib-speed) ease infinite; }
+.suo-jelly::after { animation: suo-jelly-right var(--uib-speed) ease infinite; }
+
+@keyframes suo-jelly-flip {
+  0%, 49.999%, 100% { transform: none; }
+  50%, 99.999% { transform: rotate(90deg); }
+}
+@keyframes suo-jelly-left {
+  0%, 100% { transform: translateX(0%); }
+  50% { transform: scale(.65) translateX(-75%); }
+}
+@keyframes suo-jelly-right {
+  0%, 100% { transform: translateX(0%); }
+  50% { transform: scale(.65) translateX(75%); }
+}
+
+/* ---- 三点果冻（jelly triangle）---- */
+.suo-jelly-triangle {
+  --uib-size: 45px;
+  --uib-speed: 1.75s;
+  display: block;
+  position: relative;
+  width: var(--uib-size);
+  height: var(--uib-size);
+  filter: url(#suo-goo-jelly-triangle);
+}
+.suo-jelly-triangle .suo-jelly-triangle-dot,
+.suo-jelly-triangle .suo-jelly-triangle-traveler,
+.suo-jelly-triangle::before,
+.suo-jelly-triangle::after {
+  content: '';
+  position: absolute;
+  width: 33%;
+  height: 33%;
+  border-radius: 100%;
+  background: currentColor;
+  box-shadow: 0 0 20px color-mix(in srgb, currentColor 30%, transparent);
+}
+.suo-jelly-triangle .suo-jelly-triangle-dot {
+  top: 6%;
+  left: 30%;
+  animation: suo-jelly-triangle-grow var(--uib-speed) ease infinite;
+}
+.suo-jelly-triangle::before {
+  right: 0;
+  bottom: 6%;
+  animation: suo-jelly-triangle-grow var(--uib-speed) ease calc(var(--uib-speed) * -.666) infinite;
+}
+.suo-jelly-triangle::after {
+  bottom: 6%;
+  left: 0;
+  animation: suo-jelly-triangle-grow var(--uib-speed) ease calc(var(--uib-speed) * -.333) infinite;
+}
+.suo-jelly-triangle .suo-jelly-triangle-traveler {
+  top: 6%;
+  left: 30%;
+  box-shadow: none;
+  animation: suo-jelly-triangle-travel var(--uib-speed) ease infinite;
+}
+
+@keyframes suo-jelly-triangle-travel {
+  0%, 100% { transform: none; }
+  33.333% { transform: translate(120%, 175%); }
+  66.666% { transform: translate(-95%, 175%); }
+}
+@keyframes suo-jelly-triangle-grow {
+  0%, 100% { transform: scale(1.5); }
+  20%, 70% { transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suo-blobs .suo-blob, .suo-blobs .suo-blob-center,
+  .suo-orbit, .suo-orbit::before, .suo-orbit::after,
+  .suo-jelly, .suo-jelly::before, .suo-jelly::after,
+  .suo-jelly-triangle .suo-jelly-triangle-dot,
+  .suo-jelly-triangle .suo-jelly-triangle-traveler,
+  .suo-jelly-triangle::before, .suo-jelly-triangle::after { animation: none; }
+}

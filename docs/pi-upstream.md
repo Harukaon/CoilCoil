@@ -25,6 +25,36 @@ embedded runtime requires a capability that cannot be implemented outside Pi.
   clean their state on `session_shutdown`; without the matching reload start
   event they remain uninitialized in headless AgentSession consumers.
 
+## Upstream bugs we patch ourselves
+
+These are Pi defects, not SuoCode behavior. Each one is carried until upstream
+fixes it, so **check the upstream status of every entry before accepting a
+subtree pull** and drop the patch once the fix lands there.
+
+### Duplicate `call_id` when replaying a chat-completions history to Responses
+
+- Added 2026-08-20. Patch: `packages/ai/src/api/openai-responses-shared.ts`
+  (`claimCallId` / `resolveCallId` in `convertResponsesMessages`). Regression
+  test: `packages/ai/test/openai-responses-duplicate-call-id.test.ts`.
+- Symptom: `invalid function_call at input[12]: duplicate call_id "call_0"
+  already used at input[3]`. Every later turn of the session fails the same way,
+  and compaction does not reliably clear it — `firstKeptEntryId` can retain the
+  offending turns.
+- Cause: providers on `openai-completions` (DeepSeek and friends) number their
+  tool calls per response, so each assistant turn hands out `call_0` again.
+  `convertResponsesMessages` replayed those ids verbatim, and the Responses API
+  validates call id uniqueness across the whole input. SuoCode hits this on any
+  session that switches mid-way from a completions model to a Responses model,
+  which the model picker makes a one-click action.
+- Upstream status when written: no issue filed, and `main` still had no
+  cross-input uniqueness check. Upstream already fixed the neighbours —
+  earendil-works/pi#6796 → PR #6854 (same bug in the Responses → completions
+  direction) and #5151 (duplicate `msg_*` item ids in this same function) — so
+  the patch is shaped to be cherry-picked upstream as-is.
+- On the next pull: if `convertResponsesMessages` now keeps call ids unique
+  across the input, drop our patch and keep the regression test if it still
+  compiles. Otherwise re-apply. If we upstream it, link the issue and PR here.
+
 ## Update from upstream
 
 ```bash
@@ -32,5 +62,6 @@ git fetch pi-upstream main
 git subtree pull --prefix=vendor/pi pi-upstream main --squash
 ```
 
-Before accepting an update, run Pi's own checks as well as the SuoCode runtime
-and workflow test suites.
+Before accepting an update, walk the "Upstream bugs we patch ourselves" list
+above and re-check each entry against the incoming tree, then run Pi's own
+checks as well as the SuoCode runtime and workflow test suites.

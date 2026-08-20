@@ -10,7 +10,7 @@ import type {
   RuntimeConfiguration,
   SessionSnapshot,
 } from "@suocode/runtime-protocol";
-import { insertPathAtCaret } from "./pathInsert";
+import { insertPathsAtCaret } from "./pathInsert";
 import { clipboardImage } from "./promptImages";
 
 export interface ComposerController {
@@ -24,7 +24,7 @@ export interface ComposerController {
   setModelMenuOpen: (open: boolean) => void;
   reset: () => void;
   focus: () => void;
-  insertPath: (path: string) => void;
+  insertPaths: (paths: string[]) => void;
   handlePaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
   handleCompositionStart: () => void;
   handleCompositionEnd: () => void;
@@ -75,11 +75,12 @@ export function useComposerController({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
-  const insertPath = useCallback((path: string): void => {
+  const insertPaths = useCallback((paths: string[]): void => {
+    if (!paths.length) return;
     const input = inputRef.current;
     const start = input?.selectionStart ?? draft.length;
     const end = input?.selectionEnd ?? start;
-    const result = insertPathAtCaret(draft, path, start, end);
+    const result = insertPathsAtCaret(draft, paths, start, end);
     setDraft(result.value);
     requestAnimationFrame(() => {
       inputRef.current?.focus();
@@ -173,7 +174,7 @@ export function useComposerController({
     setModelMenuOpen,
     reset,
     focus,
-    insertPath,
+    insertPaths,
     handlePaste,
     handleCompositionStart: () => { composingRef.current = true; },
     handleCompositionEnd: () => { composingRef.current = false; },

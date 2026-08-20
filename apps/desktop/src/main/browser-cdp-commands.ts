@@ -27,3 +27,19 @@ export function isDirectPageTargetInfoRequest(
   return method === "Target.getTargetInfo"
     && (params.targetId === undefined || params.targetId === pageTargetId);
 }
+
+/**
+ * Commands that mean "activate this tab's window".
+ *
+ * The built-in browser has no window of its own — its tabs are guests inside the
+ * app window — so Chromium answers these by activating the embedder: the app is
+ * raised, and an app the user minimized is restored, in the middle of an agent
+ * run happening in the background. Selecting the tab in the browser panel is the
+ * honest translation, and it is already what `Target.activateTarget` does.
+ *
+ * `Page.bringToFront` reaches us from `select_page(bringToFront: true)` and from
+ * any other CDP client driving the built-in browser.
+ */
+export function isTabActivationCommand(method: string): boolean {
+  return method === "Page.bringToFront";
+}

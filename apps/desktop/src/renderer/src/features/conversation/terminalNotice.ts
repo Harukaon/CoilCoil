@@ -19,28 +19,63 @@ function stringField(details: Record<string, unknown> | undefined, key: string):
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function readMode(value: string | undefined): TerminalNoticeMode | undefined {
+  return value === "exit" || value === "match" || value === "regex" || value === "stalled" ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** One entry of the `notices` array the workflow attaches to a batched event. */
+function readBatchedNotice(value: unknown): TerminalNotice | undefined {
+  if (!isRecord(value)) return undefined;
+  const terminalId = stringField(value, "terminalId");
+  const reason = stringField(value, "reason");
+  if (!terminalId || !reason) return undefined;
+  const output = value.output;
+  return {
+    terminalId,
+    mode: readMode(stringField(value, "mode")),
+    status: stringField(value, "status"),
+    reason,
+    output: typeof output === "string" ? output.trim() : "",
+  };
+}
+
 /**
- * Read a terminal event the workflow sent to the Agent.
+ * Read the terminal events the workflow sent to the Agent.
  *
- * The message is written for the model — one headline followed by the tail of
- * the output — so the card takes the headline apart again rather than asking the
- * extension to send a second, UI-shaped copy.
+ * One message can carry several terminals: the workflow batches everything that
+ * fired inside one window so a burst of background exits costs the Agent a
+ * single turn. `details.notices` is the structured copy of that batch; the text
+ * body is written for the model, so a message from before batching existed is
+ * still recovered by taking its headline apart.
  */
-export function parseTerminalNotice(message: ChatMessage): TerminalNotice | undefined {
-  if (message.custom?.type !== TERMINAL_NOTIFICATION_TYPE) return undefined;
+export function parseTerminalNotices(message: ChatMessage): TerminalNotice[] {
+  if (message.custom?.type !== TERMINAL_NOTIFICATION_TYPE) return [];
   const details = message.custom.details;
+  const batched = details?.notices;
+  if (Array.isArray(batched)) {
+    const notices = batched.map(readBatchedNotice).filter((notice): notice is TerminalNotice => notice !== undefined);
+    if (notices.length > 0) return notices;
+  }
   const [headline = "", ...rest] = message.text.split("\n");
   const headlineMatch = /^Terminal\s+(\S+?)[：:]\s*(.*)$/.exec(headline.trim());
   const terminalId = stringField(details, "terminalId") ?? headlineMatch?.[1] ?? "terminal";
   const reason = headlineMatch?.[2]?.trim() || headline.trim();
-  const mode = stringField(details, "mode");
-  return {
+  return [{
     terminalId,
-    mode: mode === "exit" || mode === "match" || mode === "regex" || mode === "stalled" ? mode : undefined,
+    mode: readMode(stringField(details, "mode")),
     status: stringField(details, "status"),
     reason,
     output: rest.join("\n").trim(),
-  };
+  }];
+}
+
+/** The first event in a message; a batch carries more, read them with `parseTerminalNotices`. */
+export function parseTerminalNotice(message: ChatMessage): TerminalNotice | undefined {
+  return parseTerminalNotices(message)[0];
 }
 
 /** Short label for the status pill; falls back to the mode when Pi sent no status. */

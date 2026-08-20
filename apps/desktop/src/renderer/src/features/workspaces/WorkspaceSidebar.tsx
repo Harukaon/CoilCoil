@@ -21,7 +21,8 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
 import { primaryModifierLabel } from "../../../../shared/platform-labels";
-import { SuoLoader } from "../../ui/SuoLoader";
+import { OrbitLoader } from "../../ui/loaders";
+import { SuoLogo } from "../../ui/SuoLogo";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { collectPinnedSessions, collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type PinnedSessionEntry } from "./sessionList";
 
@@ -264,7 +265,7 @@ export function WorkspaceSidebar({
                     const activity = sessionActivity[session.path];
                     const renaming = renamingPath === session.path;
                     const status = activity?.running
-                      ? <SuoLoader size={11} />
+                      ? <OrbitLoader size={10} />
                       : activity?.unread
                         ? <i className="conversation-unread" />
                         : session.pinned
@@ -382,7 +383,7 @@ export function WorkspaceSidebar({
           <button className="open-project-card" type="button" onClick={onOpenProject}><span className="open-project-icon"><Plus size={14} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
         )}
       </section>
-      <div className="sidebar-footer"><div className="brand-mark">S</div><div className="brand-copy"><strong>SuoCode</strong><span>{modelLabel}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={onOpenSettings}><Settings size={17} strokeWidth={1.7} /></button></div>
+      <div className="sidebar-footer"><div className="brand-mark"><SuoLogo size={26} /></div><div className="brand-copy"><strong>SuoCode</strong><span>{modelLabel}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={onOpenSettings}><Settings size={17} strokeWidth={1.7} /></button></div>
     </aside>
   );
 }

@@ -2,21 +2,14 @@ import { ChevronDown, ChevronRight, TerminalSquare } from "lucide-react";
 import { useState } from "react";
 import type { ChatMessage } from "@suocode/runtime-protocol";
 import {
-  parseTerminalNotice,
+  parseTerminalNotices,
   terminalNoticeLabel,
   terminalNoticePreview,
+  type TerminalNotice,
 } from "./terminalNotice";
 
-/**
- * A terminal event as a card instead of a wall of text.
- *
- * The Agent still receives the full message; this only changes how the same
- * event reads in the transcript.
- */
-export function TerminalNoticeCard({ message }: { message: ChatMessage }): React.JSX.Element | null {
+function TerminalNoticeRow({ notice }: { notice: TerminalNotice }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const notice = parseTerminalNotice(message);
-  if (!notice) return null;
   const preview = terminalNoticePreview(notice.output);
   const lineCount = notice.output ? notice.output.split("\n").length : 0;
   return (
@@ -47,5 +40,24 @@ export function TerminalNoticeCard({ message }: { message: ChatMessage }): React
           : preview ? <div className="terminal-notice-preview" title={preview}>{preview}</div> : null
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Terminal events as cards instead of a wall of text.
+ *
+ * One message can carry several terminals, because the workflow batches a burst
+ * of events into a single wake-up for the Agent; each still gets its own card.
+ */
+export function TerminalNoticeCard({ message }: { message: ChatMessage }): React.JSX.Element | null {
+  const notices = parseTerminalNotices(message);
+  if (notices.length === 0) return null;
+  if (notices.length === 1 && notices[0]) return <TerminalNoticeRow notice={notices[0]} />;
+  return (
+    <div className="terminal-notice-batch">
+      {notices.map((notice, index) => (
+        <TerminalNoticeRow key={`${notice.terminalId}-${notice.mode ?? "event"}-${index}`} notice={notice} />
+      ))}
+    </div>
   );
 }

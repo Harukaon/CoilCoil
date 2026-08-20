@@ -116,6 +116,12 @@ export interface SuoCodeDesktopApi {
   selectProject(): Promise<ProjectSelection | null>;
   pickDirectory(options?: { title?: string }): Promise<string | null>;
   setWindowMinimumWidth(width: number): Promise<void>;
+  /** Widen the window by this many pixels so an opening panel need not shrink the conversation. */
+  growWindowWidth(byPixels: number): Promise<void>;
+  /** 同步窗口底色（CSS 颜色字面量），避免暗色主题下窗口画布仍是浅色。 */
+  setWindowBackground(color: string): Promise<void>;
+  /** 从系统拖入的文件解析出绝对路径；渲染进程自己拿不到。 */
+  filePath(file: File): string;
   openExternal(url: string): Promise<void>;
   /** Classify absolute paths so a link can be drawn and routed correctly. */
   classifyPaths(paths: string[]): Promise<Record<string, PathKind>>;

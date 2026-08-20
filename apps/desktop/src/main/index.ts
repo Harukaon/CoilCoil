@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from "electron";
 import { createRequire } from "node:module";
 import type { BrowserUiViewport, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
@@ -46,6 +46,12 @@ const PROJECT_HOME_CHANNEL = "project:home";
 const APP_VERSION_CHANNEL = "app:version";
 const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
+const WINDOW_GROW_WIDTH_CHANNEL = "window:grow-width";
+const WINDOW_BACKGROUND_CHANNEL = "window:background";
+/** 首帧用的底色；窗口半透明时露出的就是这一层，之后由渲染进程按主题同步。 */
+const WINDOW_BACKGROUND = { light: "#f8f8f7", dark: "#1f1f1f" } as const;
+/** 只接受 CSS 颜色字面量，不接受任意字符串。 */
+const CSS_COLOR = /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d\s.,%/-]+\))$/i;
 const EXTERNAL_OPEN_CHANNEL = "external:open";
 const PATH_CLASSIFY_CHANNEL = "path:classify";
 const PATH_REVEAL_CHANNEL = "path:reveal";
@@ -395,12 +401,12 @@ function installGuestContextMenu(guest: Electron.WebContents, window: BrowserWin
 async function createWindow(): Promise<void> {
   const isMac = process.platform === "darwin";
   const mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 760,
+    width: 915,
+    height: 700,
     minWidth: 395,
     minHeight: 500,
     show: false,
-    backgroundColor: "#f8f8f6",
+    backgroundColor: WINDOW_BACKGROUND[nativeTheme.shouldUseDarkColors ? "dark" : "light"],
     title: "SuoCode",
     ...(isMac
       ? {
@@ -582,6 +588,30 @@ app.whenReady().then(async () => {
     if (!window || !Number.isFinite(requestedWidth)) return;
     const [, minimumHeight] = window.getMinimumSize();
     window.setMinimumSize(Math.max(315, Math.ceil(requestedWidth)), minimumHeight);
+  });
+  /**
+   * Make room for a panel by widening the window rather than by squeezing the
+   * conversation. Growth goes to the right; when that hits the edge of the
+   * display the window slides left instead, and it never exceeds the work area.
+   * A maximized or full-screen window has no room to give, so it is left alone.
+   */
+  // 渲染进程应用主题后同步窗口底色，否则暗色下缩放窗口会露出浅色画布。
+  ipcMain.handle(WINDOW_BACKGROUND_CHANNEL, (event, color: string): void => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) return;
+    if (typeof color !== "string" || !CSS_COLOR.test(color.trim())) return;
+    window.setBackgroundColor(color.trim());
+  });
+  ipcMain.handle(WINDOW_GROW_WIDTH_CHANNEL, (event, byPixels: number): void => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed() || window.isMaximized() || window.isFullScreen()) return;
+    if (!Number.isFinite(byPixels) || byPixels <= 0) return;
+    const bounds = window.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const width = Math.min(bounds.width + Math.ceil(byPixels), area.width);
+    if (width <= bounds.width) return;
+    const x = Math.max(area.x, Math.min(bounds.x, area.x + area.width - width));
+    window.setBounds({ ...bounds, x, width });
   });
   // What an absolute path in the transcript actually is, so a link can be drawn
   // and routed as the file or the folder it points at.

@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 
-import { SUOCODE_PATH_TYPE } from "../features/composer/pathInsert";
-
-function isSuocodePathDrag(event: ReactDragEvent<HTMLElement>): boolean {
-  return event.dataTransfer.types.includes(SUOCODE_PATH_TYPE);
-}
+import { carriesPaths, droppedPaths } from "../features/composer/pathInsert";
 
 function stillInsideTarget(event: ReactDragEvent<HTMLElement>): boolean {
   const related = event.relatedTarget;
@@ -13,10 +9,10 @@ function stillInsideTarget(event: ReactDragEvent<HTMLElement>): boolean {
 }
 
 export function useFilePathDrop({
-  onInsertPath,
+  onInsertPaths,
   onError,
 }: {
-  onInsertPath: (path: string) => void;
+  onInsertPaths: (paths: string[]) => void;
   onError: (message: string) => void;
 }): {
   fileDragActive: boolean;
@@ -38,29 +34,39 @@ export function useFilePathDrop({
     // Inline composers stopPropagation on drop so the pane never sees it;
     // clear the mask in capture phase / on dragend instead.
     const clear = (): void => setActive(false);
+    // A file dropped anywhere without its own handler makes the window navigate
+    // to that file. Only files are swallowed, so dragging text inside the
+    // textarea still behaves natively.
+    const swallowFileDrop = (event: DragEvent): void => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+    };
     window.addEventListener("drop", clear, true);
     window.addEventListener("dragend", clear, true);
+    window.addEventListener("dragover", swallowFileDrop);
+    window.addEventListener("drop", swallowFileDrop);
     return () => {
       window.removeEventListener("drop", clear, true);
       window.removeEventListener("dragend", clear, true);
+      window.removeEventListener("dragover", swallowFileDrop);
+      window.removeEventListener("drop", swallowFileDrop);
     };
   }, [setActive]);
 
   const handleFileDragEnter = useCallback((event: ReactDragEvent<HTMLElement>): void => {
-    if (!isSuocodePathDrag(event)) return;
+    if (!carriesPaths(event.dataTransfer)) return;
     event.preventDefault();
     setActive(true);
   }, [setActive]);
 
   const handleFileDragOver = useCallback((event: ReactDragEvent<HTMLElement>): void => {
-    if (!isSuocodePathDrag(event)) return;
+    if (!carriesPaths(event.dataTransfer)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setActive(true);
   }, [setActive]);
 
   const handleFileDragLeave = useCallback((event: ReactDragEvent<HTMLElement>): void => {
-    if (!isSuocodePathDrag(event)) return;
+    if (!carriesPaths(event.dataTransfer)) return;
     // Ignore leave events that bubble while moving across child nodes;
     // those were clearing the mask and causing a one-frame flash.
     if (stillInsideTarget(event)) return;
@@ -68,17 +74,16 @@ export function useFilePathDrop({
   }, [setActive]);
 
   const handleFileDrop = useCallback((event: ReactDragEvent<HTMLElement>): void => {
-    const serialized = event.dataTransfer.getData(SUOCODE_PATH_TYPE);
-    if (!serialized) return;
+    if (!carriesPaths(event.dataTransfer)) return;
     event.preventDefault();
     setActive(false);
     try {
-      const dropped = JSON.parse(serialized) as { path?: string };
-      if (dropped.path) onInsertPath(dropped.path);
+      const paths = droppedPaths(event.dataTransfer);
+      if (paths.length) onInsertPaths(paths);
     } catch {
       onError("无法插入拖入的路径。请重新拖动一次。");
     }
-  }, [onError, onInsertPath, setActive]);
+  }, [onError, onInsertPaths, setActive]);
 
   return { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop };
 }

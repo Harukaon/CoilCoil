@@ -60,7 +60,11 @@ function createHarness() {
   let idle = true;
   const ctx = {
     ui: { notify: (text: string, level: string) => { notices.push({ text, level }); } },
-    sessionManager: { getBranch: () => [] as unknown[] },
+    // Restore reads the session branch, so the entries the extension appended
+    // are what a reopened session replays.
+    sessionManager: {
+      getBranch: (): unknown[] => entries.map((entry) => ({ type: "custom", customType: entry.customType, data: entry.data })),
+    },
     isIdle: () => idle,
     hasPendingMessages: () => false,
   };
@@ -163,8 +167,14 @@ test("goal_complete ends the loop and withdraws the tool", async () => {
   const result = await harness.execute({ summary: "全部完成", verification: "npm test 通过" });
   assert.notEqual(result.isError, true);
   assert.equal(result.details.iteration, 1);
-  assert.equal(harness.lastState()?.status, "completed");
   assert.equal(harness.activeTools().includes(GOAL_TOOL_NAME), false);
+
+  // The loop is over, so the session reports no goal at all. Leaving a finished
+  // state on the channel is what used to pin "目标已完成" above the composer for
+  // the rest of the session, and across reloads.
+  assert.equal(harness.lastState(), undefined);
+  const ended = harness.entries.filter((entry) => entry.customType === GOAL_STATE_ENTRY).at(-1);
+  assert.equal(ended?.data.status, "completed", "the session file still records how the loop ended");
 
   // A settled turn after completion must not start another round.
   await harness.emitEvent("agent_settled", { type: "agent_settled" });
@@ -182,12 +192,26 @@ test("/goal stop ends the loop and /goal resumes it", async () => {
   const harness = createHarness();
   await harness.run("完成这个任务");
   await harness.run("stop");
-  assert.equal(harness.lastState()?.status, "stopped");
+  assert.equal(harness.lastState(), undefined);
   assert.equal(harness.activeTools().includes(GOAL_TOOL_NAME), false);
 
   await harness.run("");
   assert.equal(harness.lastState()?.status, "running");
   assert.equal(harness.activeTools().includes(GOAL_TOOL_NAME), true);
+});
+
+test("reopening a session whose loop already ended reports no goal", async () => {
+  const harness = createHarness();
+  await harness.run("完成这个任务");
+  await harness.run("stop");
+
+  // session_start replays the persisted entry. A stopped loop stays resumable
+  // through `/goal`, but it is no longer state the session is in.
+  await harness.emitEvent("session_start", { type: "session_start" });
+  assert.equal(harness.lastState(), undefined);
+
+  await harness.run("");
+  assert.equal(harness.lastState()?.status, "running");
 });
 
 test("a settled turn schedules the next round on its own", async () => {

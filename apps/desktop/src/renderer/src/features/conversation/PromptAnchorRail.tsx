@@ -31,6 +31,18 @@ export function PromptAnchorRail({ anchors, loadedFrom, onSelect }: {
 
   if (anchors.length < 2) return null;
 
+  /**
+   * Open at the bottom of the list.
+   *
+   * The newest prompt is the last row and is the one worth reaching for, so the
+   * panel starts scrolled to it instead of at the oldest prompt of the session.
+   * Reading `scrollHeight` here forces the layout the panel was just given, so
+   * the offset is right on the first frame rather than after the open animation.
+   */
+  const pinToNewest = (card: HTMLDivElement | null): void => {
+    if (card) card.scrollTop = card.scrollHeight;
+  };
+
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <nav className="prompt-anchor-rail" aria-label="提示词导航">
@@ -41,6 +53,7 @@ export function PromptAnchorRail({ anchors, loadedFrom, onSelect }: {
         </Popover.Trigger>
         <Popover.Portal>
           <Popover.Content
+            ref={pinToNewest}
             className="prompt-anchor-card"
             side="right"
             align="center"

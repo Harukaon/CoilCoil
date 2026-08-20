@@ -521,8 +521,15 @@ export interface TodoItem {
   status: "pending" | "in_progress" | "completed";
 }
 
-/** Status of a `/goal` loop: the Agent keeps working until it completes or is stopped. */
-export type GoalStatus = "running" | "paused" | "completed" | "stopped";
+/**
+ * Status of the `/goal` loop this session is in.
+ *
+ * A loop that completed or was stopped is not one of these: it stops being part
+ * of the session's state entirely rather than sticking around as a finished
+ * status, so nothing downstream has to decide whether a goal is worth showing.
+ * What happened is told by the `goal_complete` tool result in the timeline.
+ */
+export type GoalStatus = "running" | "paused";
 
 export interface GoalState {
   status: GoalStatus;
@@ -876,13 +883,18 @@ export interface MemoryConfigurationSnapshot {
   settingsFile: string;
   storageRoot: string;
   global: MemoryDocumentSnapshot;
+  /** The open project's memory, which is also the entry for it in `projects`. */
   project?: MemoryDocumentSnapshot;
+  /** Every project the memory store holds, sorted by name, open project included. */
+  projects: MemoryDocumentSnapshot[];
 }
 
 export interface SaveMemoryConfigurationInput {
   settings: MemorySettings;
   globalContent: string;
   projectContent?: string;
+  /** Edits to any listed project memory. A path the store did not list is rejected. */
+  projectContents?: Array<{ filePath: string; content: string }>;
 }
 
 export interface TerminalRun {
@@ -948,7 +960,7 @@ export interface SessionSnapshot {
   pendingModel?: PendingSessionModel;
   thinkingLevel: ThinkingLevel;
   fast: boolean;
-  /** Present while a `/goal` loop exists in this session. */
+  /** Present while this session is in a `/goal` loop; absent once it ends. */
   goal?: GoalState;
   /** A stop was delivered; the turn is winding down and may still be finishing a tool. */
   aborting?: boolean;

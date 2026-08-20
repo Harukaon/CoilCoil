@@ -6,7 +6,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   type MemoryConfigurationSnapshot,
-  type MemoryDocumentSnapshot,
   type MemorySettings,
   type SaveMemoryConfigurationInput,
   type SkillConfigurationSnapshot,
@@ -36,6 +35,11 @@ import {
   resolve,
   sep,
 } from "node:path";
+import {
+  listProjectMemoryDocuments,
+  PROJECT_MEMORY_FILE,
+  readMemoryDocument,
+} from "./memory-documents.js";
 import {
   loadMcpAdapterConfigModule,
   mcpAgentConfigRegistry,
@@ -126,51 +130,20 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     }
   }
 
-  private memoryDocument(
-    scope: MemoryDocumentSnapshot["scope"],
-    label: string,
-    filePath: string,
-    directory: string,
-    maxChars: number,
-    projectRoot?: string,
-    projectName?: string,
-  ): MemoryDocumentSnapshot {
-    const exists = existsSync(filePath);
-    let content = "";
-    if (exists) {
-      try {
-        content = readFileSync(filePath, "utf8");
-      } catch {
-        content = "";
-      }
-    }
-    return {
-      scope,
-      label,
-      filePath,
-      directory,
-      exists,
-      content,
-      contentChars: Array.from(content).length,
-      maxChars,
-      projectRoot,
-      projectName,
-    };
-  }
 
   async getMemoryConfiguration(cwd?: string): Promise<MemoryConfigurationSnapshot> {
     const settings = this.readMemorySettings();
     const storageRoot = this.memoryStorageRoot();
     const globalFile = join(storageRoot, "GLOBAL.md");
-    const global = this.memoryDocument("global", "全局记忆", globalFile, storageRoot, settings.globalMaxChars);
+    const global = readMemoryDocument("global", "全局记忆", globalFile, storageRoot, settings.globalMaxChars);
     const resolvedCwd = this.mcpCwd(cwd);
     const projectRoot = this.memoryProjectRoot(resolvedCwd);
     const projectName = basename(projectRoot) || "root";
     const projectDirectory = join(storageRoot, projectName);
-    const project = this.memoryDocument(
+    const project = readMemoryDocument(
       "project",
       projectName,
-      join(projectDirectory, "MEMORY.md"),
+      join(projectDirectory, PROJECT_MEMORY_FILE),
       projectDirectory,
       settings.projectMaxChars,
       projectRoot,
@@ -182,6 +155,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       storageRoot,
       global,
       project,
+      projects: listProjectMemoryDocuments(storageRoot, settings.projectMaxChars, project),
     };
   }
 
@@ -190,6 +164,12 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     const settings = this.normalizeMemorySettings(input.settings);
     if (typeof input.globalContent !== "string") throw new Error("全局记忆内容无效。");
     if (input.projectContent !== undefined && typeof input.projectContent !== "string") {
+      throw new Error("项目记忆内容无效。");
+    }
+    const projectEdits = input.projectContents ?? [];
+    if (!Array.isArray(projectEdits) || projectEdits.some((edit) => (
+      !edit || typeof edit.filePath !== "string" || typeof edit.content !== "string"
+    ))) {
       throw new Error("项目记忆内容无效。");
     }
     const configuration = await this.getMemoryConfiguration(cwd);
@@ -202,6 +182,13 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     writeMemory(configuration.global.filePath, input.globalContent);
     if (configuration.project && input.projectContent !== undefined) {
       writeMemory(configuration.project.filePath, input.projectContent);
+    }
+    // Only paths this store itself listed may be written, so an edit can never
+    // reach outside the memory directory however it was addressed.
+    for (const edit of projectEdits) {
+      const target = configuration.projects.find((document) => document.filePath === edit.filePath);
+      if (!target) throw new Error(`未知的项目记忆：${edit.filePath}`);
+      writeMemory(target.filePath, edit.content);
     }
     this.writeMemorySettings(settings);
     this.reloadActiveSessionResources("记忆设置重新加载失败");

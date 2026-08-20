@@ -2,7 +2,6 @@ import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, ChevronRight, Globe2, L
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   MemoryConfigurationSnapshot,
-  MemoryDocumentSnapshot,
   MemorySettings,
   RuntimeInspectionSnapshot,
 } from "@suocode/runtime-protocol";
@@ -19,8 +18,9 @@ function charCount(value: string): number {
   return Array.from(value).length;
 }
 
-function documentForScope(configuration: MemoryConfigurationSnapshot | undefined, scope: MemoryScope): MemoryDocumentSnapshot | undefined {
-  return scope === "global" ? configuration?.global : configuration?.project;
+/** One editable draft per project memory the store holds, keyed by its file. */
+function draftsFor(configuration: MemoryConfigurationSnapshot): Record<string, string> {
+  return Object.fromEntries(configuration.projects.map((document) => [document.filePath, document.content]));
 }
 
 function statusLabel(inspection?: RuntimeInspectionSnapshot): string {
@@ -51,7 +51,7 @@ export function MemoryWorkspace({
   const [scope, setScope] = useState<MemoryScope>(DEFAULT_MEMORY_SCOPE);
   const [expandedProjectEditors, setExpandedProjectEditors] = useState<Set<string>>(new Set());
   const [globalContent, setGlobalContent] = useState("");
-  const [projectContent, setProjectContent] = useState("");
+  const [projectDrafts, setProjectDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<MemorySettings>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,9 +69,9 @@ export function MemoryWorkspace({
       setConfiguration(next);
       setSettings(next.settings);
       setGlobalContent(next.global.content);
-      setProjectContent(next.project?.content ?? "");
+      setProjectDrafts(draftsFor(next));
       setInspection(nextInspection);
-      if (!next.project) setScope("global");
+      if (!next.projects.length) setScope("global");
     } catch (caught) {
       if (surfaceError) toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -89,30 +89,32 @@ export function MemoryWorkspace({
     });
   }, [runtimeId]);
 
-  const activeDocument = documentForScope(configuration, scope);
-  const activeContent = scope === "global" ? globalContent : projectContent;
-  const setActiveContent = scope === "global" ? setGlobalContent : setProjectContent;
-  const activeCount = charCount(activeContent);
-  const activeMaxChars = memoryMaxChars(scope, settings, activeDocument);
-  const editorExpanded = memoryEditorExpanded(scope, activeDocument?.filePath, expandedProjectEditors);
+  const globalDocument = configuration?.global;
+  const globalCount = charCount(globalContent);
+  const globalMaxChars = memoryMaxChars("global", settings, globalDocument);
+  const projectDocuments = configuration?.projects ?? [];
+  const projectMaxChars = memoryMaxChars("project", settings, configuration?.project);
   const settingsReady = settings !== undefined;
+  const editedProjects = useMemo(
+    () => projectDocuments.filter((document) => (projectDrafts[document.filePath] ?? "") !== document.content),
+    [projectDocuments, projectDrafts],
+  );
   const dirty = useMemo(() => {
     if (!configuration || !settings) return false;
     return globalContent !== configuration.global.content
-      || projectContent !== (configuration.project?.content ?? "")
+      || editedProjects.length > 0
       || JSON.stringify(settings) !== JSON.stringify(configuration.settings);
-  }, [configuration, globalContent, projectContent, settings]);
+  }, [configuration, editedProjects, globalContent, settings]);
 
   const updateSettings = <K extends keyof MemorySettings>(key: K, value: MemorySettings[K]): void => {
     setSettings((current) => current ? { ...current, [key]: value } : current);
   };
 
-  const toggleProjectEditor = (): void => {
-    if (!activeDocument || scope !== "project") return;
+  const toggleProjectEditor = (filePath: string): void => {
     setExpandedProjectEditors((current) => {
       const next = new Set(current);
-      if (next.has(activeDocument.filePath)) next.delete(activeDocument.filePath);
-      else next.add(activeDocument.filePath);
+      if (next.has(filePath)) next.delete(filePath);
+      else next.add(filePath);
       return next;
     });
   };
@@ -124,12 +126,19 @@ export function MemoryWorkspace({
       const next = await window.suocode.request<MemoryConfigurationSnapshot>({
         type: "save_memory_configuration",
         cwd,
-        input: { settings, globalContent, projectContent },
+        input: {
+          settings,
+          globalContent,
+          projectContents: editedProjects.map((document) => ({
+            filePath: document.filePath,
+            content: projectDrafts[document.filePath] ?? "",
+          })),
+        },
       }, runtimeId);
       setConfiguration(next);
       setSettings(next.settings);
       setGlobalContent(next.global.content);
-      setProjectContent(next.project?.content ?? "");
+      setProjectDrafts(draftsFor(next));
       toastSuccess("记忆设置已保存，后续会话将使用新规则。");
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
@@ -183,26 +192,46 @@ export function MemoryWorkspace({
             </section>
 
             <section className="memory-editor-card">
-              <div className="memory-section-heading"><div><strong>记忆内容</strong><p>全局记忆会注入所有工作区；项目记忆只注入当前工作区。</p></div><div className="memory-scope-tabs">
+              <div className="memory-section-heading"><div><strong>记忆内容</strong><p>全局记忆注入所有工作区；项目记忆逐项目保存，只有当前工作区的那份会被注入。</p></div><div className="memory-scope-tabs">
                 <button type="button" className={scope === "global" ? "active" : ""} onClick={() => setScope("global")}><Globe2 size={12} />全局</button>
-                <button type="button" className={scope === "project" ? "active" : ""} disabled={!configuration.project} onClick={() => setScope("project")}><BookOpen size={12} />项目</button>
+                <button type="button" className={scope === "project" ? "active" : ""} disabled={!projectDocuments.length} onClick={() => setScope("project")}><BookOpen size={12} />项目（{projectDocuments.length}）</button>
               </div></div>
-              {activeDocument ? <>
-                {scope === "project" ? (
-                  <button className="memory-editor-meta project-toggle" type="button" aria-expanded={editorExpanded} onClick={toggleProjectEditor}>
-                    {editorExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    <span>{activeDocument.label}</span>
-                    <code title={activeDocument.filePath}>{activeDocument.filePath}</code>
-                    <small className={activeCount > activeMaxChars ? "over" : ""}>{activeCount.toLocaleString()} / {activeMaxChars.toLocaleString()} 字</small>
-                  </button>
-                ) : (
-                  <div className="memory-editor-meta"><span>{activeDocument.label}</span><code>{activeDocument.filePath}</code><small className={activeCount > activeMaxChars ? "over" : ""}>{activeCount.toLocaleString()} / {activeMaxChars.toLocaleString()} 字</small></div>
-                )}
-                {editorExpanded ? <>
-                  <textarea className="memory-content-editor" value={activeContent} onChange={(event) => setActiveContent(event.target.value)} spellCheck={false} placeholder={scope === "global" ? "记录跨项目长期偏好、稳定工具约定…" : "记录当前项目的稳定事实、约定和关键决策…"} />
-                  <p className="memory-editor-hint">超过限制不会截断原文，但注入模型时只会取前 {activeMaxChars.toLocaleString()} 个 Unicode 字符。</p>
-                </> : <p className="memory-editor-hint collapsed">点击项目行展开文本编辑框。</p>}
-              </> : <p className="memory-empty">当前没有可编辑的项目记忆。</p>}
+              {scope === "global" && globalDocument ? <>
+                <div className="memory-editor-meta"><span>{globalDocument.label}</span><code>{globalDocument.filePath}</code><small className={globalCount > globalMaxChars ? "over" : ""}>{globalCount.toLocaleString()} / {globalMaxChars.toLocaleString()} 字</small></div>
+                <textarea className="memory-content-editor" value={globalContent} onChange={(event) => setGlobalContent(event.target.value)} spellCheck={false} placeholder="记录跨项目长期偏好、稳定工具约定…" />
+                <p className="memory-editor-hint">超过限制不会截断原文，但注入模型时只会取前 {globalMaxChars.toLocaleString()} 个 Unicode 字符。</p>
+              </> : null}
+              {scope === "project" ? (
+                projectDocuments.length ? projectDocuments.map((document) => {
+                  const draft = projectDrafts[document.filePath] ?? "";
+                  const count = charCount(draft);
+                  const expanded = memoryEditorExpanded("project", document.filePath, expandedProjectEditors);
+                  const current = document.filePath === configuration.project?.filePath;
+                  return (
+                    <div className="memory-project-entry" key={document.filePath}>
+                      <button className="memory-editor-meta project-toggle" type="button" aria-expanded={expanded} onClick={() => toggleProjectEditor(document.filePath)}>
+                        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span>{document.label}</span>
+                        {current ? <em className="memory-project-current">当前</em> : null}
+                        {!document.exists ? <em className="memory-project-empty">未创建</em> : null}
+                        <code title={document.filePath}>{document.filePath}</code>
+                        <small className={count > projectMaxChars ? "over" : ""}>{count.toLocaleString()} / {projectMaxChars.toLocaleString()} 字</small>
+                      </button>
+                      {expanded ? <>
+                        <textarea
+                          className="memory-content-editor"
+                          value={draft}
+                          onChange={(event) => setProjectDrafts((drafts) => ({ ...drafts, [document.filePath]: event.target.value }))}
+                          spellCheck={false}
+                          placeholder="记录该项目的稳定事实、约定和关键决策…"
+                        />
+                        <p className="memory-editor-hint">超过限制不会截断原文，但注入模型时只会取前 {projectMaxChars.toLocaleString()} 个 Unicode 字符。</p>
+                      </> : null}
+                    </div>
+                  );
+                }) : <p className="memory-empty">记忆目录里还没有任何项目记忆。</p>
+              ) : null}
+              {scope === "project" && projectDocuments.length ? <p className="memory-editor-hint collapsed">点击项目行展开对应的文本编辑框。</p> : null}
             </section>
 
             <section className="memory-settings-card">

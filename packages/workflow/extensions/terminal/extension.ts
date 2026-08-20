@@ -18,6 +18,7 @@ import {
   type TerminalParameters,
   type WaitOutcome,
 } from "./types.ts";
+import { createNoticeDispatcher } from "./notify.ts";
 import {
   appendOutput,
   armNotification,
@@ -95,6 +96,30 @@ export default function terminalExtension(pi: ExtensionAPI): void {
   const runToken = createTerminalRunToken();
   pruneTerminalOutput();
   let nextId = 1;
+  // Terminal events reach the Agent through one coalescing dispatcher: every
+  // delivery costs an LLM turn, so a burst of exits must not become a burst of
+  // turns, and an event a tool call already reported must not become a turn at
+  // all.
+  const notices = createNoticeDispatcher({
+    send: (payload, delivery) => {
+      try {
+        pi.sendMessage({
+          customType: "terminal-notification",
+          content: payload.content,
+          display: true,
+          details: payload.details,
+        }, { triggerTurn: true, deliverAs: delivery });
+      } catch {
+        // The owning Agent may shut down while a completion event is emitted.
+      }
+    },
+  });
+  pi.on("agent_start", () => {
+    notices.setAgentRunning(true);
+  });
+  pi.on("agent_settled", () => {
+    notices.setAgentRunning(false);
+  });
 
   const publishTerminalState = (session: ManagedTerminal): void => {
     const snapshot = snapshotOutput(session, Math.max(0, session.outputEnd - DEFAULT_READ_LIMIT), DEFAULT_READ_LIMIT);
@@ -245,17 +270,14 @@ export default function terminalExtension(pi: ExtensionAPI): void {
       else updateTimer ??= setTimeout(emitUpdate, delay);
     };
     session.notifyEvent = (event) => {
-      const tail = outputSince(session, Math.max(0, session.outputEnd - 4_000)).slice(-4_000).trim();
-      try {
-        pi.sendMessage({
-          customType: "terminal-notification",
-          content: `Terminal ${session.id}：${notificationReason(session, event)}${tail ? `\n${tail}` : ""}`,
-          display: true,
-          details: { terminalId: session.id, mode: event.mode, status: session.status },
-        }, { triggerTurn: true, deliverAs: "followUp" });
-      } catch {
-        // The owning Agent may shut down while a completion event is emitted.
-      }
+      notices.enqueue({
+        terminalId: session.id,
+        mode: event.mode,
+        status: session.status,
+        reason: notificationReason(session, event),
+        output: outputSince(session, Math.max(0, session.outputEnd - 4_000)).slice(-4_000),
+        at: Date.now(),
+      });
     };
     sessions.set(id, session);
     emitUpdate();
@@ -392,6 +414,7 @@ export default function terminalExtension(pi: ExtensionAPI): void {
         autoNotifyExit: true,
         onUpdate,
       }, signal, ctx.cwd);
+      if (!isRunning(started.session)) notices.markObserved(started.session.id);
       return toolResult({
         ...serializeSession(started.session),
         ok: started.session.status !== "failed" && started.session.status !== "cleanup_failed",
@@ -455,6 +478,7 @@ export default function terminalExtension(pi: ExtensionAPI): void {
           autoNotifyExit: false,
           onUpdate,
         }, signal, ctx.cwd);
+        if (!isRunning(started.session)) notices.markObserved(started.session.id);
         return toolResult({
           ...serializeSession(started.session),
           wait: started.wait,
@@ -474,6 +498,7 @@ export default function terminalExtension(pi: ExtensionAPI): void {
           : await waitForTerminal(session, cursor, params.waitFor, timeoutMs, signal);
         const snapshot = snapshotOutput(session, cursor, params.limit ?? DEFAULT_READ_LIMIT);
         session.defaultCursor = snapshot.cursor;
+        notices.markObserved(session.id);
         return toolResult({
           ...serializeSession(session),
           wait,
@@ -497,6 +522,7 @@ export default function terminalExtension(pi: ExtensionAPI): void {
       if (params.action === "stop") {
         const cleanup = await stopTerminal(session, params.force ?? false, params.timeoutMs ?? DEFAULT_STOP_TIMEOUT_MS);
         publishTerminalState(session);
+        notices.markObserved(session.id);
         return toolResult({ ...serializeSession(session), cleanup });
       }
       throw new Error(`Unsupported terminal action: ${params.action}`);
@@ -504,6 +530,7 @@ export default function terminalExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
+    notices.dispose();
     for (const session of sessions.values()) {
       clearNotificationTimers(session);
       if (session.hardTimeoutTimer) clearTimeout(session.hardTimeoutTimer);

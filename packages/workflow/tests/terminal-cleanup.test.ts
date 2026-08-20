@@ -40,8 +40,20 @@ function createHarness() {
       await handler({}, ctx);
     }
   };
+  const emit = async (name: string) => {
+    for (const handler of handlers.get(name) ?? []) {
+      await handler({ type: name }, ctx);
+    }
+  };
 
-  return { run, runBash, shutdown, messages, entries, tools };
+  return { run, runBash, shutdown, emit, messages, entries, tools };
+}
+
+async function waitUntil(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 function processRecord(pid: number): string | undefined {
@@ -160,8 +172,9 @@ test("background bash completion wakes the Agent and keeps a readable output fil
     command: "sleep 0.05; printf FINISHED",
     is_background: true,
   });
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  await waitUntil(() => messages.length > 0);
 
+  assert.equal(messages.length, 1, "one background exit costs the Agent one wake-up");
   assert.ok(messages.some((entry) => entry.message.details.mode === "exit"));
   assert.ok(messages.some((entry) => entry.options.triggerTurn === true));
   assert.ok(entries.some((entry) => entry.customType === "suocode-terminal-run"
@@ -184,7 +197,7 @@ test("notify_on_output uses a regular expression without ending the background s
     notify_on_output: "Listening on \\d+",
   });
   terminalId = started.details.background_shell_id;
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitUntil(() => messages.length > 0);
 
   assert.equal(started.details.is_running_in_background, true);
   assert.ok(messages.some((entry) => entry.message.details.mode === "regex"));
@@ -364,22 +377,80 @@ test("await waits for exit without polling", async (context) => {
   assert.match(result.details.output, /DONE/);
 });
 
-test("notifyOn exit sends a follow-up event", async (context) => {
+test("notifyOn exit sends a follow-up event once the shell outlives its tool call", async (context) => {
   const { run, shutdown, messages } = createHarness();
   context.after(shutdown);
 
-  await run({
+  const started = await run({
     action: "start",
-    command: "sleep 0.05; printf FINISHED",
+    command: "sleep 0.2; printf FINISHED",
     notifyOn: "exit",
-    timeoutMs: 1_000,
+    timeoutMs: 10,
   });
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(started.details.status, "running");
+  await waitUntil(() => messages.length > 0);
 
   assert.equal(messages.length, 1);
   assert.equal(messages[0].message.customType, "terminal-notification");
   assert.equal(messages[0].options.triggerTurn, true);
+  assert.equal(messages[0].options.deliverAs, "followUp");
   assert.match(messages[0].message.content, /已退出/);
+  assert.match(messages[0].message.content, /FINISHED/);
+});
+
+test("an exit the Agent already awaited does not wake it again", async (context) => {
+  const { run, runBash, shutdown, messages } = createHarness();
+  context.after(shutdown);
+
+  const started = await runBash({ command: "sleep 0.15; printf FINISHED", is_background: true });
+  const awaited = await run({
+    action: "await",
+    id: started.details.background_shell_id,
+    timeoutMs: 2_000,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
+  assert.equal(awaited.details.wait, "exit");
+  assert.match(awaited.details.output, /FINISHED/);
+  assert.equal(messages.length, 0, "the await result already carries the exit");
+});
+
+test("exits during a run are held until it settles and then wake one turn", async (context) => {
+  const { run, runBash, shutdown, emit, messages } = createHarness();
+  context.after(shutdown);
+
+  await emit("agent_start");
+  const started = await Promise.all([
+    runBash({ command: "sleep 0.05; printf ONE", is_background: true }),
+    runBash({ command: "sleep 0.05; printf TWO", is_background: true }),
+    runBash({ command: "sleep 0.05; printf THREE", is_background: true }),
+  ]);
+  const ids = started.map((shell) => shell.details.background_shell_id);
+  const exited = async (): Promise<boolean> => {
+    const listed = await run({ action: "list" });
+    return listed.details.sessions
+      .filter((session: any) => ids.includes(session.id))
+      .every((session: any) => session.status !== "running");
+  };
+  const deadline = Date.now() + 5_000;
+  while (!(await exited()) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(await exited(), "all three background shells finished");
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(messages.length, 0, "a working Agent reads its own terminals");
+
+  await emit("agent_settled");
+  await waitUntil(() => messages.length > 0);
+
+  assert.equal(messages.length, 1, "three exits cost one turn, not three");
+  const [message] = messages;
+  assert.equal(message.options.deliverAs, "followUp");
+  assert.equal(message.message.details.count, 3);
+  assert.match(message.message.content, /^3 个终端有新的事件：/);
+  for (const shell of started) {
+    assert.match(message.message.content, new RegExp(shell.details.background_shell_id));
+  }
 });
 
 test("secret references inject into the child and redact output", async (context) => {

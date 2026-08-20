@@ -153,6 +153,51 @@ export function convertResponsesMessages<TApi extends Api>(
 		return normalized.length > 64 ? normalized.slice(0, 64) : normalized;
 	};
 
+	// Some OpenAI-compatible chat providers number their tool calls per response
+	// (`call_0`, `call_1`, … restarting on every assistant turn), so a history
+	// replayed from one of them carries the same call id in turn after turn. The
+	// Responses API validates call ids across the whole input and rejects the
+	// request ("duplicate call_id ... already used at input[N]"), which leaves
+	// every later turn of that session unsendable. Rename the repeats and point
+	// the matching output at the renamed call.
+	const usedCallIds = new Set<string>();
+	const openCallIds = new Map<string, string>();
+
+	const appendCallIdOccurrence = (callId: string, occurrence: number): string => {
+		const suffix = `_${occurrence}`;
+		const base = callId.length + suffix.length > 64 ? callId.slice(0, 64 - suffix.length) : callId;
+		return `${base}${suffix}`;
+	};
+
+	/** Reserve the call id an assistant tool call replays under. */
+	const claimCallId = (rawToolCallId: string): { callId: string; renamed: boolean } => {
+		const [callId] = rawToolCallId.split("|");
+		if (!usedCallIds.has(callId)) {
+			usedCallIds.add(callId);
+			openCallIds.set(rawToolCallId, callId);
+			return { callId, renamed: false };
+		}
+		let occurrence = 2;
+		let candidate = appendCallIdOccurrence(callId, occurrence);
+		while (usedCallIds.has(candidate)) {
+			occurrence++;
+			candidate = appendCallIdOccurrence(callId, occurrence);
+		}
+		usedCallIds.add(candidate);
+		openCallIds.set(rawToolCallId, candidate);
+		return { callId: candidate, renamed: true };
+	};
+
+	/**
+	 * The call id a tool result belongs to.
+	 *
+	 * Keyed on the stored id rather than the call id alone: providers that repeat
+	 * `call_0` reuse the whole id, while Responses histories can share one call id
+	 * across several items (`call_x|fc_1`, `call_x|fc_2`) and must stay separate.
+	 */
+	const resolveCallId = (rawToolCallId: string): string =>
+		openCallIds.get(rawToolCallId) ?? rawToolCallId.split("|")[0];
+
 	const normalizeToolCallId = (id: string, _targetModel: Model<TApi>, source: AssistantMessage): string => {
 		if (!allowedToolCallProviders.has(model.provider)) return normalizeIdPart(id);
 		if (!id.includes("|")) return normalizeIdPart(id);
@@ -245,7 +290,8 @@ export function convertResponsesMessages<TApi extends Api>(
 					} satisfies ResponseOutputMessage);
 				} else if (block.type === "toolCall") {
 					const toolCall = block as ToolCall;
-					const [callId, itemIdRaw] = toolCall.id.split("|");
+					const [, itemIdRaw] = toolCall.id.split("|");
+					const { callId, renamed } = claimCallId(toolCall.id);
 					const customInputProperty = options?.grammarToolInputProperties?.get(toolCall.name);
 					let itemId: string | undefined = itemIdRaw;
 
@@ -254,7 +300,10 @@ export function convertResponsesMessages<TApi extends Api>(
 					// By omitting the id, we avoid triggering that validation (like cross-provider does).
 					// When replaying custom-tool calls as a function_call, also drop non-fc_* ids such as
 					// ctc_* custom-tool ids because function_call item ids must be fc_*.
+					// A renamed call keeps no claim on the original item id either: whatever repeated the
+					// call id repeated the item id with it, and duplicate item ids are rejected too.
 					if (
+						renamed ||
 						(isDifferentModel && itemId?.startsWith("fc_")) ||
 						(customInputProperty === undefined && !itemId?.startsWith("fc_"))
 					) {
@@ -285,7 +334,7 @@ export function convertResponsesMessages<TApi extends Api>(
 			if (output.length === 0) continue;
 			messages.push(...output);
 		} else if (msg.role === "toolResult") {
-			const [callId] = msg.toolCallId.split("|");
+			const callId = resolveCallId(msg.toolCallId);
 			const output = convertToolResultOutput(model, msg.content);
 
 			if (options?.grammarToolInputProperties?.has(msg.toolName)) {

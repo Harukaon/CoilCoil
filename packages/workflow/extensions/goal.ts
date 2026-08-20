@@ -94,6 +94,22 @@ export function parseGoalCommand(args: string): GoalCommand {
   return { kind: "start", goal: text };
 }
 
+/**
+ * The loop the session is in, as reported to the runtime and the app.
+ *
+ * A loop that completed or was stopped is over: it leaves the runtime snapshot
+ * instead of lingering there as a finished status, so no consumer has to decide
+ * whether a goal is worth showing. What happened is already in the timeline —
+ * the `goal_complete` result, or the notice `/goal stop` prints.
+ *
+ * The extension keeps its own record of the ended loop, because `/goal` resumes
+ * a stopped one and `/goal status` answers from it.
+ */
+export function reportedGoalState(state?: GoalState): GoalState | undefined {
+  if (!state) return undefined;
+  return state.status === "running" || state.status === "paused" ? state : undefined;
+}
+
 export function restoredGoalState(entries: readonly unknown[]): GoalState | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
@@ -155,7 +171,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
   let roundSentAt: number | undefined;
   let lastTurnFailed = false;
 
-  const publish = (): void => pi.events.emit(GOAL_STATE_CHANNEL, state ? { ...state } : null);
+  const publish = (): void => {
+    const reported = reportedGoalState(state);
+    pi.events.emit(GOAL_STATE_CHANNEL, reported ? { ...reported } : null);
+  };
 
   const persist = (): void => {
     if (!state) return;

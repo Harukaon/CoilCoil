@@ -37,15 +37,18 @@ function fakeClock(): QuipTimers & { advance(ms: number): void; pending(): numbe
   };
 }
 
-test("the plain phase always leads, and reads exactly as before without a quip", () => {
-  // A short run never reaches a quip, so its status must stay the sober one.
+test("the phase holds the line until a quip takes it over", () => {
+  // A short run never reaches a quip, so its status stays the sober one.
   assert.equal(agentActivityLine("思考"), "思考中…");
   assert.equal(agentActivityLine("回复"), "组织回答中…");
   assert.equal(agentActivityLine("工具"), "动手处理中…");
   assert.equal(agentActivityLine(undefined), "工作中…");
 
-  assert.equal(agentActivityLine("工具", "先备份，再动手"), "动手处理中 · 先备份，再动手");
-  assert.equal(agentActivityLine(undefined, "这次一定"), "工作中 · 这次一定");
+  // Once a quip arrives it replaces the phase instead of trailing behind it:
+  // the two are peers, and a "phase ·" prefix is exactly what we do not want.
+  assert.equal(agentActivityLine("工具", "先备份，再动手"), "先备份，再动手");
+  assert.equal(agentActivityLine(undefined, "这次一定"), "这次一定");
+  assert.doesNotMatch(agentActivityLine("思考", "这次一定"), /·|思考中/);
 });
 
 test("a quip is company for a wait, not a flash", () => {
@@ -55,7 +58,7 @@ test("a quip is company for a wait, not a flash", () => {
   assert.ok(QUIP_INTERVAL_MS >= 5_000, "a quip has to stay long enough to read");
 });
 
-test("every quip is short enough to sit after the phase word", () => {
+test("every quip is short enough to hold the status row alone", () => {
   const longest = [...AGENT_QUIPS].sort((left, right) => right.length - left.length)[0]!;
   assert.ok(longest.length <= 22, `"${longest}" is too long for the status row`);
   assert.equal(new Set(AGENT_QUIPS).size, AGENT_QUIPS.length, "duplicate quips waste the bag");
@@ -131,3 +134,4 @@ test("a run that ends during the delay cancels the pending first quip", () => {
   assert.deepEqual(shown, []);
   assert.equal(clock.pending(), 0);
 });
+

@@ -8,7 +8,7 @@ import type {
   RuntimeConfiguration,
   SessionSnapshot,
 } from "@suocode/runtime-protocol";
-import { insertPathAtCaret, SUOCODE_PATH_TYPE } from "./pathInsert";
+import { carriesPaths, droppedPaths, insertPathsAtCaret } from "./pathInsert";
 import { imageDataUrl } from "./promptImages";
 import { ModelPicker } from "./ModelPicker";
 
@@ -123,7 +123,7 @@ export function ConversationComposer({
   }, [autoFocus, inputRef]);
 
   const handlePathDragOver = (event: ReactDragEvent<HTMLElement>): void => {
-    if (!event.dataTransfer.types.includes(SUOCODE_PATH_TYPE)) return;
+    if (!carriesPaths(event.dataTransfer)) return;
     event.preventDefault();
     // Do not stopPropagation on enter/over — that made the pane think the drag left,
     // flashing the drop mask off while hovering an inline composer / user message.
@@ -131,18 +131,17 @@ export function ConversationComposer({
   };
 
   const handlePathDrop = (event: ReactDragEvent<HTMLElement>): void => {
-    const serialized = event.dataTransfer.getData(SUOCODE_PATH_TYPE);
-    if (!serialized) return;
+    if (!carriesPaths(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     try {
-      const dropped = JSON.parse(serialized) as { path?: string };
-      if (!dropped.path) return;
+      const paths = droppedPaths(event.dataTransfer);
+      if (!paths.length) return;
       const textarea = inputRef.current;
       const value = draftRef.current;
       const start = textarea?.selectionStart ?? value.length;
       const end = textarea?.selectionEnd ?? start;
-      const result = insertPathAtCaret(value, dropped.path, start, end);
+      const result = insertPathsAtCaret(value, paths, start, end);
       onDraftChange(result.value);
       requestAnimationFrame(() => {
         inputRef.current?.focus();

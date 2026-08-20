@@ -47,6 +47,7 @@ import {
   FastRuntimeState,
   RuntimeBridgeState,
   fastRuntimeState,
+  endedGoalPayload,
   goalState,
   hydrateProjectMemoryStatus,
   mergeWorkspaceMemoryStatus,
@@ -297,8 +298,11 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       else if (next.state === "failed") this.emitEvent({ type: "runtime_notice", level: "error", message: next.error || "项目记忆整理失败" });
     });
     eventBus.on(GOAL_STATE_CHANNEL, (value) => {
+      // The channel carries the loop the session is in, and null once it ends.
+      // An explicit finished status says the same thing; anything else we cannot
+      // read is junk, and junk must not wipe a loop that is still running.
       const next = goalState(value);
-      if (value !== null && value !== undefined && !next) return;
+      if (!next && value !== null && value !== undefined && !endedGoalPayload(value)) return;
       pendingGoal = next;
       if (!installedActive) return;
       installedActive.goal = next;

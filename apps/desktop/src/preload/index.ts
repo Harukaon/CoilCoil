@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { RuntimeCommand, RuntimeEvent } from "@suocode/runtime-protocol";
 import type { FileNode } from "@suocode/runtime-protocol";
 import type {
@@ -29,6 +29,8 @@ const PATH_CLASSIFY_CHANNEL = "path:classify";
 const PATH_REVEAL_CHANNEL = "path:reveal";
 const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
+const WINDOW_GROW_WIDTH_CHANNEL = "window:grow-width";
+const WINDOW_BACKGROUND_CHANNEL = "window:background";
 const EXTERNAL_OPEN_CHANNEL = "external:open";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
@@ -80,6 +82,12 @@ const api: SuoCodeDesktopApi = {
     ipcRenderer.invoke(PICK_DIRECTORY_CHANNEL, options) as Promise<string | null>,
   setWindowMinimumWidth: (width: number) =>
     ipcRenderer.invoke(WINDOW_MINIMUM_WIDTH_CHANNEL, width) as Promise<void>,
+  growWindowWidth: (byPixels: number) =>
+    ipcRenderer.invoke(WINDOW_GROW_WIDTH_CHANNEL, byPixels) as Promise<void>,
+  setWindowBackground: (color: string) =>
+    ipcRenderer.invoke(WINDOW_BACKGROUND_CHANNEL, color) as Promise<void>,
+  // Electron 32 起渲染进程拿不到 File.path，外部拖入文件的真实路径只能在这里解析。
+  filePath: (file: File) => webUtils.getPathForFile(file),
   openExternal: (url: string) =>
     ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url) as Promise<void>,
   classifyPaths: (paths: string[]) =>

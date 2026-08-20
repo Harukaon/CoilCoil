@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoFollowAfterScroll } from "../src/renderer/src/hooks/useConversationViewport.ts";
+import { autoFollowAfterScroll, gestureLeavesBottom } from "../src/renderer/src/hooks/useConversationViewport.ts";
 
 test("reaching the bottom always resumes following the newest message", () => {
   assert.equal(autoFollowAfterScroll({ distanceFromBottom: 0, msSinceGesture: 10_000, following: false }), true);
@@ -18,26 +18,35 @@ test("a scroll nobody asked for leaves following alone", () => {
   assert.equal(autoFollowAfterScroll({ distanceFromBottom: 4_000, msSinceGesture: 5_000, following: false }), false);
 });
 
-test("the app's own pin-to-bottom never re-arms following", () => {
-  // While a reply streams, pinToBottom runs on every delta and lands the
-  // viewport at the bottom. Reading that landing as "the reader is at the
-  // bottom" turned a scroll-up back into follow mode a frame later.
-  assert.equal(autoFollowAfterScroll({
-    distanceFromBottom: 0,
-    msSinceGesture: 5_000,
-    following: false,
-    programmatic: true,
-  }), false);
-  assert.equal(autoFollowAfterScroll({
-    distanceFromBottom: 0,
-    msSinceGesture: 10,
-    following: true,
-    programmatic: true,
-  }), true);
-});
-
 test("the reader's own scroll still follows at one pixel from the bottom", () => {
   const reader = { msSinceGesture: 10, following: false };
   assert.equal(autoFollowAfterScroll({ ...reader, distanceFromBottom: 1 }), true);
   assert.equal(autoFollowAfterScroll({ ...reader, distanceFromBottom: 2 }), false);
+});
+
+test("a wheel away from the newest message stops the follow on its own", () => {
+  // While a reply streams the wheel and pin-to-bottom coalesce into one scroll
+  // event that reads as "still at the bottom", so the gesture has to speak.
+  assert.equal(gestureLeavesBottom({ type: "wheel", deltaY: -120 } as WheelEvent), true);
+  assert.equal(gestureLeavesBottom({ type: "wheel", deltaY: 120 } as WheelEvent), false);
+  assert.equal(gestureLeavesBottom({ type: "wheel", deltaY: 0 } as WheelEvent), false);
+});
+
+test("keys that page backwards stop the follow, typing does not", () => {
+  assert.equal(gestureLeavesBottom({ type: "keydown", key: "PageUp" } as KeyboardEvent), true);
+  assert.equal(gestureLeavesBottom({ type: "keydown", key: "Home" } as KeyboardEvent), true);
+  assert.equal(gestureLeavesBottom({ type: "keydown", key: "PageDown" } as KeyboardEvent), false);
+  assert.equal(gestureLeavesBottom({ type: "keydown", key: "a" } as KeyboardEvent), false);
+});
+
+test("a finger dragged down pulls earlier messages in and stops the follow", () => {
+  const touchAt = (clientY: number): TouchEvent => ({ type: "touchmove", touches: [{ clientY }] } as unknown as TouchEvent);
+  assert.equal(gestureLeavesBottom(touchAt(300), 200), true);
+  assert.equal(gestureLeavesBottom(touchAt(100), 200), false);
+  // The first move of a gesture has nothing to compare against.
+  assert.equal(gestureLeavesBottom(touchAt(300), undefined), false);
+});
+
+test("a pointer press is a gesture but not a departure", () => {
+  assert.equal(gestureLeavesBottom({ type: "pointerdown" } as PointerEvent), false);
 });

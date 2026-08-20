@@ -112,7 +112,7 @@ export default function App(): React.JSX.Element {
     setModelMenuOpen,
     reset: resetComposer,
     focus: focusComposer,
-    insertPath: insertComposerPath,
+    insertPaths: insertComposerPaths,
   } = composer;
   const timelineRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -126,7 +126,7 @@ export default function App(): React.JSX.Element {
     inspector.openBrowserTab();
   }), [inspector.openBrowserTab]);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
-    onInsertPath: insertComposerPath,
+    onInsertPaths: insertComposerPaths,
     onError: (message) => { if (message) toastError(message); },
   });
 

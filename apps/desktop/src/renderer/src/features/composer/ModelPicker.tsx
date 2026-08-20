@@ -128,11 +128,11 @@ export function ModelPicker({
               <Popover.Root open={modelsOpen} onOpenChange={setModelsOpen}>
                 <Popover.Trigger asChild>
                   <button className="model-submenu-trigger" type="button">
-                    <span><strong>模型</strong><small>{currentModel?.name ?? "选择模型"}</small></span><ChevronRight size={14} />
+                    <span><strong>{currentModel?.name ?? "选择模型"}</strong><small>模型</small></span><ChevronRight size={14} />
                   </button>
                 </Popover.Trigger>
                 <Popover.Portal>
-                  <Popover.Content className="model-popover model-selection-popover model-submenu" side="left" align="end" sideOffset={7} collisionPadding={12} avoidCollisions>
+                  <Popover.Content className="model-popover model-selection-popover model-submenu" side="right" align="end" sideOffset={7} collisionPadding={12} avoidCollisions>
                     {modelList}
                   </Popover.Content>
                 </Popover.Portal>

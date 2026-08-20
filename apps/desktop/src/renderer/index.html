@@ -13,6 +13,40 @@
     </style>
   </head>
   <body>
+    <!-- The loaders' gooey filters. One set of filter ids has to serve every
+         loader on the page, and the shell is the one place always mounted.
+         Each colour matrix leaves RGB alone and only steepens alpha, which is
+         what merges the blobs; the ink keeps whatever colour the element carries,
+         so a loader takes the colour of the text around it in every theme.
+         The ink filters state their own region: the default is the element box
+         plus 10%, far narrower than a 12px blur on a 48px-tall box reaches, and
+         it cuts the stroke off into straight edges. The other three blur less
+         relative to their box, and widening them would only surface the faint
+         far field the original design leaves clipped. -->
+    <svg style="position: absolute; width: 0; height: 0" aria-hidden="true" focusable="false">
+      <filter id="suo-goo-ink" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="12"></feGaussianBlur>
+        <feColorMatrix values="1 0 0 0 0
+                               0 1 0 0 0
+                               0 0 1 0 0
+                               0 0 0 48 -7"></feColorMatrix>
+      </filter>
+      <filter id="suo-goo-blobs">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"></feGaussianBlur>
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo"></feColorMatrix>
+        <feBlend in="SourceGraphic" in2="goo"></feBlend>
+      </filter>
+      <filter id="suo-goo-jelly">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="6.25" result="blur"></feGaussianBlur>
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="ooze"></feColorMatrix>
+        <feBlend in="SourceGraphic" in2="ooze"></feBlend>
+      </filter>
+      <filter id="suo-goo-jelly-triangle">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="7.3" result="blur"></feGaussianBlur>
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="ooze"></feColorMatrix>
+        <feBlend in="SourceGraphic" in2="ooze"></feBlend>
+      </filter>
+    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

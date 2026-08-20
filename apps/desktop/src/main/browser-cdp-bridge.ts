@@ -2,7 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server as HttpServer } from "node:http";
 import type { Event, WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
-import { isDirectPageTargetInfoRequest, routePageCommand } from "./browser-cdp-commands";
+import { isDirectPageTargetInfoRequest, isTabActivationCommand, routePageCommand } from "./browser-cdp-commands";
 import { normalizeBrowserUrl } from "./browser-navigation";
 import {
   BROWSER_TARGET_ID,
@@ -263,6 +263,10 @@ export class BrowserCdpBridge {
       if (isDirectPageTargetInfoRequest(request.method, params, tab.pageTargetId)) {
         return { targetInfo: browserTargetInfo(tab, "page") };
       }
+    }
+    if (isTabActivationCommand(request.method)) {
+      this.host.selectTab(tab.id, tab.scopeId);
+      return {};
     }
     if (request.method === "Browser.close") return {};
     if (request.method === "Browser.getWindowForTarget") return this.host.windowForTab(tab);

@@ -1,10 +1,11 @@
 export type AgentPhase = "思考" | "回复" | "工具";
 
 /**
- * The plain half of the status line.
+ * What a short wait shows.
  *
- * It always leads, because it is the only part that reports anything true
- * about the run. The quip that follows is company for a wait, not a status.
+ * The phase and a quip are peers on this line, not a prefix and a tail: a run
+ * starts out reporting its phase, and once the wait is long enough for a quip
+ * the quip takes the line over.
  */
 const PHASE_COPY: Record<AgentPhase, string> = {
   思考: "思考中",
@@ -25,8 +26,8 @@ export const QUIP_INTERVAL_MS = 6_500;
  *
  * Kept deliberately mixed — folklore, advice that is actually worth taking, and
  * plain silliness — because the same three lines arriving every time a run gets
- * long is worse than no lines at all. Each one is short enough to sit after the
- * phase word without wrapping the status row.
+ * long is worse than no lines at all. Each one is short enough to hold the
+ * status row on its own without wrapping.
  */
 export const AGENT_QUIPS = [
   // 行业老梗
@@ -181,8 +182,8 @@ export function startQuipRotation(
   };
 }
 
-/** Join the two halves. Without a quip the line reads exactly as it always has. */
+/** The line to show: a quip once there is one, the phase until then. */
 export function agentActivityLine(phase: AgentPhase | undefined, quip?: string): string {
-  const head = phase ? PHASE_COPY[phase] : PHASE_FALLBACK;
-  return quip ? `${head} · ${quip}` : `${head}…`;
+  if (quip) return quip;
+  return `${phase ? PHASE_COPY[phase] : PHASE_FALLBACK}…`;
 }

@@ -159,9 +159,14 @@ export function fastRuntimeState(value: unknown): FastRuntimeState | undefined {
   };
 }
 
+/** True when the payload says the loop is over, which means the session has no goal. */
+export function endedGoalPayload(value: unknown): boolean {
+  return isRecord(value) && (value.status === "completed" || value.status === "stopped");
+}
+
 export function goalState(value: unknown): GoalState | undefined {
   if (!isRecord(value)) return undefined;
-  const statuses = new Set<GoalState["status"]>(["running", "paused", "completed", "stopped"]);
+  const statuses = new Set<GoalState["status"]>(["running", "paused"]);
   if (!statuses.has(value.status as GoalState["status"])) return undefined;
   const goal = optionalString(value, "goal");
   if (!goal) return undefined;

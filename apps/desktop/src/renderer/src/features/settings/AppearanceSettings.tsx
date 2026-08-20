@@ -1,28 +1,53 @@
 import { Check } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import { applyTheme, storedThemeId, THEMES, type ThemeDefinition } from "../../theme";
+import {
+  applyDarkTone,
+  applyLightTone,
+  applySurfaceStyle,
+  applyTheme,
+  DARK_TONES,
+  LIGHT_TONES,
+  resolveThemeMode,
+  storedDarkTone,
+  storedLightTone,
+  storedSurfaceStyle,
+  storedThemeMode,
+  SURFACE_STYLES,
+  THEME_MODES,
+  type DarkTone,
+  type LightTone,
+  type ResolvedTheme,
+  type SurfaceStyle,
+  type ThemeMode,
+  type ToneDefinition,
+} from "../../theme";
 
-/** 与 styles.css 的明度映射保持一致：暗色主题按 97% - 0.94 * L 翻转。 */
-function themeLightness(theme: ThemeDefinition, lightness: number): number {
-  return theme.dark ? 97 - 0.94 * lightness : lightness;
-}
+type AnyTone = ToneDefinition<LightTone | DarkTone>;
 
-function themeColor(theme: ThemeDefinition, lightness: number): string {
-  return `hsl(${theme.hue} ${theme.saturation} ${themeLightness(theme, lightness).toFixed(1)}%)`;
-}
-
-function ThemePreview({ theme }: { theme: ThemeDefinition }): React.JSX.Element {
-  const style = {
-    "--preview-shell": themeColor(theme, 96.9),
-    "--preview-side": themeColor(theme, 92),
-    "--preview-card": themeColor(theme, 100),
-    "--preview-border": themeColor(theme, 87),
-    "--preview-text": themeColor(theme, 13.7),
-    "--preview-muted": themeColor(theme, 56),
+/**
+ * 预览色块。取值来自同一份色调定义，所以没被选中的那张卡片也显示它自己的真实
+ * 配色，而不是当前生效的那套。
+ */
+function previewStyle(tone: AnyTone, surface: SurfaceStyle): CSSProperties {
+  const { hue, saturation, chrome, content, raised, border, muted, text } = tone.swatch;
+  const paint = (lightness: number): string => `hsl(${hue} ${saturation}% ${lightness}%)`;
+  const fills = surface === "layered"
+    ? { side: chrome, pane: content, composer: raised }
+    : { side: content, pane: content, composer: content };
+  return {
+    "--preview-shell": paint(fills.pane),
+    "--preview-side": paint(fills.side),
+    "--preview-card": paint(fills.composer),
+    "--preview-border": paint(border),
+    "--preview-text": paint(text),
+    "--preview-muted": paint(muted),
   } as CSSProperties;
+}
+
+function ThemePreview({ tone, surface }: { tone: AnyTone; surface: SurfaceStyle }): React.JSX.Element {
   return (
-    <span aria-hidden className="theme-preview" style={style}>
+    <span aria-hidden className="theme-preview" style={previewStyle(tone, surface)}>
       <span className="theme-preview-side" />
       <span className="theme-preview-main">
         <span className="theme-preview-line wide" />
@@ -33,35 +58,109 @@ function ThemePreview({ theme }: { theme: ThemeDefinition }): React.JSX.Element 
   );
 }
 
-export function AppearanceSettings(): React.JSX.Element {
-  const [activeId, setActiveId] = useState(storedThemeId);
+function ToneGrid<Id extends string>({ label, tones, active, surface, onPick }: {
+  label: string;
+  tones: readonly ToneDefinition<Id>[];
+  active: Id;
+  surface: SurfaceStyle;
+  onPick: (id: Id) => void;
+}): React.JSX.Element {
+  return (
+    <div className="theme-grid" role="radiogroup" aria-label={label}>
+      {tones.map((tone) => (
+        <button
+          key={tone.id}
+          className={`theme-card${tone.id === active ? " active" : ""}`}
+          type="button"
+          role="radio"
+          aria-checked={tone.id === active}
+          onClick={() => onPick(tone.id)}
+        >
+          <ThemePreview tone={tone as AnyTone} surface={surface} />
+          <span className="theme-card-copy">
+            <strong>{tone.name}{tone.id === active ? <Check size={12} /> : null}</strong>
+            <small>{tone.description}</small>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
-  const select = (theme: ThemeDefinition): void => {
-    applyTheme(theme.id);
-    setActiveId(theme.id);
-  };
+export function AppearanceSettings(): React.JSX.Element {
+  const [mode, setMode] = useState<ThemeMode>(storedThemeMode);
+  const [surface, setSurface] = useState<SurfaceStyle>(storedSurfaceStyle);
+  const [lightToneId, setLightToneId] = useState<LightTone>(storedLightTone);
+  const [darkToneId, setDarkToneId] = useState<DarkTone>(storedDarkTone);
+
+  const lightTone = LIGHT_TONES.find((tone) => tone.id === lightToneId) ?? LIGHT_TONES[0];
+  const darkTone = DARK_TONES.find((tone) => tone.id === darkToneId) ?? DARK_TONES[0];
+  // 明暗与层次的预览按此刻实际生效的那一套色调画。
+  const activeTone = (resolveThemeMode(mode) === "dark" ? darkTone : lightTone) as AnyTone;
+  const previewFor = (theme: ResolvedTheme): AnyTone => (theme === "dark" ? darkTone : lightTone) as AnyTone;
 
   return (
     <div className="appearance-settings">
-      <p className="appearance-hint">选择一个全局色调，立即生效并自动记住。彩色状态提示（成功 / 警告 / 错误）在所有主题下保持一致。</p>
-      <div className="theme-grid" role="radiogroup" aria-label="主题">
-        {THEMES.map((theme) => (
-          <button
-            key={theme.id}
-            className={`theme-card${theme.id === activeId ? " active" : ""}`}
-            type="button"
-            role="radio"
-            aria-checked={theme.id === activeId}
-            onClick={() => select(theme)}
-          >
-            <ThemePreview theme={theme} />
-            <span className="theme-card-copy">
-              <strong>{theme.name}{theme.id === activeId ? <Check size={12} /> : null}</strong>
-              <small>{theme.description}</small>
-            </span>
-          </button>
-        ))}
-      </div>
+      <section className="appearance-section">
+        <h3>明暗</h3>
+        <p className="appearance-hint">浅色与暗色各自独立取色，暗色不是把浅色反相。</p>
+        <div className="theme-grid" role="radiogroup" aria-label="明暗">
+          {THEME_MODES.map((option) => (
+            <button
+              key={option.id}
+              className={`theme-card${option.id === mode ? " active" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={option.id === mode}
+              onClick={() => { applyTheme(option.id); setMode(option.id); }}
+            >
+              {/* 「跟随系统」展示此刻系统实际会给出的那一套。 */}
+              <ThemePreview tone={previewFor(resolveThemeMode(option.id))} surface={surface} />
+              <span className="theme-card-copy">
+                <strong>{option.name}{option.id === mode ? <Check size={12} /> : null}</strong>
+                <small>{option.description}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="appearance-section">
+        <h3>浅色色调</h3>
+        <p className="appearance-hint">只影响浅色。暖纸是 SuoCode 原本的取色，其余三档分别拟合自 VS Code Light Modern、GitHub Light、Catppuccin Latte。</p>
+        <ToneGrid label="浅色色调" tones={LIGHT_TONES} active={lightToneId} surface={surface}
+          onPick={(id) => { applyLightTone(id); setLightToneId(id); }} />
+      </section>
+
+      <section className="appearance-section">
+        <h3>暗色色调</h3>
+        <p className="appearance-hint">只影响暗色。分别拟合自 VS Code Dark Modern、Tokyo Night、Catppuccin Mocha，外加 SuoCode 自己的暖中性。</p>
+        <ToneGrid label="暗色色调" tones={DARK_TONES} active={darkToneId} surface={surface}
+          onPick={(id) => { applyDarkTone(id); setDarkToneId(id); }} />
+      </section>
+
+      <section className="appearance-section">
+        <h3>界面层次</h3>
+        <p className="appearance-hint">侧栏与会话区是同一个底色，还是两个有深浅区分的表面。与明暗、色调都互不影响。</p>
+        <div className="theme-grid" role="radiogroup" aria-label="界面层次">
+          {SURFACE_STYLES.map((option) => (
+            <button
+              key={option.id}
+              className={`theme-card${option.id === surface ? " active" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={option.id === surface}
+              onClick={() => { applySurfaceStyle(option.id); setSurface(option.id); }}
+            >
+              <ThemePreview tone={activeTone} surface={option.id} />
+              <span className="theme-card-copy">
+                <strong>{option.name}{option.id === surface ? <Check size={12} /> : null}</strong>
+                <small>{option.description}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

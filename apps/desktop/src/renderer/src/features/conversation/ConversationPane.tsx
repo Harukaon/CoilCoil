@@ -20,11 +20,12 @@ import type {
 } from "@suocode/runtime-protocol";
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
 import { ActivityPanel } from "../activity/ActivityPanel";
-import { GoalBanner } from "./GoalBanner";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { SuoLoader } from "../../ui/SuoLoader";
+import { BlobsLoader } from "../../ui/loaders";
+import { SuoLogo } from "../../ui/SuoLogo";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
@@ -169,7 +170,7 @@ export function ConversationPane({
     onDraftChange,
     onOpenSettings,
   });
-  const hasComposerActivity = projectState.plan.length > 0 || subagents.length > 0 || queuedPrompts.length > 0 || slashMenu.slashActive;
+  const hasComposerActivity = projectState.plan.length > 0 || subagents.length > 0 || queuedPrompts.length > 0 || slashMenu.slashActive || snapshot?.goal !== undefined;
 
   useEffect(() => {
     setEditingMessageId(undefined);
@@ -293,7 +294,7 @@ export function ConversationPane({
 
       <div className="conversation-scroll">
         <div className="conversation-body" ref={timelineRef} onScroll={handleBodyScroll}>
-          {loading ? <div className="loading-state"><SuoLoader size={20} /><span>正在打开工作区…</span></div> : timeline.length || running || startingSession ? (
+          {loading ? <div className="loading-state loading-state-stacked"><BlobsLoader size={64} /><span>正在打开工作区…</span></div> : timeline.length || running || startingSession ? (
             <div className="timeline">
               {showLoadEarlier && hasEarlierTimeline ? (
                 <div className="timeline-history-loader">
@@ -331,10 +332,10 @@ export function ConversationPane({
                   renderPlan={(plan) => <PlanApprovalCard plan={plan} onApprove={onApprovePlan} onReject={onRejectPlan} />}
                 />
               ))}
-              {running ? <div className="agent-activity"><SuoLoader size={14} /><span>{activityLine}</span></div> : null}
+              {running ? <div className="agent-activity"><SuoLoader size={6} /><span className="agent-activity-line">{activityLine}</span></div> : null}
             </div>
           ) : (
-            <div className="empty-chat"><div className="empty-chat-mark">S</div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
+            <div className="empty-chat"><div className="empty-chat-mark"><SuoLogo size={40} /></div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
           )}
         </div>
         {showScrollDown ? (
@@ -350,8 +351,8 @@ export function ConversationPane({
         <div className="composer-width-resizer right" role="separator" aria-label="调整对话宽度" aria-orientation="vertical" onPointerDown={(event) => beginChatWidthResize("right", event)} />
         <div className="composer-stack">
           <div className="composer-overlays">
-            <GoalBanner goal={snapshot?.goal} onStop={onStopGoal} />
             <ActivityPanel
+              goal={snapshot?.goal}
               todo={projectState.plan}
               subagents={subagents}
               queued={queuedPrompts}
@@ -361,6 +362,7 @@ export function ConversationPane({
               onOpenSubagent={(activity) => setSelectedSubagentId(activity.id)}
               onCancelQueued={onCancelQueuedPrompt}
               onPromoteQueued={onPromoteQueuedPrompt}
+              onStopGoal={onStopGoal}
               onStopSubagent={onStopSubagent}
               onResumeSubagent={onResumeSubagent}
             />
