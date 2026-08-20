@@ -21,6 +21,7 @@
     "postinstall": "npm run patch:chrome-devtools-mcp",
     "patch:chrome-devtools-mcp": "node scripts/patch-chrome-devtools-mcp.mjs",
     "release:version": "node scripts/set-release-version.mjs",
+    "migrate:coilcoil-data": "node --experimental-strip-types scripts/migrate-coilcoil-data.mjs",
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build:pi": "npm run build:offline --prefix vendor/pi",

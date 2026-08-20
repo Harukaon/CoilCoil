@@ -23,6 +23,7 @@ import { hardenGuestPreferences } from "./browser-webview-policy";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
+import { migrateLegacyUserData } from "./data-migration";
 import { TerminalRuntimeManager } from "./terminal-runtime";
 import {
   checkForUpdate,
@@ -546,6 +547,14 @@ function scheduleUpdateChecks(): void {
 }
 
 app.whenReady().then(async () => {
+  try {
+    const migration = migrateLegacyUserData(app.getPath("userData"));
+    if (migration.migrated) {
+      console.info(`[migration] copied legacy data from ${migration.source} (${migration.copied.length} entries)`);
+    }
+  } catch (error) {
+    console.error("[migration] legacy data migration failed; starting with current data", error);
+  }
   // Only the main window may host <webview> guests, and only through the handler
   // installed in createWindow. Preview windows and anything added later refuse
   // attachment, so a future webPreferences default cannot widen the surface.
