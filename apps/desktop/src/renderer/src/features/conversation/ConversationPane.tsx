@@ -25,7 +25,6 @@ import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { CoilLoader } from "../../ui/CoilLoader";
 import { BlobsLoader } from "../../ui/loaders";
-import { CoilLogo } from "../../ui/CoilLogo";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
@@ -338,7 +337,7 @@ export function ConversationPane({
               {running ? <div className="agent-activity"><CoilLoader size={6} /><span className="agent-activity-line">{activityLine}</span></div> : null}
             </div>
           ) : (
-            <div className="empty-chat"><div className="empty-chat-mark"><CoilLogo size={40} /></div><h1>你想构建什么？</h1><p>{project ? `CoilCoil 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
+            <div className="empty-chat"><div className="empty-chat-mark"><BlobsLoader size={40} /></div><h1>你想构建什么？</h1><p>{project ? `CoilCoil 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
           )}
         </div>
         {showScrollDown ? (

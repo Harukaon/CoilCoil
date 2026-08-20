@@ -58,7 +58,7 @@ export const SURFACE_STORAGE_KEY = "coilcoil.surface";
 export const DARK_TONE_STORAGE_KEY = "coilcoil.dark-tone";
 export const LIGHT_TONE_STORAGE_KEY = "coilcoil.light-tone";
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
-export const DEFAULT_SURFACE_STYLE: SurfaceStyle = "flat";
+export const DEFAULT_SURFACE_STYLE: SurfaceStyle = "layered";
 export const DEFAULT_DARK_TONE: DarkTone = "graphite";
 export const DEFAULT_LIGHT_TONE: LightTone = "paper";
 
