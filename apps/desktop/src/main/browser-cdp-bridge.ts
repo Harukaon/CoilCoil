@@ -3,6 +3,7 @@ import { createServer, type Server as HttpServer } from "node:http";
 import type { Event, WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { isDirectPageTargetInfoRequest, isTabActivationCommand, routePageCommand } from "./browser-cdp-commands";
+import { detachDebuggerListener } from "./browser-cdp-teardown";
 import { normalizeBrowserUrl } from "./browser-navigation";
 import {
   BROWSER_TARGET_ID,
@@ -165,9 +166,7 @@ export class BrowserCdpBridge {
       client.sessions.delete(tab.id);
       this.deleteTabSessions(client.directSessions, tab.id);
       this.deleteTabSessions(client.childSessions, tab.id);
-      const listener = client.debuggerListeners.get(tab.id);
-      if (listener) tab.guest?.debugger.off("message", listener as never);
-      client.debuggerListeners.delete(tab.id);
+      this.removeDebuggerRelay(client, tab.id, tab);
     }
   }
 
@@ -175,6 +174,20 @@ export class BrowserCdpBridge {
     for (const [sessionId, ownerTabId] of sessions) {
       if (ownerTabId === tabId) sessions.delete(sessionId);
     }
+  }
+
+  /**
+   * Relay teardown is best-effort: Electron may emit `destroyed` before this
+   * lifecycle record is cleaned up, and accessing `.debugger` on that stale
+   * WebContents throws "Object has been destroyed". A guest can also disappear
+   * between `isDestroyed()` and `off()`, so the final access stays guarded.
+   */
+  private removeDebuggerRelay(client: CdpClient, tabId: string, tab = this.host.tabById(tabId)): void {
+    const listener = client.debuggerListeners.get(tabId);
+    client.debuggerListeners.delete(tabId);
+    const guest = tab?.guest;
+    if (!listener || !guest) return;
+    detachDebuggerListener(guest, listener);
   }
 
   private acceptClient(socket: WebSocket, scopeId: string): void {
@@ -192,10 +205,7 @@ export class BrowserCdpBridge {
 
   private removeClient(client: CdpClient): void {
     if (!this.clients.delete(client.id)) return;
-    for (const [tabId, listener] of client.debuggerListeners) {
-      this.host.tabById(tabId)?.guest?.debugger.off("message", listener as never);
-    }
-    client.debuggerListeners.clear();
+    for (const tabId of [...client.debuggerListeners.keys()]) this.removeDebuggerRelay(client, tabId);
     client.directSessions.clear();
     client.childSessions.clear();
   }
