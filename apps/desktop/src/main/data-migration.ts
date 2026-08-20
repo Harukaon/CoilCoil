@@ -15,7 +15,6 @@ const LEGACY_APP_DIRECTORY = "SuoCode";
 const MIGRATION_MARKER = ".coilcoil-data-migration.json";
 const SKIPPED_AGENT_DIRECTORIES = new Set(["runtime-bin", "terminal-output"]);
 const SKIPPED_AGENT_FILES = new Set(["suocode-settings.json"]);
-const SKIPPED_BUNDLED_SKILLS_DIRECTORY = "skill";
 const TEXT_EXTENSIONS = new Set([".json", ".jsonl", ".md", ".txt", ".yaml", ".yml"]);
 
 export interface LegacyDataMigrationResult {
@@ -65,16 +64,6 @@ function copyAgent(source: string, target: string, copied: string[], skipped: st
   mkdirSync(target, { recursive: true });
   for (const entry of readdirSync(source)) {
     if (SKIPPED_AGENT_DIRECTORIES.has(entry) || SKIPPED_AGENT_FILES.has(entry)) continue;
-    if (entry === "skills") {
-      const sourceSkills = join(source, entry);
-      const targetSkills = join(target, entry);
-      mkdirSync(targetSkills, { recursive: true });
-      for (const skill of readdirSync(sourceSkills)) {
-        if (skill === SKIPPED_BUNDLED_SKILLS_DIRECTORY) continue;
-        copyIfAbsent(join(sourceSkills, skill), join(targetSkills, skill), copied, skipped);
-      }
-      continue;
-    }
     copyIfAbsent(join(source, entry), join(target, entry), copied, skipped);
   }
 
