@@ -24,9 +24,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 /* 拖拽区永远不参与选中：标题是文本，在它上面按下鼠标会被判定为「选文字」，
    拖拽窗口的动作就丢了——同一次按下只会命中其中一个。表单控件仍然需要能选中，
    所以单独放回 text（当前这些 header 里没有，但规则要能扛住以后加）。 */
-.window-drag { -webkit-app-region: drag; user-select: none; }
-.window-drag * { user-select: none; }
-.window-drag input, .window-drag textarea, .window-drag [contenteditable="true"] { user-select: text; }
+.window-drag { -webkit-app-region: drag; -webkit-user-select: none; user-select: none; }
+.window-drag * { -webkit-user-select: none; user-select: none; }
+.window-drag input, .window-drag textarea, .window-drag [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
 .no-drag, button, textarea, input, select { -webkit-app-region: no-drag; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -214,7 +214,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 [data-platform="darwin"] .app-shell.left-collapsed .memory-workspace-header { padding-left: 82px; }
 .conversation-header { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; }
 [data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 82px; }
-.conversation-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; }
+/* 标题文字单独设为 no-drag，再用透明拖拽层盖住它：Chromium 在文字节点上有时会优先启动选区，
+   导致同一次按下没有交给 Electron 的窗口拖拽。覆盖层不承载内容，所以标题始终只能拖窗，按钮仍由 no-drag 区域处理。 */
+.conversation-title { position: relative; display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; -webkit-user-select: none; user-select: none; }
+.conversation-title-drag-surface { position: absolute; z-index: 1; inset: -3px 0; -webkit-app-region: drag; -webkit-user-select: none; user-select: none; }
+.conversation-title strong, .conversation-title span { position: relative; z-index: 0; -webkit-user-select: none; user-select: none; }
 .conversation-title strong { display: block; width: 100%; max-width: 620px; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-title span { color: hsl(var(--th) var(--ts) var(--l-531)); font-size: 10px; }
 .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }

@@ -288,7 +288,10 @@ export function ConversationPane({
     <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""} ${hasComposerActivity ? "has-composer-activity" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <header className="conversation-header window-drag">
         {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
-        <div className="conversation-title"><strong title={conversationTitle}>{conversationTitle}</strong>{project ? <span>{project.name}</span> : null}</div>
+        <div className="conversation-title no-drag">
+          <div className="conversation-title-drag-surface" aria-hidden="true" />
+          <strong title={conversationTitle}>{conversationTitle}</strong>{project ? <span>{project.name}</span> : null}
+        </div>
         <div className="header-actions no-drag">{!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={onOpenRight}><PanelRight size={17} /></button> : null}</div>
       </header>
 
