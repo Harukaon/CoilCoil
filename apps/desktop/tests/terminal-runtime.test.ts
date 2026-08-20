@@ -7,7 +7,7 @@ import type { TerminalSessionSnapshot } from "../src/shared/desktop-api.ts";
 import { TerminalRuntimeManager } from "../src/main/terminal-runtime.ts";
 
 test("a workspace terminal runs a command and publishes its output", async (context) => {
-  const cwd = mkdtempSync(join(tmpdir(), "suocode-terminal-"));
+  const cwd = mkdtempSync(join(tmpdir(), "coilcoil-terminal-"));
   const updates: TerminalSessionSnapshot[][] = [];
   const output: string[] = [];
   let resolveOutput: (() => void) | undefined;
@@ -22,7 +22,7 @@ test("a workspace terminal runs a command and publishes its output", async (cont
     updates.push(state);
   }, (_id, data) => {
     output.push(data);
-    if (output.join("").includes("SUOCODE_TERMINAL_OK")) resolveOutput?.();
+    if (output.join("").includes("COILCOIL_TERMINAL_OK")) resolveOutput?.();
   });
   context.after(() => {
     manager.dispose();
@@ -36,14 +36,14 @@ test("a workspace terminal runs a command and publishes its output", async (cont
 
   const id = first[0]?.id;
   assert.ok(id);
-  manager.write(id, "printf 'SUOCODE_TERMINAL_OK\\n'\r");
+  manager.write(id, "printf 'COILCOIL_TERMINAL_OK\\n'\r");
   await outputSeen;
-  assert.match(manager.state()[0]?.output ?? "", /SUOCODE_TERMINAL_OK/);
+  assert.match(manager.state()[0]?.output ?? "", /COILCOIL_TERMINAL_OK/);
   assert.deepEqual(manager.close(id), []);
 });
 
 test("a workspace can run several terminals and close them one by one", (context) => {
-  const cwd = mkdtempSync(join(tmpdir(), "suocode-terminal-multi-"));
+  const cwd = mkdtempSync(join(tmpdir(), "coilcoil-terminal-multi-"));
   const manager = new TerminalRuntimeManager(() => undefined, () => undefined);
   context.after(() => {
     manager.dispose();

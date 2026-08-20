@@ -6,7 +6,7 @@ import test from "node:test";
 import { systemPromptLayerFiles } from "../src/system-prompt-layers.js";
 
 test("system prompt layers keep Pi base and append global before project", (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-system-layers-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-system-layers-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");

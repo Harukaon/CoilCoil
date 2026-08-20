@@ -1,6 +1,6 @@
 # Shell execution lifecycle
 
-SuoCode uses one managed PTY runtime for both ordinary shell commands and background terminals.
+CoilCoil uses one managed PTY runtime for both ordinary shell commands and background terminals.
 The model sees two tools:
 
 - `bash` starts a command and owns the foreground-to-background handoff.
@@ -45,4 +45,4 @@ Every event delivered to the Agent costs a full LLM turn, because Pi drains queu
 
 Output in a batched message shares one budget, so a burst of noisy terminals cannot flood the context; each event keeps the tail of its own output, truncated from the front.
 
-Terminal state is also persisted as `suocode-terminal-run` session entries. The Runtime projects the Bash handoff as a completed tool call while keeping the stable terminal row in `running` state; later completion updates that same row instead of leaving it permanently running.
+Terminal state is also persisted as `coilcoil-terminal-run` session entries. The Runtime projects the Bash handoff as a completed tool call while keeping the stable terminal row in `running` state; later completion updates that same row instead of leaving it permanently running.

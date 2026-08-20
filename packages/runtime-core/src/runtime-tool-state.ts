@@ -10,7 +10,7 @@ import {
   type TerminalRun,
   type TodoItem,
   type ToolRun,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   AssistantToolCall,
   assistantToolCalls,
@@ -445,8 +445,8 @@ export abstract class RuntimeToolState extends RuntimeSessions {
 
   protected subagentRpc(method: "stop" | "status" | "resume", id: string): Promise<unknown> {
     const active = this.requireActive();
-    const requestId = `suocode-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const replyChannel = `suocode:subagents:rpc:v1:reply:${requestId}`;
+    const requestId = `coilcoil-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `coilcoil:subagents:rpc:v1:reply:${requestId}`;
     return new Promise((resolvePromise, rejectPromise) => {
       let settled = false;
       const finish = (callback: () => void): void => {
@@ -471,15 +471,15 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         requestId,
         method,
         params: { id },
-        source: { client: "suocode-desktop" },
+        source: { client: "coilcoil-desktop" },
       });
     });
   }
 
   protected planRpc(method: "approve" | "reject", params: { planId: string; target?: PlanExecutionTarget; agent?: string; }): Promise<unknown> {
     const active = this.requireActive();
-    const requestId = `suocode-plan-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const replyChannel = `suocode:plan:rpc:v1:reply:${requestId}`;
+    const requestId = `coilcoil-plan-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `coilcoil:plan:rpc:v1:reply:${requestId}`;
     return new Promise((resolvePromise, rejectPromise) => {
       let settled = false;
       const finish = (callback: () => void): void => {
@@ -504,7 +504,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         requestId,
         method,
         params,
-        source: { client: "suocode-desktop" },
+        source: { client: "coilcoil-desktop" },
       });
     });
   }

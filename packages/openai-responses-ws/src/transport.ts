@@ -39,7 +39,7 @@ function rewriteRelativeImports(source: string, directory: string): string {
 }
 
 /**
- * Build SuoCode's extension transport from Pi's Responses event implementation.
+ * Build CoilCoil's extension transport from Pi's Responses event implementation.
  * Unlike Pi's ChatGPT Codex provider, this API provider follows the public OpenAI
  * WebSocket endpoint: `/v1/responses`, ordinary Bearer auth, and `response.create`.
  */
@@ -101,14 +101,14 @@ async function loadOpenAIResponsesWsTransport(): Promise<OpenAIResponsesWsTransp
     const original = resolvePiCodexTransport();
     const adapted = rewriteRelativeImports(adaptPiCodexTransportSource(readFileSync(original.path, "utf8")), original.directory);
     const hash = createHash("sha256").update(adapted).digest("hex").slice(0, 16);
-    const directory = join(tmpdir(), "suocode-openai-responses-ws");
+    const directory = join(tmpdir(), "coilcoil-openai-responses-ws");
     const path = join(directory, `transport-${hash}.mjs`);
     mkdirSync(directory, { recursive: true });
     if (!existsSync(path)) writeFileSync(path, adapted, "utf8");
 
     const module = await import(pathToFileURL(path).href) as Partial<OpenAIResponsesWsTransport>;
-    if (typeof module.stream !== "function") throw new Error("SuoCode WS transport 没有导出 stream。");
-    if (typeof module.streamSimple !== "function") throw new Error("SuoCode WS transport 没有导出 streamSimple。");
+    if (typeof module.stream !== "function") throw new Error("CoilCoil WS transport 没有导出 stream。");
+    if (typeof module.streamSimple !== "function") throw new Error("CoilCoil WS transport 没有导出 streamSimple。");
     return { stream: module.stream, streamSimple: module.streamSimple };
   })().catch((error: unknown) => {
     cachedTransport = undefined;

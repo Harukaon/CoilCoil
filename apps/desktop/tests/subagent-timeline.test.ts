@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChatMessage, PlanApprovalState, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, PlanApprovalState, SubagentActivity, ToolRun } from "@coilcoil/runtime-protocol";
 import { buildConversationTimeline } from "../src/renderer/src/features/conversation/buildConversationTimeline.ts";
 
 const messages: ChatMessage[] = [

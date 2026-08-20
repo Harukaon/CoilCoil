@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, TerminalSquare } from "lucide-react";
 import { useState } from "react";
-import type { ChatMessage } from "@suocode/runtime-protocol";
+import type { ChatMessage } from "@coilcoil/runtime-protocol";
 import {
   parseTerminalNotices,
   terminalNoticeLabel,

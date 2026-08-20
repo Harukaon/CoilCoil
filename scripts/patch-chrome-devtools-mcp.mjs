@@ -13,7 +13,7 @@ if (!packageRoot) throw new Error("chrome-devtools-mcp is not installed.");
 
 const packageJson = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf8"));
 if (packageJson.version !== "1.7.0") {
-  throw new Error(`Unsupported chrome-devtools-mcp version ${packageJson.version}; review SuoCode compatibility patches first.`);
+  throw new Error(`Unsupported chrome-devtools-mcp version ${packageJson.version}; review CoilCoil compatibility patches first.`);
 }
 
 function patchFile(relativePath, replacements) {
@@ -58,8 +58,8 @@ if (patchFile("build/src/tools/tools.js", [
 
 if (patchFile("build/src/ToolHandler.js", [{
   before: `            const targetPage = page ?? context.getSelectedMcpPage();`,
-  after: `            // SUOCODE: discovery tools must survive a stale selected page.\n            let targetPage = page;\n            if (!targetPage) {\n                try {\n                    targetPage = context.getSelectedMcpPage();\n                }\n                catch {\n                    // response.handle() refreshes the page list and selects a live fallback.\n                }\n            }`,
-  marker: "SUOCODE: discovery tools must survive a stale selected page.",
+  after: `            // COILCOIL: discovery tools must survive a stale selected page.\n            let targetPage = page;\n            if (!targetPage) {\n                try {\n                    targetPage = context.getSelectedMcpPage();\n                }\n                catch {\n                    // response.handle() refreshes the page list and selects a live fallback.\n                }\n            }`,
+  marker: "COILCOIL: discovery tools must survive a stale selected page.",
 }])) changedFiles.push("ToolHandler.js");
 
 if (patchFile("build/src/tools/pages.js", [

@@ -155,7 +155,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .file-context-danger { color: var(--c-red-muted); }
 .file-context-danger[data-highlighted] { color: var(--c-red-text); background: var(--c-red-subtle); }
 @keyframes context-menu-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
-.archive-dialog { display: grid; width: min(620px, calc(100vw - 48px)); max-height: min(720px, calc(100vh - 48px)); overflow: hidden; grid-template-rows: auto auto minmax(0, 1fr); border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 16px; color: hsl(var(--th) var(--ts) var(--l-206)); background: hsl(var(--th) var(--ts) var(--l-980)); box-shadow: 0 24px 64px rgb(26 26 23 / 22%), 0 2px 10px rgb(26 26 23 / 8%); animation: suo-modal-in 160ms cubic-bezier(.16, 1, .3, 1); }
+.archive-dialog { display: grid; width: min(620px, calc(100vw - 48px)); max-height: min(720px, calc(100vh - 48px)); overflow: hidden; grid-template-rows: auto auto minmax(0, 1fr); border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 16px; color: hsl(var(--th) var(--ts) var(--l-206)); background: hsl(var(--th) var(--ts) var(--l-980)); box-shadow: 0 24px 64px rgb(26 26 23 / 22%), 0 2px 10px rgb(26 26 23 / 8%); animation: coil-modal-in 160ms cubic-bezier(.16, 1, .3, 1); }
 .archive-dialog > header { display: flex; min-height: 62px; align-items: center; justify-content: space-between; padding: 11px 12px 9px 17px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-898)); }
 .archive-dialog > header > div { display: grid; gap: 2px; }
 .archive-dialog > header > span { display: flex; align-items: center; gap: 5px; color: hsl(var(--th) var(--ts) var(--l-531)); }
@@ -404,40 +404,40 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .subagent-mini-chat .agent-turn-content { width: 100%; }
 .subagent-dialog-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 160px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 12px; }
 .subagent-dialog-error { margin-top: 16px; padding: 10px 12px; border: 1px solid var(--c-red-border); border-radius: 9px; color: var(--c-red-muted); background: hsl(var(--th) var(--ts) var(--l-984)); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* SuoCode 的墨团标志：几何、模糊、对比度脉冲与每个三角形的旋转时序均照抄设计源
+/* CoilCoil 的墨团标志：几何、模糊、对比度脉冲与每个三角形的旋转时序均照抄设计源
    `apps/desktop/build/logo.svg`，仅把选择器从 id 换成 class（同屏会渲染多个实例），
    并给 keyframes 加上本文件惯用的前缀。深色主题下把墨色换成纸色，否则黑墨看不见。 */
-.suo-logo { display: block; flex: 0 0 auto; }
-.suo-logo-mask { filter: contrast(15); animation: suo-logo-roundness 1s linear infinite; }
-.suo-logo-mask polygon { filter: blur(12px); }
-.suo-logo-mask polygon:nth-child(1) { transform-origin: 75% 25%; transform: rotate(90deg); }
-.suo-logo-mask polygon:nth-child(2) { transform-origin: 50% 50%; animation: suo-logo-rotation 2s linear infinite reverse; }
-.suo-logo-mask polygon:nth-child(3) { transform-origin: 50% 60%; animation: suo-logo-rotation 2s linear -0.6667s infinite; }
-.suo-logo-mask polygon:nth-child(4) { transform-origin: 40% 40%; animation: suo-logo-rotation 2s linear infinite reverse; }
-.suo-logo-mask polygon:nth-child(5) { transform-origin: 40% 40%; animation: suo-logo-rotation 2s linear -1s infinite reverse; }
-.suo-logo-mask polygon:nth-child(6) { transform-origin: 60% 40%; animation: suo-logo-rotation 2s linear infinite; }
-.suo-logo-mask polygon:nth-child(7) { transform-origin: 60% 40%; animation: suo-logo-rotation 2s linear -1.3333s infinite; }
-@keyframes suo-logo-rotation { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes suo-logo-roundness { 0%, 60%, 100% { filter: contrast(15); } 20%, 40% { filter: contrast(3); } }
-:root[data-theme="dark"] .suo-logo-ink-1 { stop-color: #ffffff; }
-:root[data-theme="dark"] .suo-logo-ink-2 { stop-color: #d8d8d4; }
-:root[data-theme="dark"] .suo-logo-ink-3 { stop-color: #e8e8e4; }
+.coil-logo { display: block; flex: 0 0 auto; }
+.coil-logo-mask { filter: contrast(15); animation: coil-logo-roundness 1s linear infinite; }
+.coil-logo-mask polygon { filter: blur(12px); }
+.coil-logo-mask polygon:nth-child(1) { transform-origin: 75% 25%; transform: rotate(90deg); }
+.coil-logo-mask polygon:nth-child(2) { transform-origin: 50% 50%; animation: coil-logo-rotation 2s linear infinite reverse; }
+.coil-logo-mask polygon:nth-child(3) { transform-origin: 50% 60%; animation: coil-logo-rotation 2s linear -0.6667s infinite; }
+.coil-logo-mask polygon:nth-child(4) { transform-origin: 40% 40%; animation: coil-logo-rotation 2s linear infinite reverse; }
+.coil-logo-mask polygon:nth-child(5) { transform-origin: 40% 40%; animation: coil-logo-rotation 2s linear -1s infinite reverse; }
+.coil-logo-mask polygon:nth-child(6) { transform-origin: 60% 40%; animation: coil-logo-rotation 2s linear infinite; }
+.coil-logo-mask polygon:nth-child(7) { transform-origin: 60% 40%; animation: coil-logo-rotation 2s linear -1.3333s infinite; }
+@keyframes coil-logo-rotation { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes coil-logo-roundness { 0%, 60%, 100% { filter: contrast(15); } 20%, 40% { filter: contrast(3); } }
+:root[data-theme="dark"] .coil-logo-ink-1 { stop-color: #ffffff; }
+:root[data-theme="dark"] .coil-logo-ink-2 { stop-color: #d8d8d4; }
+:root[data-theme="dark"] .coil-logo-ink-3 { stop-color: #e8e8e4; }
 @media (prefers-reduced-motion: reduce) {
-  .suo-logo-mask, .suo-logo-mask polygon { animation: none; }
+  .coil-logo-mask, .coil-logo-mask polygon { animation: none; }
 }
-/* 加载指示：两团墨沿同一条基线滚过，经 #suo-goo-ink 的模糊 + alpha 陡增合成一团
+/* 加载指示：两团墨沿同一条基线滚过，经 #coil-goo-ink 的模糊 + alpha 陡增合成一团
    会融合又分裂的墨迹。几何与动画照抄给定实现（12em×3em、22em/16em 两个圆、
    wee1/wee2 2s 线性、错开 0.75s），因此这里锁定 font-size: 16px 让那些 em 值仍按
    原尺寸解析，再用 transform 整体缩放到调用点要的高度——滤镜里的 12px 模糊是绝对
    长度，跟着字号缩会糊成一片，跟着 transform 缩才等比。 */
-.suo-loader { --loader-scale: .2917; display: inline-block; width: calc(12em * var(--loader-scale)); height: calc(3em * var(--loader-scale)); flex: 0 0 auto; font-size: 16px; vertical-align: middle; }
-.suo-loader-ink { display: block; position: relative; width: 12em; height: 3em; overflow: hidden; border-bottom: 8px solid currentColor; filter: url(#suo-goo-ink); transform: scale(var(--loader-scale)); transform-origin: top left; }
-.suo-loader-ink::before { content: ''; position: absolute; bottom: -18em; left: -2em; width: 22em; height: 18em; border-radius: 50%; background: currentColor; animation: suo-loader-wee1 2s linear infinite; }
-.suo-loader-ink::after { content: ''; position: absolute; bottom: -12em; left: -4em; width: 16em; height: 12em; border-radius: 50%; background: currentColor; animation: suo-loader-wee2 2s linear infinite .75s; }
-@keyframes suo-loader-wee1 { 0% { transform: translateX(-10em) rotate(0deg); } 100% { transform: translateX(7em) rotate(180deg); } }
-@keyframes suo-loader-wee2 { 0% { transform: translateX(-8em) rotate(0deg); } 100% { transform: translateX(8em) rotate(180deg); } }
+.coil-loader { --loader-scale: .2917; display: inline-block; width: calc(12em * var(--loader-scale)); height: calc(3em * var(--loader-scale)); flex: 0 0 auto; font-size: 16px; vertical-align: middle; }
+.coil-loader-ink { display: block; position: relative; width: 12em; height: 3em; overflow: hidden; border-bottom: 8px solid currentColor; filter: url(#coil-goo-ink); transform: scale(var(--loader-scale)); transform-origin: top left; }
+.coil-loader-ink::before { content: ''; position: absolute; bottom: -18em; left: -2em; width: 22em; height: 18em; border-radius: 50%; background: currentColor; animation: coil-loader-wee1 2s linear infinite; }
+.coil-loader-ink::after { content: ''; position: absolute; bottom: -12em; left: -4em; width: 16em; height: 12em; border-radius: 50%; background: currentColor; animation: coil-loader-wee2 2s linear infinite .75s; }
+@keyframes coil-loader-wee1 { 0% { transform: translateX(-10em) rotate(0deg); } 100% { transform: translateX(7em) rotate(180deg); } }
+@keyframes coil-loader-wee2 { 0% { transform: translateX(-8em) rotate(0deg); } 100% { transform: translateX(8em) rotate(180deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .suo-loader-ink::before, .suo-loader-ink::after { animation: none; }
+  .coil-loader-ink::before, .coil-loader-ink::after { animation: none; }
 }
 
 .composer-wrap { position: relative; z-index: 2; width: calc(100% - 48px); min-width: 0; max-width: var(--chat-content-width); margin: 0 auto; padding-bottom: 12px; }
@@ -903,9 +903,9 @@ button.runtime-chip:hover:not(:disabled), .runtime-chip.mcp:hover { border-color
 .runtime-chip.mcp > button:first-child:disabled { cursor: default; }
 .runtime-chip-action { align-self: stretch; padding: 0 8px; border-left: 1px solid hsl(var(--th) var(--ts) var(--l-884)); color: hsl(var(--th) var(--ts) var(--l-418)); background: transparent; font-size: 7px; cursor: pointer; }
 .runtime-chip-action:hover { background: hsl(var(--th) var(--ts) var(--l-937)); }
-.suo-tooltip { z-index: 1500; width: max-content; max-width: min(250px, calc(100vw - 20px)); padding: 6px 8px; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-324)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 8px 24px rgb(30 30 28 / 14%); font-size: 8px; font-weight: 400; line-height: 1.45; pointer-events: none; white-space: normal; transform-origin: var(--radix-tooltip-content-transform-origin); animation: suo-tooltip-in 120ms cubic-bezier(.16, 1, .3, 1); }
-.suo-tooltip-arrow { fill: hsl(var(--th) var(--ts) var(--l-1000)); filter: drop-shadow(0 1px 0 hsl(var(--th) var(--ts) var(--l-837))); }
-@keyframes suo-tooltip-in { from { opacity: 0; transform: translateY(2px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.coil-tooltip { z-index: 1500; width: max-content; max-width: min(250px, calc(100vw - 20px)); padding: 6px 8px; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-324)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 8px 24px rgb(30 30 28 / 14%); font-size: 8px; font-weight: 400; line-height: 1.45; pointer-events: none; white-space: normal; transform-origin: var(--radix-tooltip-content-transform-origin); animation: coil-tooltip-in 120ms cubic-bezier(.16, 1, .3, 1); }
+.coil-tooltip-arrow { fill: hsl(var(--th) var(--ts) var(--l-1000)); filter: drop-shadow(0 1px 0 hsl(var(--th) var(--ts) var(--l-837))); }
+@keyframes coil-tooltip-in { from { opacity: 0; transform: translateY(2px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .runtime-prompt-modal { margin-top: 16px; }
 .runtime-prompt-modal pre, .runtime-prompt-modal textarea { box-sizing: border-box; width: 100%; min-height: 330px; max-height: min(62vh, 560px); margin: 0; overflow: auto; padding: 12px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 10px; color: hsl(var(--th) var(--ts) var(--l-292)); background: hsl(var(--th) var(--ts) var(--l-955)); font: 10px/1.6 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .runtime-prompt-modal textarea { resize: vertical; outline: 0; background: hsl(var(--th) var(--ts) var(--l-1000)); }

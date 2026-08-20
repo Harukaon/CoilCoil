@@ -5,7 +5,7 @@
 ## 为什么值得抄
 
 - omp 是 **pi-mono（即我们 vendor/pi 的上游 earendil-works/pi）的 fork**，25.6k stars、MIT 协议、18k+ commits、迭代极快（每天发版）。
-- 与 SuoCode 同源：同一套 agent/extension/tool API 血统。很多能力不是"参考思路"，而是**可以直接以 npm 包依赖**（`@oh-my-pi/hashline`、`@oh-my-pi/pi-mnemopi`、`@oh-my-pi/omptype` 等都独立发包）或小范围移植。
+- 与 CoilCoil 同源：同一套 agent/extension/tool API 血统。很多能力不是"参考思路"，而是**可以直接以 npm 包依赖**（`@oh-my-pi/hashline`、`@oh-my-pi/pi-mnemopi`、`@oh-my-pi/omptype` 等都独立发包）或小范围移植。
 - 它是 TUI 产品，我们是 Electron 桌面产品——凡是"runtime 层"的能力都可平移，"TUI 层"的能力需要换成我们的桌面 UI。
 
 ## 改动量标尺
@@ -14,7 +14,7 @@
 
 ## 对照表
 
-| # | 借鉴项 | 作用（解决什么） | SuoCode 现状 | 集成路径 | 改动量 | 建议 |
+| # | 借鉴项 | 作用（解决什么） | CoilCoil 现状 | 集成路径 | 改动量 | 建议 |
 |---|--------|------------------|--------------|----------|--------|------|
 | 1 | **Hashline 哈希锚点编辑**（`@oh-my-pi/hashline`） | edit 工具用"行内容哈希锚点"取代原文匹配：编辑失败率大降、输出 token 省 ~61%、改到过期文件会被拒绝而不是写坏 | 用 vendor/pi 自带 edit（原文匹配），string-not-found 重试常见 | 直接依赖 npm 包，在 runtime-core 里注册替换版 edit 工具 + system prompt 说明 | **M** | ⭐ 高优先，性价比最高 |
 | 2 | **子代理工作区隔离**（task 工具 + pi-iso） | 并行子代理各自在隔离工作区（APFS clone / overlayfs / git worktree）跑，互不踩踏、无合并冲突 | 已有 subagent 派发与 UI，消息里已预留 `worktreePath` 字段但未真正隔离 | 第一步用 `git worktree` 实现（纯 Node 可做）；pi-iso 的 APFS clone 是 Rust，可后置 | **M**（git worktree 版）/ XL（native 版） | ⭐ 高优先，用户点名要的"子引擎多工作区" |

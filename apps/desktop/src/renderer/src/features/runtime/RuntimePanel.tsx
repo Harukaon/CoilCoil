@@ -19,8 +19,8 @@ import type {
   RuntimeInspectionSnapshot,
   RuntimeSummaryEvent,
   TokenUsage,
-} from "@suocode/runtime-protocol";
-import { summarizeCacheUsage } from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
+import { summarizeCacheUsage } from "@coilcoil/runtime-protocol";
 import { Modal } from "../../ui/dialog";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { Tooltip } from "../../ui/tooltip";
@@ -161,10 +161,10 @@ export function RuntimePanel({
     });
   }, [inspection?.mcp?.servers]);
 
-  const request = async <T,>(action: string, command: Parameters<typeof window.suocode.request>[0]): Promise<T | undefined> => {
+  const request = async <T,>(action: string, command: Parameters<typeof window.coilcoil.request>[0]): Promise<T | undefined> => {
     setBusyAction(action);
     try {
-      return await window.suocode.request<T>(command, runtimeId);
+      return await window.coilcoil.request<T>(command, runtimeId);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
       return undefined;
@@ -204,7 +204,7 @@ export function RuntimePanel({
       for (const step of mcpTogglePlan(server, next)) {
         if (step.kind === "workspace") {
           if (!cwd) throw new Error("请先打开一个项目，再调整 MCP 可见性。");
-          await window.suocode.request({
+          await window.coilcoil.request({
             type: "set_mcp_server_enabled",
             name: step.name,
             enabled: step.enabled,
@@ -214,7 +214,7 @@ export function RuntimePanel({
           // Only syncs an already-running Pi session. A session that has not
           // started yet, or an extension still booting, picks the workspace
           // setting up on its own — so this must never fail the toggle.
-          await window.suocode.request({
+          await window.coilcoil.request({
             type: "set_session_mcp_server_enabled",
             name: step.name,
             enabled: step.enabled,
@@ -352,9 +352,9 @@ export function RuntimePanel({
         size="lg"
         onClose={() => { setPromptOpen(false); setEditingPrompt(false); }}
         footer={<>
-          {inspection?.systemPromptOverride ? <button className="suo-modal-button" type="button" disabled={busyAction === "system-prompt"} onClick={() => { void restoreSystemPrompt(); }}><RotateCcw size={12} /> 恢复默认</button> : null}
-          {editingPrompt ? <button className="suo-modal-button" type="button" onClick={() => setEditingPrompt(false)}>取消编辑</button> : null}
-          {editingPrompt ? <button className="suo-modal-button primary" type="button" disabled={busyAction === "system-prompt" || !promptDraft.trim()} onClick={() => { void saveSystemPrompt(); }}><Save size={12} /> 保存</button> : <button className="suo-modal-button primary" type="button" disabled={!inspection?.effectiveSystemPrompt} onClick={() => setEditingPrompt(true)}>编辑当前会话</button>}
+          {inspection?.systemPromptOverride ? <button className="coil-modal-button" type="button" disabled={busyAction === "system-prompt"} onClick={() => { void restoreSystemPrompt(); }}><RotateCcw size={12} /> 恢复默认</button> : null}
+          {editingPrompt ? <button className="coil-modal-button" type="button" onClick={() => setEditingPrompt(false)}>取消编辑</button> : null}
+          {editingPrompt ? <button className="coil-modal-button primary" type="button" disabled={busyAction === "system-prompt" || !promptDraft.trim()} onClick={() => { void saveSystemPrompt(); }}><Save size={12} /> 保存</button> : <button className="coil-modal-button primary" type="button" disabled={!inspection?.effectiveSystemPrompt} onClick={() => setEditingPrompt(true)}>编辑当前会话</button>}
         </>}
       >
         <div className="runtime-prompt-modal">

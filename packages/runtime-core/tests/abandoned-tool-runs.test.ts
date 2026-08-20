@@ -5,8 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { RuntimeEvent, SubagentActivity, TerminalRun, ToolRun } from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+import type { RuntimeEvent, SubagentActivity, TerminalRun, ToolRun } from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 import { ToolRunIds } from "../src/tool-run-ids.js";
 
 interface RuntimeInternals {
@@ -42,7 +42,7 @@ function startRuntime(root: string, events: RuntimeEvent[]): { internals: Runtim
     getAllTools: () => [],
   } as unknown as AgentSession;
 
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     onEvent: (event) => events.push(event),
@@ -72,7 +72,7 @@ function startRuntime(root: string, events: RuntimeEvent[]): { internals: Runtim
 }
 
 test("a tool call from a dropped stream is closed instead of spinning forever", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-abandoned-tool-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-abandoned-tool-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const events: RuntimeEvent[] = [];
   const { internals, active, manager } = startRuntime(root, events);
@@ -136,7 +136,7 @@ test("a tool call from a dropped stream is closed instead of spinning forever", 
 });
 
 test("settling closes a tool, its terminal and its subagent that never reported back", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-settled-sweep-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-settled-sweep-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const events: RuntimeEvent[] = [];
   const { internals, active } = startRuntime(root, events);

@@ -8,7 +8,7 @@
  * by start time.
  */
 export async function openTerminalSession(cwd: string): Promise<string | undefined> {
-  const sessions = await window.suocode.createTerminal(cwd);
+  const sessions = await window.coilcoil.createTerminal(cwd);
   const forCwd = sessions.filter((item) => item.cwd === cwd);
   return (forCwd.length ? forCwd : sessions).at(-1)?.id;
 }

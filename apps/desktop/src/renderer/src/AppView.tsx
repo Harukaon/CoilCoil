@@ -17,7 +17,7 @@ import type {
   SessionSnapshot,
   SessionSummary,
   SubagentActivity,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { useInAppBrowserLinks } from "./features/browser/useInAppBrowserLinks";
 import { ConversationPane } from "./features/conversation/ConversationPane";
 import { MemoryWorkspace } from "./features/memory/MemoryWorkspace";
@@ -249,7 +249,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
               setSettingsOpen(true);
             }}
             onAbort={() => { void abortRun(); }}
-            onStopGoal={() => { void window.suocode.request({ type: "stop_goal" }, snapshot?.runtimeId); }}
+            onStopGoal={() => { void window.coilcoil.request({ type: "stop_goal" }, snapshot?.runtimeId); }}
             onApprovePlan={approvePlan}
             onRejectPlan={rejectPlan}
           />

@@ -89,16 +89,16 @@ function createHarness() {
 
 function createContext(overrides: Record<string, unknown> = {}) {
   return {
-    cwd: "/tmp/suocode-subagents-test",
+    cwd: "/tmp/coilcoil-subagents-test",
     model: undefined,
     modelRegistry: {
       find: () => undefined,
       hasConfiguredAuth: () => true,
     },
     sessionManager: {
-      getSessionDir: () => "/tmp/suocode-subagents-test/sessions",
+      getSessionDir: () => "/tmp/coilcoil-subagents-test/sessions",
       getSessionId: () => "parent-session-test",
-      getSessionFile: () => "/tmp/suocode-subagents-test/sessions/parent-session-test.jsonl",
+      getSessionFile: () => "/tmp/coilcoil-subagents-test/sessions/parent-session-test.jsonl",
     },
     ...overrides,
   };
@@ -211,13 +211,13 @@ test("resume requires a run id", async () => {
 test("resume rejects an unknown run", async () => {
   const { execute } = createHarness();
   const ctx = createContext({
-    sessionManager: { getSessionDir: () => "/tmp/does-not-exist-suocode-subagents" },
+    sessionManager: { getSessionDir: () => "/tmp/does-not-exist-coilcoil-subagents" },
   });
   await assert.rejects(execute("call-10", { action: "resume", runId: "missing" }, undefined, undefined, ctx), /未找到/);
 });
 
 test("child meta round-trips through persisted session files", () => {
-  const dir = mkdtempSync(join(tmpdir(), "suocode-subagent-scan-"));
+  const dir = mkdtempSync(join(tmpdir(), "coilcoil-subagent-scan-"));
   mkdirSync(dir, { recursive: true });
   const meta = {
     runId: "sa-scan-test",
@@ -234,12 +234,12 @@ test("child meta round-trips through persisted session files", () => {
   const sessionFile = join(dir, "2026-08-10T00-00-00-000Z_sa-scan-test.jsonl");
   const lines = [
     JSON.stringify({ type: "session", version: 3, id: "sa-scan-test" }),
-    JSON.stringify({ type: "custom", customType: "suocode-subagent-meta", data: meta }),
+    JSON.stringify({ type: "custom", customType: "coilcoil-subagent-meta", data: meta }),
   ];
   writeFileSync(sessionFile, `${lines.join("\n")}\n`, "utf8");
   writeFileSync(
     join(dir, "legacy-unscoped.jsonl"),
-    `${JSON.stringify({ type: "custom", customType: "suocode-subagent-meta", data: { runId: "legacy", agent: "worker", task: "old", background: true, startedAt: 1 } })}\n`,
+    `${JSON.stringify({ type: "custom", customType: "coilcoil-subagent-meta", data: { runId: "legacy", agent: "worker", task: "old", background: true, startedAt: 1 } })}\n`,
     "utf8",
   );
 
@@ -286,7 +286,7 @@ test("profile parsing rejects missing names and unknown tools", () => {
 });
 
 test("profile merge precedence is project > user > builtin", () => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-profiles-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-profiles-"));
   const builtinDir = join(root, "builtin");
   const userDir = join(root, "user");
   const projectDir = join(root, "project");
@@ -431,7 +431,7 @@ test("resume preserves the tool allowlist captured by the original profile", () 
 });
 
 test("resume fails closed when an isolated worktree disappeared", () => {
-  const missing = join(tmpdir(), `suocode-missing-worktree-${Date.now()}`);
+  const missing = join(tmpdir(), `coilcoil-missing-worktree-${Date.now()}`);
   const isolated = makeRun({ worktreeRequired: true, worktreePath: missing });
   const resolved = resumeCwdForRun(isolated, "/tmp/main-workspace");
   assert.equal(resolved.cwd, undefined);
@@ -539,11 +539,11 @@ async function gitIn(cwd: string, args: string[]): Promise<string> {
 }
 
 async function createTempRepo(): Promise<string> {
-  const root = mkdtempSync(join(tmpdir(), "suocode-worktree-repo-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-worktree-repo-"));
   await gitIn(root, ["init", "-b", "main"]);
   writeFileSync(join(root, "README.md"), "# test\n", "utf8");
   await gitIn(root, ["add", "README.md"]);
-  await gitIn(root, ["-c", "user.email=test@suocode", "-c", "user.name=test", "commit", "-m", "init"]);
+  await gitIn(root, ["-c", "user.email=test@coilcoil", "-c", "user.name=test", "commit", "-m", "init"]);
   return root;
 }
 
@@ -552,7 +552,7 @@ test("findGitRepoRoot resolves the repo root and rejects non-repos", async () =>
   const sub = join(root, "a", "b");
   mkdirSync(sub, { recursive: true });
   assert.equal(await findGitRepoRoot(sub), await gitIn(root, ["rev-parse", "--show-toplevel"]));
-  const bare = mkdtempSync(join(tmpdir(), "suocode-worktree-none-"));
+  const bare = mkdtempSync(join(tmpdir(), "coilcoil-worktree-none-"));
   assert.equal(await findGitRepoRoot(bare), undefined);
 });
 
@@ -564,7 +564,7 @@ test("worktree lifecycle: create, cleanliness check, removal gated on cleanlines
   assert.equal(await gitIn(root, ["status", "--porcelain"]), "", "worktree storage must not dirty the parent repository");
   assert.equal(created.branch, subagentWorktreeBranch(runId));
   assert.ok(existsSync(join(created.worktreePath, "README.md")));
-  assert.match(await gitIn(root, ["branch", "--list", created.branch]), /suocode\/subagent\/sa-wt-test/);
+  assert.match(await gitIn(root, ["branch", "--list", created.branch]), /coilcoil\/subagent\/sa-wt-test/);
   assert.equal(await isWorktreeClean(created.worktreePath), true);
 
   writeFileSync(join(created.worktreePath, "new.txt"), "dirty\n", "utf8");
@@ -590,13 +590,13 @@ test("parallel worktrees yield independent checkouts on separate branches", asyn
   assert.ok(!existsSync(join(first.worktreePath, "b.txt")), "worktrees must not share files");
   assert.ok(!existsSync(join(second.worktreePath, "a.txt")), "worktrees must not share files");
   assert.equal(await gitIn(root, ["status", "--porcelain"]), "", "parallel worktrees must not pollute the parent status");
-  assert.equal(await gitIn(first.worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]), "suocode/subagent/sa-par-a");
-  assert.equal(await gitIn(second.worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]), "suocode/subagent/sa-par-b");
+  assert.equal(await gitIn(first.worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]), "coilcoil/subagent/sa-par-a");
+  assert.equal(await gitIn(second.worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]), "coilcoil/subagent/sa-par-b");
 });
 
 test("subagent worktrees stay hidden when the opened project is itself a linked worktree", async () => {
   const root = await createTempRepo();
-  const linkedRoot = join(mkdtempSync(join(tmpdir(), "suocode-linked-parent-")), "project-linked");
+  const linkedRoot = join(mkdtempSync(join(tmpdir(), "coilcoil-linked-parent-")), "project-linked");
   await gitIn(root, ["worktree", "add", "-b", "linked-base", linkedRoot]);
   const child = await createSubagentWorktree(linkedRoot, "sa-linked-child");
   assert.ok(existsSync(join(child.worktreePath, "README.md")));
@@ -607,7 +607,7 @@ test("subagent worktrees stay hidden when the opened project is itself a linked 
 
 test("run rejects worktree isolation outside a git repository", async () => {
   const { execute } = createHarness();
-  const dir = mkdtempSync(join(tmpdir(), "suocode-no-repo-"));
+  const dir = mkdtempSync(join(tmpdir(), "coilcoil-no-repo-"));
   await assert.rejects(
     execute("call-wt-1", { task: "写点东西", worktree: true }, undefined, undefined, createContext({ cwd: dir })),
     /不是 git 仓库/,
@@ -616,7 +616,7 @@ test("run rejects worktree isolation outside a git repository", async () => {
 
 test("worker profile defaults to worktree isolation", async () => {
   const { handlers, execute } = createHarness();
-  const dir = mkdtempSync(join(tmpdir(), "suocode-no-repo-worker-"));
+  const dir = mkdtempSync(join(tmpdir(), "coilcoil-no-repo-worker-"));
   await handlers.get("session_start")?.[0]({}, createContext({ cwd: dir }));
   await assert.rejects(
     execute("call-wt-2", { task: "写点东西", agent: "worker" }, undefined, undefined, createContext({ cwd: dir })),

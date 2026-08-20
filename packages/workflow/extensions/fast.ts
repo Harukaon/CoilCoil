@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export const FAST_STATE_EVENT = "suocode:fast:state:v1";
-export const FAST_POLICY_ENTRY = "suocode-fast-policy";
+export const FAST_STATE_EVENT = "coilcoil:fast:state:v1";
+export const FAST_POLICY_ENTRY = "coilcoil-fast-policy";
 
 export interface FastState {
   version: 1;

@@ -1,4 +1,4 @@
-# SuoCode 需求完成审计
+# CoilCoil 需求完成审计
 
 本文件是“完成所有需求并做好实际测试”的验收索引。状态只能依据当前代码、自动化测试和打包应用行为更新，不能以计划或口头说明替代。
 
@@ -13,8 +13,8 @@
 
 | 需求 | 状态 | 当前证据 / 缺口 |
 | --- | --- | --- |
-| SuoCode 内置 Pi，不依赖用户本机 Pi | 已验证 | Runtime 使用私有 Agent/Session 目录；打包 smoke 验证 Home 与内置 Helper 启动器。 |
-| 工作流、MCP、子 Agent 以 Pi 扩展形式随包交付 | 已验证 | Runtime 显式加载 `@suocode/workflow`；MCP 由 `pi-mcp-adapter` 提供，子 Agent 由 SuoCode 自有扩展以内嵌 child `AgentSession` 提供。 |
+| CoilCoil 内置 Pi，不依赖用户本机 Pi | 已验证 | Runtime 使用私有 Agent/Session 目录；打包 smoke 验证 Home 与内置 Helper 启动器。 |
+| 工作流、MCP、子 Agent 以 Pi 扩展形式随包交付 | 已验证 | Runtime 显式加载 `@coilcoil/workflow`；MCP 由 `pi-mcp-adapter` 提供，子 Agent 由 CoilCoil 自有扩展以内嵌 child `AgentSession` 提供。 |
 | CLI 与 Desktop 共用 Runtime Core | 已验证 | Workspace 构建、类型检查和 Runtime smoke。 |
 | 不向 Renderer 暴露 Node | 已验证 | Desktop smoke 检查 `window.require` / `window.process` 不存在。 |
 | 超限桌面代码按功能域拆分 | 已验证 | 全局样式从 613 行降至 507 行；设置/MCP 与预览样式归入功能目录，生产构建和打包 Desktop smoke 通过。 |
@@ -82,7 +82,7 @@
 
 | 需求 | 状态 | 当前证据 / 缺口 |
 | --- | --- | --- |
-| 复用 `pi-mcp-adapter`，不重写 MCP 协议 | 已验证 | 配置、连接、状态和 OAuth 动作均调用扩展原生实现；SuoCode 只增加事件总线与 typed IPC 薄桥。 |
+| 复用 `pi-mcp-adapter`，不重写 MCP 协议 | 已验证 | 配置、连接、状态和 OAuth 动作均调用扩展原生实现；CoilCoil 只增加事件总线与 typed IPC 薄桥。 |
 | UI 新增/编辑/复制/移除，全局和项目作用域 | 已验证 | Runtime smoke 与最新打包 Desktop smoke 均覆盖扩展原生配置、复制、项目作用域和移除。 |
 | stdio、HTTP、env、headers、auth、生命周期、超时、direct tools、排除、资源、debug | 已验证 | Typed bridge 直接映射扩展原生 schema；Runtime smoke 覆盖持久化，打包 Desktop smoke 覆盖高级字段。 |
 | 启用/停用 Server | 已验证 | 升级并固定 `pi-mcp-adapter` 2.21.0，直接调用其 `writeProjectServerDisabledOverride` 与 reload 生命周期；Runtime smoke 和打包 Desktop smoke 均覆盖停用、状态投影和恢复启用。 |
@@ -97,7 +97,7 @@
 | --- | --- | --- |
 | Project 下打开独立 Terminal 工作区 | 已验证 | Workspace 行提供独立终端入口；打开后不创建 Agent 对话，右侧继续使用惰性目录树。 |
 | 多 Terminal、PTY 尺寸同步与恢复语义 | 已验证 | Electron main 持有多 PTY，xterm/FitAddon 同步尺寸；切换视图不杀进程，renderer 重挂载通过有界缓冲恢复。完整退出明确终止 PTY，不伪造跨进程重连。 |
-| 一键启动 Claude Code、Codex、内置 Pi | 已验证 | 打包 Terminal Desktop smoke 验证普通 shell、Claude Code、Codex 和安装包内置 Pi 均在项目 cwd 中启动；内置 Pi 显式加载 SuoCode 工作流扩展且不读取用户 PATH 中的 Pi。 |
+| 一键启动 Claude Code、Codex、内置 Pi | 已验证 | 打包 Terminal Desktop smoke 验证普通 shell、Claude Code、Codex 和安装包内置 Pi 均在项目 cwd 中启动；内置 Pi 显式加载 CoilCoil 工作流扩展且不读取用户 PATH 中的 Pi。 |
 
 ## 最终完成门槛
 

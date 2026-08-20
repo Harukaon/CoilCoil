@@ -20,7 +20,7 @@ import {
   type TerminalRun,
   type TodoItem,
   type ToolRun,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   existsSync,
   readFileSync,
@@ -35,7 +35,7 @@ import {
 } from "./runtime-utils.js";
 import { ToolRunIds } from "./tool-run-ids.js";
 
-export interface SuoCodeRuntimeOptions {
+export interface CoilCoilRuntimeOptions {
   agentDir: string;
   sessionDir: string;
   workflowDir?: string;

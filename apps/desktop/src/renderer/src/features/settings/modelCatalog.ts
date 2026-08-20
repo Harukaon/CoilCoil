@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "@suocode/runtime-protocol";
+import type { ThinkingLevel } from "@coilcoil/runtime-protocol";
 
 export type CatalogSourceLabel = "models.dev" | "LiteLLM";
 
@@ -27,8 +27,8 @@ export interface CatalogIndexEntry {
 }
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const MODELS_DEV_CACHE_KEY = "suocode.catalog.models-dev.v1";
-const LITELLM_CACHE_KEY = "suocode.catalog.litellm.v1";
+const MODELS_DEV_CACHE_KEY = "coilcoil.catalog.models-dev.v1";
+const LITELLM_CACHE_KEY = "coilcoil.catalog.litellm.v1";
 const MODELS_DEV_URL = "https://models.dev/api.json";
 const LITELLM_URL = "https://api.litellm.ai/model_catalog";
 
@@ -88,7 +88,7 @@ function addEntry(index: Map<string, CatalogIndexEntry[]>, keys: string[], entry
 /**
  * Read models.dev `reasoning_options` into Pi's thinking ladder.
  *
- * Only `effort` options carry a vocabulary SuoCode can map; a `toggle` or a
+ * Only `effort` options carry a vocabulary CoilCoil can map; a `toggle` or a
  * `budget_tokens` model says nothing about which effort words it accepts, so
  * those stay unstated and keep Pi's own default ladder.
  */

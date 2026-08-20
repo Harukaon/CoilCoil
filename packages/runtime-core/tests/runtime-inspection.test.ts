@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { RuntimeSummaryEvent } from "@suocode/runtime-protocol";
-import { summarizeCacheUsage } from "@suocode/runtime-protocol";
+import type { RuntimeSummaryEvent } from "@coilcoil/runtime-protocol";
+import { summarizeCacheUsage } from "@coilcoil/runtime-protocol";
 import { buildRuntimeInspection } from "../src/runtime-inspection.js";
 
 test("projects persisted Pi summaries and follows the active session branch", () => {
-  const manager = SessionManager.inMemory("/tmp/suocode-runtime-inspection");
+  const manager = SessionManager.inMemory("/tmp/coilcoil-runtime-inspection");
   const rootId = manager.appendCustomEntry("test-root", { value: true });
   const compactionId = manager.appendCompaction(
     "kept the important context",
@@ -44,7 +44,7 @@ test("projects persisted Pi summaries and follows the active session branch", ()
 });
 
 test("merges a live compaction into the inspection snapshot", () => {
-  const manager = SessionManager.inMemory("/tmp/suocode-runtime-inspection-live");
+  const manager = SessionManager.inMemory("/tmp/coilcoil-runtime-inspection-live");
   const live: RuntimeSummaryEvent = {
     id: "live-compaction",
     kind: "compaction",

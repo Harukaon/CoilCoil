@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
-import type { SuoCodeDesktopApi } from "../../shared/desktop-api";
+import type { CoilCoilDesktopApi } from "../../shared/desktop-api";
 
 declare global {
   interface Window {
-    suocode: SuoCodeDesktopApi;
+    coilcoil: CoilCoilDesktopApi;
   }
 }
 

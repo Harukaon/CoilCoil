@@ -15,8 +15,8 @@ import type {
   SubagentActivity,
   WorkspaceSnapshot,
   ToolRun,
-} from "@suocode/runtime-protocol";
-import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
+import { SESSION_OPEN_SUPERSEDED_ERROR } from "@coilcoil/runtime-protocol";
 import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { AppView } from "./AppView";
@@ -121,7 +121,7 @@ export default function App(): React.JSX.Element {
   const runtimeSessionRef = useRef(new Map<string, string>());
   const optimisticSessionsRef = useRef(new Map<string, SessionSummary>());
   const selectionRequestRef = useRef(0);
-  useEffect(() => window.suocode.onBrowserAgentActivated((scopeId) => {
+  useEffect(() => window.coilcoil.onBrowserAgentActivated((scopeId) => {
     if (scopeId !== snapshotRef.current?.runtimeId) return;
     inspector.openBrowserTab();
   }), [inspector.openBrowserTab]);
@@ -207,7 +207,7 @@ export default function App(): React.JSX.Element {
     setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
     try {
-      const { sessions, snapshot } = await window.suocode.request<WorkspaceSnapshot>({ type: "open_workspace", cwd: selection.path });
+      const { sessions, snapshot } = await window.coilcoil.request<WorkspaceSnapshot>({ type: "open_workspace", cwd: selection.path });
       if (requestId !== selectionRequestRef.current) return;
       setSessionsByProject((current) => ({ ...current, [selection.path]: sessions }));
       if (snapshot) {
@@ -229,15 +229,15 @@ export default function App(): React.JSX.Element {
   }, [applySnapshot, focusComposer, setDraftImages]);
 
   useEffect(() => {
-    document.documentElement.dataset.platform = window.suocode.platform;
-    const unsubscribe = window.suocode.onRuntimeEvent(handleRuntimeEvent);
+    document.documentElement.dataset.platform = window.coilcoil.platform;
+    const unsubscribe = window.coilcoil.onRuntimeEvent(handleRuntimeEvent);
     void (async () => {
       try {
-        const bootstrapPromise = window.suocode.request<RuntimeBootstrap>({ type: "bootstrap" }).then((bootstrap) => {
+        const bootstrapPromise = window.coilcoil.request<RuntimeBootstrap>({ type: "bootstrap" }).then((bootstrap) => {
           setConfiguration(bootstrap.configuration);
           return bootstrap;
         });
-        const home = await window.suocode.homeProject();
+        const home = await window.coilcoil.homeProject();
         const mounted = uniqueProjects([home, ...loadStoredProjects()]);
         setProjects(mounted);
         const activePath = window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
@@ -245,7 +245,7 @@ export default function App(): React.JSX.Element {
         setExpandedProjects(new Set([activeProject.path]));
         const backgroundProjects = mounted.filter((item) => item.path !== activeProject.path);
         void Promise.allSettled(backgroundProjects.map(async (item) => {
-          const listed = await window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: item.path });
+          const listed = await window.coilcoil.request<SessionSummary[]>({ type: "list_sessions", cwd: item.path });
           setSessionsByProject((current) => ({ ...current, [item.path]: listed }));
         }));
         const [bootstrap] = await Promise.all([bootstrapPromise, activateProject(activeProject)]);
@@ -275,7 +275,7 @@ export default function App(): React.JSX.Element {
     const runtimeId = snapshot?.runtimeId;
     if (settingsOpen || workspaceSurface !== "conversation" || inspector.state.activeTabId !== "runtime" || !runtimeId) return;
     let cancelled = false;
-    void window.suocode.request<SessionSnapshot["runtimeInspection"]>({ type: "get_runtime_inspection" }, runtimeId)
+    void window.coilcoil.request<SessionSnapshot["runtimeInspection"]>({ type: "get_runtime_inspection" }, runtimeId)
       .then((inspection) => {
         if (cancelled) return;
         setSnapshot((current) => {
@@ -322,14 +322,14 @@ export default function App(): React.JSX.Element {
   );
 
   const openProject = async (): Promise<void> => {
-    const selection = await window.suocode.selectProject();
+    const selection = await window.coilcoil.selectProject();
     if (!selection) return;
     const next = uniqueProjects([...projects, selection]);
     setProjects(next);
     window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next.filter((item) => item.kind === "workspace")));
     setSessionsByProject((current) => ({ ...current, [selection.path]: current[selection.path] ?? [] }));
     startPendingConversation(selection);
-    void window.suocode.request<SessionSummary[]>({ type: "list_sessions", cwd: selection.path })
+    void window.coilcoil.request<SessionSummary[]>({ type: "list_sessions", cwd: selection.path })
       .then((sessions) => setSessionsByProject((current) => ({ ...current, [selection.path]: sessions })))
       .catch((caught) => toastError(caught instanceof Error ? caught.message : String(caught)));
   };
@@ -364,7 +364,7 @@ export default function App(): React.JSX.Element {
       setProject(owner);
       window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, owner.path);
       if (cached) applySnapshot(cached);
-      const opened = await window.suocode.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path });
+      const opened = await window.coilcoil.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path });
       if (requestId === selectionRequestRef.current) applySnapshot(opened);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
@@ -407,7 +407,7 @@ export default function App(): React.JSX.Element {
     setTools((current) => current.filter((item) => item.order < message.order));
     shouldAutoScrollRef.current = true;
     try {
-      await window.suocode.request({ type: "rewind_prompt", entryId: message.entryId, text, images, clientMessageId }, snapshot.runtimeId);
+      await window.coilcoil.request({ type: "rewind_prompt", entryId: message.entryId, text, images, clientMessageId }, snapshot.runtimeId);
     } catch (caught) {
       dispatchConversationMessages({ type: "restore", state: previousConversationMessages });
       setTools(previousTools);
@@ -417,14 +417,14 @@ export default function App(): React.JSX.Element {
 
   const approvePlan = async (planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState> => {
     if (!snapshot?.runtimeId) throw new Error("当前会话尚未准备好。");
-    const plan = await window.suocode.request<PlanApprovalState>({ type: "approve_plan", planId, target, agent }, snapshot.runtimeId);
+    const plan = await window.coilcoil.request<PlanApprovalState>({ type: "approve_plan", planId, target, agent }, snapshot.runtimeId);
     setProjectState((current) => ({ ...current, planApproval: plan }));
     return plan;
   };
 
   const rejectPlan = async (planId: string): Promise<PlanApprovalState> => {
     if (!snapshot?.runtimeId) throw new Error("当前会话尚未准备好。");
-    const plan = await window.suocode.request<PlanApprovalState>({ type: "reject_plan", planId }, snapshot.runtimeId);
+    const plan = await window.coilcoil.request<PlanApprovalState>({ type: "reject_plan", planId }, snapshot.runtimeId);
     setProjectState((current) => ({ ...current, planApproval: plan }));
     return plan;
   };
@@ -487,7 +487,7 @@ export default function App(): React.JSX.Element {
       let target = snapshotRef.current;
       if (!target || pendingProjectPath === project.path) {
         setStartingSession(true);
-        const created = await window.suocode.request<SessionSnapshot>({
+        const created = await window.coilcoil.request<SessionSnapshot>({
           type: "create_session",
           cwd: project.path,
           model: selectedModel && configuration ? {
@@ -525,9 +525,9 @@ export default function App(): React.JSX.Element {
         setPendingProjectPath(undefined);
         target = activeSnapshot;
       }
-      if (runtimeCommand) await window.suocode.request({ type: "run_memory_now" }, target.runtimeId);
-      else if (intent === "steer") await window.suocode.request({ type: "steer", text: prompt, images, clientMessageId }, target.runtimeId);
-      else await window.suocode.request({ type: "prompt", text: prompt, images, clientMessageId }, target.runtimeId);
+      if (runtimeCommand) await window.coilcoil.request({ type: "run_memory_now" }, target.runtimeId);
+      else if (intent === "steer") await window.coilcoil.request({ type: "steer", text: prompt, images, clientMessageId }, target.runtimeId);
+      else await window.coilcoil.request({ type: "prompt", text: prompt, images, clientMessageId }, target.runtimeId);
     } catch (caught) {
       setDraft(prompt);
       setDraftImages(images);

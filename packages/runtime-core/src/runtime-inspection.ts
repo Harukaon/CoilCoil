@@ -3,7 +3,7 @@ import type {
   RuntimeInspectionSnapshot,
   RuntimeSummaryEvent,
   RuntimeSummaryUsage,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -1,5 +1,5 @@
 import { loadSkills } from "@earendil-works/pi-coding-agent";
-import type { SkillConfigurationSnapshot } from "@suocode/runtime-protocol";
+import type { SkillConfigurationSnapshot } from "@coilcoil/runtime-protocol";
 import { existsSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 

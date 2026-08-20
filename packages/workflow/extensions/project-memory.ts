@@ -59,7 +59,7 @@ export {
   resolveProjectRoot,
 } from "./memory-storage.ts";
 export type { PersistedProjectMemoryState } from "./memory-storage.ts";
-export const PROJECT_MEMORY_STATUS_EVENT = "suocode:project-memory:status:v1";
+export const PROJECT_MEMORY_STATUS_EVENT = "coilcoil:project-memory:status:v1";
 
 export type ProjectMemoryRunState = "idle" | "running" | "busy" | "succeeded" | "failed" | "disabled";
 

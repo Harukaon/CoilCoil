@@ -261,7 +261,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     profiles = loadProfiles({
       builtinDir: BUILTIN_AGENTS_DIR,
       userDir: join(getAgentDir(), "agents"),
-      projectDir: join(cwd, ".suocode", "agents"),
+      projectDir: join(cwd, ".coilcoil", "agents"),
     });
   };
 

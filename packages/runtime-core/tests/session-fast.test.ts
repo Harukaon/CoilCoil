@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { SuoCodeRuntime } from "../src/index.js";
+import { CoilCoilRuntime } from "../src/index.js";
 
 interface FastRuntimeInternals {
   active?: {
@@ -13,9 +13,9 @@ interface FastRuntimeInternals {
 }
 
 test("the runtime Fast command updates the current session extension", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-session-fast-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-session-fast-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
-  const runtime = new SuoCodeRuntime({ agentDir: join(root, "agent"), sessionDir: join(root, "sessions") });
+  const runtime = new CoilCoilRuntime({ agentDir: join(root, "agent"), sessionDir: join(root, "sessions") });
   const internals = runtime as unknown as FastRuntimeInternals;
   const commands: string[] = [];
   const active: NonNullable<FastRuntimeInternals["active"]> = {
@@ -35,9 +35,9 @@ test("the runtime Fast command updates the current session extension", async (co
 });
 
 test("the runtime rejects Fast for an unsupported model", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-session-fast-unsupported-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-session-fast-unsupported-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
-  const runtime = new SuoCodeRuntime({ agentDir: join(root, "agent"), sessionDir: join(root, "sessions") });
+  const runtime = new CoilCoilRuntime({ agentDir: join(root, "agent"), sessionDir: join(root, "sessions") });
   (runtime as unknown as FastRuntimeInternals).active = {
     fastState: { version: 1, enabled: false, supported: false, modelId: "claude-opus-4-6" },
     session: { async prompt() { throw new Error("must not be called"); } },

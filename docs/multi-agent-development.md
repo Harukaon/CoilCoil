@@ -1,8 +1,8 @@
-# SuoCode 多 Agent 并行开发指南
+# CoilCoil 多 Agent 并行开发指南
 
 ## 目的
 
-本文规定多个 Agent 同时开发 SuoCode 时的统一操作流程。
+本文规定多个 Agent 同时开发 CoilCoil 时的统一操作流程。
 
 本文中的 `$PROJECT_ROOT` 代表本机存放项目的父目录，示例不会依赖任何特定用户的本机路径。
 
@@ -16,7 +16,7 @@ Agent A、Agent B、Agent C、Agent D 仅用于标识不同的开发环境，不
 
 1. 一个 Agent 对应一个 Git 分支、一个 Git worktree 和一个 Electron 用户数据目录。
 2. 不允许两个 Agent 同时在同一个工作目录内修改文件或执行 Git 操作。
-3. 原始 `SuoCode` 目录默认作为主工作区，只用于同步 `main`、集成分支、解决冲突和最终验证。
+3. 原始 `CoilCoil` 目录默认作为主工作区，只用于同步 `main`、集成分支、解决冲突和最终验证。
 4. Agent 只能在自己的 worktree 内开发、启动应用和运行测试。
 5. 每次交付必须包含 Git commit、验证结果和必要的风险说明。
 6. 不得切换、重写、强推或删除其他 Agent 正在使用的分支。
@@ -28,17 +28,17 @@ Agent A、Agent B、Agent C、Agent D 仅用于标识不同的开发环境，不
 
 | 环境 | 分支 | worktree | Electron 用户数据目录 |
 |---|---|---|---|
-| Agent A | `agent/a` | `$PROJECT_ROOT/SuoCode-agent-a` | `$PROJECT_ROOT/.suocode-dev-data/a` |
-| Agent B | `agent/b` | `$PROJECT_ROOT/SuoCode-agent-b` | `$PROJECT_ROOT/.suocode-dev-data/b` |
-| Agent C | `agent/c` | `$PROJECT_ROOT/SuoCode-agent-c` | `$PROJECT_ROOT/.suocode-dev-data/c` |
-| Agent D | `agent/d` | `$PROJECT_ROOT/SuoCode-agent-d` | `$PROJECT_ROOT/.suocode-dev-data/d` |
+| Agent A | `agent/a` | `$PROJECT_ROOT/CoilCoil-agent-a` | `$PROJECT_ROOT/.coilcoil-dev-data/a` |
+| Agent B | `agent/b` | `$PROJECT_ROOT/CoilCoil-agent-b` | `$PROJECT_ROOT/.coilcoil-dev-data/b` |
+| Agent C | `agent/c` | `$PROJECT_ROOT/CoilCoil-agent-c` | `$PROJECT_ROOT/.coilcoil-dev-data/c` |
+| Agent D | `agent/d` | `$PROJECT_ROOT/CoilCoil-agent-d` | `$PROJECT_ROOT/.coilcoil-dev-data/d` |
 
 ## 创建开发环境
 
 环境创建应由负责集成的操作者统一执行。创建前确认主工作区没有未提交内容，也没有 Agent 正在其中写文件。
 
 ```bash
-cd $PROJECT_ROOT/SuoCode
+cd $PROJECT_ROOT/CoilCoil
 git status --short --branch
 git switch main
 git pull --ff-only
@@ -47,16 +47,16 @@ git pull --ff-only
 根据需要创建 worktree：
 
 ```bash
-git worktree add ../SuoCode-agent-a -b agent/a main
-git worktree add ../SuoCode-agent-b -b agent/b main
-git worktree add ../SuoCode-agent-c -b agent/c main
-git worktree add ../SuoCode-agent-d -b agent/d main
+git worktree add ../CoilCoil-agent-a -b agent/a main
+git worktree add ../CoilCoil-agent-b -b agent/b main
+git worktree add ../CoilCoil-agent-c -b agent/c main
+git worktree add ../CoilCoil-agent-d -b agent/d main
 ```
 
 如果分支已经存在，只需要重新挂载 worktree：
 
 ```bash
-git worktree add ../SuoCode-agent-a agent/a
+git worktree add ../CoilCoil-agent-a agent/a
 ```
 
 每个新 worktree 都需要准备自己的依赖。不要手工复制或共享正在被其他环境使用的 `node_modules`。
@@ -64,7 +64,7 @@ git worktree add ../SuoCode-agent-a agent/a
 Pi 的模型目录数据属于生成文件，不会随 Git worktree 一起出现。首次准备环境时先在当前 worktree 中生成模型数据，再执行完整安装：
 
 ```bash
-cd $PROJECT_ROOT/SuoCode-agent-a
+cd $PROJECT_ROOT/CoilCoil-agent-a
 npm run hydrate:model-data --prefix vendor/pi
 npm run setup
 ```
@@ -76,7 +76,7 @@ npm run setup
 每个 Agent 收到任务后，首先进入自己的 worktree，并确认路径、分支和工作区状态。
 
 ```bash
-cd $PROJECT_ROOT/SuoCode-agent-a
+cd $PROJECT_ROOT/CoilCoil-agent-a
 pwd
 git branch --show-current
 git status --short --branch
@@ -115,37 +115,37 @@ git merge main
 
 多个 Agent 可以同时执行 `npm run dev`。当前 Electron Vite 配置没有锁死 renderer 端口，Vite 通常会自动选择下一个可用端口。
 
-但是，SuoCode Desktop 默认通过 Electron `userData` 保存模型设置、凭据、会话和运行时数据。所有开发实例必须使用不同的 `--user-data-dir`。
+但是，CoilCoil Desktop 默认通过 Electron `userData` 保存模型设置、凭据、会话和运行时数据。所有开发实例必须使用不同的 `--user-data-dir`。
 
 Agent A：
 
 ```bash
-cd $PROJECT_ROOT/SuoCode-agent-a
-ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/a\"]" npm run dev
+cd $PROJECT_ROOT/CoilCoil-agent-a
+ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.coilcoil-dev-data/a\"]" npm run dev
 ```
 
 Agent B：
 
 ```bash
-cd $PROJECT_ROOT/SuoCode-agent-b
-ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/b\"]" npm run dev
+cd $PROJECT_ROOT/CoilCoil-agent-b
+ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.coilcoil-dev-data/b\"]" npm run dev
 ```
 
 Agent C：
 
 ```bash
-cd $PROJECT_ROOT/SuoCode-agent-c
-ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/c\"]" npm run dev
+cd $PROJECT_ROOT/CoilCoil-agent-c
+ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.coilcoil-dev-data/c\"]" npm run dev
 ```
 
 Agent D：
 
 ```bash
-cd $PROJECT_ROOT/SuoCode-agent-d
-ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/d\"]" npm run dev
+cd $PROJECT_ROOT/CoilCoil-agent-d
+ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.coilcoil-dev-data/d\"]" npm run dev
 ```
 
-启动后还必须确认 APP 内打开的是当前 Agent 自己的 worktree。例如 Agent A 应选择 `$PROJECT_ROOT/SuoCode-agent-a`，不能让多个实例同时操作同一个项目目录。
+启动后还必须确认 APP 内打开的是当前 Agent 自己的 worktree。例如 Agent A 应选择 `$PROJECT_ROOT/CoilCoil-agent-a`，不能让多个实例同时操作同一个项目目录。
 
 不同用户数据目录之间不会自动共享模型配置和凭据。需要测试真实模型时，应分别配置，或使用项目支持的环境变量注入凭据；不得把凭据写入仓库。
 
@@ -156,9 +156,9 @@ ELECTRON_CLI_ARGS="[\"--user-data-dir=${PROJECT_ROOT}/.suocode-dev-data/d\"]" np
 并行测试 CLI 时也要隔离数据目录，并将 CLI 指向当前 Agent 自己的 worktree。
 
 ```bash
-cd $PROJECT_ROOT/SuoCode-agent-a
-SUOCODE_DATA_DIR=$PROJECT_ROOT/.suocode-dev-data/a-cli \
-  npm run cli -- $PROJECT_ROOT/SuoCode-agent-a
+cd $PROJECT_ROOT/CoilCoil-agent-a
+COILCOIL_DATA_DIR=$PROJECT_ROOT/.coilcoil-dev-data/a-cli \
+  npm run cli -- $PROJECT_ROOT/CoilCoil-agent-a
 ```
 
 其他 Agent 替换对应的环境标识和路径。
@@ -212,10 +212,10 @@ Agent 完成交付后应保持分支和 worktree 可用，等待集成完成。�
 
 ## 集成流程
 
-集成应在原始 `SuoCode` 主工作区中进行，不要在任何 Agent 的活动 worktree 中合并全部分支。
+集成应在原始 `CoilCoil` 主工作区中进行，不要在任何 Agent 的活动 worktree 中合并全部分支。
 
 ```bash
-cd $PROJECT_ROOT/SuoCode
+cd $PROJECT_ROOT/CoilCoil
 git status --short --branch
 git switch main
 git pull --ff-only
@@ -261,7 +261,7 @@ git merge --no-ff integration/multi-agent-batch
 如果其他分支已经完成集成并进入 `main`，仍在开发的 Agent 应在收到同步通知后执行：
 
 ```bash
-cd $PROJECT_ROOT/SuoCode-agent-a
+cd $PROJECT_ROOT/CoilCoil-agent-a
 git status --short
 git merge main
 ```
@@ -275,9 +275,9 @@ git merge main
 只有在对应分支已经完成集成、worktree 没有未提交内容、相关开发进程已经停止后，才可以清理环境。
 
 ```bash
-cd $PROJECT_ROOT/SuoCode
+cd $PROJECT_ROOT/CoilCoil
 git worktree list
-git worktree remove ../SuoCode-agent-a
+git worktree remove ../CoilCoil-agent-a
 git branch -d agent/a
 git worktree prune
 ```

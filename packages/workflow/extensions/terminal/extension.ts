@@ -76,7 +76,7 @@ interface StartResult {
   hasMore: boolean;
 }
 
-const TERMINAL_RUN_ENTRY_TYPE = "suocode-terminal-run";
+const TERMINAL_RUN_ENTRY_TYPE = "coilcoil-terminal-run";
 
 function notificationReason(session: ManagedTerminal, event: { mode: string; pattern?: string }): string {
   if (event.mode === "exit") {

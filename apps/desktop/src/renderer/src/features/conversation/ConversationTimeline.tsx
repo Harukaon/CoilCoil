@@ -15,7 +15,7 @@ import type {
   SessionSnapshot,
   SubagentActivity,
   ToolRun,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { ConfirmDialog } from "../../ui/dialog";
@@ -38,7 +38,7 @@ type ActivityEntry =
   | { kind: "thinking"; id: string; text: string }
   | { kind: "tool"; id: string; tool: ToolRun };
 
-const REWIND_WARNING_DISMISSED_KEY = "suocode.rewind-warning-dismissed";
+const REWIND_WARNING_DISMISSED_KEY = "coilcoil.rewind-warning-dismissed";
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 /**
  * A path in the transcript, drawn as the file or folder it points at.
@@ -118,7 +118,7 @@ function isInsideComposerChrome(target: EventTarget | null, shell: HTMLElement |
   if (!(target instanceof Element)) return false;
   // Keep editing when interacting with model menu / rewind dialog / files inspector / sidebar
   // so users can drag paths from the right panel into the inline composer.
-  return Boolean(target.closest(".model-popover, .suo-modal-backdrop, .suo-modal, .inspector-pane, .sidebar, .settings-dialog, .toast-host"));
+  return Boolean(target.closest(".model-popover, .coil-modal-backdrop, .coil-modal, .inspector-pane, .sidebar, .settings-dialog, .toast-host"));
 }
 
 function shouldDismissHistoryEdit(target: EventTarget | null, shell: HTMLElement | null): boolean {
@@ -444,7 +444,7 @@ export function AgentTurnView({
       .join("\n\n");
     if (!text) return;
     try {
-      await window.suocode.copyText(text);
+      await window.coilcoil.copyText(text);
       setCopied(true);
       if (copiedTimer.current) clearTimeout(copiedTimer.current);
       copiedTimer.current = setTimeout(() => setCopied(false), 1500);

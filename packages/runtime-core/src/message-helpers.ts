@@ -9,7 +9,7 @@ import {
   type SubagentActivity,
   type SubagentTimelineEntry,
   type TodoItem,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   existsSync,
 } from "node:fs";

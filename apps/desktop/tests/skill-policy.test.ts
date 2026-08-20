@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SkillEntry } from "@suocode/runtime-protocol";
+import type { SkillEntry } from "@coilcoil/runtime-protocol";
 import {
   canDeleteSkill,
   canRemoveSkill,

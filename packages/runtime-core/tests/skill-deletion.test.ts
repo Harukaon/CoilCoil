@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SkillConfigurationSnapshot, SkillEntry } from "@suocode/runtime-protocol";
+import type { SkillConfigurationSnapshot, SkillEntry } from "@coilcoil/runtime-protocol";
 import test from "node:test";
-import { SuoCodeRuntime } from "../src/index.js";
+import { CoilCoilRuntime } from "../src/index.js";
 import { skillIsRemoved } from "../src/skill-overrides.js";
 
 interface DeleteSkillRuntime {
@@ -53,7 +53,7 @@ function agentsSkill(baseDir: string, filePath: string): SkillEntry {
 }
 
 test("deleteSkill removes a managed user skill and its stale override", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-skill-delete-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-skill-delete-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const skillDir = join(agentDir, "skills", "demo");
@@ -64,7 +64,7 @@ test("deleteSkill removes a managed user skill and its stale override", async (c
   writeFileSync(filePath, "# demo\n");
 
   const entry = userSkill(skillDir, filePath);
-  const runtime = Object.create(SuoCodeRuntime.prototype) as DeleteSkillRuntime;
+  const runtime = Object.create(CoilCoilRuntime.prototype) as DeleteSkillRuntime;
   runtime.agentDir = agentDir;
   runtime.mcpCwd = (requested) => requested ?? cwd;
   let current = snapshot(agentDir, [entry]);
@@ -85,7 +85,7 @@ test("deleteSkill removes a managed user skill and its stale override", async (c
 });
 
 test("removeSkill removes an Agents skill import without deleting its source", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-skill-remove-agents-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-skill-remove-agents-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -96,7 +96,7 @@ test("removeSkill removes an Agents skill import without deleting its source", a
   writeFileSync(filePath, "# eval\n");
 
   const entry = agentsSkill(skillDir, filePath);
-  const runtime = Object.create(SuoCodeRuntime.prototype) as DeleteSkillRuntime;
+  const runtime = Object.create(CoilCoilRuntime.prototype) as DeleteSkillRuntime;
   runtime.agentDir = agentDir;
   runtime.mcpCwd = () => cwd;
   let paths: string[] = [];
@@ -121,7 +121,7 @@ test("removeSkill removes an Agents skill import without deleting its source", a
 });
 
 test("deleteSkill refuses a user-scoped skill outside the managed directory", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-skill-delete-external-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-skill-delete-external-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const externalDir = join(root, "external", "demo");
@@ -129,17 +129,17 @@ test("deleteSkill refuses a user-scoped skill outside the managed directory", as
   mkdirSync(externalDir, { recursive: true });
   writeFileSync(filePath, "# external\n");
   const entry = userSkill(externalDir, filePath);
-  const runtime = Object.create(SuoCodeRuntime.prototype) as DeleteSkillRuntime;
+  const runtime = Object.create(CoilCoilRuntime.prototype) as DeleteSkillRuntime;
   runtime.agentDir = agentDir;
   runtime.mcpCwd = () => root;
   runtime.getSkillConfiguration = async () => snapshot(agentDir, [entry]);
 
-  await assert.rejects(() => runtime.deleteSkill(filePath), /只能删除 SuoCode 自维护目录中的技能/);
+  await assert.rejects(() => runtime.deleteSkill(filePath), /只能删除 CoilCoil 自维护目录中的技能/);
   assert.equal(existsSync(externalDir), true);
 });
 
 test("addSkillPath rejects invalid skills before copying them", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-skill-import-invalid-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-skill-import-invalid-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const sourceDir = join(root, "imported-skills");
@@ -149,7 +149,7 @@ test("addSkillPath rejects invalid skills before copying them", async (context) 
   mkdirSync(cwd, { recursive: true });
   writeFileSync(join(invalidDir, "SKILL.md"), "# Missing description\n");
 
-  const runtime = Object.create(SuoCodeRuntime.prototype) as DeleteSkillRuntime;
+  const runtime = Object.create(CoilCoilRuntime.prototype) as DeleteSkillRuntime;
   runtime.agentDir = agentDir;
   runtime.mcpCwd = () => cwd;
   runtime.expandSkillPath = (path) => path;
@@ -162,7 +162,7 @@ test("addSkillPath rejects invalid skills before copying them", async (context) 
 });
 
 test("deleteSkill removes a managed invalid diagnostic left by an old import", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-skill-delete-invalid-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-skill-delete-invalid-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const skillDir = join(agentDir, "skills", "broken");
@@ -172,7 +172,7 @@ test("deleteSkill removes a managed invalid diagnostic left by an old import", a
   mkdirSync(cwd, { recursive: true });
   writeFileSync(filePath, "# broken\n");
 
-  const runtime = Object.create(SuoCodeRuntime.prototype) as DeleteSkillRuntime;
+  const runtime = Object.create(CoilCoilRuntime.prototype) as DeleteSkillRuntime;
   runtime.agentDir = agentDir;
   runtime.mcpCwd = () => cwd;
   const current = snapshot(agentDir, []);

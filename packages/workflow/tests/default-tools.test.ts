@@ -6,7 +6,7 @@ import defaultToolsExtension, {
   removeToolPromptGuidelines,
   trimNativeSystemPrompt,
 } from "../extensions/default-tools.ts";
-import { SUOCODE_ENGINEERING_STANDARDS } from "../extensions/system/engineering-standards.ts";
+import { COILCOIL_ENGINEERING_STANDARDS } from "../extensions/system/engineering-standards.ts";
 
 function createHarness() {
   const handlers = new Map<string, Array<(...args: any[]) => any>>();
@@ -79,7 +79,7 @@ The following skills provide specialized instructions.
   );
 });
 
-test("tool prompt guidelines are replaced by the SuoCode engineering standards", () => {
+test("tool prompt guidelines are replaced by the CoilCoil engineering standards", () => {
   const prompt = `Base
 
 Guidelines:
@@ -93,7 +93,7 @@ Pi documentation (read only when asked about pi):
 
   assert.equal(removeToolPromptGuidelines(prompt), `Base
 
-${SUOCODE_ENGINEERING_STANDARDS}
+${COILCOIL_ENGINEERING_STANDARDS}
 
 Pi documentation (read only when asked about pi):
 - docs`);
@@ -124,7 +124,7 @@ Current working directory: /project`,
   assert.deepEqual(result, {
     systemPrompt: `Base
 
-${SUOCODE_ENGINEERING_STANDARDS}
+${COILCOIL_ENGINEERING_STANDARDS}
 
 Current working directory: /project`,
   });

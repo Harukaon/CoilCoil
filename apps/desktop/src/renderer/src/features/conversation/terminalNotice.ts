@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@suocode/runtime-protocol";
+import type { ChatMessage } from "@coilcoil/runtime-protocol";
 
 export const TERMINAL_NOTIFICATION_TYPE = "terminal-notification";
 

@@ -1,22 +1,22 @@
 # Pi upstream maintenance
 
-SuoCode carries a thin fork of Pi under `vendor/pi`.
+CoilCoil carries a thin fork of Pi under `vendor/pi`.
 
 - Upstream: `https://github.com/earendil-works/pi.git`
 - Upstream branch: `main`
 - Local remote name: `pi-upstream`
 - Import method: Git subtree with squashed upstream history
 
-The initial import intentionally contains no SuoCode-specific Pi changes.
-Product behavior should remain in SuoCode packages whenever Pi's public SDK or
+The initial import intentionally contains no CoilCoil-specific Pi changes.
+Product behavior should remain in CoilCoil packages whenever Pi's public SDK or
 extension APIs are sufficient. Changes belong in `vendor/pi` only when the
 embedded runtime requires a capability that cannot be implemented outside Pi.
 
-## SuoCode thin patches
+## CoilCoil thin patches
 
 - `packages/coding-agent/src/index.ts` re-exports Pi's existing HTTP dispatcher
   helper for SDK embedders. The CLI and RPC entry points already invoke this
-  helper; SuoCode invokes the same implementation before embedded provider SDKs
+  helper; CoilCoil invokes the same implementation before embedded provider SDKs
   make requests, preserving Pi's proxy, timeout, HTTP/2 and Undici error
   handling instead of maintaining a second network stack.
 - `packages/coding-agent/src/core/agent-session.ts` emits `session_start` after
@@ -27,7 +27,7 @@ embedded runtime requires a capability that cannot be implemented outside Pi.
 
 ## Upstream bugs we patch ourselves
 
-These are Pi defects, not SuoCode behavior. Each one is carried until upstream
+These are Pi defects, not CoilCoil behavior. Each one is carried until upstream
 fixes it, so **check the upstream status of every entry before accepting a
 subtree pull** and drop the patch once the fix lands there.
 
@@ -43,7 +43,7 @@ subtree pull** and drop the patch once the fix lands there.
 - Cause: providers on `openai-completions` (DeepSeek and friends) number their
   tool calls per response, so each assistant turn hands out `call_0` again.
   `convertResponsesMessages` replayed those ids verbatim, and the Responses API
-  validates call id uniqueness across the whole input. SuoCode hits this on any
+  validates call id uniqueness across the whole input. CoilCoil hits this on any
   session that switches mid-way from a completions model to a Responses model,
   which the model picker makes a one-click action.
 - Upstream status when written: no issue filed, and `main` still had no
@@ -64,4 +64,4 @@ git subtree pull --prefix=vendor/pi pi-upstream main --squash
 
 Before accepting an update, walk the "Upstream bugs we patch ourselves" list
 above and re-check each entry against the incoming tree, then run Pi's own
-checks as well as the SuoCode runtime and workflow test suites.
+checks as well as the CoilCoil runtime and workflow test suites.

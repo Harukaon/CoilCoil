@@ -4,7 +4,7 @@ import type {
   RuntimeResponseEnvelope,
   RuntimeWireMessage,
   FileNode,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -35,7 +35,7 @@ import {
 // harness inspect the *running* renderer instead of proving layout solely with
 // a synthetic DOM fixture. Electron otherwise does not expose the application
 // WebContents through the scoped browser CDP bridge below.
-const rendererDebugPort = process.env.SUOCODE_RENDERER_DEBUG_PORT;
+const rendererDebugPort = process.env.COILCOIL_RENDERER_DEBUG_PORT;
 if (!app.isPackaged && rendererDebugPort && /^\d{2,5}$/.test(rendererDebugPort)) {
   app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
   app.commandLine.appendSwitch("remote-debugging-port", rendererDebugPort);
@@ -220,12 +220,12 @@ class RuntimeHost {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: "1",
-        SUOCODE_AGENT_DIR: join(app.getPath("userData"), "agent"),
-        SUOCODE_SESSION_DIR: join(app.getPath("userData"), "sessions"),
-        SUOCODE_NODE_EXEC_PATH: nodeExecutable,
+        COILCOIL_AGENT_DIR: join(app.getPath("userData"), "agent"),
+        COILCOIL_SESSION_DIR: join(app.getPath("userData"), "sessions"),
+        COILCOIL_NODE_EXEC_PATH: nodeExecutable,
         ...(primaryBrowserRuntime ? {
-          SUOCODE_BROWSER_MCP_COMMAND: nodeExecutable,
-          SUOCODE_BROWSER_MCP_ARGS: JSON.stringify([
+          COILCOIL_BROWSER_MCP_COMMAND: nodeExecutable,
+          COILCOIL_BROWSER_MCP_ARGS: JSON.stringify([
             chromeDevtoolsMcpEntry(),
             "--wsEndpoint", primaryBrowserRuntime.endpoint(),
             "--wsHeaders", JSON.stringify({ Authorization: `Bearer ${primaryBrowserRuntime.token}` }),
@@ -235,7 +235,7 @@ class RuntimeHost {
             "--experimentalStructuredContent",
             "--experimentalPageIdRouting",
           ]),
-          SUOCODE_BROWSER_MCP_ENV: JSON.stringify({
+          COILCOIL_BROWSER_MCP_ENV: JSON.stringify({
             CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1",
             CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
             ELECTRON_RUN_AS_NODE: "1",
@@ -251,7 +251,7 @@ class RuntimeHost {
     child.on("message", (raw: RuntimeWireMessage) => this.handleMessage(raw));
     child.once("exit", (code, signal) => {
       this.child = undefined;
-      const reason = `SuoCode runtime exited${code === null ? "" : ` with code ${code}`}${signal ? ` (${signal})` : ""}.`;
+      const reason = `CoilCoil runtime exited${code === null ? "" : ` with code ${code}`}${signal ? ` (${signal})` : ""}.`;
       for (const request of this.pending.values()) request.reject(new Error(reason));
       this.pending.clear();
       this.onExit();
@@ -280,7 +280,7 @@ class RuntimeHost {
   request<T>(command: RuntimeCommand, runtimeId?: string): Promise<T> {
     this.start();
     const child = this.child;
-    if (!child?.connected) return Promise.reject(new Error("SuoCode 运行时不可用。"));
+    if (!child?.connected) return Promise.reject(new Error("CoilCoil 运行时不可用。"));
     const id = randomUUID();
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
@@ -302,7 +302,7 @@ class RuntimeHost {
     child.removeAllListeners("exit");
     if (child.connected) child.disconnect();
     child.kill("SIGTERM");
-    for (const request of this.pending.values()) request.reject(new Error("SuoCode 正在关闭。"));
+    for (const request of this.pending.values()) request.reject(new Error("CoilCoil 正在关闭。"));
     this.pending.clear();
   }
 }
@@ -407,7 +407,7 @@ async function createWindow(): Promise<void> {
     minHeight: 500,
     show: false,
     backgroundColor: WINDOW_BACKGROUND[nativeTheme.shouldUseDarkColors ? "dark" : "light"],
-    title: "SuoCode",
+    title: "CoilCoil",
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,
@@ -430,7 +430,7 @@ async function createWindow(): Promise<void> {
 
   // Enabling webviewTag means any script in this renderer could mint a guest and
   // choose its own preferences. This is the gate that rewrites them into the only
-  // shape SuoCode allows, or refuses the attachment.
+  // shape CoilCoil allows, or refuses the attachment.
   const webviewHostId = mainWindow.webContents.id;
   webviewHostIds.add(webviewHostId);
   // Capture the id up front: by the time "closed" fires the window is destroyed
@@ -466,7 +466,7 @@ async function createWindow(): Promise<void> {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
   });
   await browserRuntime.start();
-  if (process.env.SUOCODE_BROWSER_PROBE_LOG === "1") {
+  if (process.env.COILCOIL_BROWSER_PROBE_LOG === "1") {
     console.error("[browser-probe]", JSON.stringify({
       devtoolsEndpoint: browserRuntime.endpoint(),
       token: browserRuntime.token,
@@ -491,8 +491,8 @@ async function createWindow(): Promise<void> {
   // Diagnostic for the report that an agent driving the browser raises — and even
   // un-minimizes — the app window. Nothing in main calls focus/show/restore, so
   // the activation has to come from Chromium promoting a guest. Pair this with
-  // SUOCODE_BROWSER_CDP_LOG=1 and read the last CDP command before the event.
-  if (process.env.SUOCODE_BROWSER_FOCUS_LOG === "1") {
+  // COILCOIL_BROWSER_CDP_LOG=1 and read the last CDP command before the event.
+  if (process.env.COILCOIL_BROWSER_FOCUS_LOG === "1") {
     const logActivation = (event: string) => () => {
       console.error(`[browser-focus ${Date.now()}] window ${event}`, new Error("activation").stack);
     };

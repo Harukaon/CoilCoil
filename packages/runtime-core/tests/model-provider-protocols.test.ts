@@ -3,13 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { OPENAI_RESPONSES_WS_API } from "@suocode/openai-responses-ws/config";
-import { SuoCodeRuntime } from "../src/index.js";
+import { OPENAI_RESPONSES_WS_API } from "@coilcoil/openai-responses-ws/config";
+import { CoilCoilRuntime } from "../src/index.js";
 
 test("the WS transport is exposed as a generic request protocol, selectable by custom providers", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-model-provider-protocols-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-model-provider-protocols-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
   });

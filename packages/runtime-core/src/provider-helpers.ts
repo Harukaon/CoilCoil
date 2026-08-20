@@ -5,7 +5,7 @@ import {
 import {
   OPENAI_RESPONSES_WS_API,
   OPENAI_RESPONSES_WS_PROVIDER_NAME,
-} from "@suocode/openai-responses-ws/config";
+} from "@coilcoil/openai-responses-ws/config";
 import {
   type ModelProviderAuthState,
   type ModelProviderConfigurationSnapshot,
@@ -14,7 +14,7 @@ import {
   type ModelProviderCredentialMethod,
   type ModelProviderModelConfiguration,
   type ThinkingLevel,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   MASKED_CONFIGURATION_VALUE
 } from "./runtime-constants.js";
@@ -41,7 +41,7 @@ export const MODEL_PROVIDER_APIS: ModelProviderConfigurationSnapshot["supportedA
   { id: "mistral-conversations", label: "Mistral Conversations", description: "Mistral 原生 Conversations API。" },
   { id: "bedrock-converse-stream", label: "Amazon Bedrock Converse", description: "Amazon Bedrock Converse Stream API。" },
   { id: "pi-messages", label: "Messages", description: "原生 Messages 流协议，适用于实现该协议的私有服务。" },
-  { id: OPENAI_RESPONSES_WS_API, label: OPENAI_RESPONSES_WS_PROVIDER_NAME, description: "SuoCode 的 WebSocket 协议扩展；任何实现该协议的服务都可以直接作为自定义服务商接入，无需 ChatGPT 账号。" },
+  { id: OPENAI_RESPONSES_WS_API, label: OPENAI_RESPONSES_WS_PROVIDER_NAME, description: "CoilCoil 的 WebSocket 协议扩展；任何实现该协议的服务都可以直接作为自定义服务商接入，无需 ChatGPT 账号。" },
 ];
 
 export type CredentialFieldDefinition = Omit<ModelProviderCredentialField, "configured" | "value">;
@@ -131,7 +131,7 @@ export const BUILTIN_CREDENTIAL_METHODS: Record<string, CredentialMethodDefiniti
     {
       id: "aws-profile",
       label: "AWS Profile",
-      description: "使用 ~/.aws 中已配置的 Profile；Profile 名称会保存在 SuoCode 私有凭据中。",
+      description: "使用 ~/.aws 中已配置的 Profile；Profile 名称会保存在 CoilCoil 私有凭据中。",
       fields: [
         credentialField("AWS_PROFILE", "Profile 名称", "text", true, "default"),
         credentialField("AWS_REGION", "AWS Region", "text", false, "us-east-1"),
@@ -151,7 +151,7 @@ export const BUILTIN_CREDENTIAL_METHODS: Record<string, CredentialMethodDefiniti
     {
       id: "credential-chain",
       label: "现有 AWS Credential Chain",
-      description: "使用运行环境已有的 IAM、ECS Task Role 或 Web Identity 凭据，不在 SuoCode 中保存密钥。",
+      description: "使用运行环境已有的 IAM、ECS Task Role 或 Web Identity 凭据，不在 CoilCoil 中保存密钥。",
       fields: [credentialField("AWS_REGION", "AWS Region", "text", false, "us-east-1")],
     },
   ],

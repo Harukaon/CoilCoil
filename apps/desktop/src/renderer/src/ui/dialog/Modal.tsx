@@ -59,7 +59,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="suo-modal-backdrop"
+      className="coil-modal-backdrop"
       role="presentation"
       ref={panelRef}
       onMouseDown={(event) => {
@@ -70,16 +70,16 @@ export function Modal({
         children
       ) : (
         <section
-          className={`suo-modal suo-modal-${size}`}
+          className={`coil-modal coil-modal-${size}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
           aria-describedby={descriptionId}
         >
-          {title ? <h2 className="suo-modal-title" id={titleId}>{title}</h2> : null}
-          {description ? <p className="suo-modal-description" id={descriptionId}>{description}</p> : null}
+          {title ? <h2 className="coil-modal-title" id={titleId}>{title}</h2> : null}
+          {description ? <p className="coil-modal-description" id={descriptionId}>{description}</p> : null}
           {children}
-          {footer ? <footer className="suo-modal-footer">{footer}</footer> : null}
+          {footer ? <footer className="coil-modal-footer">{footer}</footer> : null}
         </section>
       )}
     </div>,

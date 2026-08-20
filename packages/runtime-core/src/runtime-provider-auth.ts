@@ -13,7 +13,7 @@ import {
   type RuntimeConfiguration,
   type TestProviderConnectionInput,
   type TestProviderConnectionResult,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   randomUUID,
 } from "node:crypto";
@@ -115,7 +115,7 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
       case "device_code":
         this.updateProviderAuth(flow, {
           status: "authorizing",
-          message: "请在浏览器中输入设备验证码，SuoCode 会自动等待授权完成。",
+          message: "请在浏览器中输入设备验证码，CoilCoil 会自动等待授权完成。",
           deviceCode: {
             userCode: event.userCode,
             verificationUri: event.verificationUri,

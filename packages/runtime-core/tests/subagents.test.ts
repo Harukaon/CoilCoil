@@ -9,10 +9,10 @@ import {
   type EventBusController,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import type { RuntimeEvent, SubagentActivity } from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+import type { RuntimeEvent, SubagentActivity } from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 
-const SUBAGENT_RPC_REQUEST_CHANNEL = "suocode:subagents:rpc:v1:request";
+const SUBAGENT_RPC_REQUEST_CHANNEL = "coilcoil:subagents:rpc:v1:request";
 
 interface ReconstructedState {
   subagents: Map<string, SubagentActivity>;
@@ -31,8 +31,8 @@ interface RuntimeInternals {
   };
 }
 
-function createRuntime(root: string, onEvent?: (event: RuntimeEvent) => void): SuoCodeRuntime {
-  return new SuoCodeRuntime({
+function createRuntime(root: string, onEvent?: (event: RuntimeEvent) => void): CoilCoilRuntime {
+  return new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     onEvent,
@@ -58,7 +58,7 @@ function activity(overrides: Partial<SubagentActivity> = {}): SubagentActivity {
 }
 
 test("historical live subagents restore as stopped and only advertise a usable session", (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-subagents-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-runtime-subagents-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const childSession = join(root, "child.jsonl");
   writeFileSync(childSession, `${JSON.stringify({
@@ -120,7 +120,7 @@ test("historical live subagents restore as stopped and only advertise a usable s
 });
 
 test("status queries remain ordinary tools and never create fake child runs", (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-subagent-status-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-runtime-subagent-status-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const manager = SessionManager.inMemory(root);
   manager.appendMessage({
@@ -144,7 +144,7 @@ test("status queries remain ordinary tools and never create fake child runs", (c
 });
 
 test("terminal child updates clear stale current tool labels", (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-subagent-current-tool-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-runtime-subagent-current-tool-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const runtime = createRuntime(root) as unknown as RuntimeInternals;
   const subagents = new Map<string, SubagentActivity>([["sa-live", activity({
@@ -167,7 +167,7 @@ test("terminal child updates clear stale current tool labels", (context) => {
 });
 
 test("stopSubagent preserves a terminal activity returned by the RPC bridge", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-stop-subagent-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-runtime-stop-subagent-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const events: RuntimeEvent[] = [];
   const runtime = createRuntime(root, (event) => events.push(event));
@@ -181,7 +181,7 @@ test("stopSubagent preserves a terminal activity returned by the RPC bridge", as
   eventBus.on(SUBAGENT_RPC_REQUEST_CHANNEL, (raw) => {
     const requestId = (raw as { requestId?: string }).requestId;
     assert.ok(requestId);
-    eventBus.emit(`suocode:subagents:rpc:v1:reply:${requestId}`, {
+    eventBus.emit(`coilcoil:subagents:rpc:v1:reply:${requestId}`, {
       version: 1,
       requestId,
       success: true,
@@ -206,7 +206,7 @@ test("stopSubagent preserves a terminal activity returned by the RPC bridge", as
 });
 
 test("resource reload waits for both the parent Agent and live background subagents", (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-reload-subagent-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-runtime-reload-subagent-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const runtime = createRuntime(root) as unknown as RuntimeInternals;
   const subagents = new Map<string, SubagentActivity>();

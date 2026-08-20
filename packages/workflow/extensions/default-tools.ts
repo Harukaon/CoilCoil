@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { SUOCODE_ENGINEERING_STANDARDS } from "./system/engineering-standards.ts";
+import { COILCOIL_ENGINEERING_STANDARDS } from "./system/engineering-standards.ts";
 
 const DEFAULT_EXTRA_TOOLS = ["grep", "ls"];
 const AVAILABLE_TOOLS_HEADING = "\n\nAvailable tools:\n";
@@ -7,7 +7,7 @@ const GUIDELINES_HEADING = "\n\nGuidelines:\n";
 const PI_DOCUMENTATION_HEADING = "\n\nPi documentation (";
 const PI_DOCUMENTATION_FOOTER =
   "- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)";
-const CORE_GUIDELINES = `\n\n${SUOCODE_ENGINEERING_STANDARDS}`;
+const CORE_GUIDELINES = `\n\n${COILCOIL_ENGINEERING_STANDARDS}`;
 
 export function removeRedundantToolCatalog(systemPrompt: string): string {
   const start = systemPrompt.indexOf(AVAILABLE_TOOLS_HEADING);

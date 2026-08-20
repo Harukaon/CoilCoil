@@ -7,9 +7,9 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin({
         exclude: [
-          "@suocode/runtime-core",
-          "@suocode/runtime-protocol",
-          "@suocode/runtime-server",
+          "@coilcoil/runtime-core",
+          "@coilcoil/runtime-protocol",
+          "@coilcoil/runtime-server",
         ],
       }),
     ],

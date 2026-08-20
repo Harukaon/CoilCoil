@@ -3,12 +3,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   OPENAI_RESPONSES_WS_PROVIDER_ID,
-} from "@suocode/openai-responses-ws/config";
+} from "@coilcoil/openai-responses-ws/config";
 import {
   type ChangeStatus,
   type ChangedFile,
   type FileNode,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   chmodSync,
   copyFileSync,
@@ -157,7 +157,7 @@ export async function gitChanges(cwd: string): Promise<ChangedFile[]> {
 
 export function resolveWorkflowDirectory(explicit?: string): string {
   if (explicit) return resolve(explicit);
-  const manifestPath = require.resolve("@suocode/workflow/package.json");
+  const manifestPath = require.resolve("@coilcoil/workflow/package.json");
   return dirname(manifestPath);
 }
 
@@ -174,7 +174,7 @@ export function resourcesFromManifest(directory: string): RuntimeResources {
 export function bundledRuntimeResources(workflowDirectory: string): RuntimeResources {
   const packageDirectories = [
     workflowDirectory,
-    resolvePackageDirectory("@suocode/openai-responses-ws"),
+    resolvePackageDirectory("@coilcoil/openai-responses-ws"),
   ];
   const resources = packageDirectories.map(resourcesFromManifest);
   return {

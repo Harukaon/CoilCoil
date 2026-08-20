@@ -2,9 +2,9 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-/** Public event channel consumed by SuoCode's bundled runtime. */
-export const GOAL_STATE_CHANNEL = "suocode:goal:state:v1";
-export const GOAL_STATE_ENTRY = "suocode-goal-state";
+/** Public event channel consumed by CoilCoil's bundled runtime. */
+export const GOAL_STATE_CHANNEL = "coilcoil:goal:state:v1";
+export const GOAL_STATE_ENTRY = "coilcoil-goal-state";
 
 export const GOAL_TOOL_NAME = "goal_complete";
 

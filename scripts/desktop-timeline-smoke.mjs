@@ -4,7 +4,7 @@
  * These are all rules that unit tests cannot see: they live in styles.css and
  * only mean something once Chromium has laid the elements out. The smoke runs
  * the packaged app against a throwaway `--user-data-dir`, so it never touches an
- * installed SuoCode or the user's sessions.
+ * installed CoilCoil or the user's sessions.
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/SuoCode.app/Contents/MacOS/SuoCode");
+const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/CoilCoil.app/Contents/MacOS/CoilCoil");
 
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -35,14 +35,14 @@ async function waitForPage(port) {
   while (Date.now() - startedAt < 30_000) {
     try {
       const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
-      const page = pages.find((item) => item.type === "page" && item.title === "SuoCode");
+      const page = pages.find((item) => item.type === "page" && item.title === "CoilCoil");
       if (page?.webSocketDebuggerUrl) return page;
     } catch {
       // Electron is still starting.
     }
     await delay(100);
   }
-  throw new Error("SuoCode did not expose its renderer in time.");
+  throw new Error("CoilCoil did not expose its renderer in time.");
 }
 
 class DevToolsClient {
@@ -237,7 +237,7 @@ async function checkAnchorRail(client) {
 }
 
 async function main() {
-  const dataDirectory = await mkdtemp(join(tmpdir(), "suocode-timeline-data-"));
+  const dataDirectory = await mkdtemp(join(tmpdir(), "coilcoil-timeline-data-"));
   const port = await freePort();
   const child = spawn(appBinary, [`--remote-debugging-port=${port}`, `--user-data-dir=${dataDirectory}`], {
     cwd: repositoryRoot,
@@ -248,8 +248,8 @@ async function main() {
     const page = await waitForPage(port);
     client = new DevToolsClient(page.webSocketDebuggerUrl);
     await client.open();
-    await client.waitFor(`document.readyState === "complete" && typeof window.suocode === "object"`, "Renderer did not become ready.");
-    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]'))`, "Composer did not render.", 45_000);
+    await client.waitFor(`document.readyState === "complete" && typeof window.coilcoil === "object"`, "Renderer did not become ready.");
+    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]'))`, "Composer did not render.", 45_000);
 
     const bubbleResult = await checkUserBubble(client);
     const iconResult = await checkQueueRowIcons(client);

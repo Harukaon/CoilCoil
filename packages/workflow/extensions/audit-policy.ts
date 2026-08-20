@@ -1,10 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
-const SCHEMA_MARKER = Symbol.for("suocode-workflow.tool-purpose-field");
-const PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
-const PURPOSE_SCOPE = Symbol.for("suocode-workflow.tool-purpose-scope");
-const POLICY_STATE = Symbol.for("suocode-workflow.tool-purpose-policy-state");
+const AUDIT_ENTRY_TYPE = "coilcoil-tool-purpose-audit";
+const SCHEMA_MARKER = Symbol.for("coilcoil-workflow.tool-purpose-field");
+const PURPOSE_REGISTRY = Symbol.for("coilcoil-workflow.tool-purpose-registry");
+const PURPOSE_SCOPE = Symbol.for("coilcoil-workflow.tool-purpose-scope");
+const POLICY_STATE = Symbol.for("coilcoil-workflow.tool-purpose-policy-state");
 const MAX_PURPOSE_LENGTH = 100;
 const PURPOSE_DESCRIPTION = `本次工具调用的具体目的，1至${MAX_PURPOSE_LENGTH}字`;
 const PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;

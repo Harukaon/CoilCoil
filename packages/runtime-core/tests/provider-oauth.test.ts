@@ -5,13 +5,13 @@ import { join } from "node:path";
 import test from "node:test";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Provider } from "@earendil-works/pi-ai";
-import type { RuntimeEvent } from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+import type { RuntimeEvent } from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 
 const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 test("provider OAuth is driven through serializable runtime events and responses", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-provider-oauth-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-provider-oauth-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const events: RuntimeEvent[] = [];
   let loginInteraction: AuthInteraction | undefined;
@@ -45,7 +45,7 @@ test("provider OAuth is driven through serializable runtime events and responses
       });
     },
   } as unknown as ModelRuntime;
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     modelRuntime: fakeRuntime,

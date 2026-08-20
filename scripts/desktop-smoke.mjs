@@ -11,7 +11,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const live = process.argv.includes("--live");
 const appBinary = join(
   repositoryRoot,
-  "apps/desktop/release/mac-arm64/SuoCode.app/Contents/MacOS/SuoCode",
+  "apps/desktop/release/mac-arm64/CoilCoil.app/Contents/MacOS/CoilCoil",
 );
 
 function delay(milliseconds) {
@@ -94,14 +94,14 @@ async function waitForPage(port, timeout = 30_000) {
   while (Date.now() - startedAt < timeout) {
     try {
       const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
-      const page = pages.find((item) => item.type === "page" && item.title === "SuoCode");
+      const page = pages.find((item) => item.type === "page" && item.title === "CoilCoil");
       if (page?.webSocketDebuggerUrl) return page;
     } catch {
       // Electron may still be starting.
     }
     await delay(100);
   }
-  throw new Error("Packaged SuoCode did not expose its renderer in time.");
+  throw new Error("Packaged CoilCoil did not expose its renderer in time.");
 }
 
 class DevToolsClient {
@@ -214,7 +214,7 @@ async function dismissFirstRunSettings(client, required) {
 
 async function fillComposer(client, prompt) {
   const filled = await client.evaluate(`(() => {
-    const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+    const input = document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]');
     if (!input) return false;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, ${JSON.stringify(prompt)});
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -228,7 +228,7 @@ async function fillComposer(client, prompt) {
 async function fillAndSubmitComposer(client, prompt) {
   await fillComposer(client, prompt);
   return client.evaluate(`(() => {
-    const input = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+    const input = document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]');
     const form = input?.closest("form");
     if (!form) return false;
     form.requestSubmit();
@@ -237,18 +237,18 @@ async function fillAndSubmitComposer(client, prompt) {
 }
 
 async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
-  const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
+  const eventStart = await client.evaluate(`window.__coilcoilSmokeEvents?.length ?? 0`);
   const submitted = await fillAndSubmitComposer(client, prompt);
   assert.equal(submitted, true);
   try {
     await client.waitFor(
-      `window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "tool_finished" && event.toolName === ${JSON.stringify(expectedTool)}) && window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "run_state" && event.running === false)`,
+      `window.__coilcoilSmokeEvents?.slice(${eventStart}).some((event) => event.type === "tool_finished" && event.toolName === ${JSON.stringify(expectedTool)}) && window.__coilcoilSmokeEvents?.slice(${eventStart}).some((event) => event.type === "run_state" && event.running === false)`,
       `The packaged GUI did not complete the expected ${expectedTool} tool run.`,
       timeout,
     );
   } catch (error) {
     const diagnostics = await client.evaluate(`({
-      events: window.__suocodeSmokeEvents?.slice(${eventStart}) ?? [],
+      events: window.__coilcoilSmokeEvents?.slice(${eventStart}) ?? [],
       conversation: document.querySelector(".conversation-scroll")?.textContent ?? "",
     })`).catch(() => undefined);
     throw new Error(`${error.message}\nDesktop live diagnostics:\n${JSON.stringify(diagnostics, null, 2)}`);
@@ -261,7 +261,7 @@ async function submitPrompt(client, prompt, expectedTool, timeout = 120_000) {
 }
 
 async function submitPromptWithScrollPause(client, prompt, expectedTool, timeout = 120_000) {
-  const eventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
+  const eventStart = await client.evaluate(`window.__coilcoilSmokeEvents?.length ?? 0`);
   assert.equal(await fillAndSubmitComposer(client, prompt), true);
   await client.waitFor(`Boolean(document.querySelector(".agent-activity"))`, "The Agent did not enter a streaming state.");
   const pausedAt = await client.evaluate(`(() => {
@@ -285,7 +285,7 @@ async function submitPromptWithScrollPause(client, prompt, expectedTool, timeout
     body.dispatchEvent(new Event("scroll", { bubbles: true }));
   })()`);
   await client.waitFor(
-    `window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "tool_finished" && event.toolName === ${JSON.stringify(expectedTool)}) && window.__suocodeSmokeEvents?.slice(${eventStart}).some((event) => event.type === "run_state" && event.running === false)`,
+    `window.__coilcoilSmokeEvents?.slice(${eventStart}).some((event) => event.type === "tool_finished" && event.toolName === ${JSON.stringify(expectedTool)}) && window.__coilcoilSmokeEvents?.slice(${eventStart}).some((event) => event.type === "run_state" && event.running === false)`,
     `The packaged GUI did not complete the expected ${expectedTool} tool run.`,
     timeout,
   );
@@ -380,15 +380,15 @@ async function main() {
     throw new Error("The current packaged desktop smoke test targets the macOS app bundle.");
   }
 
-  const dataDirectory = await mkdtemp(join(tmpdir(), "suocode-desktop-data-"));
-  const projectDirectory = await mkdtemp(join(tmpdir(), "suocode-desktop-project-"));
-  const concurrentDirectoryA = await mkdtemp(join(tmpdir(), "suocode-concurrent-a-"));
-  const concurrentDirectoryB = await mkdtemp(join(tmpdir(), "suocode-concurrent-b-"));
+  const dataDirectory = await mkdtemp(join(tmpdir(), "coilcoil-desktop-data-"));
+  const projectDirectory = await mkdtemp(join(tmpdir(), "coilcoil-desktop-project-"));
+  const concurrentDirectoryA = await mkdtemp(join(tmpdir(), "coilcoil-concurrent-a-"));
+  const concurrentDirectoryB = await mkdtemp(join(tmpdir(), "coilcoil-concurrent-b-"));
   const modelFixture = await startModelFixture();
   execFileSync("git", ["init", "--quiet", projectDirectory]);
   await mkdir(join(projectDirectory, "lazy-folder"));
   await writeFile(join(projectDirectory, "lazy-folder", "lazy-child.txt"), "lazy\n", "utf8");
-  await writeFile(join(projectDirectory, "unknown-format.suocode-smoke"), "unknown\n", "utf8");
+  await writeFile(join(projectDirectory, "unknown-format.coilcoil-smoke"), "unknown\n", "utf8");
   const port = await freePort();
   const logs = [];
   const child = spawn(appBinary, [
@@ -399,7 +399,7 @@ async function main() {
     env: {
       ...process.env,
       ELECTRON_ENABLE_LOGGING: "1",
-      ...(live ? { SUOCODE_LEGACY_AGENT_DIR: join(homedir(), ".pi", "agent") } : {}),
+      ...(live ? { COILCOIL_LEGACY_AGENT_DIR: join(homedir(), ".pi", "agent") } : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -412,16 +412,16 @@ async function main() {
     client = new DevToolsClient(page.webSocketDebuggerUrl);
     await client.open();
     await client.waitFor(
-      `document.readyState === "complete" && typeof window.suocode === "object"`,
+      `document.readyState === "complete" && typeof window.coilcoil === "object"`,
       "The renderer or preload bridge did not become ready.",
     );
     await client.waitFor(
-      `document.querySelector(".project-name")?.textContent === "Home" && Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]'))`,
+      `document.querySelector(".project-name")?.textContent === "Home" && Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]'))`,
       "The desktop app did not initialize its private Home workspace.",
       45_000,
     );
     const hasConfiguredProvider = await client.evaluate(`(async () => {
-      const configuration = await window.suocode.request({ type: "get_configuration" });
+      const configuration = await window.coilcoil.request({ type: "get_configuration" });
       return configuration.configuredProviders.length > 0;
     })()`);
     if (!hasConfiguredProvider) {
@@ -430,7 +430,7 @@ async function main() {
       await client.waitFor(`Boolean(document.querySelector('.conversation-pane'))`, "The workspace did not return after closing first-run settings.", 10_000);
     }
     const homeState = await client.evaluate(`(async () => {
-      const home = await window.suocode.homeProject();
+      const home = await window.coilcoil.homeProject();
       return {
         home,
         projectName: document.querySelector(".project-name")?.textContent || "",
@@ -518,7 +518,7 @@ async function main() {
       const nodeRuntimeLauncher = join(dirname(homeState.home.path), "agent", "runtime-bin", "node");
       const expectedHelper = join(
         repositoryRoot,
-        "apps/desktop/release/mac-arm64/SuoCode.app/Contents/Frameworks/SuoCode Helper.app/Contents/MacOS/SuoCode Helper",
+        "apps/desktop/release/mac-arm64/CoilCoil.app/Contents/Frameworks/CoilCoil Helper.app/Contents/MacOS/CoilCoil Helper",
       );
       assert.equal((await lstat(nodeRuntimeLauncher)).isSymbolicLink(), false, "The packaged worker launcher must not execute the Electron Helper through a generic node symlink.");
       const launcher = await readFile(nodeRuntimeLauncher, "utf8");
@@ -541,8 +541,8 @@ async function main() {
     }
 
     const skillSnapshot = await client.evaluate(`(async () => {
-      const home = await window.suocode.homeProject();
-      return window.suocode.request({ type: "get_skill_configuration", cwd: home.path });
+      const home = await window.coilcoil.homeProject();
+      return window.coilcoil.request({ type: "get_skill_configuration", cwd: home.path });
     })()`);
     assert.equal(skillSnapshot.enableSkillCommands, true, "Skill commands should be enabled by default.");
     assert.ok(Array.isArray(skillSnapshot.skills), "get_skill_configuration did not return skills.");
@@ -553,7 +553,7 @@ async function main() {
       10_000,
     );
     const slashUi = await client.evaluate(`(() => ({
-      draft: document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.value || "",
+      draft: document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]')?.value || "",
       commandsHeader: document.querySelector(".composer-activity-header strong")?.textContent || "",
       commandsTab: [...document.querySelectorAll('.composer-activity [role="tab"]')].some((tab) => tab.textContent.includes("命令") && tab.getAttribute("aria-selected") === "true"),
       commandRows: document.querySelectorAll(".composer-command-list button").length,
@@ -662,7 +662,7 @@ async function main() {
     })()`);
     assert.equal(savedCustomProvider, true, "The custom Pi provider save action was unavailable.");
     await client.waitFor(`(async () => {
-      const snapshot = await window.suocode.request({ type: "get_model_provider_configuration" });
+      const snapshot = await window.coilcoil.request({ type: "get_model_provider_configuration" });
       return snapshot.providers.some((provider) => provider.id === "desktop-smoke-provider" && provider.models.some((model) => model.id === "desktop-smoke-model"));
     })()`, "The custom provider entered through the settings UI was not persisted in Pi models.json.");
     await client.waitFor(
@@ -836,7 +836,7 @@ async function main() {
         button: document.querySelector(".mcp-editor .primary-button")?.textContent || "",
         disabled: document.querySelector(".mcp-editor .primary-button")?.disabled ?? null,
         draftName: [...document.querySelectorAll(".mcp-editor label")].find((label) => label.textContent.startsWith("名称"))?.querySelector("input")?.value || "",
-        runtime: (await window.suocode.request({ type: "get_mcp_configuration" })).servers.map((server) => server.name)
+        runtime: (await window.coilcoil.request({ type: "get_mcp_configuration" })).servers.map((server) => server.name)
       }))()`);
       throw new Error(`${error instanceof Error ? error.message : String(error)} ${JSON.stringify(diagnostic)}`);
     }
@@ -852,7 +852,7 @@ async function main() {
     assert.equal(mcpUiSaveState.saved, true, `The MCP server saved through the desktop settings did not appear: ${mcpUiSaveState.error}`);
     assert.ok(mcpUiSaveState.environment.includes("••••••"), "The MCP editor did not mask a sensitive environment value.");
     assert.ok(!mcpUiSaveState.environment.includes("desktop-mcp-secret-do-not-display"), "The MCP editor exposed a sensitive environment value after saving.");
-    const mcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration" })`);
+    const mcpSnapshot = await client.evaluate(`window.coilcoil.request({ type: "get_mcp_configuration" })`);
     const configuredMcp = mcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp");
     assert.equal(configuredMcp?.command, "/usr/bin/true");
     assert.equal(configuredMcp?.scope, "global");
@@ -882,7 +882,7 @@ async function main() {
       `(() => { const button = document.querySelector('button[aria-label="启用 MCP 服务器"]'); return Boolean(button && !button.disabled); })()`,
       "The MCP settings did not reflect the disabled project override.",
     );
-    const disabledMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
+    const disabledMcpSnapshot = await client.evaluate(`window.coilcoil.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
     assert.equal(disabledMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp")?.disabled, true);
     const enabledMcpServer = await client.evaluate(`(() => {
       const button = document.querySelector('button[aria-label="启用 MCP 服务器"]');
@@ -895,9 +895,9 @@ async function main() {
       `(() => { const button = document.querySelector('button[aria-label="停用 MCP 服务器"]'); return Boolean(button && !button.disabled); })()`,
       "The MCP settings did not clear the disabled project override.",
     );
-    const enabledMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
+    const enabledMcpSnapshot = await client.evaluate(`window.coilcoil.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
     assert.equal(enabledMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp")?.disabled, false);
-    const rejectedUnsafeExternalUrl = await client.evaluate(`window.suocode.openExternal("file:///tmp/suocode-smoke").then(() => false, () => true)`);
+    const rejectedUnsafeExternalUrl = await client.evaluate(`window.coilcoil.openExternal("file:///tmp/coilcoil-smoke").then(() => false, () => true)`);
     assert.equal(rejectedUnsafeExternalUrl, true, "The desktop external URL bridge accepted a non-HTTP URL.");
     const addedProjectMcp = await client.evaluate(`(async () => {
       document.querySelector(".mcp-add-button")?.click();
@@ -922,14 +922,14 @@ async function main() {
       `[...document.querySelectorAll(".mcp-server-list strong")].some((item) => item.textContent === "desktop-smoke-mcp-project") || Boolean(document.querySelector(".mcp-editor .settings-error"))`,
       "The project MCP server did not settle.",
     );
-    const projectMcpSnapshot = await client.evaluate(`window.suocode.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
+    const projectMcpSnapshot = await client.evaluate(`window.coilcoil.request({ type: "get_mcp_configuration", cwd: ${JSON.stringify(homeState.home.path)} })`);
     const projectMcp = projectMcpSnapshot.servers.find((server) => server.name === "desktop-smoke-mcp-project");
     assert.equal(projectMcp?.scope, "project");
     assert.equal(projectMcp?.source, projectMcpSnapshot.projectConfigPath);
     await client.evaluate(`document.querySelectorAll(".toast-dismiss").forEach((button) => button.click())`);
     await client.evaluate(`(async () => {
-      await window.suocode.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp-project", scope: "project", cwd: ${JSON.stringify(homeState.home.path)} });
-      await window.suocode.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp", scope: "global", cwd: ${JSON.stringify(homeState.home.path)} });
+      await window.coilcoil.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp-project", scope: "project", cwd: ${JSON.stringify(homeState.home.path)} });
+      await window.coilcoil.request({ type: "remove_mcp_server", name: "desktop-smoke-mcp", scope: "global", cwd: ${JSON.stringify(homeState.home.path)} });
     })()`);
     await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
 
@@ -954,7 +954,7 @@ async function main() {
 
     const isolation = await client.evaluate(`({
       title: document.title,
-      bridge: typeof window.suocode,
+      bridge: typeof window.coilcoil,
       nodeRequire: typeof window.require,
       nodeProcess: typeof window.process,
       panes: [".sidebar", ".conversation-pane", ".inspector-pane"].every((selector) => Boolean(document.querySelector(selector))),
@@ -963,7 +963,7 @@ async function main() {
       rightResizer: Boolean(document.querySelector(".right-resizer")),
       inspector: document.querySelector(".inspector-nav")?.textContent || ""
     })`);
-    assert.equal(isolation.title, "SuoCode");
+    assert.equal(isolation.title, "CoilCoil");
     assert.equal(isolation.bridge, "object");
     assert.equal(isolation.nodeRequire, "undefined");
     assert.equal(isolation.nodeProcess, "undefined");
@@ -1011,8 +1011,8 @@ async function main() {
     })()`);
     assert.equal(inspectorDragSurface?.region, "drag");
     const runtimeIsolation = await client.evaluate(`(async () => {
-      const first = await window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryA)} });
-      const second = await window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryB)} });
+      const first = await window.coilcoil.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryA)} });
+      const second = await window.coilcoil.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryB)} });
       return { first: first.runtimeId, second: second.runtimeId };
     })()`);
     assert.ok(runtimeIsolation.first);
@@ -1035,7 +1035,7 @@ async function main() {
       const header = document.querySelector(".conversation-header");
       const openButton = document.querySelector('button[aria-label="展开侧栏"]');
       const result = {
-        platform: window.suocode.platform,
+        platform: window.coilcoil.platform,
         paddingLeft: header ? Number.parseFloat(getComputedStyle(header).paddingLeft) : 0,
         buttonLeft: openButton?.getBoundingClientRect().left ?? 0,
       };
@@ -1479,16 +1479,16 @@ async function main() {
         path: projectDirectory,
         kind: "workspace",
       })};
-      localStorage.setItem("suocode.mounted-projects", JSON.stringify([project]));
-      localStorage.setItem("suocode.active-project", project.path);
-      window.__suocodeSmokeReloading = true;
+      localStorage.setItem("coilcoil.mounted-projects", JSON.stringify([project]));
+      localStorage.setItem("coilcoil.active-project", project.path);
+      window.__coilcoilSmokeReloading = true;
       location.reload();
       return true;
     })()`);
-    await client.waitFor(`typeof window.__suocodeSmokeReloading === "undefined"`, "The packaged renderer did not finish the project reload.", 45_000);
+    await client.waitFor(`typeof window.__coilcoilSmokeReloading === "undefined"`, "The packaged renderer did not finish the project reload.", 45_000);
     await dismissFirstRunSettings(client, !hasConfiguredProvider);
     await client.waitFor(
-      `Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')) && [...document.querySelectorAll(".project-name")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
+      `Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]')) && [...document.querySelectorAll(".project-name")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
       "The packaged app could not create a project session through IPC.",
       45_000,
     );
@@ -1534,7 +1534,7 @@ async function main() {
         pendingTitle: document.querySelector(".conversation-title strong")?.textContent || "",
         pendingRow: Boolean(tree?.querySelector(".conversation-row.pending")),
         loading: Boolean(document.querySelector(".loading-state")),
-        textareaDisabled: document.querySelector('textarea[aria-label="发送消息给 SuoCode"]')?.disabled ?? true,
+        textareaDisabled: document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]')?.disabled ?? true,
         conversationPane: Boolean(document.querySelector(".conversation-pane")),
         activeProjects: [...document.querySelectorAll(".project-tree.active .project-name")].map((item) => item.textContent),
       };
@@ -1550,7 +1550,7 @@ async function main() {
       const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (value) => value.charCodeAt(0));
       const transfer = new DataTransfer();
       transfer.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
-      const textarea = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+      const textarea = document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]');
       textarea?.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
     })()`);
     await client.waitFor(`Boolean(document.querySelector(".composer-images img"))`, "Pasted images did not appear in the composer.");
@@ -1564,11 +1564,11 @@ async function main() {
     })()`, "The temporary conversation did not disappear after switching to another project.");
 
     await client.evaluate(`(() => {
-      localStorage.setItem("suocode.active-project", ${JSON.stringify(projectDirectory)});
-      window.__suocodeSmokeReloading = true;
+      localStorage.setItem("coilcoil.active-project", ${JSON.stringify(projectDirectory)});
+      window.__coilcoilSmokeReloading = true;
       location.reload();
     })()`);
-    await client.waitFor(`typeof window.__suocodeSmokeReloading === "undefined"`, "The packaged renderer did not finish the temporary-session reload.", 45_000);
+    await client.waitFor(`typeof window.__coilcoilSmokeReloading === "undefined"`, "The packaged renderer did not finish the temporary-session reload.", 45_000);
     await dismissFirstRunSettings(client, !hasConfiguredProvider);
     await client.waitFor(`document.querySelector(".workspace-status")?.textContent.includes(${JSON.stringify(basename(projectDirectory))})`, "The project session did not restore after the temporary-session test.", 45_000);
 
@@ -1584,16 +1584,16 @@ async function main() {
     })`);
     assert.equal(lazyBeforeExpand.folder, true);
     assert.equal(lazyBeforeExpand.child, false);
-    const unknownFileFallback = await client.evaluate(`window.suocode.openFilePreview({ root: ${JSON.stringify(projectDirectory)}, path: "unknown-format.suocode-smoke" })`);
+    const unknownFileFallback = await client.evaluate(`window.coilcoil.openFilePreview({ root: ${JSON.stringify(projectDirectory)}, path: "unknown-format.coilcoil-smoke" })`);
     assert.deepEqual(unknownFileFallback, { opened: false, actions: ["reveal", "force-text", "trash"] });
-    await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("unknown-format.suocode-smoke"))?.click()`);
+    await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("unknown-format.coilcoil-smoke"))?.click()`);
     await client.waitFor(
       `document.querySelector(".preview-placeholder.error")?.textContent.includes("可从右键菜单选择其他打开方式")`,
       "Left-clicking an unsupported file did not show the right-click guidance.",
     );
     assert.equal(await client.evaluate(`Boolean(document.querySelector(".conversation-context-menu"))`), false, "Left-clicking an unsupported file opened a duplicate native/context menu.");
     const openedUnknownContextMenu = await client.evaluate(`(() => {
-      const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("unknown-format.suocode-smoke"));
+      const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("unknown-format.coilcoil-smoke"));
       if (!file) return false;
       file.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 180, clientY: 180 }));
       return true;
@@ -1647,7 +1647,7 @@ async function main() {
         conversation.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
         await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
       }
-      const editor = document.querySelector('[aria-label="发送消息给 SuoCode"]');
+      const editor = document.querySelector('[aria-label="发送消息给 CoilCoil"]');
       return {
         value: editor?.value || "",
         overlay: document.querySelector(".conversation-pane")?.classList.contains("file-drag-active") ?? true,
@@ -1657,7 +1657,7 @@ async function main() {
     assert.match(draggedPaths?.value ?? "", /'\/[^']+\/lazy-folder\/lazy-child\.txt'/);
     assert.equal(draggedPaths?.overlay, false);
     await client.evaluate(`(() => {
-      const editor = document.querySelector('textarea[aria-label="发送消息给 SuoCode"]');
+      const editor = document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(editor, "");
       editor.dispatchEvent(new Event("input", { bubbles: true }));
     })()`);
@@ -1736,16 +1736,16 @@ async function main() {
 
     if (!live) {
       const fixtureToken = `DESKTOP_RESTORE_FIXTURE_${Date.now()}`;
-      const fixtureSnapshot = await client.evaluate(`window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(projectDirectory)} })`);
+      const fixtureSnapshot = await client.evaluate(`window.coilcoil.request({ type: "create_session", cwd: ${JSON.stringify(projectDirectory)} })`);
       const fixturePath = join(dirname(fixtureSnapshot.session.path), `desktop-restore-${Date.now()}.jsonl`);
       const fixtureSession = { ...fixtureSnapshot, session: { ...fixtureSnapshot.session, id: `desktop-restore-${Date.now()}`, path: fixturePath } };
       await writeFile(fixturePath, `${restoreFixtureEntries(fixtureSession, fixtureToken).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
       await client.evaluate(`(() => {
-        localStorage.setItem("suocode.activeProject", ${JSON.stringify(projectDirectory)});
-        window.__suocodeSmokeReloading = true;
+        localStorage.setItem("coilcoil.activeProject", ${JSON.stringify(projectDirectory)});
+        window.__coilcoilSmokeReloading = true;
         location.reload();
       })()`);
-      await client.waitFor(`typeof window.__suocodeSmokeReloading === "undefined"`, "The packaged renderer did not finish the fixture-session reload.", 45_000);
+      await client.waitFor(`typeof window.__coilcoilSmokeReloading === "undefined"`, "The packaged renderer did not finish the fixture-session reload.", 45_000);
       await dismissFirstRunSettings(client, !hasConfiguredProvider);
       await client.waitFor(
         `[...document.querySelectorAll(".conversation-row")].some((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))`,
@@ -1808,7 +1808,7 @@ async function main() {
         return { gap: activityRect.top - bannerRect.bottom };
       })()`);
       assert.ok(overlayLayout === null || overlayLayout.gap >= 7, `The error banner overlapped the Agent activity panel (${overlayLayout?.gap}px).`);
-      await client.evaluate(`window.suocode.request({ type: "archive_session", cwd: ${JSON.stringify(projectDirectory)}, sessionPath: ${JSON.stringify(fixturePath)} })`);
+      await client.evaluate(`window.coilcoil.request({ type: "archive_session", cwd: ${JSON.stringify(projectDirectory)}, sessionPath: ${JSON.stringify(fixturePath)} })`);
       await client.evaluate(`document.querySelector('button[aria-label="归档会话"]')?.click()`);
       await client.waitFor(
         `document.querySelector(".archive-dialog")?.textContent.includes(${JSON.stringify(fixtureToken)})`,
@@ -1843,7 +1843,7 @@ async function main() {
 
     if (live) {
       const openedLiveConversation = await client.evaluate(`(async () => {
-        const configuration = await window.suocode.request({ type: "get_configuration" });
+        const configuration = await window.coilcoil.request({ type: "get_configuration" });
         const configured = configuration.models.filter((item) => item.configured);
         const model = configured.find((item) => {
           const identity = \`${'${item.provider} ${item.id} ${item.name}'}\`.toLowerCase();
@@ -1853,7 +1853,7 @@ async function main() {
           ?? configured.find((item) => item.provider === configuration.provider && item.id === configuration.modelId)
           ?? configured[0];
         if (!model) throw new Error("No configured live GUI smoke model.");
-        await window.suocode.request({ type: "configure_model", provider: model.provider, modelId: model.id, thinkingLevel: "low" });
+        await window.coilcoil.request({ type: "configure_model", provider: model.provider, modelId: model.id, thinkingLevel: "low" });
         const activeTree = [...document.querySelectorAll(".project-tree")].find((item) => item.classList.contains("active"));
         const addButton = [...(activeTree?.querySelectorAll("button.project-action") ?? [])]
           .find((button) => button.getAttribute("aria-label")?.includes("新建对话"));
@@ -1867,10 +1867,10 @@ async function main() {
         "The live smoke did not enter the temporary new-conversation state.",
       );
       await client.evaluate(`(() => {
-        window.__suocodeSmokeEvents = [];
-        window.__suocodeSmokeUnsubscribe?.();
-        window.__suocodeSmokeUnsubscribe = window.suocode.onRuntimeEvent((event, runtimeId) => {
-          window.__suocodeSmokeEvents.push({
+        window.__coilcoilSmokeEvents = [];
+        window.__coilcoilSmokeUnsubscribe?.();
+        window.__coilcoilSmokeUnsubscribe = window.coilcoil.onRuntimeEvent((event, runtimeId) => {
+          window.__coilcoilSmokeEvents.push({
             type: event.type,
             runtimeId,
             field: event.type === "message_delta" ? event.field : undefined,
@@ -1888,7 +1888,7 @@ async function main() {
       const terminalToken = `DESKTOP_TERMINAL_OK_${Date.now()}`;
       const subagentToken = `DESKTOP_SUBAGENT_OK_${Date.now()}`;
       const stoppedSubagentToken = `DESKTOP_SUBAGENT_STOP_${Date.now()}`;
-      const fileName = "suocode-desktop-smoke.txt";
+      const fileName = "coilcoil-desktop-smoke.txt";
       await submitPrompt(
         client,
         `You must call the todo tool once before replying. Set exactly two short plan items and mark both completed. Do not call another tool. Then reply exactly ${planToken}.`,
@@ -1904,7 +1904,7 @@ async function main() {
         `You must execute a shell tool before replying. Run exactly: printf ${terminalToken}. Then reply exactly ${terminalToken}.`,
         "bash",
       );
-      const subagentEventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
+      const subagentEventStart = await client.evaluate(`window.__coilcoilSmokeEvents?.length ?? 0`);
       await submitPrompt(
         client,
         `You must call the subagent tool exactly once with action run, agent explore, and background false. Ask it to reply exactly ${subagentToken}. Do not call another tool. After it completes, reply exactly ${subagentToken}.`,
@@ -1912,19 +1912,19 @@ async function main() {
         180_000,
       );
       await client.waitFor(
-        `window.__suocodeSmokeEvents?.slice(${subagentEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.status === "completed"))`,
-        "The SuoCode subagent extension did not publish a completed run.",
+        `window.__coilcoilSmokeEvents?.slice(${subagentEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.status === "completed"))`,
+        "The CoilCoil subagent extension did not publish a completed run.",
         180_000,
       );
       const completedSubagent = await client.evaluate(`(() => {
-        const events = window.__suocodeSmokeEvents?.slice(${subagentEventStart}) ?? [];
+        const events = window.__coilcoilSmokeEvents?.slice(${subagentEventStart}) ?? [];
         const activities = events.flatMap((event) => event.type === "subagents_updated" ? (event.subagents ?? []) : []);
         return activities.findLast((item) => item.status === "completed") ?? null;
       })()`);
       if (!String(completedSubagent?.finalOutput ?? "").includes(subagentToken)) {
-        const sessions = await client.evaluate(`window.suocode.request({ type: "list_sessions", cwd: ${JSON.stringify(projectDirectory)} })`);
+        const sessions = await client.evaluate(`window.coilcoil.request({ type: "list_sessions", cwd: ${JSON.stringify(projectDirectory)} })`);
         const latestSession = sessions[0]?.path ? await readFile(sessions[0].path, "utf8").catch(() => "") : "";
-        const subagentEvents = await client.evaluate(`window.__suocodeSmokeEvents?.filter((event) => event.type === "subagents_updated" || event.toolName === "subagent") ?? []`);
+        const subagentEvents = await client.evaluate(`window.__coilcoilSmokeEvents?.filter((event) => event.type === "subagents_updated" || event.toolName === "subagent") ?? []`);
         throw new Error(`The completed subagent activity did not contain its final output.\nProjected events:\n${JSON.stringify(subagentEvents, null, 2)}\nPersisted session tail:\n${latestSession.split("\n").slice(-8).join("\n")}`);
       }
       await client.waitFor(
@@ -1963,13 +1963,13 @@ async function main() {
         "The composer activity panel did not render the subagent card list.",
       );
 
-      const stopEventStart = await client.evaluate(`window.__suocodeSmokeEvents?.length ?? 0`);
+      const stopEventStart = await client.evaluate(`window.__coilcoilSmokeEvents?.length ?? 0`);
       assert.equal(await fillAndSubmitComposer(
         client,
         `Call the subagent tool exactly once with action run, agent worker, background true, and worktree false. Give it this exact task: Run the bash command sleep 90, then reply exactly ${stoppedSubagentToken}. Do not call status, stop, resume, or another tool. After the background run starts, reply briefly that it started.`,
       ), true);
       await client.waitFor(
-        `window.__suocodeSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.background && (item.status === "pending" || item.status === "running")))`,
+        `window.__coilcoilSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.background && (item.status === "pending" || item.status === "running")))`,
         "The bundled subagent extension did not expose a live background run.",
         120_000,
       );
@@ -1981,21 +1981,21 @@ async function main() {
         assert.doesNotMatch(record, /type="Foreground"/, "A real subagent worker registered as a foreground Dock application.");
       }
       assert.equal(await client.evaluate(`(async () => {
-        const events = window.__suocodeSmokeEvents?.slice(${stopEventStart}) ?? [];
+        const events = window.__coilcoilSmokeEvents?.slice(${stopEventStart}) ?? [];
         const scoped = [...events].reverse().find((event) => event.type === "subagents_updated"
           && event.subagents?.some((item) => item.background && (item.status === "pending" || item.status === "running")));
         const activity = scoped?.subagents?.find((item) => item.background && (item.status === "pending" || item.status === "running"));
         if (!activity?.runId || !scoped?.runtimeId) return false;
-        await window.suocode.request({ type: "stop_subagent", id: activity.runId, background: true }, scoped.runtimeId);
+        await window.coilcoil.request({ type: "stop_subagent", id: activity.runId, background: true }, scoped.runtimeId);
         return true;
       })()`), true, "The runtime protocol could not stop the live background subagent.");
       await client.waitFor(
-        `window.__suocodeSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.background && item.status === "stopped"))`,
+        `window.__coilcoilSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "subagents_updated" && event.subagents?.some((item) => item.background && item.status === "stopped"))`,
         "The background subagent did not transition to stopped after the UI control was clicked.",
         60_000,
       );
       await client.waitFor(
-        `window.__suocodeSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "run_state" && event.running === false)`,
+        `window.__coilcoilSmokeEvents?.slice(${stopEventStart}).some((event) => event.type === "run_state" && event.running === false)`,
         "The parent Agent did not settle after stopping its background subagent.",
         60_000,
       );
@@ -2009,7 +2009,7 @@ async function main() {
       assert.ok(toolState.count >= 1, "The GUI did not render any tool activity details.");
       assert.equal(toolState.failed, 0);
 
-      const eventState = await client.evaluate(`window.__suocodeSmokeEvents`);
+      const eventState = await client.evaluate(`window.__coilcoilSmokeEvents`);
       const eventTypes = new Set(eventState.map((event) => event.type));
       const toolNames = new Set(eventState.map((event) => event.toolName).filter(Boolean));
       for (const eventType of ["message_delta", "tool_started", "tool_finished", "plan_updated", "project_updated", "metrics_updated", "run_state"]) {
@@ -2032,9 +2032,9 @@ async function main() {
       assert.equal(await client.evaluate(`Boolean(document.querySelector(".file-preview"))`), false);
       assert.equal((await readFile(join(projectDirectory, fileName), "utf8")).trim(), fileToken);
 
-      await client.evaluate(`window.__suocodeSmokeReloading = true`);
+      await client.evaluate(`window.__coilcoilSmokeReloading = true`);
       await client.send("Page.reload", { ignoreCache: true });
-      await client.waitFor(`typeof window.__suocodeSmokeReloading === "undefined"`, "The packaged renderer did not finish the final reload.", 45_000);
+      await client.waitFor(`typeof window.__coilcoilSmokeReloading === "undefined"`, "The packaged renderer did not finish the final reload.", 45_000);
       await dismissFirstRunSettings(client, !hasConfiguredProvider);
       await client.waitFor(
         `document.querySelectorAll(".user-bubble-button").length >= 3 && document.querySelector(".timeline")?.textContent.includes(${JSON.stringify(terminalToken)})`,
@@ -2047,7 +2047,7 @@ async function main() {
       );
     }
 
-    process.stdout.write(`SuoCode Desktop smoke passed${live ? " (live Agent + tools + restored session)" : ""}.\n`);
+    process.stdout.write(`CoilCoil Desktop smoke passed${live ? " (live Agent + tools + restored session)" : ""}.\n`);
   } catch (error) {
     if (logs.length) process.stderr.write(`\nPackaged application logs:\n${logs.join("")}\n`);
     throw error;

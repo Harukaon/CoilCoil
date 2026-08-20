@@ -6,7 +6,7 @@ import test from "node:test";
 import { rewriteSessionHeaderCwd } from "../src/session-relocation.js";
 
 function sessionFile(lines: string[]): { dir: string; path: string } {
-  const dir = mkdtempSync(join(tmpdir(), "suocode-relocation-"));
+  const dir = mkdtempSync(join(tmpdir(), "coilcoil-relocation-"));
   const path = join(dir, "session.jsonl");
   writeFileSync(path, lines.map((line) => `${line}\n`).join(""), "utf8");
   return { dir, path };
@@ -16,7 +16,7 @@ test("rewriteSessionHeaderCwd repoints the header and keeps every other entry", 
   const { dir, path } = sessionFile([
     JSON.stringify({ type: "session", version: 3, id: "abc", cwd: "/projects/old", timestamp: "t" }),
     JSON.stringify({ type: "message", message: { role: "user", content: "你好" } }),
-    JSON.stringify({ type: "custom", customType: "suocode-response-metrics", data: { outputTokens: 12 } }),
+    JSON.stringify({ type: "custom", customType: "coilcoil-response-metrics", data: { outputTokens: 12 } }),
   ]);
   try {
     rewriteSessionHeaderCwd(path, "/projects/new");
@@ -32,7 +32,7 @@ test("rewriteSessionHeaderCwd repoints the header and keeps every other entry", 
     assert.equal(header.timestamp, "t");
 
     assert.equal(lines[1], JSON.stringify({ type: "message", message: { role: "user", content: "你好" } }));
-    assert.equal(lines[2], JSON.stringify({ type: "custom", customType: "suocode-response-metrics", data: { outputTokens: 12 } }));
+    assert.equal(lines[2], JSON.stringify({ type: "custom", customType: "coilcoil-response-metrics", data: { outputTokens: 12 } }));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

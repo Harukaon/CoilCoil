@@ -1,4 +1,4 @@
-import type { GoalState } from "@suocode/runtime-protocol";
+import type { GoalState } from "@coilcoil/runtime-protocol";
 
 /** Collapsed-header summary: what the loop is doing right now. */
 export function goalToggleLabel(goal: GoalState): string {

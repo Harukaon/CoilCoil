@@ -1,4 +1,4 @@
-import type { PromptImage } from "@suocode/runtime-protocol";
+import type { PromptImage } from "@coilcoil/runtime-protocol";
 
 export function imageDataUrl(image: PromptImage): string {
   return `data:${image.mimeType};base64,${image.data}`;

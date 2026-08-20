@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { RuntimeCommand, RuntimeEvent } from "@suocode/runtime-protocol";
-import type { FileNode } from "@suocode/runtime-protocol";
+import type { RuntimeCommand, RuntimeEvent } from "@coilcoil/runtime-protocol";
+import type { FileNode } from "@coilcoil/runtime-protocol";
 import type {
   DesktopPlatform,
   BrowserGuestRoster,
@@ -16,7 +16,7 @@ import type {
   RuntimeEventPayload,
   RuntimeRequestPayload,
   RuntimeRequestResult,
-  SuoCodeDesktopApi,
+  CoilCoilDesktopApi,
   TerminalDataEvent,
   TerminalSessionSnapshot,
   UpdateAvailable,
@@ -71,7 +71,7 @@ const platform = ((): DesktopPlatform => {
   return "linux";
 })();
 
-const api: SuoCodeDesktopApi = {
+const api: CoilCoilDesktopApi = {
   platform,
   appVersion: () => ipcRenderer.invoke(APP_VERSION_CHANNEL) as Promise<string>,
   homeProject: () =>
@@ -173,4 +173,4 @@ const api: SuoCodeDesktopApi = {
   },
 };
 
-contextBridge.exposeInMainWorld("suocode", api);
+contextBridge.exposeInMainWorld("coilcoil", api);

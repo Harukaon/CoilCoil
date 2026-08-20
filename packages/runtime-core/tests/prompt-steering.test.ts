@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { RuntimeEvent } from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+import type { RuntimeEvent } from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 import { ToolRunIds } from "../src/tool-run-ids.js";
 
 interface RuntimeInternals {
@@ -21,7 +21,7 @@ interface PromptCall {
 function createSteerHarness(root: string) {
   const events: RuntimeEvent[] = [];
   const calls: PromptCall[] = [];
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     onEvent: (event) => events.push(event),
@@ -71,7 +71,7 @@ function createSteerHarness(root: string) {
 }
 
 test("a steered message joins the running turn instead of the queue", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-steer-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-steer-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const { runtime, calls, active } = createSteerHarness(root);
 
@@ -86,7 +86,7 @@ test("a steered message joins the running turn instead of the queue", async (con
 });
 
 test("with nothing streaming a steer takes the ordinary path", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-steer-idle-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-steer-idle-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const { runtime, calls } = createSteerHarness(root);
 
@@ -97,7 +97,7 @@ test("with nothing streaming a steer takes the ordinary path", async (context) =
 });
 
 test("promoting a queued prompt hands it to the running turn", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-promote-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-promote-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const { runtime, calls, active } = createSteerHarness(root);
 
@@ -113,7 +113,7 @@ test("promoting a queued prompt hands it to the running turn", async (context) =
 });
 
 test("an unknown id promotes nothing", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-promote-missing-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-promote-missing-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const { runtime } = createSteerHarness(root);
 
@@ -122,7 +122,7 @@ test("an unknown id promotes nothing", async (context) => {
 });
 
 test("stopping returns at once and drops what was queued behind the turn", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-abort-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-abort-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const { runtime, events, active, session } = createSteerHarness(root);
   let abortSettled = false;
@@ -151,7 +151,7 @@ test("stopping returns at once and drops what was queued behind the turn", async
 });
 
 test("stopping a session that is no longer streaming republishes the truth", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-abort-idle-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-abort-idle-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const { runtime, events } = createSteerHarness(root);
 
@@ -163,7 +163,7 @@ test("stopping a session that is no longer streaming republishes the truth", asy
 });
 
 test("in goal mode a message joins the running turn instead of queueing", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-goal-steer-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-goal-steer-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const { runtime, calls, active } = createSteerHarness(root);
   active.goal = { status: "running", goal: "完成这个任务", iteration: 3, startedAt: 0, updatedAt: 0 };
@@ -176,7 +176,7 @@ test("in goal mode a message joins the running turn instead of queueing", async 
 });
 
 test("a stopped goal loop gets the ordinary queue back", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-goal-stopped-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-goal-stopped-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const { runtime, calls, active } = createSteerHarness(root);
   active.goal = { status: "stopped", goal: "完成这个任务", iteration: 3, startedAt: 0, updatedAt: 0 };

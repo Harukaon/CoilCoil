@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const temporaryRoot = mkdtempSync(join(tmpdir(), "suocode-runtime-smoke-"));
+const temporaryRoot = mkdtempSync(join(tmpdir(), "coilcoil-runtime-smoke-"));
 const projectDir = join(temporaryRoot, "project");
 const homeDir = join(temporaryRoot, "home");
 const mcpSmokeServerPath = join(root, "scripts", "fixtures", "mcp-smoke-server.mjs");
@@ -61,9 +61,9 @@ const child = fork(join(root, "apps/desktop/out/main/runtime.js"), [], {
     ...process.env,
     HOME: homeDir,
     XDG_CONFIG_HOME: join(homeDir, ".config"),
-    SUOCODE_AGENT_DIR: join(temporaryRoot, "agent"),
-    SUOCODE_SESSION_DIR: join(temporaryRoot, "sessions"),
-    SUOCODE_LEGACY_AGENT_DIR: live ? join(homedir(), ".pi", "agent") : join(temporaryRoot, "no-legacy"),
+    COILCOIL_AGENT_DIR: join(temporaryRoot, "agent"),
+    COILCOIL_SESSION_DIR: join(temporaryRoot, "sessions"),
+    COILCOIL_LEGACY_AGENT_DIR: live ? join(homedir(), ".pi", "agent") : join(temporaryRoot, "no-legacy"),
     PI_MCP_ADAPTER_TEST_AUTH_STORE: "memory",
   },
   stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -167,7 +167,7 @@ async function waitForRuntimeInspection(predicate, timeoutMs = 30_000) {
 }
 
 try {
-  const mcpSecret = "suocode-mcp-secret-do-not-leak";
+  const mcpSecret = "coilcoil-mcp-secret-do-not-leak";
   const bootstrap = await request({ type: "bootstrap" });
   if (!bootstrap?.configuration?.models) throw new Error("Bootstrap did not return model configuration.");
   await request({
@@ -180,9 +180,9 @@ try {
   }
   const initialMcp = await request({ type: "get_mcp_configuration", cwd: projectDir });
   if (!initialMcp?.configPath?.startsWith(temporaryRoot) || initialMcp.servers.length !== 0) {
-    throw new Error("MCP configuration was not isolated inside the SuoCode runtime.");
+    throw new Error("MCP configuration was not isolated inside the CoilCoil runtime.");
   }
-  const customProviderSecret = "suocode-custom-provider-secret";
+  const customProviderSecret = "coilcoil-custom-provider-secret";
   const customProvider = await request({
     type: "save_model_provider_configuration",
     input: {
@@ -258,7 +258,7 @@ try {
       },
       credential: {
         method: "api-key",
-        values: { key: "suocode-builtin-auth-secret" },
+        values: { key: "coilcoil-builtin-auth-secret" },
         preserveFields: [],
       },
       preserveApiKeyReference: false,
@@ -286,7 +286,7 @@ try {
   if (!bedrock?.credential.methods.some((method) => method.id === "aws-profile") || !bedrock.credential.methods.some((method) => method.id === "iam-keys") || !bedrock.credential.methods.some((method) => method.id === "credential-chain")) {
     throw new Error("Amazon Bedrock did not expose Pi's supported AWS credential paths.");
   }
-  const azureSecret = "suocode-azure-secret";
+  const azureSecret = "coilcoil-azure-secret";
   const configuredAzureResult = await request({
     type: "save_model_provider_configuration",
     input: {
@@ -340,7 +340,7 @@ try {
       transport: "stdio",
       command: process.execPath,
       args: [mcpSmokeServerPath],
-      env: { SUOCODE_MCP_SMOKE: "1", PRIVATE_TOKEN: mcpSecret },
+      env: { COILCOIL_MCP_SMOKE: "1", PRIVATE_TOKEN: mcpSecret },
       headers: {},
       lifecycle: "lazy",
       idleTimeout: 3,
@@ -356,7 +356,7 @@ try {
     !smokeMcp
     || smokeMcp.scope !== "global"
     || smokeMcp.command !== process.execPath
-    || smokeMcp.env.SUOCODE_MCP_SMOKE !== "1"
+    || smokeMcp.env.COILCOIL_MCP_SMOKE !== "1"
     || smokeMcp.env.PRIVATE_TOKEN !== mcpSecret
     || smokeMcp.idleTimeout !== 3
     || smokeMcp.requestTimeoutMs !== 4_500
@@ -386,7 +386,7 @@ try {
   const responsesWsConfiguration = await request({ type: "get_configuration" });
   const responsesWsModel = responsesWsConfiguration.models.find((model) => model.provider === "openai-responses-ws" && model.id === "gpt-5.6-ws-smoke");
   if (!responsesWsModel?.configured || responsesWsModel.contextWindow !== 196000 || !responsesWsModel.supportsImages) {
-    throw new Error(`The SuoCode OpenAI Response (WS) extension did not register its upstream model catalog: ${JSON.stringify(responsesWsModel)}`);
+    throw new Error(`The CoilCoil OpenAI Response (WS) extension did not register its upstream model catalog: ${JSON.stringify(responsesWsModel)}`);
   }
   if (!snapshot?.project?.files?.some((entry) => entry.name === "README.md")) throw new Error("Project files were not projected.");
   if (!Array.isArray(snapshot.subagents)) throw new Error("Subagent activity was not included in the session snapshot.");
@@ -411,7 +411,7 @@ try {
   ) {
     throw new Error(`An empty /memory request did not leave structured runtime feedback: ${JSON.stringify(emptyMemoryInspection.memory)}`);
   }
-  const smokePromptOverride = "SuoCode runtime inspection smoke prompt";
+  const smokePromptOverride = "CoilCoil runtime inspection smoke prompt";
   const overriddenInspection = await request({ type: "set_session_system_prompt", prompt: smokePromptOverride });
   if (!overriddenInspection.systemPromptOverride || overriddenInspection.effectiveSystemPrompt !== smokePromptOverride) {
     throw new Error("The session-scoped System Prompt override did not update immediately.");
@@ -659,7 +659,7 @@ try {
       || restoredSubagent.turnCount !== 2
       || restoredSubagent.toolCount !== 3
     ) {
-      throw new Error("The subagent tool result was not restored through the SuoCode projection bridge.");
+      throw new Error("The subagent tool result was not restored through the CoilCoil projection bridge.");
     }
   }
 
@@ -688,7 +688,7 @@ try {
     const settled = waitForEvent((event) => event.type === "run_state" && event.running === false);
     await request({
       type: "prompt",
-      text: "Use the write tool to create runtime-proof.txt containing exactly SUOCODE_RUNTIME_OK followed by a newline. Then reply with a brief confirmation.",
+      text: "Use the write tool to create runtime-proof.txt containing exactly COILCOIL_RUNTIME_OK followed by a newline. Then reply with a brief confirmation.",
     }, snapshot.runtimeId);
     await settled;
     const liveAssistant = events.slice(livePromptEventStart).findLast(
@@ -700,7 +700,7 @@ try {
       );
     }
     const proofPath = join(projectDir, "runtime-proof.txt");
-    if (!existsSync(proofPath) || readFileSync(proofPath, "utf8").trim() !== "SUOCODE_RUNTIME_OK") {
+    if (!existsSync(proofPath) || readFileSync(proofPath, "utf8").trim() !== "COILCOIL_RUNTIME_OK") {
       console.error(JSON.stringify({
         runtimeError,
         events: events.filter((event) => !["runtime_ready", "configuration_updated", "session_snapshot", "project_updated"].includes(event.type)).slice(-30).map((event) => ({
@@ -746,7 +746,7 @@ try {
     if (!restored.contextUsage?.contextWindow || restored.tokenUsage.output <= 0) {
       throw new Error("Context and token usage were not included in the restored session snapshot.");
     }
-    const mcpEchoToken = `SUOCODE_MCP_ECHO_${Date.now()}`;
+    const mcpEchoToken = `COILCOIL_MCP_ECHO_${Date.now()}`;
     const mcpEventStart = events.length;
     const mcpSettled = waitForEvent((event) => event.type === "run_state" && event.running === false);
     await request({
@@ -764,7 +764,7 @@ try {
     }
     const rewindTarget = restored.messages.find((message) => message.role === "user");
     if (!rewindTarget?.entryId) throw new Error("Historical user messages did not expose a Pi session entry ID.");
-    const rewindToken = `SUOCODE_REWIND_OK_${Date.now()}`;
+    const rewindToken = `COILCOIL_REWIND_OK_${Date.now()}`;
     const rewindEventStart = events.length;
     const rewindSettled = waitForEvent((event) => event.type === "run_state" && event.running === false);
     await request(
@@ -793,7 +793,7 @@ try {
     throw new Error("The Pi MCP adapter configuration bridge did not remove the real test server.");
   }
 
-  process.stdout.write(`SuoCode runtime smoke passed${live ? " (live model + tool execution)" : ""}.\n`);
+  process.stdout.write(`CoilCoil runtime smoke passed${live ? " (live model + tool execution)" : ""}.\n`);
 } finally {
   const runtimeExit = waitForChildExit(child);
   const oauthExit = waitForChildExit(oauthFixture);

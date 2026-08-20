@@ -10,7 +10,7 @@ import {
 
 function stubClassify(answers: Record<string, PathKind>, calls: string[][]): void {
   (globalThis as Record<string, any>).window = {
-    suocode: {
+    coilcoil: {
       classifyPaths: async (paths: string[]) => {
         calls.push(paths);
         return Object.fromEntries(paths.map((path) => [path, answers[path] ?? "missing"]));

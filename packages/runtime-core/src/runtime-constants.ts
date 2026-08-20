@@ -1,7 +1,7 @@
 import {
   type ProjectMemoryRuntimeStatus,
   type RuntimeEvent,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   execFile,
 } from "node:child_process";
@@ -24,19 +24,19 @@ export const MAX_TERMINAL_OUTPUT = 120_000;
 
 export const MASKED_CONFIGURATION_VALUE = "••••••";
 
-export const WORKFLOW_AUDIT_ENTRY_TYPE = "suocode-tool-purpose-audit";
+export const WORKFLOW_AUDIT_ENTRY_TYPE = "coilcoil-tool-purpose-audit";
 
-export const RESPONSE_METRICS_ENTRY_TYPE = "suocode-response-metrics";
+export const RESPONSE_METRICS_ENTRY_TYPE = "coilcoil-response-metrics";
 
-export const PROJECT_MEMORY_STATUS_EVENT = "suocode:project-memory:status:v1";
+export const PROJECT_MEMORY_STATUS_EVENT = "coilcoil:project-memory:status:v1";
 
-export const FAST_STATE_EVENT = "suocode:fast:state:v1";
+export const FAST_STATE_EVENT = "coilcoil:fast:state:v1";
 
-export const RUNTIME_BRIDGE_COMMAND_EVENT = "suocode:runtime-bridge:command:v1";
+export const RUNTIME_BRIDGE_COMMAND_EVENT = "coilcoil:runtime-bridge:command:v1";
 
-export const RUNTIME_BRIDGE_REPLY_PREFIX = "suocode:runtime-bridge:reply:v1:";
+export const RUNTIME_BRIDGE_REPLY_PREFIX = "coilcoil:runtime-bridge:reply:v1:";
 
-export const RUNTIME_BRIDGE_STATE_EVENT = "suocode:runtime-bridge:state:v1";
+export const RUNTIME_BRIDGE_STATE_EVENT = "coilcoil:runtime-bridge:state:v1";
 
 export const ABANDONED_TOOL_OUTPUT = "工具调用未完成：会话在返回执行结果前中断。";
 
@@ -44,28 +44,28 @@ export const ORIGINAL_SESSION_MUTATION_UNSUPPORTED = "Pi 当前无法安全地�
 
 export const projectMemoryStatusByCwd = new Map<string, ProjectMemoryRuntimeStatus>();
 
-export const SUBAGENT_ACTIVITY_CHANNEL = "suocode:subagents:activity:v1";
+export const SUBAGENT_ACTIVITY_CHANNEL = "coilcoil:subagents:activity:v1";
 
-export const SUBAGENT_RPC_REQUEST_CHANNEL = "suocode:subagents:rpc:v1:request";
+export const SUBAGENT_RPC_REQUEST_CHANNEL = "coilcoil:subagents:rpc:v1:request";
 
 export const SUBAGENT_RUN_ENTRY_TYPE = "subagent-run";
 
 /** How long a stop may take before the runtime explains what it is waiting on. */
 export const ABORT_STALL_NOTICE_MS = 10_000;
 
-export const GOAL_STATE_CHANNEL = "suocode:goal:state:v1";
+export const GOAL_STATE_CHANNEL = "coilcoil:goal:state:v1";
 
-export const PLAN_STATE_CHANNEL = "suocode:plan:state:v1";
+export const PLAN_STATE_CHANNEL = "coilcoil:plan:state:v1";
 
-export const PLAN_RPC_REQUEST_CHANNEL = "suocode:plan:rpc:v1:request";
+export const PLAN_RPC_REQUEST_CHANNEL = "coilcoil:plan:rpc:v1:request";
 
-export const PLAN_ENTRY_TYPE = "suocode-plan";
+export const PLAN_ENTRY_TYPE = "coilcoil-plan";
 
-export const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("suocode-workflow.tool-purpose-registry");
+export const WORKFLOW_PURPOSE_REGISTRY = Symbol.for("coilcoil-workflow.tool-purpose-registry");
 
-export const TOOL_PURPOSE_POLICY_STATE = Symbol.for("suocode-workflow.tool-purpose-policy-state");
+export const TOOL_PURPOSE_POLICY_STATE = Symbol.for("coilcoil-workflow.tool-purpose-policy-state");
 
-export const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("suocode-workflow.mcp-agent-config-registry");
+export const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("coilcoil-workflow.mcp-agent-config-registry");
 
 export const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 

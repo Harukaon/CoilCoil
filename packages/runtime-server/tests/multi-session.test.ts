@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { SuoCodeRuntime, SuoCodeRuntimeOptions } from "@suocode/runtime-core";
+import type { CoilCoilRuntime, CoilCoilRuntimeOptions } from "@coilcoil/runtime-core";
 import type {
   PlanApprovalState,
   PlanExecutionTarget,
@@ -12,8 +12,8 @@ import type {
   RuntimeWireMessage,
   SessionSnapshot,
   SessionModelSelection,
-} from "@suocode/runtime-protocol";
-import { SESSION_OPEN_SUPERSEDED_ERROR } from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
+import { SESSION_OPEN_SUPERSEDED_ERROR } from "@coilcoil/runtime-protocol";
 import { RuntimeServer } from "../src/index.js";
 
 const EMPTY_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
@@ -39,7 +39,7 @@ class FakeRuntime {
 
   constructor(
     private readonly ordinal: number,
-    options: SuoCodeRuntimeOptions,
+    options: CoilCoilRuntimeOptions,
     private readonly controls: {
       openGates?: Map<string, ReturnType<typeof deferred>>;
       openCalls?: Map<string, number>;
@@ -254,7 +254,7 @@ test("one runtime server keeps multiple Agent sessions alive and independently s
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options);
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -315,7 +315,7 @@ test("model selection is explicit at session creation and later switches only th
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options);
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -378,7 +378,7 @@ test("changing the future-session default never falls back to the last active co
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options);
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => "runtime-default-routing",
     },
@@ -399,7 +399,7 @@ test("plan approval commands are routed to the selected live session runtime", a
     { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
     () => undefined,
     {
-      createRuntime: (options) => new FakeRuntime(1, options) as unknown as SuoCodeRuntime,
+      createRuntime: (options) => new FakeRuntime(1, options) as unknown as CoilCoilRuntime,
       createRuntimeId: () => "runtime-plan",
     },
   );
@@ -435,7 +435,7 @@ test("repeated clicks share one in-flight historical session restore", async () 
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options, { openGates, openCalls });
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -470,7 +470,7 @@ test("settled session reopens reuse the latest immutable snapshot", async () => 
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options, { snapshotCalls });
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -487,7 +487,7 @@ test("settled session reopens reuse the latest immutable snapshot", async () => 
 });
 
 test("canonical and symlinked session paths reuse the same runtime", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-session-alias-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-session-alias-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const realSessions = join(root, "sessions");
   const aliasSessions = join(root, "session-alias");
@@ -506,7 +506,7 @@ test("canonical and symlinked session paths reuse the same runtime", async (cont
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options, { openCalls });
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -543,7 +543,7 @@ test("rapid navigation serializes restores and skips queued intermediate session
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options, { openGates, openCalls });
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -578,7 +578,7 @@ test("idle historical runtimes are bounded while recent sessions remain reopenab
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options);
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -621,7 +621,7 @@ test("a background Memory job is retained beyond the idle runtime limit", async 
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options);
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -667,7 +667,7 @@ test("a background subagent is retained beyond the idle runtime limit", async ()
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options);
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -714,7 +714,7 @@ test("a stale persisted running subagent does not pin a restored runtime", async
         const ordinal = runtimes.length;
         const runtime = new FakeRuntime(ordinal, options, ordinal === 1 ? { initialSubagentStatus: "running" } : undefined);
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },
@@ -747,7 +747,7 @@ test("workspace Memory changes invalidate cached sibling session snapshots", asy
       createRuntime: (options) => {
         const runtime = new FakeRuntime(runtimes.length, options, { snapshotCalls });
         runtimes.push(runtime);
-        return runtime as unknown as SuoCodeRuntime;
+        return runtime as unknown as CoilCoilRuntime;
       },
       createRuntimeId: () => `runtime-${++runtimeId}`,
     },

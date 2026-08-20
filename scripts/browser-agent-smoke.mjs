@@ -7,9 +7,9 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/SuoCode.app/Contents/MacOS/SuoCode");
-const sourceDataDirectory = join(homedir(), "Library/Application Support/@suocode/desktop");
-const requestedModel = process.env.SUOCODE_BROWSER_AGENT_MODEL?.trim();
+const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/CoilCoil.app/Contents/MacOS/CoilCoil");
+const sourceDataDirectory = join(homedir(), "Library/Application Support/@coilcoil/desktop");
+const requestedModel = process.env.COILCOIL_BROWSER_AGENT_MODEL?.trim();
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
@@ -32,14 +32,14 @@ async function waitForPage(port) {
   while (Date.now() - startedAt < 45_000) {
     try {
       const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
-      const page = pages.find((item) => item.type === "page" && item.title === "SuoCode");
+      const page = pages.find((item) => item.type === "page" && item.title === "CoilCoil");
       if (page?.webSocketDebuggerUrl) return page;
     } catch {
       // Electron is still starting.
     }
     await delay(100);
   }
-  throw new Error("SuoCode did not expose its renderer in time.");
+  throw new Error("CoilCoil did not expose its renderer in time.");
 }
 
 class DevToolsClient {
@@ -102,7 +102,7 @@ async function copyPrivateRuntime(targetDirectory) {
 }
 
 async function main() {
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "suocode-browser-agent-"));
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "coilcoil-browser-agent-"));
   const dataDirectory = join(temporaryRoot, "data");
   const projectDirectory = join(temporaryRoot, "project");
   await copyPrivateRuntime(dataDirectory);
@@ -110,7 +110,7 @@ async function main() {
 
   const fixtureServer = createHttpServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end("<!doctype html><title>SuoCode browser agent fixture</title><h1>Browser agent fixture</h1>");
+    response.end("<!doctype html><title>CoilCoil browser agent fixture</title><h1>Browser agent fixture</h1>");
   });
   await new Promise((resolveListen, rejectListen) => {
     fixtureServer.once("error", rejectListen);
@@ -134,7 +134,7 @@ async function main() {
     client = new DevToolsClient(page.webSocketDebuggerUrl);
     await client.open();
     const setup = await client.evaluate(`(async () => {
-      const configuration = await window.suocode.request({ type: "get_configuration" });
+      const configuration = await window.coilcoil.request({ type: "get_configuration" });
       const requestedModel = ${JSON.stringify(requestedModel || "")};
       const model = requestedModel
         ? configuration.models.find((item) => item.configured && [item.provider, item.id].join("/") === requestedModel)
@@ -147,12 +147,12 @@ async function main() {
         ?? configuration.models.find((item) => item.configured && /minimax.*m3|m3.*minimax/i.test(\`${'${item.provider} ${item.id} ${item.name}'}\`))
         ?? configuration.models.find((item) => item.configured);
       if (!model) return { error: requestedModel ? "Requested model is not configured: " + requestedModel : "No configured model" };
-      const snapshot = await window.suocode.request({ type: "create_session", cwd: ${JSON.stringify(projectDirectory)} });
-      await window.suocode.request({ type: "set_session_model", provider: model.provider, modelId: model.id, thinkingLevel: "low" }, snapshot.runtimeId);
-      await window.suocode.createBrowserTab(snapshot.runtimeId, ${JSON.stringify(fixtureUrl)});
+      const snapshot = await window.coilcoil.request({ type: "create_session", cwd: ${JSON.stringify(projectDirectory)} });
+      await window.coilcoil.request({ type: "set_session_model", provider: model.provider, modelId: model.id, thinkingLevel: "low" }, snapshot.runtimeId);
+      await window.coilcoil.createBrowserTab(snapshot.runtimeId, ${JSON.stringify(fixtureUrl)});
       window.__browserAgentEvents = [];
       window.__browserAgentUnsubscribe?.();
-      window.__browserAgentUnsubscribe = window.suocode.onRuntimeEvent((event, runtimeId) => {
+      window.__browserAgentUnsubscribe = window.coilcoil.onRuntimeEvent((event, runtimeId) => {
         if (runtimeId !== snapshot.runtimeId) return;
         window.__browserAgentEvents.push({
           type: event.type,
@@ -167,7 +167,7 @@ async function main() {
       return { runtimeId: snapshot.runtimeId, model: { provider: model.provider, id: model.id } };
     })()`);
     if (setup.error) throw new Error(setup.error);
-    await client.evaluate(`window.suocode.request({
+    await client.evaluate(`window.coilcoil.request({
       type: "prompt",
       text: ${JSON.stringify(`For the page at "${fixtureUrl.slice(0, -1)}", use the built-in browser's accessibility snapshot to read the visible heading. Do not evaluate JavaScript in the page and do not change page data. Briefly report the heading text.`)}
     }, ${JSON.stringify(setup.runtimeId)})`);
@@ -182,7 +182,7 @@ async function main() {
     assert.ok(mcpCalls.some((event) => JSON.stringify(event.toolArgs).includes("take_snapshot")), "The Agent did not call the discovered Chrome DevTools snapshot tool through MCP.");
     assert.ok(mcpResults.some((event) => /Browser agent fixture/i.test(String(event.toolOutput))), "The Agent did not read the fixture through the Chrome DevTools snapshot.");
     assert.equal(events.some((event) => event.toolName !== "mcp" && /take_snapshot/.test(String(event.toolName))), false, "A browser tool leaked onto the direct tool surface.");
-    process.stdout.write(`SuoCode browser Agent progressive-disclosure smoke passed with ${setup.model.provider}/${setup.model.id}.\n`);
+    process.stdout.write(`CoilCoil browser Agent progressive-disclosure smoke passed with ${setup.model.provider}/${setup.model.id}.\n`);
   } catch (error) {
     throw new Error(`${error.stack || error.message}\nRuntime events:\n${diagnostics || "<unavailable>"}\nElectron stderr tail:\n${stderr.split("\n").slice(-30).join("\n")}`);
   } finally {

@@ -1,7 +1,7 @@
-import type { TerminalRun } from "@suocode/runtime-protocol";
+import type { TerminalRun } from "@coilcoil/runtime-protocol";
 import { isRecord, stringValue } from "./runtime-utils.js";
 
-export const TERMINAL_RUN_ENTRY_TYPE = "suocode-terminal-run";
+export const TERMINAL_RUN_ENTRY_TYPE = "coilcoil-terminal-run";
 
 function resultDetails(value: unknown): Record<string, unknown> | undefined {
   if (!isRecord(value)) return undefined;

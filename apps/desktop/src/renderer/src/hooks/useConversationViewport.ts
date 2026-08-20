@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import type { ChatMessage, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, ToolRun } from "@coilcoil/runtime-protocol";
 
 /**
  * How long after a real gesture a scroll event still counts as user-driven.

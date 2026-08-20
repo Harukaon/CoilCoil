@@ -23,7 +23,7 @@ export function useInAppBrowserLinks({
 }): void {
   const openLink = useCallback((url: string): void => {
     openBrowser();
-    void window.suocode.createBrowserTab(scopeId, url).catch((error: unknown) => {
+    void window.coilcoil.createBrowserTab(scopeId, url).catch((error: unknown) => {
       reportError(error instanceof Error ? error.message : String(error));
     });
   }, [openBrowser, reportError, scopeId]);
@@ -39,7 +39,7 @@ export function useInAppBrowserLinks({
         // The right-hand panel is the workspace tree and single-file previews.
         // A folder belongs to the operating system's file manager instead.
         if (fileLink?.dataset.fileKind === "directory") {
-          void window.suocode.revealPath(filePath).catch((error: unknown) => {
+          void window.coilcoil.revealPath(filePath).catch((error: unknown) => {
             reportError(error instanceof Error ? error.message : String(error));
           });
           return;

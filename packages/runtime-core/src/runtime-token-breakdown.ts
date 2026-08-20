@@ -4,7 +4,7 @@ import {
 import type {
   RuntimeTokenBreakdown,
   RuntimeToolDefinition,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   estimatedTextTokens,
   isRecord,

@@ -4,7 +4,7 @@ import {
   type McpServerRuntimeStatus,
   type ProjectMemoryRuntimeStatus,
   type RuntimeInspectionSnapshot,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   existsSync,
 } from "node:fs";
@@ -39,7 +39,7 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     params: Record<string, unknown> = {},
   ): Promise<RuntimeBridgeState> {
     const active = this.requireActive();
-    const requestId = `suocode-runtime-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = `coilcoil-runtime-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const replyChannel = `${RUNTIME_BRIDGE_REPLY_PREFIX}${requestId}`;
     return new Promise((resolvePromise, rejectPromise) => {
       let settled = false;
@@ -205,8 +205,8 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
 
   protected mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete" | "logout" | "session-enable", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const active = this.requireActive();
-    const requestId = `suocode-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const replyChannel = `suocode:mcp:rpc:v1:reply:${requestId}`;
+    const requestId = `coilcoil-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyChannel = `coilcoil:mcp:rpc:v1:reply:${requestId}`;
     // pi-mcp-adapter performs a first-run metadata bootstrap before its proxy
     // tool becomes ready. That bootstrap can legitimately consume a server's
     // configured request timeout, so the GUI bridge must not abandon the
@@ -232,12 +232,12 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
         finish(() => rejectPromise(new Error(rpcError || "MCP 扩展请求失败。")));
       });
       const timer = setTimeout(() => finish(() => rejectPromise(new Error("MCP 扩展请求超时。"))), timeoutMs);
-      active.eventBus.emit("suocode:mcp:rpc:v1:request", {
+      active.eventBus.emit("coilcoil:mcp:rpc:v1:request", {
         version: 1,
         requestId,
         method,
         params,
-        source: { client: "suocode-desktop" },
+        source: { client: "coilcoil-desktop" },
       });
     });
   }

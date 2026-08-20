@@ -33,8 +33,8 @@ const { resolveDirectTools } = jiti(join(adapterDirectory, "direct-tools.ts")) a
 };
 const MCP_STATUS_EVENT = "pi-mcp-adapter/status/v1";
 const MCP_TOOL_APPROVAL_REQUEST_EVENT = "pi-mcp-adapter:tool-approval-request";
-const MCP_SESSION_POLICY_ENTRY = "suocode-mcp-session-policy";
-const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("suocode-workflow.mcp-agent-config-registry");
+const MCP_SESSION_POLICY_ENTRY = "coilcoil-mcp-session-policy";
+const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("coilcoil-workflow.mcp-agent-config-registry");
 
 interface McpStatusSnapshot {
   version: 1;
@@ -54,8 +54,8 @@ interface McpStatusSnapshot {
 }
 
 export const MCP_RPC_PROTOCOL_VERSION = 1;
-export const MCP_RPC_REQUEST_EVENT = "suocode:mcp:rpc:v1:request";
-export const MCP_RPC_REPLY_EVENT_PREFIX = "suocode:mcp:rpc:v1:reply:";
+export const MCP_RPC_REQUEST_EVENT = "coilcoil:mcp:rpc:v1:request";
+export const MCP_RPC_REPLY_EVENT_PREFIX = "coilcoil:mcp:rpc:v1:reply:";
 
 type McpRpcMethod = "status" | "connect" | "auth-start" | "auth-complete" | "logout" | "session-enable";
 
@@ -177,7 +177,7 @@ function disabledServersFromSession(context: ExtensionContext): string[] {
   return [];
 }
 
-export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
+export default function coilcoilMcpAdapter(pi: ExtensionAPI): void {
   const suppliedConfiguration = registeredMcpConfiguration(pi.events);
   const installMcpAdapter = suppliedConfiguration
     ? createMcpAdapter({ config: suppliedConfiguration })
@@ -251,7 +251,7 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
   const refreshServerTools = async (server: string): Promise<void> => {
     if (!rawProxyTool || !context) return;
     const result = await rawProxyTool.execute(
-      `suocode-mcp-session-tools-${Date.now()}`,
+      `coilcoil-mcp-session-tools-${Date.now()}`,
       { server },
       context.signal,
       undefined,
@@ -349,7 +349,7 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
         const name = serverName(request.params ?? {});
         const enabled = request.params?.enabled === true;
         const statusResult = await proxyTool.execute(
-          `suocode-mcp-session-status-${request.requestId}`,
+          `coilcoil-mcp-session-status-${request.requestId}`,
           {},
           context.signal,
           undefined,
@@ -399,7 +399,7 @@ export default function suocodeMcpAdapter(pi: ExtensionAPI): void {
       }
       if (!proxyTool) throw new Error("pi-mcp-adapter 没有注册 MCP 代理工具。");
       const result = await proxyTool.execute(
-        `suocode-mcp-rpc-${request.requestId}`,
+        `coilcoil-mcp-rpc-${request.requestId}`,
         proxyParams(request),
         context?.signal,
         undefined,

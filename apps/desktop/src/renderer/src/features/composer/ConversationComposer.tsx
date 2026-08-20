@@ -7,7 +7,7 @@ import type {
   ProjectSelection,
   RuntimeConfiguration,
   SessionSnapshot,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { carriesPaths, droppedPaths, insertPathsAtCaret } from "./pathInsert";
 import { imageDataUrl } from "./promptImages";
 import { ModelPicker } from "./ModelPicker";
@@ -187,12 +187,12 @@ export function ConversationComposer({
         ref={inputRef}
         rows={1}
         value={draft}
-        aria-label={inline ? "编辑历史消息" : "发送消息给 SuoCode"}
+        aria-label={inline ? "编辑历史消息" : "发送消息给 CoilCoil"}
         placeholder={
           inline
             ? "编辑历史消息…"
             : project
-              ? (running ? (goalActive ? "消息会介入当前轮次…" : "消息将排队发送…") : "让 SuoCode 处理这个项目…")
+              ? (running ? (goalActive ? "消息会介入当前轮次…" : "消息将排队发送…") : "让 CoilCoil 处理这个项目…")
               : "请先打开项目"
         }
         disabled={!project || loading || startingSession || modelChanging}

@@ -34,14 +34,14 @@ function assertRunId(runId: string): void {
 
 export function subagentWorktreeBranch(runId: string): string {
   assertRunId(runId);
-  return `suocode/subagent/${runId}`;
+  return `coilcoil/subagent/${runId}`;
 }
 
 export async function subagentWorktreePath(repoRoot: string, runId: string): Promise<string> {
   assertRunId(runId);
   const gitDir = await git(repoRoot, ["rev-parse", "--absolute-git-dir"]);
   if (!gitDir) throw new Error("无法定位 git 管理目录。");
-  return join(gitDir, "suocode-worktrees", runId);
+  return join(gitDir, "coilcoil-worktrees", runId);
 }
 
 export interface CreatedWorktree {

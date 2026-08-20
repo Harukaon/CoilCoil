@@ -16,7 +16,7 @@ import { join, resolve } from "node:path";
  */
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/SuoCode.app/Contents/MacOS/SuoCode");
+const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/CoilCoil.app/Contents/MacOS/CoilCoil");
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 
@@ -37,14 +37,14 @@ async function waitForPage(port) {
   while (Date.now() - startedAt < 30_000) {
     try {
       const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
-      const page = pages.find((item) => item.type === "page" && item.title === "SuoCode");
+      const page = pages.find((item) => item.type === "page" && item.title === "CoilCoil");
       if (page?.webSocketDebuggerUrl) return page;
     } catch {
       // Electron is still starting.
     }
     await delay(100);
   }
-  throw new Error("SuoCode did not expose its renderer in time.");
+  throw new Error("CoilCoil did not expose its renderer in time.");
 }
 
 class DevToolsClient {
@@ -93,7 +93,7 @@ class DevToolsClient {
 }
 
 async function main() {
-  const dataDirectory = await mkdtemp(join(tmpdir(), "suocode-guest-security-"));
+  const dataDirectory = await mkdtemp(join(tmpdir(), "coilcoil-guest-security-"));
   const port = await freePort();
   const child = spawn(appBinary, [`--remote-debugging-port=${port}`, `--user-data-dir=${dataDirectory}`], {
     cwd: repositoryRoot,
@@ -112,25 +112,25 @@ async function main() {
       };
 
       // A tab main is not waiting for.
-      const unknownTab = await attempt(() => window.suocode.registerBrowserGuest("not-a-tab", "nonce", 2));
+      const unknownTab = await attempt(() => window.coilcoil.registerBrowserGuest("not-a-tab", "nonce", 2));
 
-      const created = await window.suocode.createBrowserTab("security", "data:text/html,<title>S</title>");
+      const created = await window.coilcoil.createBrowserTab("security", "data:text/html,<title>S</title>");
       const tabId = created.tabs[0].id;
       const liveGuest = document.querySelector(".browser-guest-layer > webview");
       const liveId = liveGuest ? liveGuest.getWebContentsId() : -1;
 
       // A tab that already has its guest cannot be rebound, with any id.
-      const rebind = await attempt(() => window.suocode.registerBrowserGuest(tabId, "nonce", liveId));
+      const rebind = await attempt(() => window.coilcoil.registerBrowserGuest(tabId, "nonce", liveId));
 
       // Sweep low webContents ids: the app renderer and every other contents in
       // the process must be refused, whatever the caller claims.
       const sweep = [];
       for (let id = 1; id <= 30; id++) {
-        const outcome = await attempt(() => window.suocode.registerBrowserGuest(tabId, "nonce", id));
+        const outcome = await attempt(() => window.coilcoil.registerBrowserGuest(tabId, "nonce", id));
         if (outcome === "ACCEPTED") sweep.push(id);
       }
 
-      await window.suocode.closeBrowserTab("security", tabId);
+      await window.coilcoil.closeBrowserTab("security", tabId);
       return { unknownTab, rebind, acceptedIds: sweep };
     })()`);
 
@@ -138,7 +138,7 @@ async function main() {
     assert.notEqual(result.rebind, "ACCEPTED", "An already-bound tab accepted a second guest.");
     assert.deepEqual(result.acceptedIds, [], `Registration accepted foreign webContents ids: ${JSON.stringify(result.acceptedIds)}`);
 
-    console.log("SuoCode browser guest security smoke passed.");
+    console.log("CoilCoil browser guest security smoke passed.");
   } finally {
     client?.close();
     child.kill("SIGKILL");

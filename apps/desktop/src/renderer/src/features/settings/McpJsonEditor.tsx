@@ -1,7 +1,7 @@
 import { FileJson, LoaderCircle, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { McpConfigurationSnapshot, McpJsonDocument } from "@suocode/runtime-protocol";
-import { validateMcpJsonText } from "@suocode/runtime-protocol";
+import type { McpConfigurationSnapshot, McpJsonDocument } from "@coilcoil/runtime-protocol";
+import { validateMcpJsonText } from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 
 export function McpJsonEditor({
@@ -26,7 +26,7 @@ export function McpJsonEditor({
     if (!open) return;
     let cancelled = false;
     setLoading(true);
-    void window.suocode.request<McpJsonDocument>({ type: "get_mcp_json" }, runtimeId)
+    void window.coilcoil.request<McpJsonDocument>({ type: "get_mcp_json" }, runtimeId)
       .then((document) => {
         if (cancelled) return;
         if (!document || typeof document.path !== "string" || typeof document.content !== "string") {
@@ -61,7 +61,7 @@ export function McpJsonEditor({
     }
     setSaving(true);
     try {
-      const snapshot = await window.suocode.request<McpConfigurationSnapshot>({
+      const snapshot = await window.coilcoil.request<McpConfigurationSnapshot>({
         type: "save_mcp_json",
         content: draft,
         cwd,
@@ -87,7 +87,7 @@ export function McpJsonEditor({
           <button type="button" aria-label="关闭" disabled={saving} onClick={onClose}><X size={15} /></button>
         </header>
         <p className="mcp-json-hint">
-          这是 SuoCode 自己的 <code>mcp.json</code>，格式与 Cursor 一致。<code>imports</code> 里列出的来源（Claude、Codex、opencode 等）中的服务器仍然保存在各自的应用里，这里只会留下对它们的覆盖，例如 <code>{"{ \"disabled\": true }"}</code>；所以本文件通常比左侧列表短。
+          这是 CoilCoil 自己的 <code>mcp.json</code>，格式与 Cursor 一致。<code>imports</code> 里列出的来源（Claude、Codex、opencode 等）中的服务器仍然保存在各自的应用里，这里只会留下对它们的覆盖，例如 <code>{"{ \"disabled\": true }"}</code>；所以本文件通常比左侧列表短。
           新建服务器时用 <code>command</code>（stdio）或 <code>url</code>（HTTP）二选一，可搭配 <code>args</code>、<code>env</code>、<code>headers</code>、<code>auth</code>、<code>lifecycle</code> 等字段。保存前会校验 JSON，不合法则拒绝写入。
         </p>
         {loading ? (

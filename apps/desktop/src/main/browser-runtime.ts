@@ -13,7 +13,7 @@ import {
 import { BROWSER_PARTITION } from "./browser-webview-policy";
 
 /**
- * Owns SuoCode browser tabs, guest WebContents and renderer-facing state.
+ * Owns CoilCoil browser tabs, guest WebContents and renderer-facing state.
  * Browser-level CDP protocol adaptation lives in BrowserCdpBridge.
  */
 export class BrowserRuntimeManager {
@@ -240,7 +240,7 @@ export class BrowserRuntimeManager {
    * target id can leave that Page permanently half-initialized.
    * Electron exposes the real identity through the debugger attached to this
    * exact WebContents, so using it preserves Puppeteer's invariants and
-   * SuoCode's single-WebContents isolation boundary.
+   * CoilCoil's single-WebContents isolation boundary.
    */
   private async refreshPageTargetIdentity(tab: BrowserTab): Promise<void> {
     this.attachDebugger(tab);

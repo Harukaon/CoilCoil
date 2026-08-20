@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-const STATUS_KEY = "suocode-mcp-health";
+const STATUS_KEY = "coilcoil-mcp-health";
 const STANDARD_CONFIG = join(homedir(), ".config", "mcp", "mcp.json");
 
 function piConfigPath(environment: NodeJS.ProcessEnv = process.env): string {

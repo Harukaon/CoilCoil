@@ -15,7 +15,7 @@ import type { BrowserGuestRoster } from "../../../../shared/desktop-api";
  * viewport from `Emulation.setDeviceMetricsOverride` in main.
  */
 
-const PARTITION = "persist:suocode-browser";
+const PARTITION = "persist:coilcoil-browser";
 
 interface GuestElement extends HTMLElement {
   getWebContentsId(): number;
@@ -77,10 +77,10 @@ function createGuest(tabId: string, nonce: string): GuestEntry {
     try {
       webContentsId = element.getWebContentsId();
     } catch (error) {
-      void window.suocode.reportBrowserGuestFailure(tabId, nonce, String(error));
+      void window.coilcoil.reportBrowserGuestFailure(tabId, nonce, String(error));
       return;
     }
-    void window.suocode.registerBrowserGuest(tabId, nonce, webContentsId).catch((error: unknown) => {
+    void window.coilcoil.registerBrowserGuest(tabId, nonce, webContentsId).catch((error: unknown) => {
       // Main refused the binding. Drop the element rather than leave a live guest
       // that nothing owns.
       guests.delete(tabId);
@@ -94,7 +94,7 @@ function createGuest(tabId: string, nonce: string): GuestEntry {
   // an orphaned <webview> that reconcile can no longer find and remove.
   element.addEventListener("destroyed", () => {
     if (guests.get(tabId) !== entry) return;
-    void window.suocode.reportBrowserGuestFailure(tabId, nonce, "guest destroyed");
+    void window.coilcoil.reportBrowserGuestFailure(tabId, nonce, "guest destroyed");
   });
 
   return entry;
@@ -123,8 +123,8 @@ function reconcile(roster: BrowserGuestRoster): void {
 /** Called once from BrowserGuestLayer when the always-mounted host div exists. */
 export function mountGuestLayer(element: HTMLDivElement): () => void {
   layer = element;
-  const stopRoster = window.suocode.onBrowserGuestRoster(reconcile);
-  void window.suocode.browserGuestLayerReady().then(reconcile);
+  const stopRoster = window.coilcoil.onBrowserGuestRoster(reconcile);
+  void window.coilcoil.browserGuestLayerReady().then(reconcile);
   return () => {
     stopRoster();
     for (const entry of guests.values()) entry.element.remove();

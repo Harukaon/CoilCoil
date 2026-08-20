@@ -4,7 +4,7 @@ import type {
   ProjectSelection,
   SessionSnapshot,
   SessionSummary,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import type { SessionActivityState } from "./WorkspaceSidebar";
 import { PROJECTS_STORAGE_KEY } from "../../appState";
 import { toastError } from "../../ui/toast";
@@ -73,7 +73,7 @@ export function useConversationActions({
       return;
     }
     try {
-      const next = await window.suocode.request<SessionSummary[]>({ type: "archive_session", cwd: owner.path, sessionPath: session.path });
+      const next = await window.coilcoil.request<SessionSummary[]>({ type: "archive_session", cwd: owner.path, sessionPath: session.path });
       optimisticSessionsRef.current.delete(session.path);
       setSessionsByProject((current) => ({ ...current, [owner.path]: next }));
       setSessionActivity((current) => {
@@ -88,13 +88,13 @@ export function useConversationActions({
   };
 
   const renameConversation = async (owner: ProjectSelection, session: SessionSummary, name: string): Promise<void> => {
-    const next = await window.suocode.request<SessionSummary[]>({ type: "rename_session", cwd: owner.path, sessionPath: session.path, name });
+    const next = await window.coilcoil.request<SessionSummary[]>({ type: "rename_session", cwd: owner.path, sessionPath: session.path, name });
     setSessionsByProject((current) => ({ ...current, [owner.path]: next }));
   };
 
   const pinConversation = async (owner: ProjectSelection, session: SessionSummary, pinned: boolean): Promise<void> => {
     try {
-      const next = await window.suocode.request<SessionSummary[]>({ type: "pin_session", cwd: owner.path, sessionPath: session.path, pinned });
+      const next = await window.coilcoil.request<SessionSummary[]>({ type: "pin_session", cwd: owner.path, sessionPath: session.path, pinned });
       setSessionsByProject((current) => ({ ...current, [owner.path]: next }));
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
@@ -107,7 +107,7 @@ export function useConversationActions({
       return;
     }
     try {
-      const result = await window.suocode.request<{ sessions: SessionSummary[]; session: SessionSummary }>({
+      const result = await window.coilcoil.request<{ sessions: SessionSummary[]; session: SessionSummary }>({
         type: "fork_session",
         cwd: owner.path,
         sessionPath: session.path,
@@ -125,7 +125,7 @@ export function useConversationActions({
       return;
     }
     try {
-      const result = await window.suocode.request<MoveSessionResult>({
+      const result = await window.coilcoil.request<MoveSessionResult>({
         type: "move_session",
         cwd: owner.path,
         sessionPath: session.path,

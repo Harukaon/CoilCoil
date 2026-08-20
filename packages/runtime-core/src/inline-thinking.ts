@@ -1,7 +1,7 @@
 /**
  * Pull reasoning that arrived inside an assistant's visible text back out.
  *
- * Reasoning belongs in the thinking channel, and both Pi transports SuoCode
+ * Reasoning belongs in the thinking channel, and both Pi transports CoilCoil
  * uses put it there: `openai-responses` replays reasoning items and drops
  * thinking blocks it cannot sign, and `openai-completions` only inlines
  * `<thinking>` delimiters behind the explicit `requiresThinkingAsText` compat

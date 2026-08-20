@@ -4,7 +4,7 @@ import type {
   MemoryConfigurationSnapshot,
   MemorySettings,
   RuntimeInspectionSnapshot,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 import {
   DEFAULT_MEMORY_SCOPE,
@@ -61,9 +61,9 @@ export function MemoryWorkspace({
     setLoading(true);
     try {
       const [next, nextInspection] = await Promise.all([
-        window.suocode.request<MemoryConfigurationSnapshot>({ type: "get_memory_configuration", cwd }, runtimeId),
+        window.coilcoil.request<MemoryConfigurationSnapshot>({ type: "get_memory_configuration", cwd }, runtimeId),
         runtimeId
-          ? window.suocode.request<RuntimeInspectionSnapshot>({ type: "get_runtime_inspection" }, runtimeId)
+          ? window.coilcoil.request<RuntimeInspectionSnapshot>({ type: "get_runtime_inspection" }, runtimeId)
           : Promise.resolve(undefined),
       ]);
       setConfiguration(next);
@@ -83,7 +83,7 @@ export function MemoryWorkspace({
 
   useEffect(() => {
     if (!runtimeId) return undefined;
-    return window.suocode.onRuntimeEvent((event, eventRuntimeId) => {
+    return window.coilcoil.onRuntimeEvent((event, eventRuntimeId) => {
       if (eventRuntimeId !== runtimeId || event.type !== "runtime_inspection_updated") return;
       setInspection(event.inspection);
     });
@@ -123,7 +123,7 @@ export function MemoryWorkspace({
     if (!settings) return;
     setSaving(true);
     try {
-      const next = await window.suocode.request<MemoryConfigurationSnapshot>({
+      const next = await window.coilcoil.request<MemoryConfigurationSnapshot>({
         type: "save_memory_configuration",
         cwd,
         input: {
@@ -150,7 +150,7 @@ export function MemoryWorkspace({
   const runMemory = async (): Promise<void> => {
     setRunning(true);
     try {
-      await window.suocode.request({ type: "run_memory_now" }, runtimeId);
+      await window.coilcoil.request({ type: "run_memory_now" }, runtimeId);
       toastSuccess("项目记忆整理已在后台启动。");
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));

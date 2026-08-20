@@ -43,15 +43,15 @@ function Scaled({ authored, size, speed, ratio = 1, className, children }: {
 }): React.JSX.Element {
   return (
     <span
-      className="suo-loader-scaler"
+      className="coil-loader-scaler"
       style={{ width: size, height: size * ratio }}
       role="status"
       aria-label="加载中"
     >
       <span
-        className="suo-loader-frame"
+        className="coil-loader-frame"
         style={{
-          "--suo-loader-scale": String(size / authored),
+          "--coil-loader-scale": String(size / authored),
           width: authored,
           height: authored * ratio,
           ...(speed === undefined ? {} : { "--uib-speed": `${speed}s` }),
@@ -66,34 +66,34 @@ function Scaled({ authored, size, speed, ratio = 1, className, children }: {
 /** Ink drops crossing a rounded field, merging into one growing blot in the middle. */
 export function BlobsLoader({ size = 300, speed }: LoaderProps): React.JSX.Element {
   return (
-    <Scaled authored={300} size={size} speed={speed} className="suo-blobs">
-      <span className="suo-blob-center" />
-      <span className="suo-blob" />
-      <span className="suo-blob" />
-      <span className="suo-blob" />
-      <span className="suo-blob" />
-      <span className="suo-blob" />
-      <span className="suo-blob" />
+    <Scaled authored={300} size={size} speed={speed} className="coil-blobs">
+      <span className="coil-blob-center" />
+      <span className="coil-blob" />
+      <span className="coil-blob" />
+      <span className="coil-blob" />
+      <span className="coil-blob" />
+      <span className="coil-blob" />
+      <span className="coil-blob" />
     </Scaled>
   );
 }
 
 /** Two dots on crossing orbits, the whole ring turning as they go. */
 export function OrbitLoader({ size = 25, speed }: LoaderProps): React.JSX.Element {
-  return <Scaled authored={25} size={size} speed={speed} className="suo-orbit" />;
+  return <Scaled authored={25} size={size} speed={speed} className="coil-orbit" />;
 }
 
 /** Two rounds pulling apart and snapping back, flipping axis every other cycle. */
 export function JellyLoader({ size = 40, speed }: LoaderProps): React.JSX.Element {
-  return <Scaled authored={40} size={size} speed={speed} ratio={0.5} className="suo-jelly" />;
+  return <Scaled authored={40} size={size} speed={speed} ratio={0.5} className="coil-jelly" />;
 }
 
 /** Three corners breathing while a fourth dot walks the triangle between them. */
 export function JellyTriangleLoader({ size = 45, speed }: LoaderProps): React.JSX.Element {
   return (
-    <Scaled authored={45} size={size} speed={speed} className="suo-jelly-triangle">
-      <span className="suo-jelly-triangle-dot" />
-      <span className="suo-jelly-triangle-traveler" />
+    <Scaled authored={45} size={size} speed={speed} className="coil-jelly-triangle">
+      <span className="coil-jelly-triangle-dot" />
+      <span className="coil-jelly-triangle-traveler" />
     </Scaled>
   );
 }

@@ -1,4 +1,4 @@
-import type { FileNode } from "@suocode/runtime-protocol";
+import type { FileNode } from "@coilcoil/runtime-protocol";
 
 export function absoluteProjectPath(root: string, value: string): string {
   if (/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value)) return value;

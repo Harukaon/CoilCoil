@@ -25,7 +25,7 @@ export interface RuntimeConfiguration {
   configuredProviders: string[];
   models: ModelOption[];
   migratedLegacyCredentials: boolean;
-  /** Whether SuoCode injects and validates the tool-call purpose field. */
+  /** Whether CoilCoil injects and validates the tool-call purpose field. */
   toolPurposeAuditEnabled?: boolean;
 }
 
@@ -45,7 +45,7 @@ export interface PendingSessionModel {
   thinkingLevel: ThinkingLevel;
 }
 
-/** Configuration for SuoCode's own OpenAI Responses WebSocket Pi extension. */
+/** Configuration for CoilCoil's own OpenAI Responses WebSocket Pi extension. */
 export interface OpenAIResponsesWsConfiguration {
   configPath: string;
   baseUrl: string;
@@ -63,7 +63,7 @@ export interface OpenAIResponsesWsConfigurationInput {
 /**
  * Pi's built-in streaming transports that can be configured through
  * `models.json`. The runtime deliberately keeps the value as a string so a
- * newer Pi transport can be exposed before SuoCode itself needs a release.
+ * newer Pi transport can be exposed before CoilCoil itself needs a release.
  */
 export interface ModelProviderApiOption {
   id: string;
@@ -164,7 +164,7 @@ export interface ModelProviderModelConfiguration {
 }
 
 /**
- * A provider entry projected from SuoCode's private Pi `models.json`.
+ * A provider entry projected from CoilCoil's private Pi `models.json`.
  * Credentials are intentionally represented only as availability/reference
  * metadata; the literal key stays in Pi's private auth store.
  */
@@ -275,7 +275,7 @@ export interface McpServerConfiguration {
   sourceKind?: "user" | "project" | "import";
   /**
    * Which app an imported definition came from. For imports the adapter sets
-   * `source` to SuoCode's own config path (that is where overrides get written),
+   * `source` to CoilCoil's own config path (that is where overrides get written),
    * so this is the only field that identifies the true origin.
    */
   importKind?: McpImportConfiguration["kind"];
@@ -350,7 +350,7 @@ export function validateMcpJsonText(text: string): McpJsonValidationResult {
     // An entry may carry only overrides for a server that is defined elsewhere —
     // an imported Cursor/Claude/Codex config, or a shared `.mcp.json`. Removing
     // such a server can only tombstone it as `{ "disabled": true }` here, so
-    // demanding a transport would reject files SuoCode itself writes.
+    // demanding a transport would reject files CoilCoil itself writes.
     const overrideOnly = !hasCommand && !hasUrl
       && Object.keys(entry).every((key) => key === "disabled" || key === "excludeTools");
     if (!hasCommand && !hasUrl && !overrideOnly) {
@@ -997,7 +997,7 @@ export type RuntimeCommand =
       provider: string;
       modelId: string;
       thinkingLevel: ThinkingLevel;
-      /** SuoCode-private context limit override for this provider/model. */
+      /** CoilCoil-private context limit override for this provider/model. */
       contextWindow?: number;
       apiKey?: string;
     }
@@ -1145,4 +1145,4 @@ export function isRuntimeEventEnvelope(value: unknown): value is RuntimeEventEnv
   );
 }
 
-export const SESSION_OPEN_SUPERSEDED_ERROR = "SUOCODE_SESSION_OPEN_SUPERSEDED";
+export const SESSION_OPEN_SUPERSEDED_ERROR = "COILCOIL_SESSION_OPEN_SUPERSEDED";

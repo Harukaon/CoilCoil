@@ -5,8 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { RuntimeEvent } from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+import type { RuntimeEvent } from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 import { ToolRunIds } from "../src/tool-run-ids.js";
 
 interface MessageRuntimeInternals {
@@ -16,10 +16,10 @@ interface MessageRuntimeInternals {
 }
 
 test("one client message id survives Pi user start and finish events", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-message-correlation-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-message-correlation-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const events: RuntimeEvent[] = [];
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     onEvent: (event) => events.push(event),

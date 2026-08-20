@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SessionSnapshot, SessionSummary } from "@suocode/runtime-protocol";
+import type { SessionSnapshot, SessionSummary } from "@coilcoil/runtime-protocol";
 import { selectWorkspaceSessionPath } from "../src/workspace-session.js";
 
 function summary(path: string, pinned = false): SessionSummary {

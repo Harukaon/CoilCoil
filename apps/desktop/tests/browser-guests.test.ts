@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BrowserGuestRegistry, type GuestCandidate } from "../src/main/browser-guests.ts";
 
-const PARTITION = "persist:suocode-browser";
+const PARTITION = "persist:coilcoil-browser";
 const HOST_ID = 1;
 
 /** Manual clock so timeout paths are exercised without real waiting. */

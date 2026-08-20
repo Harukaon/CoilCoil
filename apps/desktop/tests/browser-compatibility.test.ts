@@ -19,7 +19,7 @@ test("browser runtime source files stay within the 600-line architecture limit",
   }
 });
 
-test("the pinned Chrome DevTools MCP carries SuoCode lifecycle fixes", async () => {
+test("the pinned Chrome DevTools MCP carries CoilCoil lifecycle fixes", async () => {
   const [handler, pages, snapshot, network, interception, tools, performance, response, lighthouse] = await Promise.all([
     read("node_modules/chrome-devtools-mcp/build/src/ToolHandler.js"),
     read("node_modules/chrome-devtools-mcp/build/src/tools/pages.js"),

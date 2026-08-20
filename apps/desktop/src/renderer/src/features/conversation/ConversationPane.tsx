@@ -17,15 +17,15 @@ import type {
   RuntimeConfiguration,
   SessionSnapshot,
   SubagentActivity,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
 import { ActivityPanel } from "../activity/ActivityPanel";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
-import { SuoLoader } from "../../ui/SuoLoader";
+import { CoilLoader } from "../../ui/CoilLoader";
 import { BlobsLoader } from "../../ui/loaders";
-import { SuoLogo } from "../../ui/SuoLogo";
+import { CoilLogo } from "../../ui/CoilLogo";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
@@ -335,10 +335,10 @@ export function ConversationPane({
                   renderPlan={(plan) => <PlanApprovalCard plan={plan} onApprove={onApprovePlan} onReject={onRejectPlan} />}
                 />
               ))}
-              {running ? <div className="agent-activity"><SuoLoader size={6} /><span className="agent-activity-line">{activityLine}</span></div> : null}
+              {running ? <div className="agent-activity"><CoilLoader size={6} /><span className="agent-activity-line">{activityLine}</span></div> : null}
             </div>
           ) : (
-            <div className="empty-chat"><div className="empty-chat-mark"><SuoLogo size={40} /></div><h1>你想构建什么？</h1><p>{project ? `SuoCode 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
+            <div className="empty-chat"><div className="empty-chat-mark"><CoilLogo size={40} /></div><h1>你想构建什么？</h1><p>{project ? `CoilCoil 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
           )}
         </div>
         {showScrollDown ? (

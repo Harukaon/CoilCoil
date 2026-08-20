@@ -7,7 +7,7 @@ import {
 } from "../extensions/mcp-adapter.ts";
 
 test("MCP adapter receives the Agent-only configuration registered for this session", () => {
-  const symbol = Symbol.for("suocode-workflow.mcp-agent-config-registry");
+  const symbol = Symbol.for("coilcoil-workflow.mcp-agent-config-registry");
   const globals = globalThis as Record<PropertyKey, unknown>;
   const previous = globals[symbol];
   const events = {};

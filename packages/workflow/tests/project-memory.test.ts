@@ -293,12 +293,12 @@ test("worker launch runs inside the global project memory folder with isolated r
 test("bundled memory workers use the host runtime and internal Pi CLI entry", () => {
   assert.deepEqual(
     resolvePiWorkerInvocation(
-      { PI_MEMORY_WORKER_ENTRY: "/Applications/SuoCode.app/Contents/Resources/app.asar/node_modules/pi/dist/cli.js" },
-      ["SuoCode", "runtime.js"],
+      { PI_MEMORY_WORKER_ENTRY: "/Applications/CoilCoil.app/Contents/Resources/app.asar/node_modules/pi/dist/cli.js" },
+      ["CoilCoil", "runtime.js"],
     ),
     {
       command: process.execPath,
-      prefixArgs: ["/Applications/SuoCode.app/Contents/Resources/app.asar/node_modules/pi/dist/cli.js"],
+      prefixArgs: ["/Applications/CoilCoil.app/Contents/Resources/app.asar/node_modules/pi/dist/cli.js"],
     },
   );
 });

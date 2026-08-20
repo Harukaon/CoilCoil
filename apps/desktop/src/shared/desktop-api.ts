@@ -4,9 +4,9 @@ import type {
   RuntimeCommand,
   RuntimeEvent,
   ScopedRuntimeEvent,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 
-export type { ProjectSelection } from "@suocode/runtime-protocol";
+export type { ProjectSelection } from "@coilcoil/runtime-protocol";
 
 export type DesktopPlatform = "darwin" | "linux" | "win32";
 
@@ -108,7 +108,7 @@ export interface UpdateAvailable {
   url: string;
 }
 
-export interface SuoCodeDesktopApi {
+export interface CoilCoilDesktopApi {
   platform: DesktopPlatform;
   /** The running build's version, as packaged. */
   appVersion(): Promise<string>;

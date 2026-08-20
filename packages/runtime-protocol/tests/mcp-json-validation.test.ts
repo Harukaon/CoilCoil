@@ -18,8 +18,8 @@ test("a server needs exactly one transport", () => {
 
 test("a tombstone the runtime writes for a removed import stays valid", () => {
   // Removing an imported server cannot delete it from the app that supplies it,
-  // so SuoCode records `{ "disabled": true }` here. Rejecting that shape made
-  // the JSON editor refuse to save a file SuoCode had just written itself.
+  // so CoilCoil records `{ "disabled": true }` here. Rejecting that shape made
+  // the JSON editor refuse to save a file CoilCoil had just written itself.
   const document = mcpJson({
     imports: ["claude-code", "claude-desktop", "codex", "opencode"],
     mcpServers: {

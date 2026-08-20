@@ -7,7 +7,7 @@
  * behaves the same on both.
  */
 
-export const UPDATE_REPOSITORY = "Harukaon/SuoCode";
+export const UPDATE_REPOSITORY = "Harukaon/CoilCoil";
 
 /** Long enough that a cold start is never competing with a network call. */
 export const UPDATE_FIRST_CHECK_MS = 8_000;
@@ -111,7 +111,7 @@ export function newestRelease(payload: unknown): ReleaseSummary | undefined {
 
 export async function fetchReleases(repository = UPDATE_REPOSITORY): Promise<unknown> {
   const response = await fetch(`https://api.github.com/repos/${repository}/releases?per_page=20`, {
-    headers: { accept: "application/vnd.github+json", "user-agent": "SuoCode-Updater" },
+    headers: { accept: "application/vnd.github+json", "user-agent": "CoilCoil-Updater" },
   });
   if (!response.ok) throw new Error(`GitHub 返回 ${response.status}`);
   return response.json();

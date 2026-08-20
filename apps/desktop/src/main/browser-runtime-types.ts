@@ -2,8 +2,8 @@ import type { WebContents } from "electron";
 
 export const DEFAULT_BROWSER_URL = "about:blank";
 export const DEFAULT_BROWSER_SCOPE_ID = "default";
-export const BROWSER_TARGET_ID = "suocode-browser";
-export const BROWSER_CONTEXT_ID = "suocode-browser-context";
+export const BROWSER_TARGET_ID = "coilcoil-browser";
+export const BROWSER_CONTEXT_ID = "coilcoil-browser-context";
 
 /** Logical size used while a guest is parked in its 1x1 renderer slot. */
 export const DEFAULT_BROWSER_VIEWPORT = { width: 1280, height: 720 };

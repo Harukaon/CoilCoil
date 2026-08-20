@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/SuoCode.app/Contents/MacOS/SuoCode");
+const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/CoilCoil.app/Contents/MacOS/CoilCoil");
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
@@ -29,14 +29,14 @@ async function waitForPage(port) {
   while (Date.now() - startedAt < 30_000) {
     try {
       const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
-      const page = pages.find((item) => item.type === "page" && item.title === "SuoCode");
+      const page = pages.find((item) => item.type === "page" && item.title === "CoilCoil");
       if (page?.webSocketDebuggerUrl) return page;
     } catch {
       // Electron is still starting.
     }
     await delay(100);
   }
-  throw new Error("SuoCode did not expose its renderer in time.");
+  throw new Error("CoilCoil did not expose its renderer in time.");
 }
 
 class DevToolsClient {
@@ -92,8 +92,8 @@ class DevToolsClient {
 }
 
 async function main() {
-  const dataDirectory = await mkdtemp(join(tmpdir(), "suocode-layout-data-"));
-  const projectDirectory = await mkdtemp(join(tmpdir(), "suocode-layout-project-"));
+  const dataDirectory = await mkdtemp(join(tmpdir(), "coilcoil-layout-data-"));
+  const projectDirectory = await mkdtemp(join(tmpdir(), "coilcoil-layout-project-"));
   await writeFile(join(projectDirectory, "layout-preview.html"), "<!doctype html><style>body{height:2400px}</style><h1>layout smoke</h1>", "utf8");
   const port = await freePort();
   const child = spawn(appBinary, [`--remote-debugging-port=${port}`, `--user-data-dir=${dataDirectory}`], {
@@ -105,8 +105,8 @@ async function main() {
     const page = await waitForPage(port);
     client = new DevToolsClient(page.webSocketDebuggerUrl);
     await client.open();
-    await client.waitFor(`document.readyState === "complete" && typeof window.suocode === "object"`, "Renderer did not become ready.");
-    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]'))`, "Composer did not render.", 45_000);
+    await client.waitFor(`document.readyState === "complete" && typeof window.coilcoil === "object"`, "Renderer did not become ready.");
+    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]'))`, "Composer did not render.", 45_000);
     if (await client.evaluate(`Boolean(document.querySelector('button[aria-label="返回工作区"]'))`)) {
       await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
       await client.waitFor(`Boolean(document.querySelector(".conversation-pane"))`, "Workspace did not open.");
@@ -191,11 +191,11 @@ async function main() {
 
     await client.evaluate(`(() => {
       const project = { name: "layout-project", path: ${JSON.stringify(projectDirectory)}, kind: "workspace" };
-      localStorage.setItem("suocode.mounted-projects", JSON.stringify([project]));
-      localStorage.setItem("suocode.active-project", project.path);
+      localStorage.setItem("coilcoil.mounted-projects", JSON.stringify([project]));
+      localStorage.setItem("coilcoil.active-project", project.path);
       location.reload();
     })()`);
-    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 SuoCode"]'))`, "Mounted project did not open.", 45_000);
+    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]'))`, "Mounted project did not open.", 45_000);
     if (await client.evaluate(`Boolean(document.querySelector('button[aria-label="返回工作区"]'))`)) {
       await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
     }
@@ -231,7 +231,7 @@ async function main() {
     await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: targetX, y: preview.handleY, button: "left", buttons: 0, clickCount: 1 });
     await client.waitFor(`Math.abs((document.querySelector(".inline-file-preview")?.getBoundingClientRect().width ?? 0) - ${preview.paneWidth}) > 20`, "Preview divider did not resize panes.");
 
-    process.stdout.write("SuoCode desktop layout smoke passed.\n");
+    process.stdout.write("CoilCoil desktop layout smoke passed.\n");
   } finally {
     client?.close();
     child.kill("SIGTERM");

@@ -7,7 +7,7 @@ import {
   type ResponseMetrics,
   type TokenUsage,
   summarizeCacheUsage,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   RESPONSE_METRICS_ENTRY_TYPE,
   TOOL_PURPOSE_POLICY_STATE,

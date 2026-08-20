@@ -1,4 +1,4 @@
-import type { SkillEntry } from "@suocode/runtime-protocol";
+import type { SkillEntry } from "@coilcoil/runtime-protocol";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 

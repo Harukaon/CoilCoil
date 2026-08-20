@@ -12,7 +12,7 @@ import {
   type SkillDiagnostic,
   type SkillEntry,
   type SkillSource,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   cpSync,
   existsSync,
@@ -256,7 +256,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     const resolvedCwd = this.mcpCwd(cwd);
     this.cleanRemovedMcpServerState(adapter, resolvedCwd);
     const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    // The workspace's own servers live in SuoCode's agent directory, so they are
+    // The workspace's own servers live in CoilCoil's agent directory, so they are
     // merged here rather than read back out of the workspace by the adapter.
     const configuration = this.withWorkspaceMcpServers(adapter.loadMcpConfig(configPath, resolvedCwd), resolvedCwd);
     const hiddenNames = new Set([
@@ -459,7 +459,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     const snapshot = await this.getSkillConfiguration(resolvedCwd);
     const skill = snapshot.skills.find((entry) => entry.filePath === filePath);
     if (!skill) throw new Error(`未找到技能：${filePath}`);
-    if (skill.source === "bundled") throw new Error("内置技能不能从 SuoCode 移除。");
+    if (skill.source === "bundled") throw new Error("内置技能不能从 CoilCoil 移除。");
 
     const settingsManager = this.skillSettingsManager(resolvedCwd);
     const pattern = skillOverridePattern(skill.filePath, skillPatternBaseDir(skill, resolvedCwd, this.agentDir));
@@ -488,14 +488,14 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     }
     if (skill.source === "bundled") throw new Error("内置技能不能删除。");
     if (skill.source !== "user" || skill.scope !== "user") {
-      throw new Error("只能删除 SuoCode 自维护目录中的技能。");
+      throw new Error("只能删除 CoilCoil 自维护目录中的技能。");
     }
 
     const managedRoot = safeRealPath(join(this.agentDir, "skills"));
     const skillRoot = safeRealPath(skill.baseDir);
     const relativeSkillRoot = relative(managedRoot, skillRoot);
     if (!relativeSkillRoot || relativeSkillRoot === ".." || relativeSkillRoot.startsWith(`..${sep}`) || isAbsolute(relativeSkillRoot)) {
-      throw new Error("只能删除 SuoCode 自维护目录中的技能。");
+      throw new Error("只能删除 CoilCoil 自维护目录中的技能。");
     }
 
     const settingsManager = this.skillSettingsManager(resolvedCwd);
@@ -524,7 +524,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     const managedRoot = join(this.agentDir, "skills");
     const sourceRealPath = safeRealPath(resolvedPath);
     if (sourceRealPath === safeRealPath(managedRoot) || sourceRealPath.startsWith(`${safeRealPath(managedRoot)}${sep}`)) {
-      throw new Error("所选目录已经位于 SuoCode 自维护技能目录中。");
+      throw new Error("所选目录已经位于 CoilCoil 自维护技能目录中。");
     }
     mkdirSync(managedRoot, { recursive: true });
     const baseName = basename(resolvedPath).trim() || "imported-skill";

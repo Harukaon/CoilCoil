@@ -127,14 +127,14 @@ export function AppearanceSettings(): React.JSX.Element {
 
       <section className="appearance-section">
         <h3>浅色色调</h3>
-        <p className="appearance-hint">只影响浅色。暖纸是 SuoCode 原本的取色，其余三档分别拟合自 VS Code Light Modern、GitHub Light、Catppuccin Latte。</p>
+        <p className="appearance-hint">只影响浅色。暖纸是 CoilCoil 原本的取色，其余三档分别拟合自 VS Code Light Modern、GitHub Light、Catppuccin Latte。</p>
         <ToneGrid label="浅色色调" tones={LIGHT_TONES} active={lightToneId} surface={surface}
           onPick={(id) => { applyLightTone(id); setLightToneId(id); }} />
       </section>
 
       <section className="appearance-section">
         <h3>暗色色调</h3>
-        <p className="appearance-hint">只影响暗色。分别拟合自 VS Code Dark Modern、Tokyo Night、Catppuccin Mocha，外加 SuoCode 自己的暖中性。</p>
+        <p className="appearance-hint">只影响暗色。分别拟合自 VS Code Dark Modern、Tokyo Night、Catppuccin Mocha，外加 CoilCoil 自己的暖中性。</p>
         <ToneGrid label="暗色色调" tones={DARK_TONES} active={darkToneId} surface={surface}
           onPick={(id) => { applyDarkTone(id); setDarkToneId(id); }} />
       </section>

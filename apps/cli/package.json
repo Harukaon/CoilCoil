@@ -1,11 +1,11 @@
 {
-  "name": "@suocode/cli",
+  "name": "@coilcoil/cli",
   "version": "0.1.0",
   "private": true,
-  "description": "SuoCode terminal coding agent",
+  "description": "CoilCoil terminal coding agent",
   "type": "module",
   "bin": {
-    "suocode": "dist/index.js"
+    "coilcoil": "dist/index.js"
   },
   "files": [
     "dist"
@@ -16,9 +16,9 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@suocode/runtime-core": "0.1.0",
-    "@suocode/runtime-protocol": "0.1.0",
-    "@suocode/workflow": "0.1.0"
+    "@coilcoil/runtime-core": "0.1.0",
+    "@coilcoil/runtime-protocol": "0.1.0",
+    "@coilcoil/workflow": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "26.1.2",

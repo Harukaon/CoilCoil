@@ -1,7 +1,7 @@
 /**
  * Stable per-session identity for tool runs.
  *
- * SuoCode keys tool cards, terminals, and subagent placeholders by the tool call
+ * CoilCoil keys tool cards, terminals, and subagent placeholders by the tool call
  * id the provider reports. That is safe for `anthropic-messages` and
  * `openai-responses`, which mint a globally unique id per call, but not for
  * OpenAI-compatible `openai-completions` endpoints: DeepSeek and friends number

@@ -5,7 +5,7 @@ import type {
   RuntimeInspectionSnapshot,
   RuntimeSkillState,
   RuntimeToolDefinition,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   resolve,
 } from "node:path";

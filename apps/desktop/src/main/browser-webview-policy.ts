@@ -5,12 +5,12 @@
  * its own preferences, including a preload script that would run with elevated
  * privileges. This module is the single gate that closes that surface: it runs
  * from `will-attach-webview` and either rewrites the guest's settings into the
- * only shape SuoCode allows, or refuses the attachment outright.
+ * only shape CoilCoil allows, or refuses the attachment outright.
  *
  * The functions are pure so the policy can be tested without launching Electron.
  */
 
-export const BROWSER_PARTITION = "persist:suocode-browser";
+export const BROWSER_PARTITION = "persist:coilcoil-browser";
 
 /** Everything the element may point at before main performs the real navigation. */
 const ALLOWED_SRC = new Set(["", "about:blank"]);

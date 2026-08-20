@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { McpServerRuntimeStatus } from "@suocode/runtime-protocol";
+import type { McpServerRuntimeStatus } from "@coilcoil/runtime-protocol";
 import {
   isMountedMcpServer,
   mcpEnablementClass,
@@ -177,13 +177,13 @@ test("a mounted server names the app its definition really lives in", () => {
   }
 });
 
-test("the origin ignores `source`, which points at SuoCode's own config for imports", () => {
+test("the origin ignores `source`, which points at CoilCoil's own config for imports", () => {
   // pi-mcp-adapter sets `path` to the Pi-owned config for every import, because
   // that is where overrides get written. Reading it would label everything the
   // same — `importKind` is the only field that identifies the real origin.
-  const suocodeConfig = "/tmp/suocode-test/Application Support/@suocode/desktop/agent/mcp.json";
+  const coilcoilConfig = "/tmp/coilcoil-test/Application Support/@coilcoil/desktop/agent/mcp.json";
   assert.equal(
-    mcpOriginLabel({ source: suocodeConfig, sourceKind: "import", importKind: "codex" }),
+    mcpOriginLabel({ source: coilcoilConfig, sourceKind: "import", importKind: "codex" }),
     "Codex",
   );
 });

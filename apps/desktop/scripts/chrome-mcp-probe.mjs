@@ -13,7 +13,7 @@ const fixtureServer = createServer((request, response) => {
     return;
   }
   if (pathname === "/api/mock") {
-    response.writeHead(200, { "content-type": "application/json", "x-suocode-source": "real" });
+    response.writeHead(200, { "content-type": "application/json", "x-coilcoil-source": "real" });
     response.end(JSON.stringify({ source: "real" }));
     return;
   }
@@ -80,7 +80,7 @@ const callTool = async (name, args = {}, timeout) => toolError(name, await reque
 
 try {
   process.stderr.write("[probe] initialize\n");
-  await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "suocode-probe", version: "1" } });
+  await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "coilcoil-probe", version: "1" } });
   notify("notifications/initialized", {});
   process.stderr.write("[probe] tools/list\n");
   const tools = await request("tools/list", {});
@@ -120,15 +120,15 @@ try {
   }
   let heap;
   let heapBytes;
-  if (process.env.SUOCODE_PROBE_HEAP === "1") {
-    const heapPath = `/tmp/suocode-browser-probe-${process.pid}.heapsnapshot`;
+  if (process.env.COILCOIL_PROBE_HEAP === "1") {
+    const heapPath = `/tmp/coilcoil-browser-probe-${process.pid}.heapsnapshot`;
     process.stderr.write("[probe] take_heapsnapshot\n");
     heap = await callTool("take_heapsnapshot", { pageId, filePath: heapPath }, 180_000);
     heapBytes = (await stat(heapPath)).size;
     await unlink(heapPath);
   }
   let lighthouse;
-  if (process.env.SUOCODE_PROBE_LIGHTHOUSE === "1") {
+  if (process.env.COILCOIL_PROBE_LIGHTHOUSE === "1") {
     process.stderr.write("[probe] lighthouse_audit\n");
     lighthouse = await callTool("lighthouse_audit", { pageId, mode: "snapshot", device: "desktop" }, 180_000);
     if (!lighthouse.structuredContent?.lighthouseResult?.summary?.url) {
@@ -151,13 +151,13 @@ try {
     response: {
       status: 201,
       contentType: "application/json",
-      headers: { "x-suocode-source": "mock" },
+      headers: { "x-coilcoil-source": "mock" },
       body: JSON.stringify({ source: "mock" }),
     },
   });
   const interceptionFetch = await callTool("evaluate_script", {
     pageId,
-    function: "async () => { const response = await fetch('/api/mock'); return { status: response.status, source: response.headers.get('x-suocode-source'), body: await response.json() }; }",
+    function: "async () => { const response = await fetch('/api/mock'); return { status: response.status, source: response.headers.get('x-coilcoil-source'), body: await response.json() }; }",
   });
   if (!JSON.stringify(interceptionFetch).includes("mock") || !JSON.stringify(interceptionFetch).includes("201")) {
     throw new Error(`The intercepted request did not return the mock response: ${JSON.stringify(interceptionFetch)}`);
@@ -166,7 +166,7 @@ try {
   const interceptionClear = await callTool("intercept_network_request", { pageId, operation: "clear" });
   const realFetch = await callTool("evaluate_script", {
     pageId,
-    function: "async () => { const response = await fetch('/api/mock'); return { status: response.status, source: response.headers.get('x-suocode-source'), body: await response.json() }; }",
+    function: "async () => { const response = await fetch('/api/mock'); return { status: response.status, source: response.headers.get('x-coilcoil-source'), body: await response.json() }; }",
   });
   if (!JSON.stringify(realFetch).includes("real")) {
     throw new Error(`Clearing interception did not restore the real response: ${JSON.stringify(realFetch)}`);

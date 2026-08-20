@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
+import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protocol";
 import {
   ARCHIVE_ROW_BATCH,
   filterArchivedSessionGroups,

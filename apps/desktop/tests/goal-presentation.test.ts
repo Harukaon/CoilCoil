@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { GoalState } from "@suocode/runtime-protocol";
+import type { GoalState } from "@coilcoil/runtime-protocol";
 import { goalStatusLine, goalToggleLabel } from "../src/renderer/src/features/activity/goalPresentation.ts";
 
 function goal(overrides: Partial<GoalState> = {}): GoalState {

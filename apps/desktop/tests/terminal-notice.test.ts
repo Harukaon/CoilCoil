@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChatMessage } from "@suocode/runtime-protocol";
+import type { ChatMessage } from "@coilcoil/runtime-protocol";
 import {
   parseTerminalNotice,
   parseTerminalNotices,

@@ -1,4 +1,4 @@
-import type { SessionSnapshot, SessionSummary } from "@suocode/runtime-protocol";
+import type { SessionSnapshot, SessionSummary } from "@coilcoil/runtime-protocol";
 
 export function selectWorkspaceSessionPath(
   sessions: SessionSummary[],

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import type { ChatMessage, SubagentActivity, SubagentTimelineEntry, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, SubagentActivity, SubagentTimelineEntry, ToolRun } from "@coilcoil/runtime-protocol";
 import { AgentTurnView, type TimelineItem } from "../conversation/ConversationTimeline";
 
 export function subagentIsActive(activity: SubagentActivity): boolean {

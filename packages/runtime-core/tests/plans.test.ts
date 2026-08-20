@@ -13,11 +13,11 @@ import type {
   PlanApprovalState,
   ProjectSnapshot,
   RuntimeEvent,
-} from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+} from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 
-const PLAN_RPC_REQUEST_CHANNEL = "suocode:plan:rpc:v1:request";
-const PLAN_RPC_REPLY_PREFIX = "suocode:plan:rpc:v1:reply:";
+const PLAN_RPC_REQUEST_CHANNEL = "coilcoil:plan:rpc:v1:request";
+const PLAN_RPC_REPLY_PREFIX = "coilcoil:plan:rpc:v1:reply:";
 
 interface RuntimeInternals {
   reconstructState(session: AgentSession): { planApproval?: PlanApprovalState };
@@ -55,7 +55,7 @@ function project(planApproval?: PlanApprovalState): ProjectSnapshot {
 }
 
 test("runtime restores the latest durable plan state from the active branch", (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-plan-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-runtime-plan-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const manager = SessionManager.inMemory(root);
   manager.appendMessage({
@@ -72,7 +72,7 @@ test("runtime restores the latest durable plan state from the active branch", (c
     isError: false,
     timestamp: Date.now(),
   } as never);
-  manager.appendCustomEntry("suocode-plan", plan({
+  manager.appendCustomEntry("coilcoil-plan", plan({
     revision: 2,
     status: "delegated",
     executionTarget: "subagent",
@@ -81,7 +81,7 @@ test("runtime restores the latest durable plan state from the active branch", (c
     updatedAt: 2,
   }));
 
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
   });
@@ -92,10 +92,10 @@ test("runtime restores the latest durable plan state from the active branch", (c
 });
 
 test("runtime approval bridge forwards the selected execution target and updates project state", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-runtime-plan-rpc-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-runtime-plan-rpc-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const events: RuntimeEvent[] = [];
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     onEvent: (event) => events.push(event),

@@ -13,7 +13,7 @@ import {
   OPENAI_RESPONSES_WS_CONFIG_FILE,
   OPENAI_RESPONSES_WS_PROVIDER_ID,
   OPENAI_RESPONSES_WS_PROVIDER_NAME,
-} from "@suocode/openai-responses-ws/config";
+} from "@coilcoil/openai-responses-ws/config";
 import {
   type ModelOption,
   type ModelProviderConfiguration,
@@ -22,7 +22,7 @@ import {
   type OpenAIResponsesWsConfigurationInput,
   type RuntimeConfiguration,
   type ThinkingLevel,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   chmodSync,
   existsSync,
@@ -105,12 +105,12 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
     };
   }
 
-  protected suocodeSettingsPath(): string {
-    return join(this.agentDir, "suocode-settings.json");
+  protected coilcoilSettingsPath(): string {
+    return join(this.agentDir, "coilcoil-settings.json");
   }
 
   protected readToolPurposeAuditSetting(): boolean {
-    const path = this.suocodeSettingsPath();
+    const path = this.coilcoilSettingsPath();
     if (!existsSync(path)) return true;
     try {
       const value = JSON.parse(readFileSync(path, "utf8"));
@@ -121,7 +121,7 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
   }
 
   async setToolPurposeAuditEnabled(enabled: boolean): Promise<RuntimeConfiguration> {
-    const path = this.suocodeSettingsPath();
+    const path = this.coilcoilSettingsPath();
     let current: Record<string, unknown> = {};
     if (existsSync(path)) {
       try {
@@ -264,10 +264,10 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
     try {
       parsed = JSON.parse(stripJsonComments(readFileSync(path, "utf8")));
     } catch (error) {
-      throw new Error(`无法读取 SuoCode 私有 models.json：${errorMessage(error)}`);
+      throw new Error(`无法读取 CoilCoil 私有 models.json：${errorMessage(error)}`);
     }
     if (!isRecord(parsed) || !isRecord(parsed.providers)) {
-      throw new Error("SuoCode 私有 models.json 必须包含 providers 对象。");
+      throw new Error("CoilCoil 私有 models.json 必须包含 providers 对象。");
     }
     const providers = Object.fromEntries(
       Object.entries(parsed.providers).filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1])),

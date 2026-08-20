@@ -1,6 +1,6 @@
 import { ArchiveRestore, ChevronDown, LoaderCircle, RotateCcw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
+import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protocol";
 import { Modal } from "../../ui/dialog";
 import { filterArchivedSessionGroups, initialArchiveTarget, pendingArchiveTargets } from "./archiveSessions";
 
@@ -39,7 +39,7 @@ export function ArchivedSessionsDialog({
     setLoadingPaths((current) => [...current, ...paths]);
     await Promise.all(paths.map(async (path) => {
       try {
-        const sessions = await window.suocode.request<SessionSummary[]>({ type: "list_archived_sessions", cwd: path });
+        const sessions = await window.coilcoil.request<SessionSummary[]>({ type: "list_archived_sessions", cwd: path });
         if (!cancelledRef.current) setArchives((current) => ({ ...current, [path]: sessions }));
       } catch (caught) {
         if (!cancelledRef.current) onError(caught instanceof Error ? caught.message : String(caught));
@@ -91,7 +91,7 @@ export function ArchivedSessionsDialog({
   const restore = async (project: ProjectSelection, session: SessionSummary): Promise<void> => {
     setRestoringPath(session.path);
     try {
-      const sessions = await window.suocode.request<SessionSummary[]>({ type: "restore_session", cwd: project.path, sessionPath: session.path });
+      const sessions = await window.coilcoil.request<SessionSummary[]>({ type: "restore_session", cwd: project.path, sessionPath: session.path });
       setArchives((current) => ({ ...current, [project.path]: (current[project.path] ?? []).filter((item) => item.path !== session.path) }));
       onRestored(project, sessions);
     } catch (caught) {

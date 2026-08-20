@@ -123,7 +123,7 @@ export class BrowserCdpBridge {
   }
 
   async dispose(): Promise<void> {
-    for (const client of this.clients.values()) client.socket.close(1001, "SuoCode 正在关闭");
+    for (const client of this.clients.values()) client.socket.close(1001, "CoilCoil 正在关闭");
     this.clients.clear();
     await new Promise<void>((resolve) => this.socketServer.close(() => resolve()));
     if (this.server.listening) await new Promise<void>((resolve) => this.server.close(() => resolve()));
@@ -442,7 +442,7 @@ export class BrowserCdpBridge {
   }
 
   private browserTargetInfo(): Record<string, unknown> {
-    return { targetId: BROWSER_TARGET_ID, type: "browser", title: "SuoCode", url: "", attached: true, canAccessOpener: false };
+    return { targetId: BROWSER_TARGET_ID, type: "browser", title: "CoilCoil", url: "", attached: true, canAccessOpener: false };
   }
 
   private allTargetInfos(scopeId: string): Array<Record<string, unknown>> {
@@ -497,6 +497,6 @@ export class BrowserCdpBridge {
   private log(direction: string, subject: unknown, detail: unknown): void {
     // The timestamp is what lets a reader line these up against the window
     // activation log and see which command raised the app.
-    if (process.env.SUOCODE_BROWSER_CDP_LOG === "1") console.error(`[browser-cdp ${Date.now()}] ${direction}`, subject, detail);
+    if (process.env.COILCOIL_BROWSER_CDP_LOG === "1") console.error(`[browser-cdp ${Date.now()}] ${direction}`, subject, detail);
   }
 }

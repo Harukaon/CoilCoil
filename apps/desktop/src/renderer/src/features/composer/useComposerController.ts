@@ -9,7 +9,7 @@ import type {
   PromptImage,
   RuntimeConfiguration,
   SessionSnapshot,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { insertPathsAtCaret } from "./pathInsert";
 import { clipboardImage } from "./promptImages";
 
@@ -112,7 +112,7 @@ export function useComposerController({
     onError(undefined);
     setModelMenuOpen(false);
     try {
-      const next = await window.suocode.request<RuntimeConfiguration>({
+      const next = await window.coilcoil.request<RuntimeConfiguration>({
         type: runtimeId ? "set_session_model" : "configure_model",
         provider: model.provider,
         modelId: model.id,
@@ -135,7 +135,7 @@ export function useComposerController({
     setModelChanging(true);
     onError(undefined);
     try {
-      const next = await window.suocode.request<RuntimeConfiguration>({
+      const next = await window.coilcoil.request<RuntimeConfiguration>({
         type: runtimeId ? "set_session_model" : "configure_model",
         provider: model.provider,
         modelId: model.id,
@@ -155,7 +155,7 @@ export function useComposerController({
     setModelChanging(true);
     onError(undefined);
     try {
-      await window.suocode.request({ type: "set_session_fast", enabled }, runtimeId);
+      await window.coilcoil.request({ type: "set_session_fast", enabled }, runtimeId);
     } catch (caught) {
       onError(caught instanceof Error ? caught.message : String(caught));
     } finally {

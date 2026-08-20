@@ -36,8 +36,8 @@ test("normalizes compatible service roots into model and inference endpoints", (
   });
 });
 
-test("reads the legacy filename once and writes only the SuoCode-owned config", () => {
-  const directory = mkdtempSync(join(tmpdir(), "suocode-responses-ws-config-"));
+test("reads the legacy filename once and writes only the CoilCoil-owned config", () => {
+  const directory = mkdtempSync(join(tmpdir(), "coilcoil-responses-ws-config-"));
   try {
     writeFileSync(join(directory, "cliproxyapi.json"), JSON.stringify({ baseUrl: "http://legacy", apiKey: "legacy-key" }));
     assert.equal(readOpenAIResponsesWsConfig(directory).apiKey, "legacy-key");
@@ -84,7 +84,7 @@ break;
   const adapted = adaptPiCodexTransportSource(source);
   assert.match(adapted, /return ""/);
   assert.match(adapted, /openai-responses-ws/);
-  assert.match(adapted, /suocode-openai-responses-ws/);
+  assert.match(adapted, /coilcoil-openai-responses-ws/);
   assert.match(adapted, /https:\/\/api\.openai\.com\/v1/);
   assert.doesNotMatch(adapted, /\/codex\/responses/);
   assert.doesNotMatch(adapted, /headers\.set\("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS\)/);

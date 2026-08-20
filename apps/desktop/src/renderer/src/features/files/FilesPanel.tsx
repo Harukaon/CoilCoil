@@ -1,6 +1,6 @@
 import { Files } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FileNode, ProjectSnapshot } from "@suocode/runtime-protocol";
+import type { FileNode, ProjectSnapshot } from "@coilcoil/runtime-protocol";
 import type { FilePreviewDocument } from "../../../../shared/desktop-api";
 import { toastError } from "../../ui/toast";
 import { FilePreviewPane } from "./FilePreviewPane";
@@ -49,7 +49,7 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
 
   const releasePreview = useCallback((id?: string): void => {
     if (!id) return;
-    void window.suocode.closeFilePreview(id).catch(() => undefined);
+    void window.coilcoil.closeFilePreview(id).catch(() => undefined);
   }, []);
 
   const closePreview = useCallback((): void => {
@@ -64,7 +64,7 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
   useEffect(() => {
     setTree(project.files);
     if (!project.cwd || project.files.length) return;
-    void window.suocode.listProjectDirectory(project.cwd).then(setTree).catch((caught) => {
+    void window.coilcoil.listProjectDirectory(project.cwd).then(setTree).catch((caught) => {
       toastError(caught instanceof Error ? caught.message : String(caught));
     });
   }, [project.cwd, project.files]);
@@ -73,7 +73,7 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
     closePreview();
   }, [project.cwd, closePreview]);
 
-  useEffect(() => window.suocode.onFilePreviewUpdated((document) => {
+  useEffect(() => window.coilcoil.onFilePreviewUpdated((document) => {
     const selectedNode = selectedNodeRef.current;
     if (!selectedNode || !project.cwd) return;
     if (document.id !== previewIdRef.current && !samePreviewPath(project.cwd, selectedNode, document)) return;
@@ -93,8 +93,8 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
   const loadDirectory = async (path: string): Promise<void> => {
     try {
       const children = runtimeId
-        ? await window.suocode.request<FileNode[]>({ type: "list_directory", path }, runtimeId)
-        : await window.suocode.listProjectDirectory(project.cwd, path);
+        ? await window.coilcoil.request<FileNode[]>({ type: "list_directory", path }, runtimeId)
+        : await window.coilcoil.listProjectDirectory(project.cwd, path);
       setTree((current) => replaceDirectoryChildren(current, path, children));
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
@@ -110,7 +110,7 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
     releasePreview(previousId);
     setSelection({ node, loading: true });
     try {
-      const result = await window.suocode.openFilePreview({ root: project.cwd, path: node.path, forceText });
+      const result = await window.coilcoil.openFilePreview({ root: project.cwd, path: node.path, forceText });
       if (requestId !== requestIdRef.current) {
         releasePreview(result.document?.id);
         return;

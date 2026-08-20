@@ -12,7 +12,7 @@ import type {
   SessionSummary,
   SubagentActivity,
   ToolRun,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import type { SessionActivityState } from "../features/workspaces/WorkspaceSidebar";
 import { upsertSessionSummary } from "../features/workspaces/sessionList";
 import type { conversationMessagesReducer } from "../features/conversation/conversationMessages";

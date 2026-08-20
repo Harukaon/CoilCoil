@@ -8,7 +8,7 @@ import {
 } from "../src/main/update-check.ts";
 
 function release(tag: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return { tag_name: tag, html_url: `https://github.com/Harukaon/SuoCode/releases/tag/${tag}`, ...extra };
+  return { tag_name: tag, html_url: `https://github.com/Harukaon/CoilCoil/releases/tag/${tag}`, ...extra };
 }
 
 test("beta builds order by number, not by string", () => {
@@ -51,7 +51,7 @@ test("only a genuinely newer build is offered", async () => {
   const feed = [release("v0.1.0-beta.5"), release("v0.1.0-beta.7")];
   assert.deepEqual(
     await checkForUpdate("0.1.0-beta.5", async () => feed),
-    { current: "0.1.0-beta.5", latest: "0.1.0-beta.7", url: "https://github.com/Harukaon/SuoCode/releases/tag/v0.1.0-beta.7" },
+    { current: "0.1.0-beta.5", latest: "0.1.0-beta.7", url: "https://github.com/Harukaon/CoilCoil/releases/tag/v0.1.0-beta.7" },
   );
 
   assert.equal(await checkForUpdate("0.1.0-beta.7", async () => feed), undefined, "the current build is not an update");

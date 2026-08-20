@@ -1,6 +1,6 @@
 import { BrainCircuit, Files, Globe2, Terminal } from "lucide-react";
 import { useCallback } from "react";
-import type { ProjectSnapshot, SessionSnapshot } from "@suocode/runtime-protocol";
+import type { ProjectSnapshot, SessionSnapshot } from "@coilcoil/runtime-protocol";
 import { BrowserPanel } from "../browser/BrowserPanel";
 import { FilesPanel } from "../files/FilesPanel";
 import { RuntimePanel } from "../runtime/RuntimePanel";
@@ -88,7 +88,7 @@ export function WorkspaceInspector({
   const closeTab = useCallback((id: InspectorTabId): void => {
     const terminalId = tabs.find((item) => item.id === id)?.terminalId;
     if (terminalId) {
-      void window.suocode.closeTerminal(terminalId).catch((error: unknown) => {
+      void window.coilcoil.closeTerminal(terminalId).catch((error: unknown) => {
         toastError(error instanceof Error ? error.message : String(error));
       });
     }

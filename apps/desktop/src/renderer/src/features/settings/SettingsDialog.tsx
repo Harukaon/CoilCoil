@@ -8,7 +8,7 @@ import type {
   McpServerConfiguration,
   McpServerRuntimeStatus,
   RuntimeConfiguration,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
 import { ModelSettings } from "./ModelSettings";
@@ -19,7 +19,7 @@ import "./settings.css";
 
 type SettingsSection = "models" | "mcp" | "skills" | "appearance";
 const MASKED_SECRET_VALUE = "••••••";
-const SETTINGS_SIDEBAR_WIDTH_KEY = "suocode.settings-sidebar-width";
+const SETTINGS_SIDEBAR_WIDTH_KEY = "coilcoil.settings-sidebar-width";
 const DEFAULT_SETTINGS_SIDEBAR_WIDTH = 220;
 const MINIMUM_SETTINGS_SIDEBAR_WIDTH = 160;
 const MAXIMUM_SETTINGS_SIDEBAR_WIDTH = 360;
@@ -43,7 +43,7 @@ function ToolPurposePolicyToggle({ configuration, runtimeId, onSaved }: {
     setEnabled(next);
     setSaving(true);
     try {
-      const configuration = await window.suocode.request<RuntimeConfiguration>({ type: "set_tool_purpose_audit_enabled", enabled: next }, runtimeId);
+      const configuration = await window.coilcoil.request<RuntimeConfiguration>({ type: "set_tool_purpose_audit_enabled", enabled: next }, runtimeId);
       onSaved(configuration);
       toastSuccess(next ? "已开启工具调用意图记录。" : "已关闭工具调用意图强制校验。");
     } catch (caught) {
@@ -156,7 +156,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     }
     setStatusLoading(true);
     try {
-      setRuntimeStatus(await window.suocode.request<McpRuntimeStatus>({ type: "get_mcp_status" }, runtimeId));
+      setRuntimeStatus(await window.coilcoil.request<McpRuntimeStatus>({ type: "get_mcp_status" }, runtimeId));
     } catch (caught) {
       setRuntimeStatus(undefined);
       if (surfaceError) toastError(caught instanceof Error ? caught.message : String(caught));
@@ -170,7 +170,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     const editVersion = editVersionRef.current;
     setLoading(true);
     try {
-      const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "get_mcp_configuration", cwd }, runtimeId);
+      const next = await window.coilcoil.request<McpConfigurationSnapshot>({ type: "get_mcp_configuration", cwd }, runtimeId);
       if (loadVersion !== loadVersionRef.current) return;
       setConfiguration(next);
       if (editVersion === editVersionRef.current) {
@@ -209,7 +209,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
         directTools: directToolsText.trim() ? directToolsText.split("\n").map((item) => item.trim()).filter(Boolean) : draft.directTools === true,
         excludeTools: excludeToolsText.split("\n").map((item) => item.trim()).filter(Boolean),
       };
-      const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "save_mcp_server", server, previousName: selectedName, cwd }, runtimeId);
+      const next = await window.coilcoil.request<McpConfigurationSnapshot>({ type: "save_mcp_server", server, previousName: selectedName, cwd }, runtimeId);
       setConfiguration(next);
       selectServer(next.servers.find((item) => item.name === server.name));
       void loadStatus();
@@ -226,7 +226,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     if (!imports.length) return;
     setSaving(true);
     try {
-      setConfiguration(await window.suocode.request<McpConfigurationSnapshot>({ type: "enable_mcp_imports", imports, cwd }, runtimeId));
+      setConfiguration(await window.coilcoil.request<McpConfigurationSnapshot>({ type: "enable_mcp_imports", imports, cwd }, runtimeId));
       toastSuccess("已导入检测到的兼容配置。");
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
@@ -249,11 +249,11 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     if (!selectedName) return;
     setActionBusy(true);
     try {
-      const result = await window.suocode.request<McpActionResult>({ type: "start_mcp_auth", name: selectedName }, runtimeId);
+      const result = await window.coilcoil.request<McpActionResult>({ type: "start_mcp_auth", name: selectedName }, runtimeId);
       applyActionResult(result);
       const url = typeof result.details?.authorizationUrl === "string" ? result.details.authorizationUrl : undefined;
       setAuthorizationUrl(url);
-      if (url) await window.suocode.openExternal(url);
+      if (url) await window.coilcoil.openExternal(url);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -265,7 +265,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     if (!selectedName || !authInput.trim()) return;
     setActionBusy(true);
     try {
-      const result = await window.suocode.request<McpActionResult>({ type: "complete_mcp_auth", name: selectedName, input: authInput }, runtimeId);
+      const result = await window.coilcoil.request<McpActionResult>({ type: "complete_mcp_auth", name: selectedName, input: authInput }, runtimeId);
       applyActionResult(result);
       if (!result.details?.error) {
         setAuthorizationUrl(undefined);
@@ -282,7 +282,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     if (!selectedName) return;
     setActionBusy(true);
     try {
-      applyActionResult(await window.suocode.request<McpActionResult>({ type: "logout_mcp_server", name: selectedName }, runtimeId));
+      applyActionResult(await window.coilcoil.request<McpActionResult>({ type: "logout_mcp_server", name: selectedName }, runtimeId));
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -300,7 +300,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     setDraft((current) => ({ ...current, disabled: !enabling }));
     setTogglingEnabled(true);
     try {
-      const next = await window.suocode.request<McpConfigurationSnapshot>({ type: "set_mcp_server_enabled", name, enabled: enabling, cwd }, runtimeId);
+      const next = await window.coilcoil.request<McpConfigurationSnapshot>({ type: "set_mcp_server_enabled", name, enabled: enabling, cwd }, runtimeId);
       setConfiguration(next);
       const saved = next.servers.find((server) => server.name === name);
       if (saved) setDraft((current) => ({ ...current, disabled: saved.disabled }));
@@ -319,7 +319,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     const removing = name;
     setSaving(true);
     try {
-      const next = await window.suocode.request<McpConfigurationSnapshot>({
+      const next = await window.coilcoil.request<McpConfigurationSnapshot>({
         type: "remove_mcp_server",
         name: removing,
         scope,
@@ -395,7 +395,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
           <div className="mcp-editor-heading"><div><strong>{selectedName ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</strong><small>连接、认证与工具发现均由内置 pi-mcp-adapter 执行。</small></div></div>
           {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpEnablementClass(draft, selectedStatus)}`} /><strong>{mcpEnablementLabel(draft, selectedStatus)}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={togglingEnabled || actionBusy || !cwd} onClick={() => void setEnabled()}>{togglingEnabled ? <LoaderCircle className="spin" size={13} /> : <Power size={13} />}{draft.disabled ? "启用" : "停用"}</button>{supportsAuth ? <><button type="button" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void startAuth()}><ExternalLink size={13} />认证</button><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void logout()}><LogOut size={13} />登出</button></> : null}</div> : null}
           {runtimeStatus?.diagnostic ? <p className="mcp-source-note">{runtimeStatus.diagnostic}</p> : null}
-          {mounted ? <p className="mcp-source-note">这个服务器挂载自 {mcpOriginLabel(draft)}，定义保存在 <code>{draft.source}</code>。SuoCode 只叠加启用状态等本地覆盖，要改命令、地址或请求头请到该应用里编辑。</p> : null}
+          {mounted ? <p className="mcp-source-note">这个服务器挂载自 {mcpOriginLabel(draft)}，定义保存在 <code>{draft.source}</code>。CoilCoil 只叠加启用状态等本地覆盖，要改命令、地址或请求头请到该应用里编辑。</p> : null}
           <fieldset className="mcp-definition-fields" disabled={mounted}>
           <div className="settings-grid"><label>名称<input value={draft.name} placeholder="例如 github" onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label><label>作用域<select value={draft.scope} disabled={!cwd} onChange={(event) => setDraft((current) => ({ ...current, scope: event.target.value as McpServerConfiguration["scope"] }))}><option value="global">全局</option><option value="project">当前项目</option></select></label></div>
           <label>连接方式<select value={draft.transport} onChange={(event) => setDraft((current) => ({ ...current, transport: event.target.value as McpServerConfiguration["transport"] }))}><option value="stdio">stdio 命令</option><option value="http">HTTP</option></select></label>
@@ -405,8 +405,8 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
           <div className="settings-grid"><label>直接注册的工具（每行一个）<textarea value={directToolsText} placeholder="留空时使用下面的全部开关" onChange={(event) => setDirectToolsText(event.target.value)} /></label><label>排除工具（每行一个）<textarea value={excludeToolsText} onChange={(event) => setExcludeToolsText(event.target.value)} /></label></div>
           <div className="settings-grid"><label className="checkbox-setting"><input type="checkbox" checked={draft.directTools === true} disabled={Boolean(directToolsText.trim())} onChange={(event) => setDraft((current) => ({ ...current, directTools: event.target.checked }))} />直接注册全部服务器工具</label><label className="checkbox-setting"><input type="checkbox" checked={draft.exposeResources} onChange={(event) => setDraft((current) => ({ ...current, exposeResources: event.target.checked }))} />向 Agent 暴露资源</label></div>
           </fieldset>
-          {draft.sourceKind === "import" || (draft.source && draft.source !== configuration?.configPath) ? <p className="mcp-source-note">{draft.sourceKind === "import" ? <>当前条目来自外部导入{draft.source ? `（${draft.source}）` : ""}。删除只会从 SuoCode 列表中移除并本地停用，不会修改外部应用配置。保存会写入 SuoCode 私有覆盖。</> : <>当前配置来自 {draft.source}。保存后会在 SuoCode 私有配置中创建同名覆盖，不会修改外部应用。</>}</p> : null}
-          {authorizationUrl ? <div className="mcp-auth-panel"><strong>完成 OAuth 认证</strong><p>浏览器已打开扩展生成的授权地址。完成授权后，粘贴回调地址或授权码。</p><button type="button" onClick={() => void window.suocode.openExternal(authorizationUrl)}><ExternalLink size={13} />重新打开授权页</button><textarea value={authInput} placeholder="粘贴回调地址或授权码" onChange={(event) => setAuthInput(event.target.value)} /><button className="primary-button" type="button" disabled={actionBusy || !authInput.trim()} onClick={() => void completeAuth()}>完成认证</button></div> : null}
+          {draft.sourceKind === "import" || (draft.source && draft.source !== configuration?.configPath) ? <p className="mcp-source-note">{draft.sourceKind === "import" ? <>当前条目来自外部导入{draft.source ? `（${draft.source}）` : ""}。删除只会从 CoilCoil 列表中移除并本地停用，不会修改外部应用配置。保存会写入 CoilCoil 私有覆盖。</> : <>当前配置来自 {draft.source}。保存后会在 CoilCoil 私有配置中创建同名覆盖，不会修改外部应用。</>}</p> : null}
+          {authorizationUrl ? <div className="mcp-auth-panel"><strong>完成 OAuth 认证</strong><p>浏览器已打开扩展生成的授权地址。完成授权后，粘贴回调地址或授权码。</p><button type="button" onClick={() => void window.coilcoil.openExternal(authorizationUrl)}><ExternalLink size={13} />重新打开授权页</button><textarea value={authInput} placeholder="粘贴回调地址或授权码" onChange={(event) => setAuthInput(event.target.value)} /><button className="primary-button" type="button" disabled={actionBusy || !authInput.trim()} onClick={() => void completeAuth()}>完成认证</button></div> : null}
           <footer>
             <span>{configuration?.configPath}</span>
             <div className="mcp-editor-footer-actions">
@@ -437,7 +437,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
   const [appVersion, setAppVersion] = useState("");
   useEffect(() => {
     let cancelled = false;
-    void window.suocode.appVersion()
+    void window.coilcoil.appVersion()
       .then((version) => { if (!cancelled) setAppVersion(version); })
       .catch(() => undefined);
     return () => { cancelled = true; };
@@ -486,8 +486,8 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
           <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />技能</button>
           <button className={section === "appearance" ? "active" : ""} type="button" onClick={() => setSection("appearance")}><Palette size={15} />外观</button>
         </nav>
-        <div className="settings-version" title={appVersion ? `SuoCode ${appVersion}` : undefined}>
-          {appVersion ? `SuoCode ${appVersion}` : ""}
+        <div className="settings-version" title={appVersion ? `CoilCoil ${appVersion}` : undefined}>
+          {appVersion ? `CoilCoil ${appVersion}` : ""}
         </div>
       </aside>
       <div className="settings-sidebar-resizer" role="separator" aria-label="调整设置侧栏宽度" aria-orientation="vertical" onPointerDown={beginSidebarResize} />
@@ -504,7 +504,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
                   ? "按需加载的专业技能包。"
                   : section === "appearance"
                     ? "全局色调，一键切换并本机保存。"
-                    : "模型凭据和 MCP 配置均保存在 SuoCode 的私有运行时中。"}
+                    : "模型凭据和 MCP 配置均保存在 CoilCoil 的私有运行时中。"}
               </p>
             </div>
           </div>

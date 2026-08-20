@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { RuntimeToolDefinition } from "@suocode/runtime-protocol";
+import type { RuntimeToolDefinition } from "@coilcoil/runtime-protocol";
 import {
   buildRuntimeTokenBreakdown,
   isMcpTool,

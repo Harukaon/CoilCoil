@@ -80,7 +80,7 @@ function toModel(value: unknown): { model: OpenAIResponsesWsModel; fast: boolean
     model: {
       id,
       name: nonEmptyString(remote.display_name, remote.name, id) ?? id,
-      api: "suocode-openai-responses-ws" as Api,
+      api: "coilcoil-openai-responses-ws" as Api,
       reasoning: efforts.some((effort) => effort !== "none"),
       thinkingLevelMap: thinkingLevelMap(efforts),
       input: inputModalities(remote.input_modalities),

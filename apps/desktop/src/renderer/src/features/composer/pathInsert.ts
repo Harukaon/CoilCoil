@@ -25,11 +25,11 @@ export function insertPathAtCaret(
   return insertPathsAtCaret(value, [path], start, end);
 }
 
-export const SUOCODE_PATH_TYPE = "application/x-suocode-path";
+export const COILCOIL_PATH_TYPE = "application/x-coilcoil-path";
 
 /** 这次拖动带着可以插入的路径吗？dragover 时 `files` 还是空的，只能看 types。 */
 export function carriesPaths(transfer: DataTransfer): boolean {
-  return transfer.types.includes(SUOCODE_PATH_TYPE) || transfer.types.includes("Files");
+  return transfer.types.includes(COILCOIL_PATH_TYPE) || transfer.types.includes("Files");
 }
 
 /**
@@ -40,10 +40,10 @@ export function carriesPaths(transfer: DataTransfer): boolean {
  * 预加载里的 webUtils 解析。
  */
 export function droppedPaths(transfer: DataTransfer): string[] {
-  const serialized = transfer.getData(SUOCODE_PATH_TYPE);
+  const serialized = transfer.getData(COILCOIL_PATH_TYPE);
   if (serialized) {
     const dropped = JSON.parse(serialized) as { path?: string };
     return dropped.path ? [dropped.path] : [];
   }
-  return Array.from(transfer.files, (file) => window.suocode.filePath(file)).filter(Boolean);
+  return Array.from(transfer.files, (file) => window.coilcoil.filePath(file)).filter(Boolean);
 }

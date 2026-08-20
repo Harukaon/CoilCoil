@@ -108,7 +108,7 @@ export async function resolveProjectMemoryPaths(
     projectMemoryDir,
     workerSessionsDir: join(projectMemoryDir, ".worker-sessions"),
     workerLockFile: join(projectMemoryDir, ".worker.lock"),
-    runtimeStateFile: join(projectMemoryDir, ".suocode-memory-state.json"),
+    runtimeStateFile: join(projectMemoryDir, ".coilcoil-memory-state.json"),
   };
 }
 

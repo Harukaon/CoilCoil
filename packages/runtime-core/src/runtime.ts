@@ -6,7 +6,7 @@ import {
   type SessionSnapshot,
   type SessionSummary,
   type ThinkingLevel,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   existsSync,
   statSync,
@@ -48,7 +48,7 @@ import {
   sessionUsage,
 } from "./session-values.js";
 
-export class SuoCodeRuntime extends RuntimeSessionEvents {
+export class CoilCoilRuntime extends RuntimeSessionEvents {
   async prompt(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true; }> {
     const active = this.requireActive();
     if (this.modelTransition) await this.modelTransition;

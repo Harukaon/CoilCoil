@@ -1,8 +1,8 @@
-import type { ProjectSelection, ProjectSnapshot } from "@suocode/runtime-protocol";
+import type { ProjectSelection, ProjectSnapshot } from "@coilcoil/runtime-protocol";
 
-const LEGACY_PROJECT_STORAGE_KEY = "suocode.selected-workspace";
-export const PROJECTS_STORAGE_KEY = "suocode.mounted-projects";
-export const ACTIVE_PROJECT_STORAGE_KEY = "suocode.active-project";
+const LEGACY_PROJECT_STORAGE_KEY = "coilcoil.selected-workspace";
+export const PROJECTS_STORAGE_KEY = "coilcoil.mounted-projects";
+export const ACTIVE_PROJECT_STORAGE_KEY = "coilcoil.active-project";
 
 export const EMPTY_PROJECT: ProjectSnapshot = {
   cwd: "",

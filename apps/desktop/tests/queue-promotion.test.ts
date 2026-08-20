@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { QueuedPrompt } from "@suocode/runtime-protocol";
+import type { QueuedPrompt } from "@coilcoil/runtime-protocol";
 import { conversationMessagesReducer, EMPTY_CONVERSATION_MESSAGES, selectQueuedPrompts } from "../src/renderer/src/features/conversation/conversationMessages.ts";
 
 function withQueue(queue: QueuedPrompt[]) {

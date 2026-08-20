@@ -1,6 +1,6 @@
 import { BrainCircuit, Files, FileText, Globe2, Terminal } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
-import type { FileNode } from "@suocode/runtime-protocol";
+import type { FileNode } from "@coilcoil/runtime-protocol";
 import type { LucideIcon } from "lucide-react";
 
 export type InspectorTabKind = "files" | "browser" | "runtime" | "terminal" | "file";

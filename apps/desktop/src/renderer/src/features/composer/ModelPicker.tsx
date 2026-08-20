@@ -1,7 +1,7 @@
 import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronDown, ChevronRight, CircleDot, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { ModelOption, RuntimeConfiguration, SessionSnapshot, ThinkingLevel } from "@suocode/runtime-protocol";
+import type { ModelOption, RuntimeConfiguration, SessionSnapshot, ThinkingLevel } from "@coilcoil/runtime-protocol";
 import { hasConfigurableThinkingLevel } from "./modelPickerCapabilities";
 
 const THINKING_LABELS: Record<ThinkingLevel, string> = {

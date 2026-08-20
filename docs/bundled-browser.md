@@ -1,6 +1,6 @@
-# SuoCode 内置浏览器
+# CoilCoil 内置浏览器
 
-SuoCode 的内置浏览器由 Renderer 中的 `<webview>` guest 渲染，元素挂在应用根部一个
+CoilCoil 的内置浏览器由 Renderer 中的 `<webview>` guest 渲染，元素挂在应用根部一个
 常驻图层里，主进程通过 `getWebContentsId()` 拿到 guest 的 WebContents 后接管全部
 控制。Agent 侧只接入官方
 [`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp)：服务器
@@ -19,7 +19,7 @@ SuoCode 的内置浏览器由 Renderer 中的 `<webview>` guest 渲染，元素�
   `tabId → webContentsId` 的对应关系。主进程逐条校验后才绑定，任何一条不过即拒绝
   并抛错（Renderer 随即移除该元素）：每标签页一次性 nonce、
   `hostWebContents` 必须是本窗口、`getType()` 必须是 `webview`、session 必须是
-  `persist:suocode-browser`、且该 webContentsId 未绑定到其他标签页。最后一条是防止
+  `persist:coilcoil-browser`、且该 webContentsId 未绑定到其他标签页。最后一条是防止
   跨 scope 串线的承重墙 —— 下游的 scope 校验只检查标签页记录上的 scope，
   不检查其背后 WebContents 的身份。绑定一次成立后永不静默改绑。
 - 下发给 Renderer 的 guest 名册只含 `{tabId, nonce}`，不含 URL、不含 scopeId：
@@ -77,7 +77,7 @@ API（[#1335](https://github.com/electron/electron/issues/1335) 2015 起、
 
 ## 上游复用方式
 
-Chrome DevTools MCP 作为 Apache-2.0 npm 依赖保留，SuoCode 不复制它的通用工具层。
+Chrome DevTools MCP 作为 Apache-2.0 npm 依赖保留，CoilCoil 不复制它的通用工具层。
 浏览器实现按职责拆成三层，所有源文件都受 600 行架构上限约束：
 
 - `browser-runtime.ts` 只管理标签页、guest 生命周期和 Renderer 状态；
@@ -101,13 +101,13 @@ Lighthouse TargetManager。MCP 同时开启 structured content 和可选 pageId 
 但仍保持 `directTools: false`，不会把 30 个 schema 注入模型默认上下文。
 
 同一套上游工具已经覆盖导航、页面快照、点击、输入、截图、Console、Network、
-Performance 与 Lighthouse。SuoCode 只额外增加一个页级 `intercept_network_request`
+Performance 与 Lighthouse。CoilCoil 只额外增加一个页级 `intercept_network_request`
 工具，通过同一个 Chrome DevTools MCP 和 CDP `Fetch` 链路管理规则：`add/list/remove/clear`
 四种操作覆盖 Mock 响应、阻断请求、修改 URL/方法/Headers/Body 后继续请求；规则跨页面
 导航保留，关闭页面或 MCP 重连后释放，最新匹配规则优先，未匹配请求始终继续，避免页面
 被意外挂起。该工具仍只存在于可搜索的 MCP 元数据中，不改变默认零直接工具的设计。
 
-SuoCode 不再同时装载 Playwright MCP，也不再维护独立的 Debugger/Fetch/Storage MCP；
+CoilCoil 不再同时装载 Playwright MCP，也不再维护独立的 Debugger/Fetch/Storage MCP；
 能力缺口按真实需求逐项评估，不通过叠加整套控制框架补齐。
 
 ## 当前界面
@@ -116,7 +116,7 @@ SuoCode 不再同时装载 Playwright MCP，也不再维护独立的 Debugger/Fe
 Agent 操作的是同一组 `<webview>` guest；Agent 新建、选择、关闭或导航页面时，右栏
 会实时同步。非活动标签页保持 1×1 在屏并常驻 1280×720 的模拟视口 —— **不会被
 `display:none`/`visibility:hidden`/离屏隐藏**，否则 guest 停止合成，agent 的截图
-会永久挂起。Agent 首次连接内置 MCP 时，SuoCode 会自动打开右侧浏览器页签，避免
+会永久挂起。Agent 首次连接内置 MCP 时，CoilCoil 会自动打开右侧浏览器页签，避免
 模型在用户不可见的后台页面中执行交互。
 
 ## 同类项目源码对比
@@ -149,6 +149,6 @@ Agent 操作的是同一组 `<webview>` guest；Agent 新建、选择、关闭�
   用独立 `BrowserWindow` 或外部 Chrome CDP，MCP 主要操作 ChatGPT 等网页产品，
   不是嵌在 Agent 工作区右栏中的同一个可见页面。
 
-许可证分别为 Apache-2.0、MIT、Apache-2.0、MIT、MPL-2.0。SuoCode 当前只新增
+许可证分别为 Apache-2.0、MIT、Apache-2.0、MIT、MPL-2.0。CoilCoil 当前只新增
 Apache-2.0 的官方 `chrome-devtools-mcp` 依赖；对上述项目只做架构审计，没有复制
 其源码。

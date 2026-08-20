@@ -4,7 +4,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 
-export const FILE_PREVIEW_SHARE_KEY = "suocode.file-preview-share";
+export const FILE_PREVIEW_SHARE_KEY = "coilcoil.file-preview-share";
 export const DEFAULT_FILE_PREVIEW_SHARE = 0.66;
 const MINIMUM_PANE_WIDTH = 96;
 

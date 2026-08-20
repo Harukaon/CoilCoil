@@ -1,4 +1,4 @@
-import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
+import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protocol";
 
 export const DEFAULT_VISIBLE_SESSION_ROWS = 4;
 export const SESSION_EXPANSION_BATCH = 4;

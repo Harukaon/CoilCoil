@@ -1,10 +1,10 @@
 /* 主题令牌 —— 浅色与暗色各有几档色调，每一档的明度阶梯和中性色饱和度都
  * 拟合自一套已发布的主题，而不是把另一套反相或整体挪一个色相。
  *
- * 浅色  暖纸 SuoCode 自己的取色（原样保留，不由脚本重算）
+ * 浅色  暖纸 CoilCoil 自己的取色（原样保留，不由脚本重算）
  *       雪白 VS Code Light Modern   石板 GitHub Light   拿铁 Catppuccin Latte
  * 暗色  石墨 VS Code Dark Modern    深蓝夜 Tokyo Night  藕紫夜 Catppuccin Mocha
- *       暖夜 SuoCode 自己的暖中性，按同一套阶梯重排
+ *       暖夜 CoilCoil 自己的暖中性，按同一套阶梯重排
  *
  * `--l-*` 只存明度，色相与饱和度由 `--th` / `--ts` 控制。抬起的表面单独走一
  * 条支线，所以暗色下卡片比背景更亮而不是更暗。暗色正文一律收在 80% 上下 ——

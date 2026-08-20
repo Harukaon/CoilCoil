@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   OPENAI_RESPONSES_WS_PROVIDER_ID,
-} from "@suocode/openai-responses-ws/config";
+} from "@coilcoil/openai-responses-ws/config";
 import {
   type ModelProviderConfiguration,
   type ModelProviderConfigurationInput,
@@ -22,7 +22,7 @@ import {
   type PendingSessionModel,
   type RuntimeConfiguration,
   type ThinkingLevel,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   join,
 } from "node:path";

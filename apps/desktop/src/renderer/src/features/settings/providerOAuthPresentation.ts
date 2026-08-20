@@ -1,4 +1,4 @@
-import type { ModelProviderAuthState } from "@suocode/runtime-protocol";
+import type { ModelProviderAuthState } from "@coilcoil/runtime-protocol";
 
 export function oauthCallbackUrl(state: ModelProviderAuthState): string | undefined {
   const prompt = state.prompt;

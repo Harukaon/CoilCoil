@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
 
-const server = new McpServer({ name: "suocode-smoke", version: "1.0.0" });
+const server = new McpServer({ name: "coilcoil-smoke", version: "1.0.0" });
 
 server.registerTool("echo", {
   description: "Return the supplied smoke-test text unchanged.",
@@ -13,10 +13,10 @@ server.registerTool("echo", {
 
 server.registerResource(
   "smoke-resource",
-  "suocode://smoke/resource",
-  { mimeType: "text/plain", description: "SuoCode MCP discovery smoke resource." },
+  "coilcoil://smoke/resource",
+  { mimeType: "text/plain", description: "CoilCoil MCP discovery smoke resource." },
   async () => ({
-    contents: [{ uri: "suocode://smoke/resource", mimeType: "text/plain", text: "SUOCODE_MCP_RESOURCE_OK" }],
+    contents: [{ uri: "coilcoil://smoke/resource", mimeType: "text/plain", text: "COILCOIL_MCP_RESOURCE_OK" }],
   }),
 );
 

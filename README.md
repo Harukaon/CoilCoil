@@ -1,39 +1,39 @@
-# SuoCode
+# CoilCoil
 
-SuoCode is a self-contained coding Agent product built on an embedded Pi runtime. It ships as a desktop application and a terminal application; both use the same runtime, sessions, tools, and SuoCode workflow.
+CoilCoil is a self-contained coding Agent product built on an embedded Pi runtime. It ships as a desktop application and a terminal application; both use the same runtime, sessions, tools, and CoilCoil workflow.
 
-SuoCode Desktop does not require a user-installed Pi. The application starts its bundled runtime in an isolated child process and communicates with it through a typed IPC protocol.
+CoilCoil Desktop does not require a user-installed Pi. The application starts its bundled runtime in an isolated child process and communicates with it through a typed IPC protocol.
 
 ## Products
 
-- **SuoCode Desktop** — a three-pane Agent workspace with projects and sessions on the left, the live Agent conversation in the center, and project files on the right.
-- **SuoCode CLI** — a terminal Agent using the same model configuration, session system, tools, and workflow.
+- **CoilCoil Desktop** — a three-pane Agent workspace with projects and sessions on the left, the live Agent conversation in the center, and project files on the right.
+- **CoilCoil CLI** — a terminal Agent using the same model configuration, session system, tools, and workflow.
 
 ## Included capabilities
 
 - Streaming Agent responses, reasoning, tool calls, steering, and cancellation
 - Persistent project-scoped conversations that survive application restarts
 - Model/provider selection and API-key configuration
-- SuoCode-owned `OpenAI Response (WS)` Pi extension for ordinary proxy keys and persistent WebSocket transport
+- CoilCoil-owned `OpenAI Response (WS)` Pi extension for ordinary proxy keys and persistent WebSocket transport
 - Project tools for reading, searching, editing, writing, and running commands
-- Bundled `pi-mcp-adapter` with SuoCode-owned GUI configuration, plus SuoCode's own subagent engine and typed runtime activity events
+- Bundled `pi-mcp-adapter` with CoilCoil-owned GUI configuration, plus CoilCoil's own subagent engine and typed runtime activity events
 - `/goal <目标>` goal mode: an Agent loop that keeps working through errors until it calls the goal-completion tool or the user stops it
 - Structured todo plans, Git changes and patches, terminal output, and project file previews
-- SuoCode's bundled Simplified Chinese workflow, policies, project memory, and terminal support
+- CoilCoil's bundled Simplified Chinese workflow, policies, project memory, and terminal support
 - Explicit development-only migration support for an existing Pi model configuration
 
 ## Repository layout
 
 ```text
-SuoCode/
+CoilCoil/
 ├── apps/
-│   ├── cli/                  # SuoCode terminal application
+│   ├── cli/                  # CoilCoil terminal application
 │   └── desktop/              # Electron + React desktop application
 ├── packages/
 │   ├── runtime-core/         # Pi session and project runtime
 │   ├── runtime-protocol/     # Shared command/event contracts
 │   ├── runtime-server/       # Process IPC and JSONL transports
-│   └── workflow/             # SuoCode tools, policies, and defaults
+│   └── workflow/             # CoilCoil tools, policies, and defaults
 ├── vendor/pi/                # Traceable thin fork of Pi
 ├── scripts/                  # End-to-end runtime smoke tests
 └── docs/                     # Architecture and upstream maintenance
@@ -43,7 +43,7 @@ See [the runtime architecture](docs/architecture.md), [the multi-Agent developme
 
 ## Setup
 
-SuoCode requires Node.js 22.19 or newer. From a clean checkout:
+CoilCoil requires Node.js 22.19 or newer. From a clean checkout:
 
 ```bash
 npm run setup
@@ -68,7 +68,7 @@ npm run cli -- /absolute/path/to/project
 The CLI can also receive an initial model configuration:
 
 ```bash
-SUOCODE_API_KEY=your-key npm run cli -- /path/to/project \
+COILCOIL_API_KEY=your-key npm run cli -- /path/to/project \
   --provider anthropic --model claude-sonnet-4-5
 ```
 
@@ -99,8 +99,8 @@ Windows builds NSIS installers for x64 and arm64 plus an x64 ZIP:
 
 ```bash
 npm run build:pi
-npm run build --workspace @suocode/openai-responses-ws
-npm run build --workspace @suocode/desktop
+npm run build --workspace @coilcoil/openai-responses-ws
+npm run build --workspace @coilcoil/desktop
 npm --prefix apps/desktop exec electron-builder -- --win
 ```
 
@@ -116,4 +116,4 @@ on Windows.
 
 ## Product data
 
-Desktop credentials, settings, MCP configuration, project memory, and sessions live under Electron's platform-specific application-data directory. CLI data defaults to `~/.suocode` and can be redirected with `SUOCODE_DATA_DIR`. SuoCode never loads the user's global Pi packages or executable at runtime.
+Desktop credentials, settings, MCP configuration, project memory, and sessions live under Electron's platform-specific application-data directory. CLI data defaults to `~/.coilcoil` and can be redirected with `COILCOIL_DATA_DIR`. CoilCoil never loads the user's global Pi packages or executable at runtime.

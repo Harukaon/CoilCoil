@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/SuoCode.app/Contents/MacOS/SuoCode");
+const appBinary = join(repositoryRoot, "apps/desktop/release/mac-arm64/CoilCoil.app/Contents/MacOS/CoilCoil");
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
@@ -29,14 +29,14 @@ async function waitForPage(port) {
   while (Date.now() - startedAt < 30_000) {
     try {
       const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
-      const page = pages.find((item) => item.type === "page" && item.title === "SuoCode");
+      const page = pages.find((item) => item.type === "page" && item.title === "CoilCoil");
       if (page?.webSocketDebuggerUrl) return page;
     } catch {
       // Electron is still starting.
     }
     await delay(100);
   }
-  throw new Error("SuoCode did not expose its renderer in time.");
+  throw new Error("CoilCoil did not expose its renderer in time.");
 }
 
 class DevToolsClient {
@@ -83,7 +83,7 @@ class DevToolsClient {
 }
 
 async function main() {
-  const dataDirectory = await mkdtemp(join(tmpdir(), "suocode-browser-scope-"));
+  const dataDirectory = await mkdtemp(join(tmpdir(), "coilcoil-browser-scope-"));
   const port = await freePort();
   const child = spawn(appBinary, [`--remote-debugging-port=${port}`, `--user-data-dir=${dataDirectory}`], {
     cwd: repositoryRoot,
@@ -95,19 +95,19 @@ async function main() {
     client = new DevToolsClient(page.webSocketDebuggerUrl);
     await client.open();
     const result = await client.evaluate(`(async () => {
-      const a = await window.suocode.createBrowserTab("scope-a", "data:text/html,<title>Scope A</title><h1>A</h1>");
-      const b = await window.suocode.createBrowserTab("scope-b", "data:text/html,<title>Scope B</title><h1>B</h1>");
-      const aState = await window.suocode.getBrowserState("scope-a");
-      const bState = await window.suocode.getBrowserState("scope-b");
+      const a = await window.coilcoil.createBrowserTab("scope-a", "data:text/html,<title>Scope A</title><h1>A</h1>");
+      const b = await window.coilcoil.createBrowserTab("scope-b", "data:text/html,<title>Scope B</title><h1>B</h1>");
+      const aState = await window.coilcoil.getBrowserState("scope-a");
+      const bState = await window.coilcoil.getBrowserState("scope-b");
       let crossScopeError = "";
-      try { await window.suocode.selectBrowserTab("scope-a", b.tabs[0].id); }
+      try { await window.coilcoil.selectBrowserTab("scope-a", b.tabs[0].id); }
       catch (error) { crossScopeError = String(error); }
-      await window.suocode.closeBrowserTab("scope-a", a.tabs[0].id);
+      await window.coilcoil.closeBrowserTab("scope-a", a.tabs[0].id);
       return {
         aState,
         bState,
-        aAfterClose: await window.suocode.getBrowserState("scope-a"),
-        bAfterClose: await window.suocode.getBrowserState("scope-b"),
+        aAfterClose: await window.coilcoil.getBrowserState("scope-a"),
+        bAfterClose: await window.coilcoil.getBrowserState("scope-b"),
         crossScopeError,
       };
     })()`);
@@ -119,7 +119,7 @@ async function main() {
     assert.match(result.crossScopeError, /浏览器标签页不存在/);
     assert.equal(result.aAfterClose.tabs.length, 0);
     assert.equal(result.bAfterClose.tabs.length, 1);
-    process.stdout.write("SuoCode browser scope smoke passed.\n");
+    process.stdout.write("CoilCoil browser scope smoke passed.\n");
   } finally {
     client?.close();
     child.kill("SIGTERM");

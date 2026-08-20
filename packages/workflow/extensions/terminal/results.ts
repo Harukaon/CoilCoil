@@ -38,7 +38,7 @@ export const TERMINAL_OUTPUT_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 function terminalOutputRoot(): string {
   const root = process.env.PI_CODING_AGENT_DIR?.trim()
-    || join(tmpdir(), "suocode", String(process.pid));
+    || join(tmpdir(), "coilcoil", String(process.pid));
   return join(root, "terminal-output");
 }
 

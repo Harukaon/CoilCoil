@@ -9,7 +9,7 @@ import { isRecord } from "./runtime-utils.js";
 /**
  * Point a persisted session at another project directory.
  *
- * SuoCode gives every project the same flat session directory, and Pi's
+ * CoilCoil gives every project the same flat session directory, and Pi's
  * `SessionManager.list(cwd, sessionDir)` decides which project a session
  * belongs to purely from the `cwd` recorded in its header. Rewriting that one
  * field is therefore a true move: the file name, session id, and the archived

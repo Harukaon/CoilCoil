@@ -12,7 +12,7 @@ import {
 } from "../extensions/terminal/results.ts";
 
 async function withAgentDir(run: (agentDir: string) => Promise<void>): Promise<void> {
-  const agentDir = await mkdtemp(join(tmpdir(), "suocode-terminal-output-"));
+  const agentDir = await mkdtemp(join(tmpdir(), "coilcoil-terminal-output-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agentDir;
   try {

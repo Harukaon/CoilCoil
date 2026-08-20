@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModelProviderAuthState } from "@suocode/runtime-protocol";
+import type { ModelProviderAuthState } from "@coilcoil/runtime-protocol";
 import { oauthCallbackUrl } from "../src/renderer/src/features/settings/providerOAuthPresentation.ts";
 
 function state(prompt?: ModelProviderAuthState["prompt"]): ModelProviderAuthState {

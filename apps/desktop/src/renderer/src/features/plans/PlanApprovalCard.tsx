@@ -6,7 +6,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import type { PlanApprovalState, PlanExecutionTarget } from "@suocode/runtime-protocol";
+import type { PlanApprovalState, PlanExecutionTarget } from "@coilcoil/runtime-protocol";
 import { Modal } from "../../ui/dialog";
 import { Markdown } from "../conversation/ConversationTimeline";
 
@@ -98,8 +98,8 @@ export function PlanApprovalCard({
         size="sm"
         onClose={() => { if (!pendingAction) setAgentDialogOpen(false); }}
         footer={<>
-          <button className="suo-modal-button" type="button" disabled={Boolean(pendingAction)} onClick={() => setAgentDialogOpen(false)}>取消</button>
-          <button className="suo-modal-button primary" type="button" disabled={Boolean(pendingAction) || !profile.trim()} onClick={() => void dispatchToSubagent()}>
+          <button className="coil-modal-button" type="button" disabled={Boolean(pendingAction)} onClick={() => setAgentDialogOpen(false)}>取消</button>
+          <button className="coil-modal-button primary" type="button" disabled={Boolean(pendingAction) || !profile.trim()} onClick={() => void dispatchToSubagent()}>
             {pendingAction === "subagent" ? "正在派发…" : "确认派发"}
           </button>
         </>}

@@ -2,10 +2,10 @@ import type { ContextEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent
 
 type AgentMessage = ContextEvent["messages"][number];
 
-export const RUNTIME_BRIDGE_COMMAND_EVENT = "suocode:runtime-bridge:command:v1";
-export const RUNTIME_BRIDGE_REPLY_PREFIX = "suocode:runtime-bridge:reply:v1:";
-export const RUNTIME_BRIDGE_STATE_EVENT = "suocode:runtime-bridge:state:v1";
-export const RUNTIME_BRIDGE_POLICY_ENTRY = "suocode-runtime-bridge-policy";
+export const RUNTIME_BRIDGE_COMMAND_EVENT = "coilcoil:runtime-bridge:command:v1";
+export const RUNTIME_BRIDGE_REPLY_PREFIX = "coilcoil:runtime-bridge:reply:v1:";
+export const RUNTIME_BRIDGE_STATE_EVENT = "coilcoil:runtime-bridge:state:v1";
+export const RUNTIME_BRIDGE_POLICY_ENTRY = "coilcoil-runtime-bridge-policy";
 
 interface RuntimeBridgeCommand {
   version: 1;

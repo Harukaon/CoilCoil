@@ -15,9 +15,9 @@ export function Tooltip({
       <RadixTooltip.Root>
         <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
         <RadixTooltip.Portal>
-          <RadixTooltip.Content className="suo-tooltip" side="top" align="start" sideOffset={7} collisionPadding={10}>
+          <RadixTooltip.Content className="coil-tooltip" side="top" align="start" sideOffset={7} collisionPadding={10}>
             {content}
-            <RadixTooltip.Arrow className="suo-tooltip-arrow" width={10} height={5} />
+            <RadixTooltip.Arrow className="coil-tooltip-arrow" width={10} height={5} />
           </RadixTooltip.Content>
         </RadixTooltip.Portal>
       </RadixTooltip.Root>

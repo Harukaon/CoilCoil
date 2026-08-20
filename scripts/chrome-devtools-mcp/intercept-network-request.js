@@ -1,5 +1,5 @@
 /**
- * SuoCode request interception extension for chrome-devtools-mcp.
+ * CoilCoil request interception extension for chrome-devtools-mcp.
  *
  * This file is copied into chrome-devtools-mcp/build/src/tools by the
  * version-locked postinstall patch. Keep imports relative to that destination.
@@ -152,7 +152,7 @@ async function dispatchRequest(state, request) {
     }
     if (state.rules.length === 0) {
         void deactivateState(state).catch(error => {
-            console.error('[suocode-browser] Failed to disable empty request interception state:', error);
+            console.error('[coilcoil-browser] Failed to disable empty request interception state:', error);
         });
     }
 }
@@ -168,7 +168,7 @@ function createState(page) {
     };
     state.requestListener = request => {
         void dispatchRequest(state, request).catch(error => {
-            console.error(`[suocode-browser] Request interception failed for ${request.url()}:`, error);
+            console.error(`[coilcoil-browser] Request interception failed for ${request.url()}:`, error);
         });
     };
     state.closeListener = () => {

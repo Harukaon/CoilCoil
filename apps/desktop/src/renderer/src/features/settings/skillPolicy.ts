@@ -1,4 +1,4 @@
-import type { SkillEntry } from "@suocode/runtime-protocol";
+import type { SkillEntry } from "@coilcoil/runtime-protocol";
 
 /**
  * Bundled skills ship with the runtime and cannot be turned on or off, so the
@@ -36,7 +36,7 @@ export function skillToggleTarget(skill: Pick<SkillEntry, "enabled">): boolean {
   return !skill.enabled;
 }
 
-/** Only skills copied into SuoCode's own user directory can be deleted here. */
+/** Only skills copied into CoilCoil's own user directory can be deleted here. */
 export function canDeleteSkill(skill: Pick<SkillEntry, "source" | "scope" | "baseDir">, userSkillsDir?: string): boolean {
   if (skill.source !== "user" || skill.scope !== "user" || !userSkillsDir) return false;
   const root = userSkillsDir.replaceAll("\\", "/").replace(/\/+$/, "");

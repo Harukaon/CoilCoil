@@ -14,16 +14,16 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
   const scopeRef = useRef(scopeId);
   scopeRef.current = scopeId;
 
-  useEffect(() => window.suocode.onBrowserStateUpdated((next) => {
+  useEffect(() => window.coilcoil.onBrowserStateUpdated((next) => {
     if (next.scopeId === scopeRef.current) setState(next);
   }), []);
 
   useEffect(() => {
     let cancelled = false;
     setState(EMPTY_STATE(scopeId));
-    void window.suocode.setBrowserScope(scopeId).then(async (current) => {
+    void window.coilcoil.setBrowserScope(scopeId).then(async (current) => {
       if (cancelled) return;
-      const next = active && current.tabs.length === 0 ? await window.suocode.createBrowserTab(scopeId) : current;
+      const next = active && current.tabs.length === 0 ? await window.coilcoil.createBrowserTab(scopeId) : current;
       if (!cancelled) setState(next);
     });
     return () => { cancelled = true; };
@@ -44,12 +44,12 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
         setGuestPlacement(undefined);
         // Zero tells main the panel is hidden, so the tab parks and keeps a real
         // emulated viewport instead of rendering into its 1x1 element box.
-        void window.suocode.setBrowserUiViewport({ width: 0, height: 0 });
+        void window.coilcoil.setBrowserUiViewport({ width: 0, height: 0 });
         return;
       }
       setGuestPlacement({ tabId: activeTabId, x: rect.left, y: rect.top, width: rect.width, height: rect.height });
       // Agents ask for the window size; report what the user is actually looking at.
-      void window.suocode.setBrowserUiViewport({ width: rect.width, height: rect.height });
+      void window.coilcoil.setBrowserUiViewport({ width: rect.width, height: rect.height });
     };
     const observer = new ResizeObserver(update);
     observer.observe(host);
@@ -63,13 +63,13 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
       window.removeEventListener("scroll", update, true);
       document.removeEventListener("visibilitychange", update);
       setGuestPlacement(undefined);
-      void window.suocode.setBrowserUiViewport({ width: 0, height: 0 });
+      void window.coilcoil.setBrowserUiViewport({ width: 0, height: 0 });
     };
   }, [active, activeTabId]);
 
   const submitAddress = (event: React.FormEvent): void => {
     event.preventDefault();
-    void window.suocode.navigateBrowser(scopeId, address).then(setState);
+    void window.coilcoil.navigateBrowser(scopeId, address).then(setState);
   };
 
   return (
@@ -78,24 +78,24 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
         <div className="browser-tabs">
           {state.tabs.map((tab) => (
             <div className={`browser-tab ${tab.id === state.activeTabId ? "active" : ""}`} key={tab.id}>
-              <button className="browser-tab-select" type="button" onClick={() => void window.suocode.selectBrowserTab(scopeId, tab.id).then(setState)}>
+              <button className="browser-tab-select" type="button" onClick={() => void window.coilcoil.selectBrowserTab(scopeId, tab.id).then(setState)}>
                 {tab.loading ? <LoaderCircle className="spin" size={11} /> : <Globe2 size={11} />}
                 <span>{tab.title}</span>
               </button>
-              <button className="browser-tab-close" type="button" aria-label={`关闭 ${tab.title}`} onClick={() => void window.suocode.closeBrowserTab(scopeId, tab.id).then(setState)}><X size={10} /></button>
+              <button className="browser-tab-close" type="button" aria-label={`关闭 ${tab.title}`} onClick={() => void window.coilcoil.closeBrowserTab(scopeId, tab.id).then(setState)}><X size={10} /></button>
             </div>
           ))}
-          <button className="browser-new-tab" type="button" aria-label="新建浏览器标签页" onClick={() => void window.suocode.createBrowserTab(scopeId).then(setState)}><Plus size={13} /></button>
+          <button className="browser-new-tab" type="button" aria-label="新建浏览器标签页" onClick={() => void window.coilcoil.createBrowserTab(scopeId).then(setState)}><Plus size={13} /></button>
         </div>
       </div>
       <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
-        <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => void window.suocode.browserBack(scopeId).then(setState)}><ArrowLeft size={13} /></button>
-        <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => void window.suocode.browserForward(scopeId).then(setState)}><ArrowRight size={13} /></button>
-        <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => void window.suocode.reloadBrowser(scopeId).then(setState)}><RotateCw size={12} /></button>
+        <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => void window.coilcoil.browserBack(scopeId).then(setState)}><ArrowLeft size={13} /></button>
+        <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => void window.coilcoil.browserForward(scopeId).then(setState)}><ArrowRight size={13} /></button>
+        <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => void window.coilcoil.reloadBrowser(scopeId).then(setState)}><RotateCw size={12} /></button>
         <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} onChange={(event) => setAddress(event.target.value)} />
       </form>
       <div className="browser-native-host" ref={hostRef}>
-        {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => void window.suocode.createBrowserTab(scopeId).then(setState)}>新建标签页</button></div> : null}
+        {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => void window.coilcoil.createBrowserTab(scopeId).then(setState)}>新建标签页</button></div> : null}
       </div>
     </section>
   );

@@ -1,4 +1,4 @@
-import type { ChatMessage, PlanApprovalState, SubagentActivity, ToolRun } from "@suocode/runtime-protocol";
+import type { ChatMessage, PlanApprovalState, SubagentActivity, ToolRun } from "@coilcoil/runtime-protocol";
 import type { ConversationTimelineItem, TimelineItem } from "./ConversationTimeline";
 
 export function buildConversationTimeline(

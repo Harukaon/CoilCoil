@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 
 export const OPENAI_RESPONSES_WS_PROVIDER_ID = "openai-responses-ws";
 export const OPENAI_RESPONSES_WS_PROVIDER_NAME = "OpenAI Response (WS)";
-export const OPENAI_RESPONSES_WS_API = "suocode-openai-responses-ws";
+export const OPENAI_RESPONSES_WS_API = "coilcoil-openai-responses-ws";
 export const OPENAI_RESPONSES_WS_CONFIG_FILE = "openai-responses-ws.json";
 export const OPENAI_RESPONSES_WS_MODELS_CACHE_FILE = "openai-responses-ws-models.json";
 export const LEGACY_CLIPROXYAPI_CONFIG_FILE = "cliproxyapi.json";
@@ -28,7 +28,7 @@ function parseObject(path: string): OpenAIResponsesWsConfigFile {
   return parsed as OpenAIResponsesWsConfigFile;
 }
 
-/** Read the SuoCode-owned config and transparently accept the one-time legacy filename. */
+/** Read the CoilCoil-owned config and transparently accept the one-time legacy filename. */
 export function readOpenAIResponsesWsConfig(agentDir: string): OpenAIResponsesWsConfigFile {
   const path = join(agentDir, OPENAI_RESPONSES_WS_CONFIG_FILE);
   if (existsSync(path)) return parseObject(path);

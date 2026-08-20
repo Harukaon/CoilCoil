@@ -22,7 +22,7 @@ interface ResponseMetricsEntry {
   timestamp: number;
 }
 
-const RESPONSE_METRICS_ENTRY_TYPE = "suocode-response-metrics";
+const RESPONSE_METRICS_ENTRY_TYPE = "coilcoil-response-metrics";
 
 function formatSeconds(milliseconds: number): string {
   return (Math.max(0, milliseconds) / 1_000).toFixed(2);

@@ -4,7 +4,7 @@ import {
 import {
   type PromptImage,
   type SubagentActivity,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   assistantToolCalls,
   extractExitCode,

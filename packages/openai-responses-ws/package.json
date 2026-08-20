@@ -1,8 +1,8 @@
 {
-  "name": "@suocode/openai-responses-ws",
+  "name": "@coilcoil/openai-responses-ws",
   "version": "0.1.0",
   "private": true,
-  "description": "SuoCode-maintained Pi extension for OpenAI Responses over persistent WebSocket",
+  "description": "CoilCoil-maintained Pi extension for OpenAI Responses over persistent WebSocket",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

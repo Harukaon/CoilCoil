@@ -51,7 +51,7 @@ async function buildChildSession(options: {
     noThemes: true,
     extensionFactories: profilePrompt
       ? [{
-          name: "suocode-subagent-prompt",
+          name: "coilcoil-subagent-prompt",
           hidden: true,
           factory: (pi) => {
             pi.on("before_agent_start", (event) => ({ systemPrompt: `${event.systemPrompt}\n\n${profilePrompt}` }));

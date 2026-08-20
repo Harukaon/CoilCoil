@@ -5,8 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { RuntimeEvent, ToolRun } from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+import type { RuntimeEvent, ToolRun } from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 import { ToolRunIds } from "../src/tool-run-ids.js";
 
 interface RuntimeInternals {
@@ -16,7 +16,7 @@ interface RuntimeInternals {
 }
 
 test("a mid-stream snapshot includes the in-progress assistant message instead of dropping it", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-live-message-snapshot-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-live-message-snapshot-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
 
   const manager = SessionManager.inMemory(root);
@@ -40,7 +40,7 @@ test("a mid-stream snapshot includes the in-progress assistant message instead o
     getAllTools: () => [],
   } as unknown as AgentSession;
 
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
   });
@@ -110,7 +110,7 @@ test("a mid-stream snapshot includes the in-progress assistant message instead o
 });
 
 test("assistant tool calls stay visible before a result and survive a live snapshot", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-live-tool-snapshot-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-live-tool-snapshot-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
 
   const manager = SessionManager.inMemory(root);
@@ -133,7 +133,7 @@ test("assistant tool calls stay visible before a result and survive a live snaps
     getAllTools: () => [],
   } as unknown as AgentSession;
   const events: RuntimeEvent[] = [];
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     onEvent: (event) => events.push(event),
@@ -239,7 +239,7 @@ test("assistant tool calls stay visible before a result and survive a live snaps
       id: "terminal-finished",
       parentId: null,
       timestamp: new Date().toISOString(),
-      customType: "suocode-terminal-run",
+      customType: "coilcoil-terminal-run",
       data: {
         id: "term-1",
         ownerToolCallId: "bash-server",
@@ -254,7 +254,7 @@ test("assistant tool calls stay visible before a result and survive a live snaps
   });
   assert.equal(active.terminals.get("term-1")?.status, "stopped", "async completion updates the same terminal row");
 
-  const restoredRuntime = new SuoCodeRuntime({
+  const restoredRuntime = new CoilCoilRuntime({
     agentDir: join(root, "restored-agent"),
     sessionDir: join(root, "restored-sessions"),
   }) as unknown as RuntimeInternals;

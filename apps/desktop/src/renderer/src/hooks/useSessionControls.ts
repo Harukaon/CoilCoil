@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { SubagentActivity } from "@suocode/runtime-protocol";
+import type { SubagentActivity } from "@coilcoil/runtime-protocol";
 import { toastError } from "../ui/toast";
 
 export interface SessionControls {
@@ -21,10 +21,10 @@ export interface SessionControls {
  * actually owns.
  */
 export function useSessionControls(runtimeId: string | undefined): SessionControls {
-  const send = useCallback(async (command: Parameters<typeof window.suocode.request>[0]): Promise<void> => {
+  const send = useCallback(async (command: Parameters<typeof window.coilcoil.request>[0]): Promise<void> => {
     if (!runtimeId) return;
     try {
-      await window.suocode.request(command, runtimeId);
+      await window.coilcoil.request(command, runtimeId);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     }

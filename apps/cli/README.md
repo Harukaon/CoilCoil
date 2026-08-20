@@ -1,6 +1,6 @@
-# SuoCode CLI
+# CoilCoil CLI
 
-SuoCode CLI is the terminal surface for the shared SuoCode runtime. It supports saved sessions, model selection, streaming responses, tool activity, steering, and aborting a run.
+CoilCoil CLI is the terminal surface for the shared CoilCoil runtime. It supports saved sessions, model selection, streaming responses, tool activity, steering, and aborting a run.
 
 From the repository root:
 

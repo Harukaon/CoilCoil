@@ -16,7 +16,7 @@ import {
   type RuntimeInspectionSnapshot,
   type SessionSnapshot,
   type SubagentActivity,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   mkdirSync,
 } from "node:fs";
@@ -45,7 +45,7 @@ import {
 import {
   ActiveSession,
   ReconstructedSessionState,
-  SuoCodeRuntimeOptions,
+  CoilCoilRuntimeOptions,
 } from "./runtime-state.js";
 import {
   setGlobalToolPurposeAuditEnabled,
@@ -90,7 +90,7 @@ export abstract class RuntimeBase {
 
   protected readonly providerAuthFlows = new Map<string, ProviderAuthFlow>();
 
-  constructor(options: SuoCodeRuntimeOptions) {
+  constructor(options: CoilCoilRuntimeOptions) {
     // The Pi CLI configures its Undici dispatcher before provider SDKs run.
     // Embedded SDK consumers must do the same or Node's default dispatcher can
     // negotiate HTTP/2 and surface idle stream errors as uncaught exceptions.
@@ -211,7 +211,7 @@ export abstract class RuntimeBase {
       console.error("[runtime] 释放会话连接失败", error);
     }
     active.session.refreshModelFromRegistry();
-    // Context-window overrides are SuoCode runtime metadata rather than Pi
+    // Context-window overrides are CoilCoil runtime metadata rather than Pi
     // registry data, so the refresh above discards them. Re-apply directly on
     // the agent state: setModel() would append a model_change entry and make it
     // look like the user switched models, and skipping the refresh entirely

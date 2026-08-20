@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { MemoryDocumentSnapshot } from "@suocode/runtime-protocol";
+import type { MemoryDocumentSnapshot } from "@coilcoil/runtime-protocol";
 
 /** The file every project's memory is kept in, inside its own folder of the store. */
 export const PROJECT_MEMORY_FILE = "MEMORY.md";

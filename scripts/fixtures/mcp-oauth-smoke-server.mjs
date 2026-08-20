@@ -66,7 +66,7 @@ const requireOAuth = requireBearerAuth({
 });
 
 function createServer() {
-  const server = new McpServer({ name: "suocode-oauth-smoke", version: "1.0.0" });
+  const server = new McpServer({ name: "coilcoil-oauth-smoke", version: "1.0.0" });
   server.registerTool("oauth-echo", {
     description: "Return text through an OAuth-protected MCP connection.",
     inputSchema: { text: z.string() },

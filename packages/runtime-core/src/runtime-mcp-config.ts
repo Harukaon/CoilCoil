@@ -4,7 +4,7 @@ import {
   type McpJsonDocument,
   type McpServerConfiguration,
   validateMcpJsonText,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   existsSync,
   mkdirSync,
@@ -45,9 +45,9 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
   /**
    * Where a workspace's own MCP configuration lives.
    *
-   * Inside SuoCode's private agent directory, never in the workspace itself: a
+   * Inside CoilCoil's private agent directory, never in the workspace itself: a
    * config file written into someone's repository gets committed by accident,
-   * travels to other machines, and is not SuoCode's to place there.
+   * travels to other machines, and is not CoilCoil's to place there.
    */
   protected workspaceMcpConfigPath(cwd: string): string {
     // Normalised here so a workspace keeps one file however its path is spelled
@@ -209,7 +209,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     if (changed) this.writeDisabledMcpServers(disabled);
 
     const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    // Only SuoCode's own files are swept here. A marker left in a workspace is
+    // Only CoilCoil's own files are swept here. A marker left in a workspace is
     // harmless for a removed server — it stays hidden either way — and sweeping
     // it would mean writing into someone's repository on every refresh.
     const workspaceConfigPath = cwd ? this.workspaceMcpConfigPath(cwd) : undefined;
@@ -224,7 +224,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
    * Clear a stale `{ "disabled": true }` marker an older build wrote into the
    * workspace itself.
    *
-   * SuoCode no longer writes there, but a marker left behind still outranks
+   * CoilCoil no longer writes there, but a marker left behind still outranks
    * every other layer, so re-enabling a server would silently do nothing.
    * Only a bare marker is touched — never a definition the repository owns.
    */
@@ -244,7 +244,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
     const provenance = adapter.getServerProvenance(configPath, resolvedCwd);
     // Pi's provenance only covers the files Pi itself knows about, so a server
-    // that lives in SuoCode's own per-workspace mcp.json came back with no
+    // that lives in CoilCoil's own per-workspace mcp.json came back with no
     // source at all — the UI could not say which file it belonged to.
     const workspaceDefinitions = this.workspaceMcpDefinitions(cwd);
     const projectDefinitions = new Set([
@@ -401,7 +401,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
       this.removeMcpServerFromFile(configPath, normalizedName);
     };
 
-    // Only mutate SuoCode-owned files. Never delete Cursor/Claude/Codex imports or shared `.mcp.json`.
+    // Only mutate CoilCoil-owned files. Never delete Cursor/Claude/Codex imports or shared `.mcp.json`.
     tryRemove(globalConfigPath);
     tryRemove(projectConfigPath);
     const provenance = adapter.getServerProvenance(globalConfigPath, resolvedCwd ?? process.cwd());
@@ -410,9 +410,9 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
       tryRemove(source.path);
     }
 
-    // External/shared definitions belong to another application, so SuoCode
+    // External/shared definitions belong to another application, so CoilCoil
     // does not mutate their source file. The private exclusion is permanent
-    // from SuoCode's perspective and is never exposed to Pi or the Settings UI.
+    // from CoilCoil's perspective and is never exposed to Pi or the Settings UI.
     const stillPresent = Boolean(adapter.loadMcpConfig(globalConfigPath, resolvedCwd ?? process.cwd()).mcpServers[normalizedName]);
     if (stillPresent) {
       this.markMcpServerRemovedLocally(normalizedName);
@@ -433,7 +433,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     const effective = this.withWorkspaceMcpServers(adapter.loadMcpConfig(globalConfigPath, resolvedCwd), cwd);
     if (!effective.mcpServers[normalizedName]) throw new Error(`MCP Server 不存在：${normalizedName}`);
-    // Enablement lives in SuoCode's own opt-out list, and the effective
+    // Enablement lives in CoilCoil's own opt-out list, and the effective
     // configuration handed to the Agent is filtered by it. Nothing has to be
     // written into a workspace to make it take effect.
     this.setMcpServerOptOut(normalizedName, !enabled);

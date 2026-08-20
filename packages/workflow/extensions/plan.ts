@@ -13,11 +13,11 @@ import {
   type SubagentToolDetails,
 } from "./subagents/types.ts";
 
-/** Public event channels consumed by SuoCode's bundled runtime. */
-export const PLAN_STATE_CHANNEL = "suocode:plan:state:v1";
-export const PLAN_RPC_REQUEST_CHANNEL = "suocode:plan:rpc:v1:request";
-export const PLAN_RPC_REPLY_PREFIX = "suocode:plan:rpc:v1:reply:";
-export const PLAN_ENTRY_TYPE = "suocode-plan";
+/** Public event channels consumed by CoilCoil's bundled runtime. */
+export const PLAN_STATE_CHANNEL = "coilcoil:plan:state:v1";
+export const PLAN_RPC_REQUEST_CHANNEL = "coilcoil:plan:rpc:v1:request";
+export const PLAN_RPC_REPLY_PREFIX = "coilcoil:plan:rpc:v1:reply:";
+export const PLAN_ENTRY_TYPE = "coilcoil-plan";
 
 type PlanStatus = "pending_approval" | "running" | "delegated" | "completed" | "rejected" | "failed";
 type ExecutionTarget = "main" | "subagent";
@@ -172,7 +172,7 @@ export function serializePlanFile(plan: PlanState): string {
  * preserving the session-owned identity and approval state.
  */
 export function parsePlanFile(text: string, fallback?: PlanState): PlanState | undefined {
-  const match = text.match(/<!--\s*suocode-plan:v1\s*([\s\S]*?)\s*-->/i);
+  const match = text.match(/<!--\s*coilcoil-plan:v1\s*([\s\S]*?)\s*-->/i);
   let metadata: PlanState | undefined;
   if (match) {
     try {
@@ -421,7 +421,7 @@ export default function planExtension(pi: ExtensionAPI): void {
             requestId: requestIdForChild,
             method: "run",
             params: { agent: next.agentProfile, task: executionPrompt(next, true), background: true, planId: next.id },
-            source: { client: "suocode-plan" },
+            source: { client: "coilcoil-plan" },
           } satisfies SubagentRpcRequest);
         });
         next = stateWith(next, { subagentRunId: details.runId, status: "delegated" });

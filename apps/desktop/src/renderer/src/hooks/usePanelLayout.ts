@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-const LEFT_WIDTH_KEY = "suocode.left-panel-width";
-const RIGHT_WIDTH_KEY = "suocode.right-panel-width";
+const LEFT_WIDTH_KEY = "coilcoil.left-panel-width";
+const RIGHT_WIDTH_KEY = "coilcoil.right-panel-width";
 export const MINIMUM_CONVERSATION_WIDTH = 315;
 /**
  * The narrowest window that may host an open inspector without being moved.
@@ -117,7 +117,7 @@ export function usePanelLayout(options: {
     rightWasOpenRef.current = rightOpen;
     if (!justOpened) return;
     const growth = panelOpenGrowth(window.innerWidth);
-    if (growth > 0) void window.suocode.growWindowWidth(growth);
+    if (growth > 0) void window.coilcoil.growWindowWidth(growth);
   }, [rightOpen]);
 
   useEffect(() => {
@@ -131,7 +131,7 @@ export function usePanelLayout(options: {
       });
       setLeftWidth(leftOpen ? fitted.leftWidth : Math.round(preferredLeftWidthRef.current));
       setRightWidth(rightOpen ? fitted.rightWidth : Math.round(preferredRightWidthRef.current));
-      void window.suocode.setWindowMinimumWidth(minimumWindowWidth(leftOpen, rightOpen));
+      void window.coilcoil.setWindowMinimumWidth(minimumWindowWidth(leftOpen, rightOpen));
     };
     fitPanelsToWindow();
     window.addEventListener("resize", fitPanelsToWindow);

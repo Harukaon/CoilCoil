@@ -2,10 +2,10 @@ import * as ContextMenu from "@radix-ui/react-context-menu";
 import { ChevronDown, ChevronRight, File, Folder, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
-import type { FileNode } from "@suocode/runtime-protocol";
+import type { FileNode } from "@coilcoil/runtime-protocol";
 import { fileManagerLabel, trashLabel } from "../../../../shared/platform-labels";
 import { toastError } from "../../ui/toast";
-import { quotePath, SUOCODE_PATH_TYPE } from "../composer/pathInsert";
+import { quotePath, COILCOIL_PATH_TYPE } from "../composer/pathInsert";
 import { absoluteProjectPath, relativeProjectPath } from "./filePaths";
 
 function FileContextMenu({ node, root, onOpenAsText, onTrashed }: {
@@ -16,14 +16,14 @@ function FileContextMenu({ node, root, onOpenAsText, onTrashed }: {
 }): React.JSX.Element {
   const copy = async (value: string): Promise<void> => {
     try {
-      await window.suocode.copyText(value);
+      await window.coilcoil.copyText(value);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     }
   };
   const run = async (action: "reveal" | "trash"): Promise<void> => {
     try {
-      const result = await window.suocode.performProjectFileAction({ root, path: node.path, action });
+      const result = await window.coilcoil.performProjectFileAction({ root, path: node.path, action });
       if (result.trashed) onTrashed(node.path);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
@@ -37,9 +37,9 @@ function FileContextMenu({ node, root, onOpenAsText, onTrashed }: {
         <ContextMenu.Separator className="file-context-separator" />
         {node.kind === "file" ? <ContextMenu.Item className="conversation-context-item" onSelect={() => onOpenAsText(node)}>作为文本尝试预览</ContextMenu.Item> : null}
         {node.kind === "file" ? <ContextMenu.Separator className="file-context-separator" /> : null}
-        <ContextMenu.Item className="conversation-context-item" onSelect={() => void run("reveal")}>在{fileManagerLabel(window.suocode.platform)}中显示</ContextMenu.Item>
+        <ContextMenu.Item className="conversation-context-item" onSelect={() => void run("reveal")}>在{fileManagerLabel(window.coilcoil.platform)}中显示</ContextMenu.Item>
         <ContextMenu.Separator className="file-context-separator" />
-        <ContextMenu.Item className="conversation-context-item file-context-danger" onSelect={() => void run("trash")}>移到{trashLabel(window.suocode.platform)}</ContextMenu.Item>
+        <ContextMenu.Item className="conversation-context-item file-context-danger" onSelect={() => void run("trash")}>移到{trashLabel(window.coilcoil.platform)}</ContextMenu.Item>
       </ContextMenu.Content>
     </ContextMenu.Portal>
   );
@@ -60,7 +60,7 @@ function FileTreeNode({ node, root, depth, selectedPath, onLoad, onOpen, onOpenA
   const startPathDrag = (event: ReactDragEvent<HTMLButtonElement>): void => {
     const absolutePath = absoluteProjectPath(root, node.path);
     event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData(SUOCODE_PATH_TYPE, JSON.stringify({ path: absolutePath }));
+    event.dataTransfer.setData(COILCOIL_PATH_TYPE, JSON.stringify({ path: absolutePath }));
     event.dataTransfer.setData("text/plain", quotePath(absolutePath));
   };
 

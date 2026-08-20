@@ -177,7 +177,7 @@ test("background bash completion wakes the Agent and keeps a readable output fil
   assert.equal(messages.length, 1, "one background exit costs the Agent one wake-up");
   assert.ok(messages.some((entry) => entry.message.details.mode === "exit"));
   assert.ok(messages.some((entry) => entry.options.triggerTurn === true));
-  assert.ok(entries.some((entry) => entry.customType === "suocode-terminal-run"
+  assert.ok(entries.some((entry) => entry.customType === "coilcoil-terminal-run"
     && entry.data.status === "succeeded"
     && entry.data.ownerToolCallId === "test-bash-call"));
   assert.match(await readFile(started.details.output_location, "utf8"), /FINISHED/);

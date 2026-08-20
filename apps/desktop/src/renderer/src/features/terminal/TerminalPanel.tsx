@@ -55,13 +55,13 @@ function TerminalSurface({ session, active }: { session: TerminalSessionSnapshot
     renderedOutputRef.current = session.output;
     terminalRef.current = terminal;
     fitRef.current = fit;
-    const input = terminal.onData((data) => { void window.suocode.writeTerminal(session.id, data); });
+    const input = terminal.onData((data) => { void window.coilcoil.writeTerminal(session.id, data); });
     const observer = new ResizeObserver(() => {
       if (!activeRef.current || container.clientWidth < 20 || container.clientHeight < 20) return;
       window.requestAnimationFrame(() => {
         try {
           fit.fit();
-          void window.suocode.resizeTerminal(session.id, terminal.cols, terminal.rows);
+          void window.coilcoil.resizeTerminal(session.id, terminal.cols, terminal.rows);
         } catch {
           // The inspector can become hidden before the queued frame runs.
         }
@@ -97,7 +97,7 @@ function TerminalSurface({ session, active }: { session: TerminalSessionSnapshot
         fitRef.current?.fit();
         const terminal = terminalRef.current;
         if (terminal) {
-          void window.suocode.resizeTerminal(session.id, terminal.cols, terminal.rows);
+          void window.coilcoil.resizeTerminal(session.id, terminal.cols, terminal.rows);
           terminal.focus();
         }
       } catch {
@@ -124,14 +124,14 @@ export function TerminalPanel({ sessionId, cwd, active, onSessionOpened }: {
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    const unsubscribeState = window.suocode.onTerminalStateUpdated((next) => {
+    const unsubscribeState = window.coilcoil.onTerminalStateUpdated((next) => {
       if (mounted) setSession(next.find((item) => item.id === sessionId));
     });
-    const unsubscribeData = window.suocode.onTerminalData(({ id, data }) => {
+    const unsubscribeData = window.coilcoil.onTerminalData(({ id, data }) => {
       if (!mounted || id !== sessionId) return;
       setSession((current) => current && { ...current, output: `${current.output}${data}`.slice(-MAX_TERMINAL_OUTPUT) });
     });
-    void window.suocode.getTerminalSessions().then((current) => {
+    void window.coilcoil.getTerminalSessions().then((current) => {
       if (!mounted) return;
       setSession(current.find((item) => item.id === sessionId));
       setLoading(false);

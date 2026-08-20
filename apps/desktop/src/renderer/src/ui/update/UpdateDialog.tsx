@@ -11,7 +11,7 @@ export function UpdateDialog(): React.JSX.Element | null {
   const [update, setUpdate] = useState<UpdateAvailable>();
   const [opening, setOpening] = useState(false);
 
-  useEffect(() => window.suocode.onUpdateAvailable(setUpdate), []);
+  useEffect(() => window.coilcoil.onUpdateAvailable(setUpdate), []);
 
   const close = useCallback(() => {
     if (!opening) setUpdate(undefined);
@@ -21,7 +21,7 @@ export function UpdateDialog(): React.JSX.Element | null {
     if (!update) return;
     setOpening(true);
     try {
-      await window.suocode.openExternal(update.url);
+      await window.coilcoil.openExternal(update.url);
       setUpdate(undefined);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
@@ -42,8 +42,8 @@ export function UpdateDialog(): React.JSX.Element | null {
       onClose={close}
       footer={
         <>
-          <button className="suo-modal-button" type="button" disabled={opening} onClick={close}>稍后</button>
-          <button className="suo-modal-button primary" type="button" disabled={opening} onClick={() => void download()}>
+          <button className="coil-modal-button" type="button" disabled={opening} onClick={close}>稍后</button>
+          <button className="coil-modal-button primary" type="button" disabled={opening} onClick={() => void download()}>
             {opening ? "正在打开…" : "去下载"}
           </button>
         </>

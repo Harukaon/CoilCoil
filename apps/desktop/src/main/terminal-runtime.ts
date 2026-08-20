@@ -23,7 +23,7 @@ function defaultShell(): { file: string; args: string[] } {
   if (process.platform !== "win32") {
     return { file: process.env.SHELL || "/bin/zsh", args: ["-l"] };
   }
-  const preferred = process.env.SUOCODE_SHELL
+  const preferred = process.env.COILCOIL_SHELL
     || (existsSync("C:\\Program Files\\PowerShell\\7\\pwsh.exe") ? "C:\\Program Files\\PowerShell\\7\\pwsh.exe" : undefined)
     || "powershell.exe";
   return { file: preferred, args: ["-NoLogo"] };

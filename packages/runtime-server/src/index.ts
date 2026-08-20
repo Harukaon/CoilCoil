@@ -1,4 +1,4 @@
-import { SuoCodeRuntime, type SuoCodeRuntimeOptions } from "@suocode/runtime-core";
+import { CoilCoilRuntime, type CoilCoilRuntimeOptions } from "@coilcoil/runtime-core";
 import {
   isRuntimeCommandEnvelope,
   SESSION_OPEN_SUPERSEDED_ERROR,
@@ -9,7 +9,7 @@ import {
   type SessionSnapshot,
   type SessionSummary,
   type RuntimeWireMessage,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
@@ -17,7 +17,7 @@ import { createInterface } from "node:readline";
 import { selectWorkspaceSessionPath } from "./workspace-session.js";
 
 type WireSink = (message: RuntimeWireMessage) => void;
-type RuntimeFactory = (options: SuoCodeRuntimeOptions) => SuoCodeRuntime;
+type RuntimeFactory = (options: CoilCoilRuntimeOptions) => CoilCoilRuntime;
 
 const MAX_RETAINED_IDLE_SESSION_RUNTIMES = 6;
 
@@ -67,12 +67,12 @@ function eventChangesSnapshot(event: RuntimeEvent): boolean {
 }
 
 export class RuntimeServer {
-  readonly runtime: SuoCodeRuntime;
+  readonly runtime: CoilCoilRuntime;
   private readonly send: WireSink;
-  private readonly options: SuoCodeRuntimeOptions;
+  private readonly options: CoilCoilRuntimeOptions;
   private readonly createRuntime: RuntimeFactory;
   private readonly createRuntimeId: () => string;
-  private readonly runtimes = new Map<string, SuoCodeRuntime>();
+  private readonly runtimes = new Map<string, CoilCoilRuntime>();
   private readonly sessionPaths = new Map<string, string>();
   private readonly runtimePaths = new Map<string, string>();
   private readonly runtimeAccess = new Map<string, number>();
@@ -87,10 +87,10 @@ export class RuntimeServer {
   private defaultRuntimeId?: string;
   private disposed = false;
 
-  constructor(options: SuoCodeRuntimeOptions, send: WireSink, dependencies: RuntimeServerDependencies = {}) {
+  constructor(options: CoilCoilRuntimeOptions, send: WireSink, dependencies: RuntimeServerDependencies = {}) {
     this.send = send;
     this.options = options;
-    this.createRuntime = dependencies.createRuntime ?? ((runtimeOptions) => new SuoCodeRuntime(runtimeOptions));
+    this.createRuntime = dependencies.createRuntime ?? ((runtimeOptions) => new CoilCoilRuntime(runtimeOptions));
     this.createRuntimeId = dependencies.createRuntimeId ?? randomUUID;
     this.runtime = this.createManagedRuntime();
   }
@@ -104,7 +104,7 @@ export class RuntimeServer {
     }
   }
 
-  private createManagedRuntime(runtimeId?: string, modelRuntimePromise?: SuoCodeRuntimeOptions["modelRuntimePromise"]): SuoCodeRuntime {
+  private createManagedRuntime(runtimeId?: string, modelRuntimePromise?: CoilCoilRuntimeOptions["modelRuntimePromise"]): CoilCoilRuntime {
     return this.createRuntime({
       ...this.options,
       modelRuntimePromise,
@@ -185,7 +185,7 @@ export class RuntimeServer {
     this.runtimeAccess.set(runtimeId, Date.now());
   }
 
-  private removeRuntimeReferences(runtimeId: string): SuoCodeRuntime | undefined {
+  private removeRuntimeReferences(runtimeId: string): CoilCoilRuntime | undefined {
     const runtime = this.runtimes.get(runtimeId);
     if (runtime) this.send({ runtimeId, event: { type: "runtime_released" } });
     this.runtimes.delete(runtimeId);
@@ -222,13 +222,13 @@ export class RuntimeServer {
     }
   }
 
-  private runtimeById(runtimeId: string): SuoCodeRuntime {
+  private runtimeById(runtimeId: string): CoilCoilRuntime {
     const runtime = this.runtimes.get(runtimeId);
     if (!runtime) throw new Error("所选会话运行时已失效，请重新打开会话。");
     return runtime;
   }
 
-  private selectedRuntime(runtimeId?: string): SuoCodeRuntime {
+  private selectedRuntime(runtimeId?: string): CoilCoilRuntime {
     if (runtimeId) return this.runtimeById(runtimeId);
     if (this.defaultRuntimeId) return this.runtimeById(this.defaultRuntimeId);
     return this.runtime;
@@ -391,7 +391,7 @@ export class RuntimeServer {
     }
   }
 
-  private dispatchTo(runtime: SuoCodeRuntime, command: Exclude<RuntimeCommand, { type: "create_session" } | { type: "open_session" } | { type: "open_workspace" }>): Promise<unknown> {
+  private dispatchTo(runtime: CoilCoilRuntime, command: Exclude<RuntimeCommand, { type: "create_session" } | { type: "open_session" } | { type: "open_workspace" }>): Promise<unknown> {
     switch (command.type) {
       case "bootstrap":
         return runtime.initialize();
@@ -565,17 +565,17 @@ export class RuntimeServer {
   }
 }
 
-export function runtimeOptionsFromEnvironment(): SuoCodeRuntimeOptions {
-  const agentDir = process.env.SUOCODE_AGENT_DIR;
-  const sessionDir = process.env.SUOCODE_SESSION_DIR;
+export function runtimeOptionsFromEnvironment(): CoilCoilRuntimeOptions {
+  const agentDir = process.env.COILCOIL_AGENT_DIR;
+  const sessionDir = process.env.COILCOIL_SESSION_DIR;
   if (!agentDir || !sessionDir) {
-    throw new Error("SUOCODE_AGENT_DIR and SUOCODE_SESSION_DIR are required.");
+    throw new Error("COILCOIL_AGENT_DIR and COILCOIL_SESSION_DIR are required.");
   }
   return {
     agentDir,
     sessionDir,
-    workflowDir: process.env.SUOCODE_WORKFLOW_DIR,
-    legacyAgentDir: process.env.SUOCODE_LEGACY_AGENT_DIR,
+    workflowDir: process.env.COILCOIL_WORKFLOW_DIR,
+    legacyAgentDir: process.env.COILCOIL_LEGACY_AGENT_DIR,
   };
 }
 
@@ -583,7 +583,7 @@ export function attachProcessIpc(options = runtimeOptionsFromEnvironment()): Run
   if (typeof process.send !== "function") throw new Error("The runtime process requires an IPC channel.");
   const server = new RuntimeServer(options, (message) => process.send?.(message));
   void server.warmup().catch((error) => {
-    process.stderr.write(`[suocode-runtime] warmup failed: ${errorMessage(error)}\n`);
+    process.stderr.write(`[coilcoil-runtime] warmup failed: ${errorMessage(error)}\n`);
   });
   process.on("message", (message) => {
     void server.receive(message);

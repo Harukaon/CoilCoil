@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FileNode } from "@suocode/runtime-protocol";
+import type { FileNode } from "@coilcoil/runtime-protocol";
 import {
   absoluteProjectPath,
   previewFileNode,

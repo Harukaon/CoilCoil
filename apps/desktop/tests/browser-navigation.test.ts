@@ -21,9 +21,9 @@ test("browser navigation expands home-relative paths", () => {
 });
 
 test("browser navigation keeps file and data URLs without an allowlist", () => {
-  const fileUrl = pathToFileURL("/private/tmp/suocode browser test.html").toString();
+  const fileUrl = pathToFileURL("/private/tmp/coilcoil browser test.html").toString();
   assert.equal(normalizeBrowserUrl(fileUrl), fileUrl);
-  assert.equal(normalizeBrowserUrl("data:text/html,<h1>SuoCode</h1>"), "data:text/html,<h1>SuoCode</h1>");
+  assert.equal(normalizeBrowserUrl("data:text/html,<h1>CoilCoil</h1>"), "data:text/html,<h1>CoilCoil</h1>");
 });
 
 test("browser navigation still treats plain text as a search", () => {

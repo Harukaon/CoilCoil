@@ -1,4 +1,4 @@
-import type { ChatMessage, QueuedPrompt } from "@suocode/runtime-protocol";
+import type { ChatMessage, QueuedPrompt } from "@coilcoil/runtime-protocol";
 
 export interface PendingUserMessage {
   message: ChatMessage;

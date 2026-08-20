@@ -1,8 +1,8 @@
 {
-  "name": "@suocode/workflow",
+  "name": "@coilcoil/workflow",
   "version": "0.1.0",
   "private": true,
-  "description": "SuoCode's Pi workflow, tools, policies, and Simplified Chinese experience",
+  "description": "CoilCoil's Pi workflow, tools, policies, and Simplified Chinese experience",
   "keywords": [
     "pi-package"
   ],

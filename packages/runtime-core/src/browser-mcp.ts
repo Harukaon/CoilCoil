@@ -1,6 +1,6 @@
 import {
   type McpImportConfiguration,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   existsSync,
   readFileSync,
@@ -77,8 +77,8 @@ export function withBundledBrowserMcp(
     }
   };
   const parseServer = (): { command: string; args: string[]; env: Record<string, string>; } | undefined => {
-    const command = environment.SUOCODE_BROWSER_MCP_COMMAND?.trim();
-    const rawArgs = environment.SUOCODE_BROWSER_MCP_ARGS;
+    const command = environment.COILCOIL_BROWSER_MCP_COMMAND?.trim();
+    const rawArgs = environment.COILCOIL_BROWSER_MCP_ARGS;
     if (!command || !rawArgs) return undefined;
     const parsedArgs = JSON.parse(rawArgs) as unknown;
     const args = Array.isArray(parsedArgs)
@@ -88,8 +88,8 @@ export function withBundledBrowserMcp(
           ? scopedEndpoint(value)
           : value)
       : parsedArgs;
-    const env = environment.SUOCODE_BROWSER_MCP_ENV
-      ? JSON.parse(environment.SUOCODE_BROWSER_MCP_ENV) as unknown
+    const env = environment.COILCOIL_BROWSER_MCP_ENV
+      ? JSON.parse(environment.COILCOIL_BROWSER_MCP_ENV) as unknown
       : {};
     if (!Array.isArray(args) || !args.every((value) => typeof value === "string")) return undefined;
     if (!env || typeof env !== "object" || Array.isArray(env) || !Object.values(env).every((value) => typeof value === "string")) return undefined;
@@ -103,14 +103,14 @@ export function withBundledBrowserMcp(
       ...configuration,
       mcpServers: {
         ...configuration.mcpServers,
-        "suocode-browser": {
+        "coilcoil-browser": {
           ...browser,
           // Preload Chrome DevTools metadata for gateway search, while keeping
           // every browser schema off the model's default direct-tool surface.
           lifecycle: "eager",
           requestTimeoutMs: 300_000,
           directTools: false,
-          description: "通过 Chrome DevTools MCP 按需控制和调试 SuoCode 右侧可见网页。",
+          description: "通过 Chrome DevTools MCP 按需控制和调试 CoilCoil 右侧可见网页。",
           builtin: true,
         },
       },

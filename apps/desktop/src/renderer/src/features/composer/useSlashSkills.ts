@@ -5,7 +5,7 @@ import type {
   ProjectSelection,
   SkillConfigurationSnapshot,
   SkillEntry,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 
 export type SlashToken = {
   query: string;
@@ -148,11 +148,11 @@ export function useSlashMenu({
     }
     try {
       const [skillSnapshot, mcpSnapshot] = await Promise.all([
-        window.suocode.request<SkillConfigurationSnapshot>({
+        window.coilcoil.request<SkillConfigurationSnapshot>({
           type: "get_skill_configuration",
           cwd: project.path,
         }, runtimeId),
-        window.suocode.request<McpConfigurationSnapshot>({
+        window.coilcoil.request<McpConfigurationSnapshot>({
           type: "get_mcp_configuration",
           cwd: project.path,
         }, runtimeId).catch(() => ({ servers: [] as McpConfigurationSnapshot["servers"] })),

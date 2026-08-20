@@ -1,4 +1,4 @@
-import type { MemoryDocumentSnapshot, MemorySettings } from "@suocode/runtime-protocol";
+import type { MemoryDocumentSnapshot, MemorySettings } from "@coilcoil/runtime-protocol";
 
 export type MemoryScope = "global" | "project";
 

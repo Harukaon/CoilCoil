@@ -1,6 +1,6 @@
 import { FolderPlus, LoaderCircle, Power, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { SkillConfigurationSnapshot, SkillEntry, SkillSource } from "@suocode/runtime-protocol";
+import type { SkillConfigurationSnapshot, SkillEntry, SkillSource } from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { canDeleteSkill, canRemoveSkill, managedSkills, skillCountLabel, skillToggleActionLabel, skillToggleLabel, skillToggleTarget } from "./skillPolicy";
 
@@ -39,7 +39,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
   const load = useCallback(async (surfaceError = false): Promise<void> => {
     setLoading(true);
     try {
-      setConfiguration(await window.suocode.request<SkillConfigurationSnapshot>({ type: "get_skill_configuration", cwd }, runtimeId));
+      setConfiguration(await window.coilcoil.request<SkillConfigurationSnapshot>({ type: "get_skill_configuration", cwd }, runtimeId));
     } catch (caught) {
       if (surfaceError) toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -66,7 +66,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
   const toggleSkill = (skill: SkillEntry): void => {
     if (skill.source === "bundled") return;
     void withBusy(
-      () => window.suocode.request<SkillConfigurationSnapshot>({
+      () => window.coilcoil.request<SkillConfigurationSnapshot>({
         type: "set_skill_enabled",
         filePath: skill.filePath,
         enabled: skillToggleTarget(skill),
@@ -77,17 +77,17 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
   };
 
   const addPath = async (): Promise<void> => {
-    const path = await window.suocode.pickDirectory({ title: "选择要导入的技能目录" });
+    const path = await window.coilcoil.pickDirectory({ title: "选择要导入的技能目录" });
     if (!path) return;
     await withBusy(
-      () => window.suocode.request<SkillConfigurationSnapshot>({ type: "add_skill_path", path, cwd }, runtimeId),
+      () => window.coilcoil.request<SkillConfigurationSnapshot>({ type: "add_skill_path", path, cwd }, runtimeId),
       "已导入技能目录",
     );
   };
 
   const removePath = (path: string): void => {
     void withBusy(
-      () => window.suocode.request<SkillConfigurationSnapshot>({ type: "remove_skill_path", path, cwd }, runtimeId),
+      () => window.coilcoil.request<SkillConfigurationSnapshot>({ type: "remove_skill_path", path, cwd }, runtimeId),
       "已移除技能目录",
     );
   };
@@ -101,7 +101,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
     }
     setDeleteArmed(undefined);
     void withBusy(
-      () => window.suocode.request<SkillConfigurationSnapshot>({
+      () => window.coilcoil.request<SkillConfigurationSnapshot>({
         type: deletesSource ? "delete_skill" : "remove_skill",
         filePath: skill.filePath,
         cwd,
@@ -112,7 +112,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
 
   const deleteInvalidSkill = (filePath: string): void => {
     void withBusy(
-      () => window.suocode.request<SkillConfigurationSnapshot>({ type: "delete_skill", filePath, cwd }, runtimeId),
+      () => window.coilcoil.request<SkillConfigurationSnapshot>({ type: "delete_skill", filePath, cwd }, runtimeId),
       "已删除无效 Skill",
     );
   };
@@ -127,7 +127,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
             <strong>已发现的技能</strong>
             {configuration ? <small>{skillCountLabel(configuration.skills)}</small> : null}
           </div>
-          <p>技能会从约定目录自动发现；从其他位置导入后，会复制到 SuoCode 自维护目录，不依赖原目录。</p>
+          <p>技能会从约定目录自动发现；从其他位置导入后，会复制到 CoilCoil 自维护目录，不依赖原目录。</p>
         </div>
         <div className="skills-toolbar">
           <button type="button" disabled={busy || loading} onClick={() => void addPath()}>
@@ -191,7 +191,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
                     className={`skill-delete${armed ? " armed" : ""}`}
                     disabled={busy}
                     aria-label={armed ? `再次确认${deletesSource ? "删除" : "移除导入"} ${skill.name}` : `${deletesSource ? "删除" : "移除导入"} ${skill.name}`}
-                    title={armed ? "再次点击确认" : deletesSource ? "删除技能及 SuoCode 自维护副本" : "移除该技能的导入，不修改来源目录"}
+                    title={armed ? "再次点击确认" : deletesSource ? "删除技能及 CoilCoil 自维护副本" : "移除该技能的导入，不修改来源目录"}
                     onClick={() => removeSkill(skill)}
                   >
                     <Trash2 size={13} />
@@ -203,7 +203,7 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
           </article>
         ))}
         {!loading && !skills.length ? (
-          <p className="skills-empty">尚未发现技能。可将含 SKILL.md 的目录放到约定位置，或点击「导入技能目录」将其复制保存到 SuoCode 自维护目录。</p>
+          <p className="skills-empty">尚未发现技能。可将含 SKILL.md 的目录放到约定位置，或点击「导入技能目录」将其复制保存到 CoilCoil 自维护目录。</p>
         ) : null}
       </section>
 

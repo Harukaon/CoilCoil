@@ -79,7 +79,7 @@ test("request interception mocks matching requests and passes unmatched requests
     response: {
       status: 201,
       contentType: "application/json",
-      headers: { "x-suocode-mock": "yes" },
+      headers: { "x-coilcoil-mock": "yes" },
       body: '{"source":"mock"}',
     },
   });
@@ -98,7 +98,7 @@ test("request interception mocks matching requests and passes unmatched requests
   assert.equal(matched.mocked.length, 1);
   assert.deepEqual(matched.mocked[0], {
     status: 201,
-    headers: { "x-suocode-mock": "yes" },
+    headers: { "x-coilcoil-mock": "yes" },
     contentType: "application/json",
     body: '{"source":"mock"}',
   });
@@ -124,7 +124,7 @@ test("newer continue rules override broader block rules", async () => {
     behavior: "continue",
     requestOverrides: {
       method: "POST",
-      headers: { "x-suocode-test": "1" },
+      headers: { "x-coilcoil-test": "1" },
       postData: "probe=true",
     },
   });
@@ -135,7 +135,7 @@ test("newer continue rules override broader block rules", async () => {
   assert.deepEqual(health.continued, [{
     method: "POST",
     postData: "probe=true",
-    headers: { accept: "application/json", "x-suocode-test": "1" },
+    headers: { accept: "application/json", "x-coilcoil-test": "1" },
   }]);
 
   const blocked = new FakeRequest("http://localhost/api/private");

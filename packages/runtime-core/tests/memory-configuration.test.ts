@@ -13,8 +13,8 @@ import { join } from "node:path";
 import type {
   MemoryConfigurationSnapshot,
   MemorySettings,
-} from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+} from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 
 interface MemoryRuntime {
   agentDir: string;
@@ -30,7 +30,7 @@ interface MemoryRuntime {
 }
 
 test("memory configuration reads and saves global and project documents", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-memory-config-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-memory-config-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const storageRoot = join(root, "memory");
@@ -38,7 +38,7 @@ test("memory configuration reads and saves global and project documents", async 
   mkdirSync(join(project, ".git"), { recursive: true });
   const previousStorage = process.env.PI_PROJECT_MEMORY_DIR;
   process.env.PI_PROJECT_MEMORY_DIR = storageRoot;
-  const runtime = Object.create(SuoCodeRuntime.prototype) as MemoryRuntime;
+  const runtime = Object.create(CoilCoilRuntime.prototype) as MemoryRuntime;
   runtime.agentDir = agentDir;
   runtime.mcpCwd = (cwd) => cwd ?? project;
   let reloads = 0;
@@ -78,7 +78,7 @@ test("memory configuration reads and saves global and project documents", async 
 });
 
 test("memory configuration lists every project in the store, not just the open one", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-memory-projects-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-memory-projects-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const storageRoot = join(root, "memory");
   const project = join(root, "project-open");
@@ -89,7 +89,7 @@ test("memory configuration lists every project in the store, not just the open o
   mkdirSync(join(storageRoot, "project-blank"), { recursive: true });
   const previousStorage = process.env.PI_PROJECT_MEMORY_DIR;
   process.env.PI_PROJECT_MEMORY_DIR = storageRoot;
-  const runtime = Object.create(SuoCodeRuntime.prototype) as MemoryRuntime;
+  const runtime = Object.create(CoilCoilRuntime.prototype) as MemoryRuntime;
   runtime.agentDir = join(root, "agent");
   runtime.mcpCwd = (cwd) => cwd ?? project;
   runtime.reloadActiveSessionResources = () => undefined;

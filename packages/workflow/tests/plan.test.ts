@@ -88,7 +88,7 @@ async function waitFor<T>(read: () => T | undefined, timeoutMs = 2_000): Promise
 }
 
 async function createPlanFixture(t: test.TestContext) {
-  const root = await mkdtemp(join(tmpdir(), "suocode-plan-"));
+  const root = await mkdtemp(join(tmpdir(), "coilcoil-plan-"));
   t.after(async () => rm(root, { recursive: true, force: true }));
   const branch: any[] = [];
   const context = {
@@ -130,7 +130,7 @@ test("plan Markdown round-trips without imposing a document schema", async (t) =
   const { plan } = await createPlanFixture(t);
   const raw = serializePlanFile(plan);
   assert.equal(raw, plan.markdown, "the persisted file must be the Markdown document itself");
-  assert.doesNotMatch(raw, /suocode-plan:v1/);
+  assert.doesNotMatch(raw, /coilcoil-plan:v1/);
   const serialized = raw
     .replace("- [ ] 写入计划文件", "- [x] 持久化计划文件")
     .replace("- [ ] 等待用户审批", "> 等待界面审批");

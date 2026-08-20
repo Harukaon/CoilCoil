@@ -1,4 +1,4 @@
-import type { McpServerRuntimeStatus } from "@suocode/runtime-protocol";
+import type { McpServerRuntimeStatus } from "@coilcoil/runtime-protocol";
 
 /**
  * The inspector panel exposes exactly two concepts, deliberately ignoring
@@ -114,7 +114,7 @@ export type McpOrigin = {
 };
 
 /**
- * An imported server's definition lives in another app's config file. SuoCode
+ * An imported server's definition lives in another app's config file. CoilCoil
  * can mount it and layer local overrides on top, but editing the definition
  * here would silently fork it — so the origin is surfaced and the fields are
  * locked.
@@ -125,7 +125,7 @@ export function isMountedMcpServer(server: Pick<McpOrigin, "sourceKind">): boole
 
 /**
  * Name the app a mounted server came from. This reads `importKind` rather than
- * the path: for imports the adapter points `source` at SuoCode's own config,
+ * the path: for imports the adapter points `source` at CoilCoil's own config,
  * because that is where overrides are written, so the path says nothing about
  * where the definition actually lives.
  */

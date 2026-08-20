@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, GoalState, SubagentActivity, TodoItem } from "@suocode/runtime-protocol";
+import type { ChatMessage, GoalState, SubagentActivity, TodoItem } from "@coilcoil/runtime-protocol";
 import type { SlashMenuItem } from "../composer/useSlashSkills";
 import { SubagentCard } from "../subagents/SubagentActivity";
 import { goalStatusLine, goalToggleLabel } from "./goalPresentation";

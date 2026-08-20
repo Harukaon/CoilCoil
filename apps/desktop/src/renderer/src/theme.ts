@@ -22,7 +22,7 @@ export type ResolvedTheme = "light" | "dark";
 export type SurfaceStyle = "flat" | "layered";
 
 /**
- * 暗色色调。浅色是 SuoCode 自己的取色，只有一套；暗色的明度阶梯和中性色饱和度
+ * 暗色色调。浅色是 CoilCoil 自己的取色，只有一套；暗色的明度阶梯和中性色饱和度
  * 分别拟合自几套成熟的暗色主题，见 theme-tokens.css 顶部的说明。
  */
 export type DarkTone = "graphite" | "midnight" | "mauve" | "ember";
@@ -53,10 +53,10 @@ export interface ToneDefinition<Id extends string> {
 export type LightToneDefinition = ToneDefinition<LightTone>;
 export type DarkToneDefinition = ToneDefinition<DarkTone>;
 
-export const THEME_STORAGE_KEY = "suocode.theme";
-export const SURFACE_STORAGE_KEY = "suocode.surface";
-export const DARK_TONE_STORAGE_KEY = "suocode.dark-tone";
-export const LIGHT_TONE_STORAGE_KEY = "suocode.light-tone";
+export const THEME_STORAGE_KEY = "coilcoil.theme";
+export const SURFACE_STORAGE_KEY = "coilcoil.surface";
+export const DARK_TONE_STORAGE_KEY = "coilcoil.dark-tone";
+export const LIGHT_TONE_STORAGE_KEY = "coilcoil.light-tone";
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
 export const DEFAULT_SURFACE_STYLE: SurfaceStyle = "flat";
 export const DEFAULT_DARK_TONE: DarkTone = "graphite";
@@ -72,7 +72,7 @@ export const LIGHT_TONES: LightToneDefinition[] = [
   {
     id: "paper",
     name: "暖纸",
-    description: "SuoCode 自己的暖纸色调，取值原样保留。",
+    description: "CoilCoil 自己的暖纸色调，取值原样保留。",
     swatch: { hue: 60, saturation: 6, chrome: 93.4, content: 96.9, raised: 100, border: 86.1, muted: 56, text: 13.7 },
   },
   {
@@ -117,7 +117,7 @@ export const DARK_TONES: DarkToneDefinition[] = [
   {
     id: "ember",
     name: "暖夜",
-    description: "SuoCode 自己的暖中性，按同一套阶梯重排。",
+    description: "CoilCoil 自己的暖中性，按同一套阶梯重排。",
     swatch: { hue: 40, saturation: 8, chrome: 9.5, content: 12.5, raised: 19, border: 18.9, muted: 60, text: 79 },
   },
 ];
@@ -190,7 +190,7 @@ function paint(mode: ThemeMode, surface: SurfaceStyle, lightTone: LightTone, dar
   // 窗口是半透明的，露出的画布底色归主进程管。读实际生效的令牌而不是自己再算
   // 一遍，色调改了这里不会漏掉。
   const fill = getComputedStyle(root).getPropertyValue("--shell-fill").trim();
-  if (fill) void window.suocode?.setWindowBackground(fill);
+  if (fill) void window.coilcoil?.setWindowBackground(fill);
 }
 
 export function applyTheme(mode: ThemeMode): void {

@@ -94,7 +94,7 @@ export class BrowserGuestRegistry {
   }
 
   waitForLayer(): Promise<void> {
-    if (this.disposed) return Promise.reject(new Error("SuoCode 正在关闭。"));
+    if (this.disposed) return Promise.reject(new Error("CoilCoil 正在关闭。"));
     if (this.layerReady) return Promise.resolve();
     return new Promise<void>((resolve, reject) => {
       const waiter = {
@@ -115,7 +115,7 @@ export class BrowserGuestRegistry {
    * stale report from a previous element cannot satisfy a newer request.
    */
   expectGuest(tabId: string, nonce: string): Promise<number> {
-    if (this.disposed) return Promise.reject(new Error("SuoCode 正在关闭。"));
+    if (this.disposed) return Promise.reject(new Error("CoilCoil 正在关闭。"));
     if (this.pending.has(tabId)) return Promise.reject(new Error(`标签页 ${tabId} 已在等待浏览器视图。`));
     return new Promise<number>((resolve, reject) => {
       const entry: PendingGuest = {
@@ -201,12 +201,12 @@ export class BrowserGuestRegistry {
     this.disposed = true;
     for (const [tabId, entry] of this.pending) {
       this.clearTimer(entry.timer);
-      entry.reject(new Error("SuoCode 正在关闭。"));
+      entry.reject(new Error("CoilCoil 正在关闭。"));
       this.pending.delete(tabId);
     }
     for (const waiter of this.layerWaiters) {
       this.clearTimer(waiter.timer);
-      waiter.reject(new Error("SuoCode 正在关闭。"));
+      waiter.reject(new Error("CoilCoil 正在关闭。"));
     }
     this.layerWaiters.clear();
     this.bindings.clear();

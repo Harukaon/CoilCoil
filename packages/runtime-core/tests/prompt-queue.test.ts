@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { RuntimeEvent } from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+import type { RuntimeEvent } from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 import { ToolRunIds } from "../src/tool-run-ids.js";
 
 interface Deferred {
@@ -33,7 +33,7 @@ function createQueueHarness(root: string, failures = new Set<number>()) {
   const events: RuntimeEvent[] = [];
   const calls: string[] = [];
   const gates: Deferred[] = [];
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     onEvent: (event) => events.push(event),
@@ -87,7 +87,7 @@ function createQueueHarness(root: string, failures = new Set<number>()) {
 }
 
 test("messages submitted during a run execute strictly FIFO after each run settles", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-prompt-queue-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-prompt-queue-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const harness = createQueueHarness(root);
 
@@ -113,7 +113,7 @@ test("messages submitted during a run execute strictly FIFO after each run settl
 });
 
 test("a failed queued prompt is removed and does not block later messages", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-prompt-queue-failure-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-prompt-queue-failure-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const harness = createQueueHarness(root, new Set([1]));
 
@@ -131,7 +131,7 @@ test("a failed queued prompt is removed and does not block later messages", asyn
 });
 
 test("a prompt accepted after its predecessor settled is still sent", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-prompt-queue-late-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-prompt-queue-late-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const harness = createQueueHarness(root);
 
@@ -155,7 +155,7 @@ test("a prompt accepted after its predecessor settled is still sent", async (con
 });
 
 test("a queued prompt can be withdrawn before it starts", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-prompt-queue-cancel-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-prompt-queue-cancel-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const harness = createQueueHarness(root);
 

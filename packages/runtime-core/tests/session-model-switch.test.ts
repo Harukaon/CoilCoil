@@ -5,8 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
-import type { PendingSessionModel, RuntimeConfiguration, RuntimeEvent, SessionSnapshot, ThinkingLevel } from "@suocode/runtime-protocol";
-import { SuoCodeRuntime } from "../src/index.js";
+import type { PendingSessionModel, RuntimeConfiguration, RuntimeEvent, SessionSnapshot, ThinkingLevel } from "@coilcoil/runtime-protocol";
+import { CoilCoilRuntime } from "../src/index.js";
 
 const EMPTY_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
 
@@ -85,7 +85,7 @@ function snapshot(session: ModelSessionDouble): SessionSnapshot {
 }
 
 test("an idle session commits its model before publishing the new snapshot", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-session-model-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-session-model-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const previous = model("pierce", "gpt-5.6-sol");
   const next = model("xai", "grok-4.5");
@@ -111,7 +111,7 @@ test("an idle session commits its model before publishing the new snapshot", asy
     getModel: (provider: string, id: string) => provider === next.provider && id === next.id ? next : undefined,
     checkAuth: async () => true,
   } as unknown as ModelRuntime;
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     modelRuntime,
@@ -145,7 +145,7 @@ test("an idle session commits its model before publishing the new snapshot", asy
 });
 
 test("a running session records a model switch for the next request", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "suocode-running-model-"));
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-running-model-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const current = model("pierce", "gpt-5.6-sol");
   const next = model("xai", "grok-4.5");
@@ -163,7 +163,7 @@ test("a running session records a model switch for the next request", async (con
     getModel: (provider: string, id: string) => provider === next.provider && id === next.id ? next : undefined,
     checkAuth: async () => true,
   } as unknown as ModelRuntime;
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     modelRuntime,

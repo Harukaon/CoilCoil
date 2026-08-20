@@ -46,7 +46,7 @@ function scheduleClassification(): void {
     inFlight = undefined;
     if (!paths.length) return;
     try {
-      const result = await window.suocode.classifyPaths(paths);
+      const result = await window.coilcoil.classifyPaths(paths);
       for (const path of paths) known.set(path, result[path] ?? "missing");
     } catch {
       // Leave the paths unknown: the link still works, it just keeps the

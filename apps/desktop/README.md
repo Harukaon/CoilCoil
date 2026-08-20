@@ -1,6 +1,6 @@
-# SuoCode Desktop
+# CoilCoil Desktop
 
-SuoCode Desktop is the self-contained GUI distribution of SuoCode. It provides a real Agent workspace rather than an editor shell: persistent conversations, live model output, tools, plans, Git changes, terminal activity, and project files are all backed by the embedded runtime.
+CoilCoil Desktop is the self-contained GUI distribution of CoilCoil. It provides a real Agent workspace rather than an editor shell: persistent conversations, live model output, tools, plans, Git changes, terminal activity, and project files are all backed by the embedded runtime.
 
 ## Runtime boundary
 

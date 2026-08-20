@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { SuoCodeRuntime } from "@suocode/runtime-core";
-import type { RuntimeConfiguration, RuntimeEvent, ThinkingLevel } from "@suocode/runtime-protocol";
+import { CoilCoilRuntime } from "@coilcoil/runtime-core";
+import type { RuntimeConfiguration, RuntimeEvent, ThinkingLevel } from "@coilcoil/runtime-protocol";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -58,21 +58,21 @@ function parseArgs(argv: string[]): CliOptions {
   if (Boolean(provider) !== Boolean(modelId)) {
     throw new Error("--provider and --model must be provided together.");
   }
-  return { cwd, fresh, help, version, provider, modelId, apiKey: apiKey ?? process.env.SUOCODE_API_KEY, thinkingLevel };
+  return { cwd, fresh, help, version, provider, modelId, apiKey: apiKey ?? process.env.COILCOIL_API_KEY, thinkingLevel };
 }
 
 function printHelp(): void {
   stdout.write(
     [
-      `SuoCode ${VERSION}`,
+      `CoilCoil ${VERSION}`,
       "",
-      "Usage: suocode [project] [options]",
+      "Usage: coilcoil [project] [options]",
       "",
       "Options:",
       "  --new                        start with a fresh session",
       "  --provider <provider>        configure the initial provider",
       "  --model <model>              configure the initial model",
-      "  --api-key <key>              provider API key (SUOCODE_API_KEY is preferred)",
+      "  --api-key <key>              provider API key (COILCOIL_API_KEY is preferred)",
       "  --thinking <level>           off|minimal|low|medium|high|xhigh|max",
       "  -h, --help                   show this help",
       "  -v, --version                show the version",
@@ -84,7 +84,7 @@ function printHelp(): void {
       "  /model <provider> <model>    select a model",
       "  /abort                       stop the current run",
       "  /help                        show this help",
-      "  /exit                        quit SuoCode",
+      "  /exit                        quit CoilCoil",
       "",
       "Messages entered while the Agent is running steer the current run.",
       "",
@@ -105,7 +105,7 @@ function eventPrinter(event: RuntimeEvent): void {
 }
 
 async function ensureModel(
-  runtime: SuoCodeRuntime,
+  runtime: CoilCoilRuntime,
   configuration: RuntimeConfiguration,
   options: CliOptions,
 ): Promise<RuntimeConfiguration> {
@@ -135,7 +135,7 @@ async function ensureModel(
   }
 
   throw new Error(
-    "No model credential is configured. Run with --provider, --model and --api-key, or configure SuoCode Desktop first.",
+    "No model credential is configured. Run with --provider, --model and --api-key, or configure CoilCoil Desktop first.",
   );
 }
 
@@ -150,9 +150,9 @@ async function main(): Promise<void> {
     return;
   }
   if (!existsSync(options.cwd)) throw new Error(`Project does not exist: ${options.cwd}`);
-  const dataRoot = resolve(process.env.SUOCODE_DATA_DIR ?? join(homedir(), ".suocode"));
+  const dataRoot = resolve(process.env.COILCOIL_DATA_DIR ?? join(homedir(), ".coilcoil"));
   let running = false;
-  const runtime = new SuoCodeRuntime({
+  const runtime = new CoilCoilRuntime({
     agentDir: join(dataRoot, "agent"),
     sessionDir: join(dataRoot, "sessions"),
     onEvent: (event) => {
@@ -169,7 +169,7 @@ async function main(): Promise<void> {
     if (!options.fresh && sessions[0]) await runtime.openSession(options.cwd, sessions[0].path);
     else await runtime.createSession(options.cwd);
 
-    stdout.write(`\nSuoCode · ${basename(options.cwd)}\nType /help for commands.\n\n`);
+    stdout.write(`\nCoilCoil · ${basename(options.cwd)}\nType /help for commands.\n\n`);
     for (;;) {
       const input = (await terminal.question(running ? "↳ " : "› ")).trim();
       if (!input) continue;
@@ -220,6 +220,6 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`SuoCode: ${message}\n`);
+  process.stderr.write(`CoilCoil: ${message}\n`);
   process.exitCode = 1;
 });

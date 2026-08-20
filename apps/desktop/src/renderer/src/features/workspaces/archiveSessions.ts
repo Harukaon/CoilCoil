@@ -1,4 +1,4 @@
-import type { ProjectSelection, SessionSummary } from "@suocode/runtime-protocol";
+import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protocol";
 
 /** How many archived rows a group shows before it asks to be expanded. */
 export const ARCHIVE_ROW_BATCH = 8;

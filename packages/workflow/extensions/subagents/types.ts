@@ -1,10 +1,10 @@
-export const SUBAGENT_ACTIVITY_CHANNEL = "suocode:subagents:activity:v1";
-export const SUBAGENT_RPC_REQUEST_CHANNEL = "suocode:subagents:rpc:v1:request";
+export const SUBAGENT_ACTIVITY_CHANNEL = "coilcoil:subagents:activity:v1";
+export const SUBAGENT_RPC_REQUEST_CHANNEL = "coilcoil:subagents:rpc:v1:request";
 export const SUBAGENT_RUN_ENTRY_TYPE = "subagent-run";
-export const SUBAGENT_META_ENTRY_TYPE = "suocode-subagent-meta";
+export const SUBAGENT_META_ENTRY_TYPE = "coilcoil-subagent-meta";
 
 export function subagentRpcReplyChannel(requestId: string): string {
-  return `suocode:subagents:rpc:v1:reply:${requestId}`;
+  return `coilcoil:subagents:rpc:v1:reply:${requestId}`;
 }
 
 export type SubagentRunStatus = "pending" | "running" | "completed" | "failed" | "stopped";

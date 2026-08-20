@@ -1,4 +1,4 @@
-# SuoCode Desktop 当前缺陷清单
+# CoilCoil Desktop 当前缺陷清单
 
 本文档记录 2026-08-07 桌面端测试中确认的缺陷。这里的条目优先于新增大型功能；每项修复都应经过窄窗口、历史会话恢复和打包应用回归。
 
@@ -51,7 +51,7 @@
 ### 拖放目标必须跟随当前编辑器
 
 - 当前问题：从文件树拖放文件或文件夹时，路径总是进入底部 Composer，即使用户正在编辑历史消息。
-- 目标：拖放到哪个文本编辑器，就向哪个编辑器插入带单引号的绝对路径，例如 `'/path/to/project/SuoCode'`。
+- 目标：拖放到哪个文本编辑器，就向哪个编辑器插入带单引号的绝对路径，例如 `'/path/to/project/CoilCoil'`。
 - 不再实现附件卡片、特殊标记或富文本引用；路径始终是可直接编辑、复制和发送的纯文本。
 - 验收：文件和文件夹都支持；路径中含空格或中文也可正确发送；历史编辑和底部 Composer 互不串写。
 
@@ -114,12 +114,12 @@
 - 原因方向：后台 worker 可能直接使用 Electron 应用可执行文件启动 Node/Pi CLI，macOS 因而把每个 worker 识别为新的 GUI 应用实例，而不是无界面的后台子进程。
 - 目标：子 Agent、memory worker 和其他 Runtime worker 必须使用真正的无界面进程启动方式，不注册 Dock 应用，不创建窗口，不激活应用。
 - 实现审查：
-  - 检查打包环境下 `process.execPath` 是否指向 Electron/SuoCode 可执行文件。
+  - 检查打包环境下 `process.execPath` 是否指向 Electron/CoilCoil 可执行文件。
   - Electron 可执行文件承载 Node worker 时，确保使用正确的 Node 模式环境和后台启动参数；如果仍会注册 GUI 实例，应改用安装包内独立的 Node sidecar/runtime launcher。
   - worker 的 stdio、IPC、退出码和进程组仍需保留，不能通过脱离管理来隐藏图标。
   - 子 Agent 停止、异常退出或主应用退出后，必须清理对应 worker，不能留下孤儿进程。
 - 验收：
-  1. 同时启动 1 个、3 个和更多子 Agent，Dock 中始终只有一个 SuoCode 图标。
+  1. 同时启动 1 个、3 个和更多子 Agent，Dock 中始终只有一个 CoilCoil 图标。
   2. 不出现 `exec`、Electron 或其他临时应用图标。
   3. 子 Agent 启动过程中不弹窗、不抢焦点、不切换当前 Space。
   4. 子 Agent 的流式事件、停止操作和退出状态保持正常。

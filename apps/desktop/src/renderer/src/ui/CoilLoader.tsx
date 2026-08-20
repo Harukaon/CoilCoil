@@ -8,10 +8,10 @@ import type { CSSProperties } from "react";
  * down as a whole, so `size` is the height it occupies and the width follows the
  * 4:1 shape. Colour comes from the filter, not from here.
  */
-export function SuoLoader({ size = 14 }: { size?: number }): React.JSX.Element {
+export function CoilLoader({ size = 14 }: { size?: number }): React.JSX.Element {
   return (
-    <span className="suo-loader" style={{ "--loader-scale": String(size / 48) } as CSSProperties}>
-      <span className="suo-loader-ink" />
+    <span className="coil-loader" style={{ "--loader-scale": String(size / 48) } as CSSProperties}>
+      <span className="coil-loader-ink" />
     </span>
   );
 }

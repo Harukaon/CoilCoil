@@ -7,7 +7,7 @@ const DEFAULT_BROWSER_URL = "about:blank";
 /**
  * Normalize text entered by the user or sent through the browser MCP.
  *
- * SuoCode intentionally does not maintain a protocol or filesystem allowlist:
+ * CoilCoil intentionally does not maintain a protocol or filesystem allowlist:
  * the embedded Chromium instance decides whether it can load a given URL.
  * Absolute paths and home-relative paths are converted to file URLs so local
  * reports can be opened without callers having to encode them first.

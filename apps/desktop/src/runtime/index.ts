@@ -1,4 +1,4 @@
-import { attachProcessIpc } from "@suocode/runtime-server";
+import { attachProcessIpc } from "@coilcoil/runtime-server";
 import { chmodSync, existsSync, linkSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -7,8 +7,8 @@ function shellQuote(value: string): string {
 }
 
 function installHeadlessNodeExecutable(): void {
-  const source = process.env.SUOCODE_NODE_EXEC_PATH;
-  const agentDir = process.env.SUOCODE_AGENT_DIR;
+  const source = process.env.COILCOIL_NODE_EXEC_PATH;
+  const agentDir = process.env.COILCOIL_AGENT_DIR;
   if (!source || !agentDir || !existsSync(source)) return;
   const binDir = join(agentDir, "runtime-bin");
   const target = join(binDir, process.platform === "win32" ? "node.exe" : "node");

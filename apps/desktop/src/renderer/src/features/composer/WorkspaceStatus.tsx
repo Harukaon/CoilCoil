@@ -2,8 +2,8 @@ import * as Popover from "@radix-ui/react-popover";
 import { FileCode2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import { summarizeCacheUsage } from "@suocode/runtime-protocol";
-import type { ContextUsage, ProjectSelection, ResponseMetrics, RuntimeTokenBreakdown, TokenUsage } from "@suocode/runtime-protocol";
+import { summarizeCacheUsage } from "@coilcoil/runtime-protocol";
+import type { ContextUsage, ProjectSelection, ResponseMetrics, RuntimeTokenBreakdown, TokenUsage } from "@coilcoil/runtime-protocol";
 
 function pathLabel(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");

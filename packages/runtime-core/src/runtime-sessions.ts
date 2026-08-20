@@ -19,7 +19,7 @@ import {
   type SessionSnapshot,
   type SessionSummary,
   type ThinkingLevel,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import {
   existsSync,
   statSync,
@@ -228,7 +228,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     sessionManager: SessionManager,
     initialModel?: SessionModelSelection,
   ): Promise<SessionSnapshot> {
-    const timingEnabled = process.env.SUOCODE_RUNTIME_TIMING === "1";
+    const timingEnabled = process.env.COILCOIL_RUNTIME_TIMING === "1";
     const timingStartedAt = Date.now();
     const timings: Record<string, number> = {};
     let timingCheckpoint = timingStartedAt;
@@ -328,7 +328,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       additionalPromptTemplatePaths: this.promptPaths,
       noExtensions: true,
       noThemes: true,
-      // SuoCode treats SYSTEM.md as an additive global/project layer. Pi's
+      // CoilCoil treats SYSTEM.md as an additive global/project layer. Pi's
       // native discovery replaces the base prompt and only selects one scope.
       systemPromptOverride: () => undefined,
       appendSystemPrompt: systemPromptLayerFiles({
@@ -360,7 +360,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     const extensionErrors = loader.getExtensions().errors;
     if (extensionErrors.length > 0) {
       const message = extensionErrors.map((entry) => `${entry.path}: ${entry.error}`).join("\n");
-      throw new Error(`SuoCode workflow failed to load:\n${message}`);
+      throw new Error(`CoilCoil workflow failed to load:\n${message}`);
     }
     if (timingEnabled) {
       for (const extension of loader.getExtensions().extensions) {
@@ -371,7 +371,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
           try {
             return await handler(...args);
           } finally {
-            process.stderr.write(`[suocode-runtime-timing] ${JSON.stringify({ extension: extension.path, event: "session_start", handler: index, elapsedMs: Date.now() - startedAt })}\n`);
+            process.stderr.write(`[coilcoil-runtime-timing] ${JSON.stringify({ extension: extension.path, event: "session_start", handler: index, elapsedMs: Date.now() - startedAt })}\n`);
           }
         }) as typeof handler));
       }
@@ -400,7 +400,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
     if (missingTools.length > 0) {
       await shutdownAgentSession(created.session, "quit").catch(() => undefined);
-      throw new Error(`SuoCode workflow did not activate required tools: ${missingTools.join(", ")}`);
+      throw new Error(`CoilCoil workflow did not activate required tools: ${missingTools.join(", ")}`);
     }
 
     const reconstructed = this.reconstructState(created.session);
@@ -462,7 +462,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       });
     }, 0);
     if (timingEnabled) {
-      process.stderr.write(`[suocode-runtime-timing] ${JSON.stringify({ cwd, totalMs: Date.now() - timingStartedAt, ...timings })}\n`);
+      process.stderr.write(`[coilcoil-runtime-timing] ${JSON.stringify({ cwd, totalMs: Date.now() - timingStartedAt, ...timings })}\n`);
     }
     return snapshot;
   }

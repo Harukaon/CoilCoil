@@ -32,10 +32,10 @@ export function ConfirmDialog({
           key={action.label}
           className={
             action.variant === "primary"
-              ? "suo-modal-button primary"
+              ? "coil-modal-button primary"
               : action.variant === "danger"
-                ? "suo-modal-button danger"
-                : "suo-modal-button"
+                ? "coil-modal-button danger"
+                : "coil-modal-button"
           }
           type="button"
           autoFocus={action.autoFocus}

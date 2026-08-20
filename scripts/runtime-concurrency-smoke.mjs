@@ -8,7 +8,7 @@ import { performance } from "node:perf_hooks";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const live = process.argv.includes("--live");
-const temporaryRoot = await mkdtemp(join(tmpdir(), "suocode-concurrency-"));
+const temporaryRoot = await mkdtemp(join(tmpdir(), "coilcoil-concurrency-"));
 const projectA = join(temporaryRoot, "project-a");
 const projectB = join(temporaryRoot, "project-b");
 const projectRestore = join(temporaryRoot, "project-restore");
@@ -17,9 +17,9 @@ await Promise.all([mkdir(projectA), mkdir(projectB), mkdir(projectRestore)]);
 const child = fork(join(root, "apps/desktop/out/main/runtime.js"), [], {
   env: {
     ...process.env,
-    SUOCODE_AGENT_DIR: join(temporaryRoot, "agent"),
-    SUOCODE_SESSION_DIR: join(temporaryRoot, "sessions"),
-    SUOCODE_LEGACY_AGENT_DIR: live ? join(homedir(), ".pi", "agent") : join(temporaryRoot, "no-legacy"),
+    COILCOIL_AGENT_DIR: join(temporaryRoot, "agent"),
+    COILCOIL_SESSION_DIR: join(temporaryRoot, "sessions"),
+    COILCOIL_LEGACY_AGENT_DIR: live ? join(homedir(), ".pi", "agent") : join(temporaryRoot, "no-legacy"),
   },
   stdio: ["ignore", "pipe", "pipe", "ipc"],
 });
@@ -237,8 +237,8 @@ try {
     assert.ok(completedB.messages.some((message) => message.role === "assistant" && message.text.includes(tokenB)));
   }
 
-  process.stdout.write(`SuoCode concurrency smoke passed (cold ${coldOpenMs.toFixed(1)}ms, warm ${warmOpenMs.toFixed(1)}ms, switch ${switchMs.toFixed(1)}ms, 30x restore ${repeatedRestoreMs.toFixed(1)}ms, 100x cached ${cachedSwitchMs.toFixed(1)}ms).\n`);
-  if (process.env.SUOCODE_RUNTIME_TIMING === "1" && stderr) process.stdout.write(stderr);
+  process.stdout.write(`CoilCoil concurrency smoke passed (cold ${coldOpenMs.toFixed(1)}ms, warm ${warmOpenMs.toFixed(1)}ms, switch ${switchMs.toFixed(1)}ms, 30x restore ${repeatedRestoreMs.toFixed(1)}ms, 100x cached ${cachedSwitchMs.toFixed(1)}ms).\n`);
+  if (process.env.COILCOIL_RUNTIME_TIMING === "1" && stderr) process.stdout.write(stderr);
 } finally {
   const runtimeExit = waitForChildExit(child);
   if (child.connected) child.disconnect();

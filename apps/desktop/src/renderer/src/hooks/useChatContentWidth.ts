@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-export const CHAT_WIDTH_KEY = "suocode.chat-content-width";
+export const CHAT_WIDTH_KEY = "coilcoil.chat-content-width";
 export const DEFAULT_CHAT_WIDTH = 820;
 export const MINIMUM_CHAT_WIDTH = 480;
 export const MAXIMUM_CHAT_WIDTH = 1200;

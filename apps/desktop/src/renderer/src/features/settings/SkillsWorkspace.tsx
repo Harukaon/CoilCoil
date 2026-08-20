@@ -26,7 +26,7 @@ export function SkillsWorkspace({
           <span className="settings-icon"><Sparkles size={17} /></span>
           <div>
             <h1 id="skills-workspace-title">技能</h1>
-            <p>管理 SuoCode 在当前工作区中发现和使用的技能。</p>
+            <p>管理 CoilCoil 在当前工作区中发现和使用的技能。</p>
           </div>
         </div>
         <button className="settings-header-action no-drag" type="button" onClick={onClose}>

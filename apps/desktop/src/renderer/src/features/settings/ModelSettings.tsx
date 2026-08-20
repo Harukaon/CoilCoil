@@ -14,7 +14,7 @@ import type {
   RuntimeConfiguration,
   TestProviderConnectionResult,
   ThinkingLevel,
-} from "@suocode/runtime-protocol";
+} from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 import {
   loadModelCatalog,
@@ -304,7 +304,7 @@ function ProviderCredentialEditor({
       {configuration.oauth ? <div className={`provider-oauth-action ${oauthConfigured ? "configured" : ""}`}>
         <div>
           <strong>{configuration.oauth.label}</strong>
-          <span>{oauthConfigured ? "当前使用订阅凭据" : "由 SuoCode 打开浏览器并保存授权凭据"}</span>
+          <span>{oauthConfigured ? "当前使用订阅凭据" : "由 CoilCoil 打开浏览器并保存授权凭据"}</span>
         </div>
         {oauthConfigured
           ? <button type="button" disabled={oauthBusy} onClick={onOAuthLogout}><LogOut size={13} />退出登录</button>
@@ -412,7 +412,7 @@ function OpenAIResponsesWsEditor({ runtimeId, onSaved, onReload }: {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    void window.suocode.request<OpenAIResponsesWsConfiguration>({ type: "get_openai_responses_ws_configuration" }, runtimeId)
+    void window.coilcoil.request<OpenAIResponsesWsConfiguration>({ type: "get_openai_responses_ws_configuration" }, runtimeId)
       .then((next) => {
         setConfiguration(next);
         setBaseUrl(next.baseUrl);
@@ -424,7 +424,7 @@ function OpenAIResponsesWsEditor({ runtimeId, onSaved, onReload }: {
   const save = async (): Promise<void> => {
     setSaving(true);
     try {
-      const next = await window.suocode.request<RuntimeConfiguration>({
+      const next = await window.coilcoil.request<RuntimeConfiguration>({
         type: "save_openai_responses_ws_configuration",
         input: {
           baseUrl,
@@ -433,7 +433,7 @@ function OpenAIResponsesWsEditor({ runtimeId, onSaved, onReload }: {
           fast,
         },
       }, runtimeId);
-      const stored = await window.suocode.request<OpenAIResponsesWsConfiguration>({ type: "get_openai_responses_ws_configuration" }, runtimeId);
+      const stored = await window.coilcoil.request<OpenAIResponsesWsConfiguration>({ type: "get_openai_responses_ws_configuration" }, runtimeId);
       setConfiguration(stored);
       setApiKey("");
       onSaved(next);
@@ -448,16 +448,16 @@ function OpenAIResponsesWsEditor({ runtimeId, onSaved, onReload }: {
 
   return <form className="openai-responses-ws-editor" onSubmit={(event) => { event.preventDefault(); void save(); }}>
     <header className="provider-editor-heading">
-      <div><span className="provider-source-tag">SuoCode 自有 Pi 扩展</span><strong>OpenAI Response (WS)</strong><small>面向兼容 OpenAI Codex Responses WebSocket 的服务；支持普通代理 API Key，不要求 ChatGPT accountId，并保持持久 WebSocket。</small></div>
+      <div><span className="provider-source-tag">CoilCoil 自有 Pi 扩展</span><strong>OpenAI Response (WS)</strong><small>面向兼容 OpenAI Codex Responses WebSocket 的服务；支持普通代理 API Key，不要求 ChatGPT accountId，并保持持久 WebSocket。</small></div>
       <button className="primary-button" type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存并连接</button>
     </header>
-    <div className="provider-native-summary"><strong>由 SuoCode 扩展独立注册</strong><p>内部标识为 <code>openai-responses-ws</code>，不会覆盖已有服务商或 Pi 内置的 <code>openai-codex-responses</code>。模型目录从服务端的 <code>/v1/models?client_version=pi</code> 自动读取。</p></div>
+    <div className="provider-native-summary"><strong>由 CoilCoil 扩展独立注册</strong><p>内部标识为 <code>openai-responses-ws</code>，不会覆盖已有服务商或 Pi 内置的 <code>openai-codex-responses</code>。模型目录从服务端的 <code>/v1/models?client_version=pi</code> 自动读取。</p></div>
     <div className="settings-grid">
       <label>服务地址（Base URL）<input value={baseUrl} placeholder="http://127.0.0.1:8317" onChange={(event) => setBaseUrl(event.target.value)} /></label>
       <label>API Key<span className="secret-input"><KeyRound size={13} /><input type="password" value={apiKey} autoComplete="off" placeholder={configuration?.apiKeyConfigured ? "已配置；留空即可保留" : "粘贴 API Key"} onChange={(event) => setApiKey(event.target.value)} /></span></label>
     </div>
     <label className="checkbox-setting"><input type="checkbox" checked={fast} onChange={(event) => setFast(event.target.checked)} />启用 Fast / priority mode（仅支持该能力的模型生效）</label>
-    <footer><span>{configuration?.configPath}</span><span className="provider-runtime-note">配置仅保存于 SuoCode 私有运行时。</span></footer>
+    <footer><span>{configuration?.configPath}</span><span className="provider-runtime-note">配置仅保存于 CoilCoil 私有运行时。</span></footer>
   </form>;
 }
 
@@ -561,7 +561,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const load = async (preferredId?: string, nextConfiguration = configuration): Promise<void> => {
     setLoading(true);
     try {
-      const next = await window.suocode.request<ModelProviderConfigurationSnapshot>({ type: "get_model_provider_configuration" }, runtimeId);
+      const next = await window.coilcoil.request<ModelProviderConfigurationSnapshot>({ type: "get_model_provider_configuration" }, runtimeId);
       setSnapshot(next);
       const selected = next.providers.find((provider) => provider.id === preferredId)
         ?? next.providers.find((provider) => provider.id === nextConfiguration?.provider)
@@ -577,7 +577,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
 
   useEffect(() => { void load(); }, [runtimeId]);
 
-  useEffect(() => window.suocode.onRuntimeEvent((event, eventRuntimeId) => {
+  useEffect(() => window.coilcoil.onRuntimeEvent((event, eventRuntimeId) => {
     if (event.type !== "model_provider_auth_updated") return;
     if (eventRuntimeId && runtimeId && eventRuntimeId !== runtimeId) return;
     setOAuthFlow(event.state.status === "cancelled" ? undefined : event.state);
@@ -687,7 +687,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const save = async (): Promise<ModelProviderSaveResult | undefined> => {
     setSaving(true);
     try {
-      const result = await window.suocode.request<ModelProviderSaveResult>({ type: "save_model_provider_configuration", input: buildInput() }, runtimeId);
+      const result = await window.coilcoil.request<ModelProviderSaveResult>({ type: "save_model_provider_configuration", input: buildInput() }, runtimeId);
       onSaved(result.configuration);
       await load(result.provider.id, result.configuration);
       toastSuccess(isBuiltinProvider ? "已保存设置。" : "已保存服务商。");
@@ -705,8 +705,8 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setSaving(true);
     try {
       const next = selectedSource === "built-in"
-        ? await window.suocode.request<RuntimeConfiguration>({ type: "remove_provider_auth", provider: selectedId }, runtimeId)
-        : await window.suocode.request<RuntimeConfiguration>({ type: "remove_model_provider_configuration", provider: selectedId }, runtimeId);
+        ? await window.coilcoil.request<RuntimeConfiguration>({ type: "remove_provider_auth", provider: selectedId }, runtimeId)
+        : await window.coilcoil.request<RuntimeConfiguration>({ type: "remove_model_provider_configuration", provider: selectedId }, runtimeId);
       onSaved(next);
       await load(undefined, next);
       toastSuccess(selectedSource === "built-in" ? "已清除该服务商的凭据。" : "已移除该服务商配置。");
@@ -722,7 +722,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     const provider = selectedId ?? draft?.id;
     if (!provider || !credentialConfiguration.oauth) return;
     try {
-      const state = await window.suocode.request<ModelProviderAuthState>({ type: "start_model_provider_oauth", provider }, runtimeId);
+      const state = await window.coilcoil.request<ModelProviderAuthState>({ type: "start_model_provider_oauth", provider }, runtimeId);
       setOAuthFlow((current) => current?.flowId === state.flowId ? current : state);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
@@ -732,7 +732,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const respondOAuthLogin = async (promptId: string, value: string): Promise<void> => {
     if (!oauthFlow) return;
     try {
-      await window.suocode.request({ type: "respond_model_provider_oauth", flowId: oauthFlow.flowId, promptId, value }, runtimeId);
+      await window.coilcoil.request({ type: "respond_model_provider_oauth", flowId: oauthFlow.flowId, promptId, value }, runtimeId);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
       throw caught;
@@ -743,7 +743,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     const flow = oauthFlow;
     setOAuthFlow(undefined);
     if (!flow || flow.status === "succeeded" || flow.status === "failed" || flow.status === "cancelled") return;
-    void window.suocode.request({ type: "cancel_model_provider_oauth", flowId: flow.flowId }, runtimeId).catch((caught) => {
+    void window.coilcoil.request({ type: "cancel_model_provider_oauth", flowId: flow.flowId }, runtimeId).catch((caught) => {
       toastError(caught instanceof Error ? caught.message : String(caught));
     });
   };
@@ -753,7 +753,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     if (!provider) return;
     setSaving(true);
     try {
-      const next = await window.suocode.request<RuntimeConfiguration>({ type: "remove_provider_auth", provider }, runtimeId);
+      const next = await window.coilcoil.request<RuntimeConfiguration>({ type: "remove_provider_auth", provider }, runtimeId);
       onSaved(next);
       await load(provider, next);
       toastSuccess("已退出订阅登录。");
@@ -778,7 +778,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     try {
       void loadModelCatalog();
       const headers = parseStringMap(providerHeadersText, "服务商请求头");
-      const result = await window.suocode.request<FetchProviderModelsResult>({
+      const result = await window.coilcoil.request<FetchProviderModelsResult>({
         type: "fetch_provider_models",
         input: {
           baseUrl: draft.baseUrl,
@@ -833,7 +833,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     setTesting(true);
     try {
       const headers = parseStringMap(providerHeadersText, "服务商请求头");
-      const result = await window.suocode.request<TestProviderConnectionResult>({
+      const result = await window.coilcoil.request<TestProviderConnectionResult>({
         type: "test_provider_connection",
         input: {
           baseUrl: draft.baseUrl,
@@ -883,7 +883,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
         </section> : null)}
       </aside>
       <section className="provider-editor">
-        {!draft && !loading ? <div className="provider-editor-empty"><CircleDot size={22} /><strong>选择或添加一个服务商</strong><p>所有配置都会写入 SuoCode 私有运行时的 <code>models.json</code>，不会读取或修改用户的本地 Agent 目录。</p></div> : null}
+        {!draft && !loading ? <div className="provider-editor-empty"><CircleDot size={22} /><strong>选择或添加一个服务商</strong><p>所有配置都会写入 CoilCoil 私有运行时的 <code>models.json</code>，不会读取或修改用户的本地 Agent 目录。</p></div> : null}
         {draft?.id === "openai-responses-ws" ? <OpenAIResponsesWsEditor runtimeId={runtimeId} onSaved={onSaved} onReload={(next) => load("openai-responses-ws", next)} /> : draft ? <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
           <header className="provider-editor-heading">
             <div>
@@ -947,7 +947,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
             <div className="settings-grid"><label>模型<SettingsSelect value={testModelId} options={defaultModels.map((model) => ({ value: model.id, label: model.name || model.id, detail: model.id }))} ariaLabel="要测试的模型" placeholder="请选择模型" onChange={(modelId) => { setTestModelId(modelId); const selected = defaultModels.find((model) => model.id === modelId); const levels: ThinkingLevel[] = selected ? modelThinkingLevels(selected, configuration, draft.id) : ["off"]; setThinkingLevel((current) => levels.includes(current) ? current : levels[0]); }} searchable /></label><label>Thinking<SettingsSelect value={thinkingLevel} options={thinkingOptions} ariaLabel="测试 Thinking 强度" onChange={(value) => setThinkingLevel(value as ThinkingLevel)} disabled={thinkingOptions.length <= 1} /></label></div>
             <div className="provider-default-actions"><button className="secondary-button" type="button" disabled={saving || testing || !testModelId} onClick={() => void testConnection()}>{testing ? <LoaderCircle className="spin" size={15} /> : <Zap size={15} />}{testing ? "测试中…" : "测试此模型"}</button></div>
           </section> : null}
-          <footer><span>{snapshot?.configPath}</span><span className="provider-runtime-note">内置协议、模型覆盖和凭据都在 SuoCode 私有运行时中处理。</span></footer>
+          <footer><span>{snapshot?.configPath}</span><span className="provider-runtime-note">内置协议、模型覆盖和凭据都在 CoilCoil 私有运行时中处理。</span></footer>
         </form> : null}
       </section>
     </div>

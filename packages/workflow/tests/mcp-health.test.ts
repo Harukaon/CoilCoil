@@ -7,10 +7,10 @@ import {
   piConfigPath,
 } from "../extensions/mcp-health.ts";
 
-test("MCP health uses the SuoCode-owned Agent directory", () => {
+test("MCP health uses the CoilCoil-owned Agent directory", () => {
   assert.equal(
-    piConfigPath({ PI_CODING_AGENT_DIR: "/tmp/suocode-agent" }),
-    "/tmp/suocode-agent/mcp.json",
+    piConfigPath({ PI_CODING_AGENT_DIR: "/tmp/coilcoil-agent" }),
+    "/tmp/coilcoil-agent/mcp.json",
   );
 });
 
