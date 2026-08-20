@@ -8,7 +8,6 @@ import type {
 	ResponseInputItem,
 	ResponseInputText,
 	ResponseOutputItem,
-	ResponseOutputMessage,
 	ResponseReasoningItem,
 	ResponseStreamEvent,
 	ResponseToolSearchOutputItemParam,
@@ -280,14 +279,16 @@ export function convertResponsesMessages<TApi extends Api>(
 					} else if (msgId.length > 64) {
 						msgId = `msg_${shortHash(msgId)}`;
 					}
+					// This is replayed as request input, not a provider response. Some
+					// OpenAI-compatible gateways reject the response-only `status` field
+					// even though the official SDK's output-message type requires it.
 					output.push({
 						type: "message",
 						role: "assistant",
 						content: [{ type: "output_text", text: sanitizeSurrogates(textBlock.text), annotations: [] }],
-						status: "completed",
 						id: msgId,
 						phase: parsedSignature?.phase,
-					} satisfies ResponseOutputMessage);
+					} as unknown as ResponseInputItem);
 				} else if (block.type === "toolCall") {
 					const toolCall = block as ToolCall;
 					const [, itemIdRaw] = toolCall.id.split("|");

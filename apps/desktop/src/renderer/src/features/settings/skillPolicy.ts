@@ -43,3 +43,8 @@ export function canDeleteSkill(skill: Pick<SkillEntry, "source" | "scope" | "bas
   const baseDir = skill.baseDir.replaceAll("\\", "/").replace(/\/+$/, "");
   return Boolean(root && baseDir && baseDir !== root && baseDir.startsWith(`${root}/`));
 }
+
+/** External and project skill imports can be removed without touching their source directory. */
+export function canRemoveSkill(skill: Pick<SkillEntry, "source">): boolean {
+  return skill.source !== "bundled";
+}

@@ -459,6 +459,8 @@ export class RuntimeServer {
         return runtime.getSkillConfiguration(command.cwd);
       case "set_skill_enabled":
         return runtime.setSkillEnabled(command.filePath, command.enabled, command.cwd);
+      case "remove_skill":
+        return runtime.removeSkill(command.filePath, command.cwd);
       case "delete_skill":
         return runtime.deleteSkill(command.filePath, command.cwd);
       case "add_skill_path":

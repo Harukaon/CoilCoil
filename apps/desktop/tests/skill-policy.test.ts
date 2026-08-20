@@ -3,6 +3,7 @@ import test from "node:test";
 import type { SkillEntry } from "@suocode/runtime-protocol";
 import {
   canDeleteSkill,
+  canRemoveSkill,
   managedSkills,
   skillCountLabel,
   skillEnabledCount,
@@ -89,4 +90,11 @@ test("only user skills copied into the managed directory can be deleted", () => 
   assert.equal(canDeleteSkill(skill({ source: "project", scope: "project", baseDir: "/project/.pi/skills/mine" }), "/agent/skills"), false);
   assert.equal(canDeleteSkill(skill({ source: "agents", baseDir: "/home/.agents/skills/mine" }), "/agent/skills"), false);
   assert.equal(canDeleteSkill(skill({ baseDir: "/agent/skills-other/mine" }), "/agent/skills"), false);
+});
+
+test("external skill imports can be removed without being deletable", () => {
+  assert.equal(canRemoveSkill(skill({ source: "agents" })), true);
+  assert.equal(canRemoveSkill(skill({ source: "project" })), true);
+  assert.equal(canRemoveSkill(skill({ source: "user" })), true);
+  assert.equal(canRemoveSkill(skill({ source: "bundled" })), false);
 });

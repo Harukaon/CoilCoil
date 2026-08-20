@@ -60,6 +60,13 @@ import {
   deleteInvalidManagedSkill,
   validateSkillImport,
 } from "./skill-import-validation.js";
+import {
+  removeSkillOverride,
+  rewriteSkillOverridePaths,
+  skillIsRemoved,
+  skillOverridePattern,
+  skillPatternBaseDir,
+} from "./skill-overrides.js";
 
 export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
   private static readonly defaultMemoryGenerationRules = "只记录跨会话仍会复用的稳定事实、项目约定和用户长期偏好；不要记录临时进度、一次性错误、通用知识或任何密码、API Key、Token、Cookie、私钥和 Authorization。";
@@ -341,23 +348,6 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     return isAbsolute(trimmed) ? resolve(trimmed) : resolve(trimmed);
   }
 
-  protected skillOverridePattern(filePath: string, baseDir: string): string {
-    const pattern = relative(baseDir, filePath).split(sep).join("/");
-    if (!pattern || pattern.startsWith("..")) return filePath;
-    return pattern;
-  }
-
-  protected rewriteSkillOverridePaths(paths: string[], pattern: string, enabled: boolean): string[] {
-    const disablePattern = `-${pattern}`;
-    const enablePattern = `+${pattern}`;
-    const updated = paths.filter((entry) => {
-      const stripped = entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-") ? entry.slice(1) : entry;
-      return stripped !== pattern;
-    });
-    updated.push(enabled ? enablePattern : disablePattern);
-    return updated;
-  }
-
   async getSkillConfiguration(cwd?: string): Promise<SkillConfigurationSnapshot> {
     const resolvedCwd = this.mcpCwd(cwd);
     const settingsManager = this.skillSettingsManager(resolvedCwd);
@@ -370,6 +360,8 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     const diagnostics: SkillDiagnostic[] = [];
     const skills: SkillEntry[] = [];
     const seen = new Set<string>();
+    const skillPaths = settingsManager.getSkillPaths();
+    const projectSkillPaths = [...(settingsManager.getProjectSettings().skills ?? [])];
 
     for (const entry of resolved.skills) {
       const loaded = loadSkills({
@@ -385,7 +377,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
         if (seen.has(skill.filePath)) continue;
         seen.add(skill.filePath);
         const scope = entry.metadata.scope === "project" ? "project" : "user";
-        skills.push({
+        const configuredSkill: SkillEntry = {
           name: skill.name,
           description: skill.description,
           filePath: skill.filePath,
@@ -394,7 +386,8 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
           enabled: entry.enabled,
           disableModelInvocation: skill.disableModelInvocation,
           scope,
-        });
+        };
+        if (!skillIsRemoved(configuredSkill, resolvedCwd, this.agentDir, skillPaths, projectSkillPaths)) skills.push(configuredSkill);
       }
     }
 
@@ -425,8 +418,6 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     }
 
     skills.sort((left, right) => left.name.localeCompare(right.name) || left.filePath.localeCompare(right.filePath));
-    const skillPaths = settingsManager.getSkillPaths();
-    const projectSkillPaths = [...(settingsManager.getProjectSettings().skills ?? [])];
     return {
       agentDir: this.agentDir,
       userSkillsDir: join(this.agentDir, "skills"),
@@ -449,18 +440,34 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     if (skill.source === "bundled") throw new Error("内置技能不能在此开关。");
 
     const settingsManager = this.skillSettingsManager(resolvedCwd);
-    const patternBaseDir = skill.source === "agents"
-      ? join(skill.scope === "project" ? resolvedCwd : homedir(), ".agents")
-      : skill.scope === "project"
-        ? join(resolvedCwd, ".pi")
-        : this.agentDir;
-    const pattern = this.skillOverridePattern(skill.filePath, patternBaseDir);
+    const pattern = skillOverridePattern(skill.filePath, skillPatternBaseDir(skill, resolvedCwd, this.agentDir));
 
     if (skill.scope === "project") {
       const current = [...(settingsManager.getProjectSettings().skills ?? [])];
-      settingsManager.setProjectSkillPaths(this.rewriteSkillOverridePaths(current, pattern, enabled));
+      settingsManager.setProjectSkillPaths(rewriteSkillOverridePaths(current, pattern, enabled));
     } else {
-      settingsManager.setSkillPaths(this.rewriteSkillOverridePaths(settingsManager.getSkillPaths(), pattern, enabled));
+      settingsManager.setSkillPaths(rewriteSkillOverridePaths(settingsManager.getSkillPaths(), pattern, enabled));
+    }
+    this.reloadActiveSessionResources("Skills 重新加载失败");
+    const next = await this.getSkillConfiguration(resolvedCwd);
+    this.updateActiveSkillConfiguration(resolvedCwd, next);
+    return next;
+  }
+
+  async removeSkill(filePath: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
+    const resolvedCwd = this.mcpCwd(cwd);
+    const snapshot = await this.getSkillConfiguration(resolvedCwd);
+    const skill = snapshot.skills.find((entry) => entry.filePath === filePath);
+    if (!skill) throw new Error(`未找到技能：${filePath}`);
+    if (skill.source === "bundled") throw new Error("内置技能不能从 SuoCode 移除。");
+
+    const settingsManager = this.skillSettingsManager(resolvedCwd);
+    const pattern = skillOverridePattern(skill.filePath, skillPatternBaseDir(skill, resolvedCwd, this.agentDir));
+    if (skill.scope === "project") {
+      const current = [...(settingsManager.getProjectSettings().skills ?? [])];
+      settingsManager.setProjectSkillPaths(removeSkillOverride(current, pattern));
+    } else {
+      settingsManager.setSkillPaths(removeSkillOverride(settingsManager.getSkillPaths(), pattern));
     }
     this.reloadActiveSessionResources("Skills 重新加载失败");
     const next = await this.getSkillConfiguration(resolvedCwd);
@@ -492,7 +499,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     }
 
     const settingsManager = this.skillSettingsManager(resolvedCwd);
-    const pattern = this.skillOverridePattern(skill.filePath, this.agentDir);
+    const pattern = skillOverridePattern(skill.filePath, this.agentDir);
     const currentPaths = settingsManager.getSkillPaths();
     const nextPaths = currentPaths.filter((entry) => {
       const stripped = entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-") ? entry.slice(1) : entry;

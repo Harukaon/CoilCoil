@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { SkillConfigurationSnapshot, SkillEntry } from "@suocode/runtime-protocol";
 import test from "node:test";
 import { SuoCodeRuntime } from "../src/index.js";
+import { skillIsRemoved } from "../src/skill-overrides.js";
 
 interface DeleteSkillRuntime {
   agentDir: string;
@@ -13,6 +14,7 @@ interface DeleteSkillRuntime {
   skillSettingsManager(cwd?: string): { getSkillPaths(): string[]; setSkillPaths(paths: string[]): void };
   reloadActiveSessionResources(label?: string): void;
   updateActiveSkillConfiguration(cwd: string, snapshot: SkillConfigurationSnapshot): void;
+  removeSkill(filePath: string, cwd?: string): Promise<SkillConfigurationSnapshot>;
   deleteSkill(filePath: string, cwd?: string): Promise<SkillConfigurationSnapshot>;
   expandSkillPath(path: string): string;
   addSkillPath(path: string, cwd?: string): Promise<SkillConfigurationSnapshot>;
@@ -46,6 +48,10 @@ function userSkill(baseDir: string, filePath: string): SkillEntry {
   };
 }
 
+function agentsSkill(baseDir: string, filePath: string): SkillEntry {
+  return { ...userSkill(baseDir, filePath), source: "agents" };
+}
+
 test("deleteSkill removes a managed user skill and its stale override", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "suocode-skill-delete-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -76,6 +82,42 @@ test("deleteSkill removes a managed user skill and its stale override", async (c
   assert.equal(existsSync(skillDir), false);
   assert.deepEqual(paths, ["other-skill"]);
   assert.deepEqual(current.skills, [entry]);
+});
+
+test("removeSkill removes an Agents skill import without deleting its source", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "suocode-skill-remove-agents-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "project");
+  const skillDir = join(root, ".agents", "skills", "eval");
+  const filePath = join(skillDir, "SKILL.md");
+  mkdirSync(skillDir, { recursive: true });
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(filePath, "# eval\n");
+
+  const entry = agentsSkill(skillDir, filePath);
+  const runtime = Object.create(SuoCodeRuntime.prototype) as DeleteSkillRuntime;
+  runtime.agentDir = agentDir;
+  runtime.mcpCwd = () => cwd;
+  let paths: string[] = [];
+  let current = snapshot(agentDir, [entry]);
+  runtime.getSkillConfiguration = async () => current;
+  runtime.skillSettingsManager = () => ({
+    getSkillPaths: () => paths,
+    setSkillPaths: (next) => {
+      paths = next;
+      current = snapshot(agentDir, []);
+    },
+  });
+  runtime.reloadActiveSessionResources = () => undefined;
+  runtime.updateActiveSkillConfiguration = (_resolvedCwd, next) => { current = next; };
+
+  current = await runtime.removeSkill(filePath, cwd);
+
+  assert.equal(existsSync(filePath), true);
+  assert.deepEqual(paths, ["!skills/eval/SKILL.md"]);
+  assert.deepEqual(current.skills, []);
+  assert.equal(skillIsRemoved(entry, cwd, agentDir, paths, []), true);
 });
 
 test("deleteSkill refuses a user-scoped skill outside the managed directory", async (context) => {

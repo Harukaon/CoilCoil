@@ -2,7 +2,7 @@ import { FolderPlus, LoaderCircle, Power, RefreshCw, Sparkles, Trash2 } from "lu
 import { useCallback, useEffect, useState } from "react";
 import type { SkillConfigurationSnapshot, SkillEntry, SkillSource } from "@suocode/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
-import { canDeleteSkill, managedSkills, skillCountLabel, skillToggleActionLabel, skillToggleLabel, skillToggleTarget } from "./skillPolicy";
+import { canDeleteSkill, canRemoveSkill, managedSkills, skillCountLabel, skillToggleActionLabel, skillToggleLabel, skillToggleTarget } from "./skillPolicy";
 
 const sourceLabel: Record<SkillSource, string> = {
   user: "用户",
@@ -92,16 +92,21 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
     );
   };
 
-  const deleteSkill = (skill: SkillEntry): void => {
-    if (!canDeleteSkill(skill, configuration?.userSkillsDir)) return;
+  const removeSkill = (skill: SkillEntry): void => {
+    if (!canRemoveSkill(skill)) return;
+    const deletesSource = canDeleteSkill(skill, configuration?.userSkillsDir);
     if (deleteArmed !== skill.filePath) {
       setDeleteArmed(skill.filePath);
       return;
     }
     setDeleteArmed(undefined);
     void withBusy(
-      () => window.suocode.request<SkillConfigurationSnapshot>({ type: "delete_skill", filePath: skill.filePath, cwd }, runtimeId),
-      `已删除 ${skill.name}`,
+      () => window.suocode.request<SkillConfigurationSnapshot>({
+        type: deletesSource ? "delete_skill" : "remove_skill",
+        filePath: skill.filePath,
+        cwd,
+      }, runtimeId),
+      deletesSource ? `已删除 ${skill.name}` : `已移除 ${skill.name} 的导入`,
     );
   };
 
@@ -177,19 +182,23 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
                 <Power size={13} />
                 {skillToggleLabel(skill)}
               </button>
-              {canDeleteSkill(skill, configuration?.userSkillsDir) ? (
-                <button
-                  type="button"
-                  className={`skill-delete${deleteArmed === skill.filePath ? " armed" : ""}`}
-                  disabled={busy}
-                  aria-label={deleteArmed === skill.filePath ? `再次确认删除 ${skill.name}` : `删除 ${skill.name}`}
-                  title={deleteArmed === skill.filePath ? "再次点击确认删除" : "删除技能"}
-                  onClick={() => deleteSkill(skill)}
-                >
-                  <Trash2 size={13} />
-                  {deleteArmed === skill.filePath ? "再次确认" : "删除"}
-                </button>
-              ) : null}
+              {canRemoveSkill(skill) ? (() => {
+                const deletesSource = canDeleteSkill(skill, configuration?.userSkillsDir);
+                const armed = deleteArmed === skill.filePath;
+                return (
+                  <button
+                    type="button"
+                    className={`skill-delete${armed ? " armed" : ""}`}
+                    disabled={busy}
+                    aria-label={armed ? `再次确认${deletesSource ? "删除" : "移除导入"} ${skill.name}` : `${deletesSource ? "删除" : "移除导入"} ${skill.name}`}
+                    title={armed ? "再次点击确认" : deletesSource ? "删除技能及 SuoCode 自维护副本" : "移除该技能的导入，不修改来源目录"}
+                    onClick={() => removeSkill(skill)}
+                  >
+                    <Trash2 size={13} />
+                    {armed ? "再次确认" : deletesSource ? "删除" : "移除导入"}
+                  </button>
+                );
+              })() : null}
             </div>
           </article>
         ))}

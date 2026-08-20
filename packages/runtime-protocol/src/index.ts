@@ -1033,6 +1033,7 @@ export type RuntimeCommand =
   | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
   | { type: "get_skill_configuration"; cwd?: string }
   | { type: "set_skill_enabled"; filePath: string; enabled: boolean; cwd?: string }
+  | { type: "remove_skill"; filePath: string; cwd?: string }
   | { type: "delete_skill"; filePath: string; cwd?: string }
   | { type: "add_skill_path"; path: string; cwd?: string }
   | { type: "remove_skill_path"; path: string; cwd?: string }
