@@ -164,6 +164,12 @@ export interface CoilCoilDesktopApi {
   request<T = unknown>(command: RuntimeCommand, runtimeId?: string): Promise<T>;
   onRuntimeEvent(listener: (event: RuntimeEvent, runtimeId?: string) => void): () => void;
   onUpdateAvailable(listener: (update: UpdateAvailable) => void): () => void;
+  /** The three things a title bar does, for the buttons the Renderer draws. */
+  minimizeWindow(): void;
+  toggleWindowMaximized(): void;
+  closeWindow(): void;
+  isWindowMaximized(): Promise<boolean>;
+  onWindowMaximizedChange(listener: (maximized: boolean) => void): () => void;
   /** Hand Renderer entries to the process that owns the log file. */
   writeDiagnostics(batch: DiagnosticLogBatch): void;
   /** Show the log in the file manager and return its path. */

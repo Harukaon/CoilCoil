@@ -35,6 +35,11 @@ const EXTERNAL_OPEN_CHANNEL = "external:open";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
+const WINDOW_MINIMIZE_CHANNEL = "window:minimize";
+const WINDOW_TOGGLE_MAXIMIZED_CHANNEL = "window:toggle-maximized";
+const WINDOW_IS_MAXIMIZED_CHANNEL = "window:is-maximized";
+const WINDOW_MAXIMIZED_CHANNEL = "window:maximized";
+const WINDOW_CLOSE_CHANNEL = "window:close";
 const DIAGNOSTIC_LOG_CHANNEL = "diagnostics:log";
 const DIAGNOSTIC_REVEAL_CHANNEL = "diagnostics:reveal";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
@@ -162,6 +167,15 @@ const api: CoilCoilDesktopApi = {
     ) as RuntimeRequestResult;
     if (!result.ok) throw new Error(result.error);
     return result.value as T;
+  },
+  minimizeWindow: () => ipcRenderer.send(WINDOW_MINIMIZE_CHANNEL),
+  toggleWindowMaximized: () => ipcRenderer.send(WINDOW_TOGGLE_MAXIMIZED_CHANNEL),
+  closeWindow: () => ipcRenderer.send(WINDOW_CLOSE_CHANNEL),
+  isWindowMaximized: () => ipcRenderer.invoke(WINDOW_IS_MAXIMIZED_CHANNEL) as Promise<boolean>,
+  onWindowMaximizedChange: (listener: (maximized: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, maximized: boolean): void => listener(maximized);
+    ipcRenderer.on(WINDOW_MAXIMIZED_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(WINDOW_MAXIMIZED_CHANNEL, handler);
   },
   /** Fire-and-forget: logging must never be able to stall the Renderer. */
   writeDiagnostics: (batch: DiagnosticLogBatch) => ipcRenderer.send(DIAGNOSTIC_LOG_CHANNEL, batch),

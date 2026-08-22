@@ -66,10 +66,25 @@ function responseError(error: unknown): { code: number; message: string } {
  * browser -> tab -> page target hierarchy. This class owns only that protocol
  * adaptation; BrowserRuntimeManager remains responsible for tab/UI lifecycle.
  */
+/** Enough to cover a single agent action and the commands framing it. */
+const RECENT_COMMAND_LIMIT = 24;
+
 export class BrowserCdpBridge {
   readonly token = randomBytes(32).toString("base64url");
   private readonly pathToken = randomBytes(24).toString("hex");
   private readonly clients = new Map<string, CdpClient>();
+  /**
+   * The last handful of commands an agent sent, kept for one question only.
+   *
+   * Something raises the app window while an agent drives the browser in the
+   * background, and nothing in main calls focus, show, or restore — so Chromium
+   * is promoting a guest in response to a command. A stack trace cannot say
+   * which: the window's `focus` event is native and carries no JS caller, which
+   * is why the previous instrumentation never settled it. What identifies the
+   * culprit is the command that immediately preceded the activation, so keep
+   * enough of them to name it and attach the list when the window comes up.
+   */
+  private readonly recent: Array<{ ts: number; method: string }> = [];
   private readonly server: HttpServer;
   private readonly socketServer: WebSocketServer;
   private port?: number;
@@ -203,6 +218,17 @@ export class BrowserCdpBridge {
     socket.once("error", () => this.removeClient(client));
   }
 
+  private remember(method: string): void {
+    this.recent.push({ ts: Date.now(), method });
+    if (this.recent.length > RECENT_COMMAND_LIMIT) this.recent.splice(0, this.recent.length - RECENT_COMMAND_LIMIT);
+  }
+
+  /** Recent agent commands, newest last, each with how long ago it was sent. */
+  recentCommands(): Array<{ method: string; msAgo: number }> {
+    const now = Date.now();
+    return this.recent.map((entry) => ({ method: entry.method, msAgo: now - entry.ts }));
+  }
+
   private removeClient(client: CdpClient): void {
     if (!this.clients.delete(client.id)) return;
     for (const tabId of [...client.debuggerListeners.keys()]) this.removeDebuggerRelay(client, tabId);
@@ -239,6 +265,7 @@ export class BrowserCdpBridge {
     try {
       request = JSON.parse(data.toString()) as CdpRequest;
       this.log("←", request.method, request.sessionId ?? "root");
+      if (typeof request.method === "string") this.remember(request.method);
       if (!Number.isInteger(request.id) || typeof request.method !== "string") throw new Error("无效的 CDP 请求。");
       const result = await this.executeCdp(client, request);
       this.send(client, { id: request.id, result: result ?? {}, ...(request.sessionId ? { sessionId: request.sessionId } : {}) });

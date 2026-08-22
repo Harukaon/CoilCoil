@@ -85,6 +85,11 @@ export class BrowserRuntimeManager {
     return this.cdp.token;
   }
 
+  /** What an agent asked the browser to do most recently. See the bridge's ring. */
+  recentCdpCommands(): Array<{ method: string; msAgo: number }> {
+    return this.cdp.recentCommands();
+  }
+
   async start(): Promise<void> {
     await this.cdp.start();
   }

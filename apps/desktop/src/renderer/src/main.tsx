@@ -4,6 +4,7 @@ import App from "./App";
 import { BrowserGuestLayer } from "./features/browser/BrowserGuestLayer";
 import { diagnostics, installRendererErrorHandlers } from "./diagnostics";
 import { AppErrorBoundary } from "./ui/AppErrorBoundary";
+import { WindowControls } from "./ui/WindowControls";
 import { initTheme } from "./theme";
 import { ToastHost } from "./ui/toast";
 import { UpdateDialog } from "./ui/update/UpdateDialog";
@@ -27,6 +28,7 @@ createRoot(root).render(
     {/* Outside the boundary: these are what a crashed App is reported through,
         so they have to survive it. */}
     <BrowserGuestLayer />
+    <WindowControls />
     <ToastHost />
     <UpdateDialog />
   </StrictMode>,

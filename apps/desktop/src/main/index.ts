@@ -24,6 +24,7 @@ import { hardenGuestPreferences } from "./browser-webview-policy";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
+import { applicationMenuTemplate, windowChromeOptions } from "./window-chrome";
 import { migrateLegacyUserData } from "./data-migration";
 import {
   DIAGNOSTIC_LEVEL_ENV,
@@ -68,6 +69,11 @@ const PATH_REVEAL_CHANNEL = "path:reveal";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
+const WINDOW_MINIMIZE_CHANNEL = "window:minimize";
+const WINDOW_TOGGLE_MAXIMIZED_CHANNEL = "window:toggle-maximized";
+const WINDOW_IS_MAXIMIZED_CHANNEL = "window:is-maximized";
+const WINDOW_MAXIMIZED_CHANNEL = "window:maximized";
+const WINDOW_CLOSE_CHANNEL = "window:close";
 const DIAGNOSTIC_LOG_CHANNEL = "diagnostics:log";
 const DIAGNOSTIC_REVEAL_CHANNEL = "diagnostics:reveal";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
@@ -210,6 +216,14 @@ async function listProjectDirectory(rootValue: string, relativePath = ""): Promi
 function isEventEnvelope(message: RuntimeWireMessage): message is RuntimeEventEnvelope {
   return "event" in message;
 }
+
+
+/**
+ * How recently an agent must have driven the browser for a window activation to
+ * be worth recording. Longer than a single command round trip, short enough that
+ * a user clicking the dock a moment later is not blamed on the agent.
+ */
+const WINDOW_ACTIVATION_ATTRIBUTION_MS = 3_000;
 
 /** How much of the runtime child's stderr to keep for its own obituary. */
 const RUNTIME_STDERR_TAIL_LINES = 60;
@@ -459,7 +473,7 @@ function installGuestContextMenu(guest: Electron.WebContents, window: BrowserWin
 }
 
 async function createWindow(): Promise<void> {
-  const isMac = process.platform === "darwin";
+  const platform = currentPlatform(process.platform);
   const mainWindow = new BrowserWindow({
     width: 915,
     height: 700,
@@ -468,13 +482,7 @@ async function createWindow(): Promise<void> {
     show: false,
     backgroundColor: WINDOW_BACKGROUND[nativeTheme.shouldUseDarkColors ? "dark" : "light"],
     title: "CoilCoil",
-    ...(isMac
-      ? {
-          titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 18, y: 18 },
-          hasShadow: true,
-        }
-      : {}),
+    ...windowChromeOptions(platform),
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
@@ -491,6 +499,17 @@ async function createWindow(): Promise<void> {
   // Enabling webviewTag means any script in this renderer could mint a guest and
   // choose its own preferences. This is the gate that rewrites them into the only
   // shape CoilCoil allows, or refuses the attachment.
+  if (platform !== "darwin") {
+    mainWindow.setMenuBarVisibility(false);
+    mainWindow.autoHideMenuBar = true;
+  }
+  // The Renderer draws the window buttons, so it has to know which one to show.
+  const publishMaximized = (): void => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(WINDOW_MAXIMIZED_CHANNEL, mainWindow.isMaximized());
+  };
+  mainWindow.on("maximize", publishMaximized);
+  mainWindow.on("unmaximize", publishMaximized);
+
   const webviewHostId = mainWindow.webContents.id;
   webviewHostIds.add(webviewHostId);
   // Capture the id up front: by the time "closed" fires the window is destroyed
@@ -552,17 +571,25 @@ async function createWindow(): Promise<void> {
   // un-minimizes — the app window. Nothing in main calls focus/show/restore, so
   // the activation has to come from Chromium promoting a guest. Pair this with
   // COILCOIL_BROWSER_CDP_LOG=1 and read the last CDP command before the event.
-  if (process.env.COILCOIL_BROWSER_FOCUS_LOG === "1") {
-    const logActivation = (event: string) => () => {
-      console.error(`[browser-focus ${Date.now()}] window ${event}`, new Error("activation").stack);
-    };
-    mainWindow.on("focus", logActivation("focus"));
-    mainWindow.on("show", logActivation("show"));
-    mainWindow.on("restore", logActivation("restore"));
-    mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
-      guest.on("focus", () => console.error(`[browser-focus ${Date.now()}] guest focus`, guest.id));
+  // The window coming forward while an agent works in the background is the
+  // symptom; the command that provoked it is the answer. A stack trace cannot
+  // give it — `focus` is a native event with no JS caller, which is why the
+  // stderr-only probe this replaces never settled it — so record what the agent
+  // had just asked the browser to do instead, and keep it where the user can
+  // reach it rather than in a stream a packaged app throws away.
+  const logActivation = (event: string) => () => {
+    const recent = browserRuntime.recentCdpCommands();
+    // Nothing from an agent recently means the user raised the window themselves.
+    if (!recent.some((entry) => entry.msAgo < WINDOW_ACTIVATION_ATTRIBUTION_MS)) return;
+    diagnosticLog().warn("window-activation", "window_activated_during_agent_browsing", {
+      event,
+      minimized: mainWindow.isMinimized(),
+      recentCdp: recent,
     });
-  }
+  };
+  mainWindow.on("focus", logActivation("focus"));
+  mainWindow.on("show", logActivation("show"));
+  mainWindow.on("restore", logActivation("restore"));
 
   mainWindow.on("ready-to-show", () => mainWindow.show());
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -607,6 +634,7 @@ function scheduleUpdateChecks(): void {
 
 app.whenReady().then(async () => {
   const log = diagnosticLog();
+  Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(currentPlatform(process.platform))));
   // Not fatal on purpose: taking the whole app down over one broken operation
   // is a worse outcome than carrying on with the failure written down.
   installProcessErrorHandlers(log, { exitOnUncaught: false });
@@ -775,6 +803,22 @@ app.whenReady().then(async () => {
   ipcMain.handle(TERMINAL_CLOSE_CHANNEL, (event, id: string) => terminalFor(event).close(id));
   // The Renderer cannot write files. Its entries ride over here and join the
   // main process's own, so one file holds all three processes in time order.
+  // The window buttons on Windows and Linux are drawn by the Renderer, so the
+  // three things a title bar does have to be reachable from it.
+  const senderWindow = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): BrowserWindow | null => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    return window && !window.isDestroyed() ? window : null;
+  };
+  ipcMain.on(WINDOW_MINIMIZE_CHANNEL, (event) => senderWindow(event)?.minimize());
+  ipcMain.on(WINDOW_CLOSE_CHANNEL, (event) => senderWindow(event)?.close());
+  ipcMain.on(WINDOW_TOGGLE_MAXIMIZED_CHANNEL, (event) => {
+    const window = senderWindow(event);
+    if (!window) return;
+    if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+  });
+  ipcMain.handle(WINDOW_IS_MAXIMIZED_CHANNEL, (event) => senderWindow(event)?.isMaximized() ?? false);
+
   ipcMain.on(DIAGNOSTIC_LOG_CHANNEL, (_event, batch: DiagnosticLogBatch) => {
     if (!Array.isArray(batch?.entries)) return;
     diagnosticLog().writeEntries(batch.entries);
