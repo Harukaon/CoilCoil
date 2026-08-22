@@ -402,7 +402,7 @@ export function ConversationPane({
             onAbort={onAbort}
           />
         </div>
-        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenUsage={snapshot?.tokenUsage} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />
+        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />
       </div>
       <SubagentDetailDialog activity={selectedSubagent} onClose={() => setSelectedSubagentId(undefined)} />
     </section>

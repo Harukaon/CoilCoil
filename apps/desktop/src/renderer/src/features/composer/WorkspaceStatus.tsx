@@ -3,7 +3,7 @@ import { FileCode2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 import { summarizeCacheUsage } from "@coilcoil/runtime-protocol";
-import type { ContextUsage, ProjectSelection, ResponseMetrics, RuntimeTokenBreakdown, TokenUsage } from "@coilcoil/runtime-protocol";
+import type { ContextUsage, ProjectSelection, ResponseMetrics, RuntimeTokenBreakdown } from "@coilcoil/runtime-protocol";
 
 function pathLabel(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
@@ -34,14 +34,12 @@ export function WorkspaceStatus({
   responseMetrics,
   responseMetricsHistory,
   contextUsage,
-  tokenUsage,
   tokenBreakdown,
 }: {
   project: ProjectSelection | null;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   contextUsage?: ContextUsage;
-  tokenUsage?: TokenUsage;
   tokenBreakdown?: RuntimeTokenBreakdown;
 }): React.JSX.Element {
   const [pathOpen, setPathOpen] = useState(false);
@@ -50,7 +48,9 @@ export function WorkspaceStatus({
   const speedText = responseMetrics?.averageTokensPerSecond === undefined ? undefined : `${responseMetrics.averageTokensPerSecond.toFixed(1)} tok/s`;
   const metricSummary = [firstTokenText, speedText].filter(Boolean).join(" · ");
   const hasPerformanceHistory = responseMetricsHistory.length > 0;
-  const cumulativeCache = summarizeCacheUsage(tokenUsage?.input, tokenUsage?.cacheRead, tokenUsage?.cacheWrite);
+  // 命中率按最近一次请求统计（与 DeepSeek Harness 同口径：cacheRead / 计费输入），
+  // 而不是会话累计——累计会被首次填充缓存的那一轮永久拉低。
+  const latestCache = summarizeCacheUsage(responseMetrics?.inputTokens, responseMetrics?.cacheReadTokens, responseMetrics?.cacheWriteTokens);
   return (
     <div className="workspace-status">
       <Popover.Root open={pathOpen} onOpenChange={setPathOpen}>
@@ -118,12 +118,12 @@ export function WorkspaceStatus({
                   rest of the context is what this turn costs, and this says how
                   much of it is being re-sent at full price.
                 */}
-                {tokenUsage ? (
-                  <div><dt>缓存命中率</dt><dd>{cumulativeCache.hitRate === undefined ? "—" : `${(cumulativeCache.hitRate * 100).toFixed(1)}%`}</dd></div>
+                {responseMetrics ? (
+                  <div><dt>缓存命中率</dt><dd>{latestCache.hitRate === undefined ? "—" : `${(latestCache.hitRate * 100).toFixed(1)}%`}</dd></div>
                 ) : null}
               </dl>
-              {tokenUsage ? (
-                <p className="context-popover-note">缓存命中率按本会话累计的输入统计；长期为 0 说明每一轮都在按全价重发整个上下文。</p>
+              {responseMetrics ? (
+                <p className="context-popover-note">缓存命中率按最近一次请求统计；长期为 0 说明每一轮都在按全价重发整个上下文。</p>
               ) : null}
               <Popover.Arrow className="model-popover-arrow" />
             </Popover.Content>
