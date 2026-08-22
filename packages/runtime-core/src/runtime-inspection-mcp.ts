@@ -4,10 +4,20 @@ import {
   type McpServerRuntimeStatus,
   type ProjectMemoryRuntimeStatus,
   type RuntimeInspectionSnapshot,
+  type SubagentConfiguration,
+  type SubagentConfigurationInput,
 } from "@coilcoil/runtime-protocol";
 import {
   existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
 } from "node:fs";
+import {
+  dirname,
+  join,
+} from "node:path";
 import {
   ORIGINAL_SESSION_MUTATION_UNSUPPORTED,
   RUNTIME_BRIDGE_COMMAND_EVENT,
@@ -34,6 +44,67 @@ import {
 } from "./session-values.js";
 
 export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
+  private subagentSettingsPath(): string {
+    return join(this.agentDir, "subagent-settings.json");
+  }
+
+  private normalizeSubagentConfiguration(value: unknown): SubagentConfiguration {
+    const record = value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+    const models = record.models && typeof record.models === "object" && !Array.isArray(record.models)
+      ? record.models as Record<string, unknown>
+      : {};
+    // Migrate the short-lived single-model format by preserving its original
+    // meaning: that model applied to all three built-in profiles.
+    const legacyModel = typeof record.model === "string" ? record.model : "";
+    const normalizeModel = (model: unknown): string => (
+      typeof model === "string" ? model.trim().slice(0, 200) : legacyModel.trim().slice(0, 200)
+    );
+    return {
+      models: {
+        explore: normalizeModel(models.explore),
+        worker: normalizeModel(models.worker),
+        reviewer: normalizeModel(models.reviewer),
+      },
+    };
+  }
+
+  protected readSubagentConfiguration(): SubagentConfiguration {
+    const path = this.subagentSettingsPath();
+    if (!existsSync(path)) return this.normalizeSubagentConfiguration(undefined);
+    try {
+      return this.normalizeSubagentConfiguration(JSON.parse(readFileSync(path, "utf8")));
+    } catch {
+      return this.normalizeSubagentConfiguration(undefined);
+    }
+  }
+
+  async getSubagentConfiguration(): Promise<SubagentConfiguration> {
+    return this.readSubagentConfiguration();
+  }
+
+  async saveSubagentConfiguration(input: SubagentConfigurationInput): Promise<SubagentConfiguration> {
+    const models = input && typeof input === "object" && input.models && typeof input.models === "object"
+      ? input.models
+      : undefined;
+    if (
+      !models
+      || typeof models.explore !== "string"
+      || typeof models.worker !== "string"
+      || typeof models.reviewer !== "string"
+    ) {
+      throw new Error("子代理配置无效。");
+    }
+    const configuration = this.normalizeSubagentConfiguration(input);
+    const path = this.subagentSettingsPath();
+    mkdirSync(dirname(path), { recursive: true });
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(configuration, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
+    return configuration;
+  }
+
   protected runtimeBridgeRpc(
     method: "get" | "set-system-prompt" | "set-skill-enabled",
     params: Record<string, unknown> = {},

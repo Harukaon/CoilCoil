@@ -83,6 +83,8 @@ export interface SubagentActivityPayload {
   updatedAt: number;
   /** Durable plan that requested this run, when dispatched from the plan tool. */
   planId?: string;
+  /** True when the run inherited the parent session's model instead of a user-configured default. */
+  modelInherited?: boolean;
 }
 
 export interface SubagentUsageDetails {
@@ -118,7 +120,6 @@ export interface SubagentRpcRequest {
     id?: string;
     agent?: string;
     task?: string;
-    model?: string;
     background?: boolean;
     worktree?: boolean;
     planId?: string;
@@ -131,6 +132,7 @@ export interface SubagentChildMeta {
   agent: string;
   task: string;
   model?: string;
+  modelInherited?: boolean;
   tools?: string[];
   background: boolean;
   parentSessionId: string;

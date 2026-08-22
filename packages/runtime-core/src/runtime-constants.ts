@@ -56,16 +56,16 @@ export const ABORT_STALL_NOTICE_MS = 10_000;
 /**
  * Tools the workflow registers but the Agent is not told about.
  *
- * `plan` and `subagent` are half-built: the approval loop and the subagent
- * engine both have known gaps, and an Agent that reaches for them mid-task ends
- * up somewhere worse than one that just does the work. The extensions stay in
- * the manifest — their RPC channels, their session-entry restore, and the cards
- * for sessions that already contain plan or subagent runs all keep working —
- * but Pi is asked to exclude the tools themselves, which drops their schemas
- * and their prompt guidelines before the system prompt is ever built. Empty
- * this list to bring them back once they are rewritten along oh-my-pi's lines.
+ * `plan` is half-built: the approval loop has known gaps, and an Agent that
+ * reaches for it mid-task ends up somewhere worse than one that just does the
+ * work. The extension stays in the manifest — its RPC channels, its
+ * session-entry restore, and the cards for sessions that already contain plan
+ * runs all keep working — but Pi is asked to exclude the tool itself, which
+ * drops its schema and prompt guidelines before the system prompt is ever
+ * built. Empty this list to bring it back once it is rewritten along
+ * oh-my-pi's lines.
  */
-export const HIDDEN_AGENT_TOOLS: readonly string[] = ["plan", "subagent"];
+export const HIDDEN_AGENT_TOOLS: readonly string[] = ["plan"];
 
 export const GOAL_STATE_CHANNEL = "coilcoil:goal:state:v1";
 

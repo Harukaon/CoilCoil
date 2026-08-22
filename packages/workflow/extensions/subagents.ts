@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Model } from "@earendil-works/pi-ai";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -65,9 +65,8 @@ const SubagentParams = Type.Object({
   action: Type.Optional(
     StringEnum(SUBAGENT_ACTIONS, { description: "run 派发；status 查询；stop 停止；resume 复用已完成的子 Agent。默认 run。" }),
   ),
-  agent: Type.Optional(Type.String({ description: "子 Agent profile 名称（如 explore、reviewer、worker），会套用预设的提示词、模型和工具范围；省略则用默认配置派发。" })),
+  agent: Type.Optional(Type.String({ description: "子 Agent profile 名称（如 explore、reviewer、worker），会套用预设的提示词、用户配置模型和工具范围；省略则用默认配置派发。" })),
   task: Type.Optional(Type.String({ description: "action=run 时必填；action=resume 时作为追加指示，省略则继续原任务。" })),
-  model: Type.Optional(Type.String({ description: '模型覆盖，格式 "provider/model-id"。省略则继承当前会话模型。' })),
   background: Type.Optional(Type.Boolean({ description: "true 时立即返回 runId，子 Agent 在后台运行，完成后会自动汇报。" })),
   worktree: Type.Optional(Type.Boolean({ description: "true 时子 Agent 在独立的 git worktree 分支上工作，适合并行写入；省略则跟随 profile 设置（worker 默认开启）。" })),
   runId: Type.Optional(Type.String({ description: "action=status/stop/resume 时指定目标运行；status 省略则列出全部。" })),
@@ -98,6 +97,38 @@ function sleep(ms: number): Promise<void> {
 
 function modelLabel(model: Model<never> | undefined): string | undefined {
   return model ? `${model.provider}/${model.id}` : undefined;
+}
+
+const CONFIGURABLE_SUBAGENT_PROFILES = ["explore", "worker", "reviewer"] as const;
+type ConfigurableSubagentProfile = (typeof CONFIGURABLE_SUBAGENT_PROFILES)[number];
+
+function isConfigurableSubagentProfile(value: string): value is ConfigurableSubagentProfile {
+  return (CONFIGURABLE_SUBAGENT_PROFILES as readonly string[]).includes(value);
+}
+
+/** Resolve one profile's configured model from current or legacy settings. */
+export function configuredSubagentModel(value: unknown, profileName: string | undefined): string {
+  if (!profileName || !isConfigurableSubagentProfile(profileName)) return "";
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const models = record.models && typeof record.models === "object" && !Array.isArray(record.models)
+    ? record.models as Record<string, unknown>
+    : {};
+  const selected = models[profileName];
+  if (typeof selected === "string") return selected.trim();
+  // Preserve the behavior of the short-lived single-model configuration.
+  return typeof record.model === "string" ? record.model.trim() : "";
+}
+
+function readConfiguredSubagentModel(profileName: string | undefined): string {
+  try {
+    const path = join(getAgentDir(), "subagent-settings.json");
+    if (!existsSync(path)) return "";
+    return configuredSubagentModel(JSON.parse(readFileSync(path, "utf8")), profileName);
+  } catch {
+    return "";
+  }
 }
 
 function resolveModel(query: string | undefined, ctx: ExtensionContext): ResolvedModel | { error: string } {
@@ -500,6 +531,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       agent: meta.agent || "default",
       task: meta.task,
       model: meta.model,
+      modelInherited: meta.modelInherited,
       tools: meta.tools ? [...meta.tools] : undefined,
       background: meta.background,
       status: "stopped",
@@ -577,7 +609,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
   const executeRun = async (
     toolCallId: string,
-    params: { agent?: string; task?: string; model?: string; background?: boolean; worktree?: boolean; planId?: string },
+    params: { agent?: string; task?: string; background?: boolean; worktree?: boolean; planId?: string },
     signal: AbortSignal | undefined,
     onUpdate: ((update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => void) | undefined,
     ctx: ExtensionContext,
@@ -592,7 +624,14 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     if (profileName && !profile) {
       throw new Error(`未找到子 Agent profile：${profileName}。\n${formatProfileCatalog(profiles)}`);
     }
-    const resolved = resolveModel(params.model ?? profile?.model, ctx);
+    // Each built-in profile has its own user-controlled model. The tool schema
+    // deliberately exposes no model override, so an Agent cannot bypass this
+    // setting. A profile frontmatter model remains the fallback for custom
+    // profiles; otherwise the child inherits the parent session model.
+    const configuredModel = readConfiguredSubagentModel(profile?.name);
+    const modelQuery = configuredModel || profile?.model;
+    const modelInherited = !configuredModel && !profile?.model;
+    const resolved = resolveModel(modelQuery, ctx);
     if ("error" in resolved) throw new Error(resolved.error);
 
     const background = params.background === true;
@@ -604,6 +643,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       agent: profile?.name ?? (profileName || "default"),
       task,
       model: resolved.label,
+      modelInherited,
       tools,
       background,
       status: "running",
@@ -634,6 +674,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       agent: run.agent,
       task: run.task,
       model: run.model,
+      modelInherited: run.modelInherited,
       tools: [...tools],
       background,
       parentSessionId: ctx.sessionManager.getSessionId(),
@@ -808,7 +849,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           {
             agent: request.params?.agent,
             task,
-            model: request.params?.model,
             background: request.params?.background ?? true,
             worktree: request.params?.worktree,
             planId: request.params?.planId,

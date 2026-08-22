@@ -475,6 +475,10 @@ export class RuntimeServer {
         return runtime.getMemoryConfiguration(command.cwd);
       case "save_memory_configuration":
         return runtime.saveMemoryConfiguration(command.input, command.cwd);
+      case "get_subagent_configuration":
+        return runtime.getSubagentConfiguration();
+      case "save_subagent_configuration":
+        return runtime.saveSubagentConfiguration(command.input);
       case "get_skill_configuration":
         return runtime.getSkillConfiguration(command.cwd);
       case "set_skill_enabled":

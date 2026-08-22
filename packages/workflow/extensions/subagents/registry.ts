@@ -24,6 +24,7 @@ export interface ChildRun {
   agent: string;
   task: string;
   model?: string;
+  modelInherited?: boolean;
   tools?: string[];
   background: boolean;
   status: SubagentRunStatus;
@@ -155,6 +156,7 @@ export class SubagentRegistry {
       error: run.error,
       updatedAt: run.finishedAt ?? now,
       planId: run.planId,
+      modelInherited: run.modelInherited,
     };
   }
 

@@ -641,6 +641,8 @@ export interface SubagentActivity {
   updatedAt: number;
   /** Durable plan that dispatched this run, when applicable. */
   planId?: string;
+  /** True when the run inherited the parent session's model instead of a user-configured default. */
+  modelInherited?: boolean;
 }
 
 export interface ToolRun {
@@ -802,6 +804,8 @@ export interface RuntimeInspectionSnapshot {
   skills: RuntimeSkillState[];
   mcp?: McpRuntimeStatus;
   memory?: ProjectMemoryRuntimeStatus;
+  /** User-configured default models for the built-in subagent profiles. */
+  subagent?: SubagentConfiguration;
   capabilities: {
     editSystemPrompt: boolean;
     removeOriginalSessionItems: false;
@@ -895,6 +899,28 @@ export interface SaveMemoryConfigurationInput {
   projectContent?: string;
   /** Edits to any listed project memory. A path the store did not list is rejected. */
   projectContents?: Array<{ filePath: string; content: string }>;
+}
+
+/** Built-in subagent profiles whose default models can be configured independently. */
+export type ConfigurableSubagentProfile = "explore" | "worker" | "reviewer";
+
+/** User-configured model for each built-in subagent profile. */
+export interface SubagentProfileModels {
+  /** `provider/model-id`, or empty to inherit the parent session's model. */
+  explore: string;
+  /** `provider/model-id`, or empty to inherit the parent session's model. */
+  worker: string;
+  /** `provider/model-id`, or empty to inherit the parent session's model. */
+  reviewer: string;
+}
+
+/** User-configured default models for dispatched subagents. */
+export interface SubagentConfiguration {
+  models: SubagentProfileModels;
+}
+
+export interface SubagentConfigurationInput {
+  models: SubagentProfileModels;
 }
 
 export interface TerminalRun {
@@ -1031,6 +1057,8 @@ export type RuntimeCommand =
   | { type: "logout_mcp_server"; name: string }
   | { type: "get_memory_configuration"; cwd?: string }
   | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
+  | { type: "get_subagent_configuration" }
+  | { type: "save_subagent_configuration"; input: SubagentConfigurationInput }
   | { type: "get_skill_configuration"; cwd?: string }
   | { type: "set_skill_enabled"; filePath: string; enabled: boolean; cwd?: string }
   | { type: "remove_skill"; filePath: string; cwd?: string }

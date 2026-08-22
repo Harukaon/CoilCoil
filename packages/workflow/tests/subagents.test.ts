@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import subagentsExtension, {
+  configuredSubagentModel,
   disposeRunsForShutdown,
   resumeCwdForRun,
   resumeToolsForRun,
@@ -108,10 +109,11 @@ async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-test("subagent tool registers with run/status actions", () => {
+test("subagent tool registers without an Agent-controlled model override", () => {
   const { execute, parameters } = createHarness();
   assert.equal(typeof execute, "function");
   assert.equal(parameters.properties?.planId, undefined, "plan correlation stays on the private runtime RPC");
+  assert.equal(parameters.properties?.model, undefined, "profile model selection stays under user control");
 });
 
 test("run rejects a missing task", async () => {
@@ -119,25 +121,72 @@ test("run rejects a missing task", async () => {
   await assert.rejects(execute("call-1", {}, undefined, undefined, createContext()), /缺少子 Agent 任务描述/);
 });
 
-test("run rejects a malformed model override", async () => {
-  const { execute } = createHarness();
-  await assert.rejects(execute("call-2", { task: "看一下 README", model: "no-slash" }, undefined, undefined, createContext()), /模型格式无效/);
+test("configured subagent models are selected independently by profile", () => {
+  const configuration = {
+    models: {
+      explore: "provider/fast",
+      worker: "provider/code",
+      reviewer: "provider/review",
+    },
+  };
+  assert.equal(configuredSubagentModel(configuration, "explore"), "provider/fast");
+  assert.equal(configuredSubagentModel(configuration, "worker"), "provider/code");
+  assert.equal(configuredSubagentModel(configuration, "reviewer"), "provider/review");
+  assert.equal(configuredSubagentModel(configuration, "custom"), "");
+  assert.equal(configuredSubagentModel(configuration, undefined), "");
 });
 
-test("run rejects an unknown model", async () => {
-  const { execute } = createHarness();
-  await assert.rejects(execute("call-3", { task: "看一下 README", model: "prov/unknown" }, undefined, undefined, createContext()), /未找到模型/);
+test("configured subagent model reads the legacy global setting for built-in profiles", () => {
+  assert.equal(configuredSubagentModel({ model: " provider/legacy " }, "explore"), "provider/legacy");
+  assert.equal(configuredSubagentModel({ model: " provider/legacy " }, "worker"), "provider/legacy");
+  assert.equal(configuredSubagentModel({ model: " provider/legacy " }, "reviewer"), "provider/legacy");
+  assert.equal(configuredSubagentModel({ model: " provider/legacy " }, "custom"), "");
 });
 
-test("run rejects a model without configured auth", async () => {
-  const { execute } = createHarness();
-  const ctx = createContext({
+test("configured profile models drive dispatch while unconfigured profiles inherit the parent", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-subagent-profile-models-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "not-a-repository");
+  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(join(agentDir, "subagent-settings.json"), JSON.stringify({
+    models: { explore: "", worker: "provider/code", reviewer: "provider/review" },
+  }));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  context.after(() => {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  const lookups: string[] = [];
+  const parentModel = { provider: "provider", id: "parent" };
+  const extensionContext = createContext({
+    cwd,
+    model: parentModel,
     modelRegistry: {
-      find: () => ({ provider: "prov", id: "locked" }),
-      hasConfiguredAuth: () => false,
+      find: (provider: string, id: string) => {
+        lookups.push(`${provider}/${id}`);
+        return { provider, id };
+      },
+      hasConfiguredAuth: () => true,
     },
   });
-  await assert.rejects(execute("call-4", { task: "看一下 README", model: "prov/locked" }, undefined, undefined, ctx), /尚未配置 API Key/);
+  const { handlers, execute } = createHarness();
+  await handlers.get("session_start")?.[0]({}, extensionContext);
+
+  await assert.rejects(
+    execute("call-profile-reviewer", { task: "评审", agent: "reviewer", worktree: true }, undefined, undefined, extensionContext),
+    /不是 git 仓库/,
+  );
+  assert.deepEqual(lookups, ["provider/review"]);
+
+  await assert.rejects(
+    execute("call-profile-explore", { task: "搜索", agent: "explore", worktree: true }, undefined, undefined, extensionContext),
+    /不是 git 仓库/,
+  );
+  assert.deepEqual(lookups, ["provider/review"], "explore should inherit without resolving another configured model");
 });
 
 test("status reports an empty registry", async () => {

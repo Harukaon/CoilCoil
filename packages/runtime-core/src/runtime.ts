@@ -488,7 +488,8 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   }
 
   protected runtimeInspection(active: ActiveSession): RuntimeInspectionSnapshot {
-    return buildRuntimeInspectionSnapshot(active);
+    const snapshot = buildRuntimeInspectionSnapshot(active);
+    return { ...snapshot, subagent: this.readSubagentConfiguration() };
   }
 
   protected publishRuntimeInspection(active: ActiveSession): void {
