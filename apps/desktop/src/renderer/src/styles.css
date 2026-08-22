@@ -292,6 +292,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .user-bubble-button:hover { background: hsl(var(--th) var(--ts) var(--l-896)); }
 .user-bubble-button:disabled { cursor: default; }
 .user-bubble-button:disabled:hover { background: hsl(var(--th) var(--ts) var(--l-920)); }
+/* 还没发出去的消息：留在原地，但用虚线边框和淡下来的正文说明它只是排着队。 */
+.user-bubble.queued { border-style: dashed; background: transparent; color: hsl(var(--th) var(--ts) var(--l-437)); }
+.user-bubble-button.queued:disabled:hover { background: transparent; }
 .user-message-queue-status { display: flex; width: fit-content; align-items: center; gap: 5px; margin-top: 7px; color: hsl(var(--th) var(--ts) var(--l-512)); font-size: 11px; line-height: 1; }
 .message-images { display: grid; margin-top: 8px; grid-template-columns: repeat(auto-fit, minmax(88px, 150px)); gap: 7px; }
 .message-images:first-child { margin-top: 0; }
@@ -960,3 +963,14 @@ button.runtime-chip:hover:not(:disabled), .runtime-chip.mcp:hover { border-color
 @media (max-width: 1040px) {
   .conversation-body { padding-inline: 24px; }
 }
+
+/* 渲染崩溃兜底页。整棵树已经卸载，这里只能依赖最基础的样式。 */
+.app-crash { display: flex; height: 100vh; flex-direction: column; justify-content: center; gap: 14px; padding: 40px; background: hsl(var(--th) var(--ts) var(--l-980)); color: hsl(var(--th) var(--ts) var(--l-157)); }
+.app-crash h1 { margin: 0; font-size: 19px; font-weight: 600; }
+.app-crash p { margin: 0; color: hsl(var(--th) var(--ts) var(--l-437)); font-size: 13px; }
+.app-crash-detail { max-height: 46vh; margin: 0; padding: 14px; overflow: auto; border: 1px solid hsl(var(--th) var(--ts) var(--l-886)); border-radius: 10px; background: hsl(var(--th) var(--ts) var(--l-920)); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+.app-crash-actions { display: flex; gap: 9px; }
+.app-crash-actions button { height: 32px; padding: 0 14px; border: 1px solid hsl(var(--th) var(--ts) var(--l-886)); border-radius: 8px; background: hsl(var(--th) var(--ts) var(--l-920)); color: inherit; font-size: 13px; cursor: pointer; }
+.app-crash-actions button:hover { background: hsl(var(--th) var(--ts) var(--l-896)); }
+.runtime-log-button { height: 22px; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-886)); border-radius: 6px; background: transparent; color: hsl(var(--th) var(--ts) var(--l-437)); font-size: 11px; cursor: pointer; }
+.runtime-log-button:hover { border-color: hsl(var(--th) var(--ts) var(--l-861)); background: hsl(var(--th) var(--ts) var(--l-920)); color: hsl(var(--th) var(--ts) var(--l-239)); }

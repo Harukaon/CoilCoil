@@ -1,7 +1,8 @@
 {
-  "name": "@coilcoil/runtime-server",
+  "name": "@coilcoil/diagnostics",
   "version": "0.1.0",
   "private": true,
+  "description": "CoilCoil's cross-process diagnostic log",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -11,8 +12,6 @@
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@coilcoil/diagnostics": "0.1.0",
-    "@coilcoil/runtime-core": "0.1.0",
     "@coilcoil/runtime-protocol": "0.1.0"
   },
   "devDependencies": {

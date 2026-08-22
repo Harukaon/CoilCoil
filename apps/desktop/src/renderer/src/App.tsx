@@ -33,6 +33,8 @@ import { useConversationActions } from "./features/workspaces/useConversationAct
 import { useWorkspaceInspector } from "./features/inspector/useWorkspaceInspector";
 import { useComposerController } from "./features/composer/useComposerController";
 import { usePanelLayout } from "./hooks/usePanelLayout";
+import { diagnostics } from "./diagnostics";
+import { useBufferedRuntimeEvents } from "./hooks/useBufferedRuntimeEvents";
 import { useRuntimeEventHandler } from "./hooks/useRuntimeEventHandler";
 import { useAgentActivityLine } from "./hooks/useAgentActivityLine";
 import { useConversationViewport } from "./hooks/useConversationViewport";
@@ -131,6 +133,16 @@ export default function App(): React.JSX.Element {
   });
 
   const applySnapshot = useCallback((next: SessionSnapshot): void => {
+    // The transcript is replaced wholesale here, so a message that appears,
+    // disappears, or arrives in the wrong order is either this or the reducer.
+    diagnostics.info("snapshot", "snapshot_applied", {
+      sessionPath: next.session.path,
+      revision: next.messageRevision,
+      messages: next.messages.length,
+      queued: next.promptQueue?.length ?? 0,
+      running: next.running,
+      aborting: next.aborting,
+    });
     snapshotRef.current = next;
     if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
     if (next.runtimeId && next.session.path) runtimeSessionRef.current.set(next.runtimeId, next.session.path);
@@ -173,7 +185,7 @@ export default function App(): React.JSX.Element {
     focusComposer();
   }, [focusComposer, resetComposer]);
 
-  const handleRuntimeEvent = useRuntimeEventHandler({
+  const applyRuntimeEvent = useRuntimeEventHandler({
     snapshotRef,
     snapshotCacheRef,
     runtimeSessionRef,
@@ -189,6 +201,9 @@ export default function App(): React.JSX.Element {
     setProjectState,
     setSubagents,
   });
+  // Streaming arrives token by token; applying it token by token is what used to
+  // starve the renderer in long conversations. See useBufferedRuntimeEvents.
+  const handleRuntimeEvent = useBufferedRuntimeEvents(applyRuntimeEvent);
 
   const activateProject = useCallback(async (selection: ProjectSelection): Promise<void> => {
     const requestId = ++selectionRequestRef.current;

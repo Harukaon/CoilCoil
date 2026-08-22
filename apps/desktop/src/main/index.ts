@@ -12,6 +12,7 @@ import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from "electron";
 import { createRequire } from "node:module";
+import type { DiagnosticLogBatch } from "@coilcoil/runtime-protocol";
 import type { BrowserUiViewport, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { BrowserRuntimeManager } from "./browser-runtime";
 import {
@@ -24,6 +25,14 @@ import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
 import { migrateLegacyUserData } from "./data-migration";
+import {
+  DIAGNOSTIC_LEVEL_ENV,
+  DIAGNOSTIC_LOG_DIRECTORY,
+  DiagnosticLog,
+  installProcessErrorHandlers,
+  levelFromEnvironment,
+  processStartupData,
+} from "@coilcoil/diagnostics";
 import { TerminalRuntimeManager } from "./terminal-runtime";
 import {
   checkForUpdate,
@@ -59,6 +68,8 @@ const PATH_REVEAL_CHANNEL = "path:reveal";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
+const DIAGNOSTIC_LOG_CHANNEL = "diagnostics:log";
+const DIAGNOSTIC_REVEAL_CHANNEL = "diagnostics:reveal";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_CLOSE_CHANNEL = "preview:close";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
@@ -200,8 +211,37 @@ function isEventEnvelope(message: RuntimeWireMessage): message is RuntimeEventEn
   return "event" in message;
 }
 
+/** How much of the runtime child's stderr to keep for its own obituary. */
+const RUNTIME_STDERR_TAIL_LINES = 60;
+
+let mainLog: DiagnosticLog | undefined;
+
+/**
+ * The main process's log, and the file the Renderer's entries land in too.
+ *
+ * Created on first use rather than at module load: it writes under `userData`,
+ * which is only settled once Electron has resolved the app paths.
+ */
+function diagnosticLog(): DiagnosticLog {
+  mainLog ??= new DiagnosticLog({
+    directory: join(app.getPath("userData"), "agent", DIAGNOSTIC_LOG_DIRECTORY),
+    process: "main",
+    level: levelFromEnvironment(process.env[DIAGNOSTIC_LEVEL_ENV]),
+    echo: !app.isPackaged,
+  });
+  return mainLog;
+}
+
 class RuntimeHost {
   private child?: ChildProcess;
+  /**
+   * The runtime child's recent stderr.
+   *
+   * Everything it prints went to this process's own stderr, which a packaged
+   * app throws away — so the one place that said why it died was the one place
+   * nobody could read. Keeping a tail means the exit entry can carry it.
+   */
+  private stderrTail: string[] = [];
   private readonly pending = new Map<
     string,
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
@@ -247,12 +287,31 @@ class RuntimeHost {
     });
     this.child = child;
 
+    this.stderrTail = [];
+    diagnosticLog().info("runtime-host", "runtime_spawned", { pid: child.pid, entry: runtimeEntry });
     child.stdout?.on("data", (chunk: Buffer) => process.stdout.write(`[runtime] ${chunk.toString()}`));
-    child.stderr?.on("data", (chunk: Buffer) => process.stderr.write(`[runtime] ${chunk.toString()}`));
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      process.stderr.write(`[runtime] ${text}`);
+      for (const line of text.split("\n")) {
+        if (line.trim()) this.stderrTail.push(line);
+      }
+      if (this.stderrTail.length > RUNTIME_STDERR_TAIL_LINES) {
+        this.stderrTail = this.stderrTail.slice(-RUNTIME_STDERR_TAIL_LINES);
+      }
+    });
     child.on("message", (raw: RuntimeWireMessage) => this.handleMessage(raw));
     child.once("exit", (code, signal) => {
       this.child = undefined;
       const reason = `CoilCoil runtime exited${code === null ? "" : ` with code ${code}`}${signal ? ` (${signal})` : ""}.`;
+      const unexpected = !isQuitting;
+      diagnosticLog().log(unexpected ? "error" : "info", "runtime-host", "runtime_exited", {
+        code,
+        signal,
+        quitting: isQuitting,
+        pendingRequests: this.pending.size,
+        stderrTail: this.stderrTail,
+      });
       for (const request of this.pending.values()) request.reject(new Error(reason));
       this.pending.clear();
       this.onExit();
@@ -547,6 +606,15 @@ function scheduleUpdateChecks(): void {
 }
 
 app.whenReady().then(async () => {
+  const log = diagnosticLog();
+  // Not fatal on purpose: taking the whole app down over one broken operation
+  // is a worse outcome than carrying on with the failure written down.
+  installProcessErrorHandlers(log, { exitOnUncaught: false });
+  log.info("process", "app_started", processStartupData({
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    locale: app.getLocale(),
+  }));
   try {
     const migration = migrateLegacyUserData(app.getPath("userData"));
     if (migration.migrated) {
@@ -705,6 +773,19 @@ app.whenReady().then(async () => {
   ipcMain.handle(TERMINAL_WRITE_CHANNEL, (event, id: string, data: string): void => terminalFor(event).write(id, data));
   ipcMain.handle(TERMINAL_RESIZE_CHANNEL, (event, id: string, cols: number, rows: number): void => terminalFor(event).resize(id, cols, rows));
   ipcMain.handle(TERMINAL_CLOSE_CHANNEL, (event, id: string) => terminalFor(event).close(id));
+  // The Renderer cannot write files. Its entries ride over here and join the
+  // main process's own, so one file holds all three processes in time order.
+  ipcMain.on(DIAGNOSTIC_LOG_CHANNEL, (_event, batch: DiagnosticLogBatch) => {
+    if (!Array.isArray(batch?.entries)) return;
+    diagnosticLog().writeEntries(batch.entries);
+  });
+
+  ipcMain.handle(DIAGNOSTIC_REVEAL_CHANNEL, async (): Promise<string> => {
+    const log = diagnosticLog();
+    shell.showItemInFolder(log.filePath);
+    return log.filePath;
+  });
+
   ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (_event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
     try {
       return { ok: true, value: await runtime.request(payload) };

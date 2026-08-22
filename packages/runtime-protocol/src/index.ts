@@ -1146,3 +1146,38 @@ export function isRuntimeEventEnvelope(value: unknown): value is RuntimeEventEnv
 }
 
 export const SESSION_OPEN_SUPERSEDED_ERROR = "COILCOIL_SESSION_OPEN_SUPERSEDED";
+
+/**
+ * Which process a diagnostic entry came from.
+ *
+ * CoilCoil runs as three: the Electron main process, the Renderer, and the
+ * runtime child that owns Pi. A symptom the user can see — a stop that seems
+ * ignored, a composer still spinning — is usually the seam between two of them,
+ * so an entry is only useful next to the entries from the other two.
+ */
+export type DiagnosticProcess = "main" | "renderer" | "runtime";
+
+export type DiagnosticLevel = "debug" | "info" | "warn" | "error";
+
+export interface DiagnosticLogEntry {
+  /** Epoch milliseconds. The only key that orders entries across processes. */
+  ts: number;
+  level: DiagnosticLevel;
+  process: DiagnosticProcess;
+  /** Area this belongs to, e.g. `run-state`, `prompt-queue`, `abort`. */
+  scope: string;
+  /** What happened, in the past tense and stable enough to grep for. */
+  event: string;
+  /** Which session runtime this concerns, when it concerns one. */
+  runtimeId?: string;
+  sessionPath?: string;
+  /** Structured detail. Must survive JSON.stringify and carry no secrets. */
+  data?: Record<string, unknown>;
+  /** Present on errors: the message and, where we have one, the stack. */
+  error?: { message: string; stack?: string };
+}
+
+/** A batch of Renderer entries on its way to the process that owns the file. */
+export interface DiagnosticLogBatch {
+  entries: DiagnosticLogEntry[];
+}

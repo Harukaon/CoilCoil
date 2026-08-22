@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { RuntimeCommand, RuntimeEvent } from "@coilcoil/runtime-protocol";
+import type { DiagnosticLogBatch, RuntimeCommand, RuntimeEvent } from "@coilcoil/runtime-protocol";
 import type { FileNode } from "@coilcoil/runtime-protocol";
 import type {
   DesktopPlatform,
@@ -35,6 +35,8 @@ const EXTERNAL_OPEN_CHANNEL = "external:open";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
+const DIAGNOSTIC_LOG_CHANNEL = "diagnostics:log";
+const DIAGNOSTIC_REVEAL_CHANNEL = "diagnostics:reveal";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_CLOSE_CHANNEL = "preview:close";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
@@ -161,6 +163,9 @@ const api: CoilCoilDesktopApi = {
     if (!result.ok) throw new Error(result.error);
     return result.value as T;
   },
+  /** Fire-and-forget: logging must never be able to stall the Renderer. */
+  writeDiagnostics: (batch: DiagnosticLogBatch) => ipcRenderer.send(DIAGNOSTIC_LOG_CHANNEL, batch),
+  revealDiagnostics: () => ipcRenderer.invoke(DIAGNOSTIC_REVEAL_CHANNEL) as Promise<string>,
   onRuntimeEvent: (listener: (event: RuntimeEvent, runtimeId?: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: RuntimeEventPayload): void => listener(value.event, value.runtimeId);
     ipcRenderer.on(RUNTIME_EVENT_CHANNEL, handler);

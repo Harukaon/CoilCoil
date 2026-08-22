@@ -41,7 +41,7 @@ test("a just-finished response is reflected before Pi persists its assistant mes
     project: { cwd: root, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
     messageIds: new WeakMap(),
     messageRevision: 0,
-    pendingUserMessageIds: [],
+    pendingUserPrompts: [],
     promptQueue: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 0,

@@ -12,8 +12,16 @@ import {
 } from "@coilcoil/runtime-protocol";
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import {
+  DIAGNOSTIC_LEVEL_ENV,
+  DIAGNOSTIC_LOG_DIRECTORY,
+  DiagnosticLog,
+  installProcessErrorHandlers,
+  levelFromEnvironment,
+  processStartupData,
+} from "@coilcoil/diagnostics";
 import { selectWorkspaceSessionPath } from "./workspace-session.js";
 
 type WireSink = (message: RuntimeWireMessage) => void;
@@ -68,6 +76,9 @@ function eventChangesSnapshot(event: RuntimeEvent): boolean {
 
 export class RuntimeServer {
   readonly runtime: CoilCoilRuntime;
+
+  /** Shared with every runtime this server owns, so one file holds them all. */
+  readonly log: DiagnosticLog;
   private readonly send: WireSink;
   private readonly options: CoilCoilRuntimeOptions;
   private readonly createRuntime: RuntimeFactory;
@@ -90,6 +101,11 @@ export class RuntimeServer {
   constructor(options: CoilCoilRuntimeOptions, send: WireSink, dependencies: RuntimeServerDependencies = {}) {
     this.send = send;
     this.options = options;
+    this.log = options.log ?? new DiagnosticLog({
+      directory: join(options.agentDir, DIAGNOSTIC_LOG_DIRECTORY),
+      process: "runtime",
+      level: levelFromEnvironment(process.env[DIAGNOSTIC_LEVEL_ENV]),
+    });
     this.createRuntime = dependencies.createRuntime ?? ((runtimeOptions) => new CoilCoilRuntime(runtimeOptions));
     this.createRuntimeId = dependencies.createRuntimeId ?? randomUUID;
     this.runtime = this.createManagedRuntime();
@@ -100,6 +116,9 @@ export class RuntimeServer {
       const result = await this.dispatch(envelope.command, envelope.runtimeId);
       return { id: envelope.id, ok: true, result };
     } catch (error) {
+      this.log.error("command", "command_failed", error, { command: envelope.command.type }, {
+        runtimeId: envelope.runtimeId,
+      });
       return { id: envelope.id, ok: false, error: errorMessage(error) };
     }
   }
@@ -107,6 +126,7 @@ export class RuntimeServer {
   private createManagedRuntime(runtimeId?: string, modelRuntimePromise?: CoilCoilRuntimeOptions["modelRuntimePromise"]): CoilCoilRuntime {
     return this.createRuntime({
       ...this.options,
+      log: this.log,
       modelRuntimePromise,
       browserScopeId: runtimeId,
       onEvent: (event) => this.sendRuntimeEvent(runtimeId, event),
@@ -582,7 +602,12 @@ export function runtimeOptionsFromEnvironment(): CoilCoilRuntimeOptions {
 export function attachProcessIpc(options = runtimeOptionsFromEnvironment()): RuntimeServer {
   if (typeof process.send !== "function") throw new Error("The runtime process requires an IPC channel.");
   const server = new RuntimeServer(options, (message) => process.send?.(message));
+  // An uncaught exception here already ended the process and told the user only
+  // "runtime exited with code 1"; keep that ending, and add the reason.
+  installProcessErrorHandlers(server.log, { exitOnUncaught: true });
+  server.log.info("process", "runtime_started", processStartupData({ agentDir: options.agentDir }));
   void server.warmup().catch((error) => {
+    server.log.error("process", "warmup_failed", error);
     process.stderr.write(`[coilcoil-runtime] warmup failed: ${errorMessage(error)}\n`);
   });
   process.on("message", (message) => {

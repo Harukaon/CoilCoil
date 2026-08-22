@@ -20,6 +20,37 @@ import {
 } from "./runtime-utils.js";
 import { splitInlineThinking } from "./inline-thinking.js";
 
+/** A prompt CoilCoil handed to Pi, waiting for Pi to echo it back as a user message. */
+export interface PendingUserPrompt {
+  id: string;
+  /** Exactly the text passed to Pi, before Pi's own skill/template expansion. */
+  text: string;
+}
+
+/**
+ * Decide which pending prompt a Pi user message belongs to.
+ *
+ * Pi emits `message_start` for every user message, including ones no client
+ * sent: a running `/goal` loop feeds itself a fresh prompt each round through
+ * `sendUserMessage`. Claiming the head of the queue on sight handed that round
+ * the client id of a message the user was still waiting to send, which replaced
+ * the user's own bubble with the loop's text and pulled their prompt out of the
+ * queue before it was ever delivered. Matching on the text keeps a
+ * runtime-generated message from claiming anything.
+ *
+ * A leading-slash prompt is the one case the text cannot answer: Pi expands
+ * skill commands and prompt templates before the message exists, so what comes
+ * back is not what we sent. The head is claimed for that case alone, and only
+ * once an exact match has been ruled out.
+ *
+ * Returns the index to consume, or -1 when the message belongs to no client.
+ */
+export function matchPendingUserPrompt(pending: readonly PendingUserPrompt[], text: string): number {
+  const exact = pending.findIndex((prompt) => prompt.text === text);
+  if (exact >= 0) return exact;
+  return pending[0]?.text.startsWith("/") ? 0 : -1;
+}
+
 export function contentParts(content: unknown): { text: string; thinking: string; images: PromptImage[]; } {
   if (typeof content === "string") return { text: content, thinking: "", images: [] };
   if (!Array.isArray(content)) return { text: "", thinking: "", images: [] };

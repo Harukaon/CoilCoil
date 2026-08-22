@@ -59,7 +59,7 @@ function startRuntime(root: string, events: RuntimeEvent[]): { internals: Runtim
     project: { cwd: root, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
     messageIds: new WeakMap(),
     messageRevision: 0,
-    pendingUserMessageIds: [],
+    pendingUserPrompts: [],
     promptQueue: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 1,

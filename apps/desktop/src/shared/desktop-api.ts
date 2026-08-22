@@ -1,4 +1,5 @@
 import type {
+  DiagnosticLogBatch,
   FileNode,
   ProjectSelection,
   RuntimeCommand,
@@ -163,6 +164,10 @@ export interface CoilCoilDesktopApi {
   request<T = unknown>(command: RuntimeCommand, runtimeId?: string): Promise<T>;
   onRuntimeEvent(listener: (event: RuntimeEvent, runtimeId?: string) => void): () => void;
   onUpdateAvailable(listener: (update: UpdateAvailable) => void): () => void;
+  /** Hand Renderer entries to the process that owns the log file. */
+  writeDiagnostics(batch: DiagnosticLogBatch): void;
+  /** Show the log in the file manager and return its path. */
+  revealDiagnostics(): Promise<string>;
 }
 
 

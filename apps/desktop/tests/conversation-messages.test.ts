@@ -64,8 +64,9 @@ test("切换会话后仍从运行时快照恢复 FIFO 排队消息", () => {
     promptQueue: [queued],
     revision: 4,
   });
-  // Queued prompts are projected separately: they are not in the transcript.
-  assert.deepEqual(selectConversationMessages(state), []);
+  // Queued prompts stay in the transcript, marked as not yet sent, and are also
+  // listed above the composer where they can be withdrawn or interjected.
+  assert.deepEqual(selectConversationMessages(state).map((message) => [message.id, message.status]), [["client-queued", "queued"]]);
   assert.equal(selectQueuedPrompts(state)[0]?.status, "queued");
   state = conversationMessagesReducer(state, {
     type: "snapshot",
@@ -81,8 +82,38 @@ test("切换会话后仍从运行时快照恢复 FIFO 排队消息", () => {
     promptQueue: [queued],
     revision: 5,
   });
-  assert.deepEqual(selectConversationMessages(state), []);
+  assert.deepEqual(selectConversationMessages(state).map((message) => message.id), ["client-queued"]);
   assert.deepEqual(selectQueuedPrompts(state).map((message) => [message.id, message.status]), [["client-queued", "queued"]]);
+});
+
+test("排队气泡排在已确认消息之后，并按入队顺序排列", () => {
+  const state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, {
+    type: "snapshot",
+    sessionPath: "/sessions/a.jsonl",
+    messages: [user("m1", "第一条", 1), { ...user("a1", "回复", 2), role: "assistant" }],
+    promptQueue: [
+      { id: "q2", text: "后排队的", queuedAt: 200 },
+      { id: "q1", text: "先排队的", queuedAt: 100 },
+    ],
+    revision: 3,
+  });
+  assert.deepEqual(selectConversationMessages(state).map((message) => message.id), ["m1", "a1", "q1", "q2"]);
+});
+
+test("快照同时带着队列占位和正式消息时只画一条气泡", () => {
+  // Pi echoes the user message before the runtime drops its queue row, so a
+  // snapshot taken in that window carries the prompt in both lists.
+  const state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, {
+    type: "snapshot",
+    sessionPath: "/sessions/a.jsonl",
+    messages: [{ ...user("q1", "跑一下测试", 5), status: undefined }],
+    promptQueue: [{ id: "q1", text: "跑一下测试", queuedAt: 100 }],
+    revision: 2,
+  });
+  assert.deepEqual(
+    selectConversationMessages(state).map((message) => [message.id, message.order, message.status]),
+    [["q1", 5, undefined]],
+  );
 });
 
 test("队列投影在正式 user message 到达时只保留一条消息", () => {

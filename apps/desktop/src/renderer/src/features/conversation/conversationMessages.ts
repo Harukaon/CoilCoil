@@ -172,14 +172,25 @@ export function conversationMessagesReducer(
 }
 
 /**
- * Project the committed runtime state and local sends into one stable list.
+ * Project the committed runtime state, the queue, and local sends into one list.
  *
- * Queued prompts are deliberately absent. They have not been sent, they can
- * still be withdrawn, and rendering them as chat bubbles claimed otherwise —
- * they belong above the input, where `selectQueuedPrompts` feeds them.
+ * A queued prompt stays where it was typed, carrying its `queued` status so the
+ * bubble can say it has not been sent yet. Taking it out of the transcript until
+ * its turn came read as the message having been swallowed — the row above the
+ * input is where it can be withdrawn or interjected, not where it is read.
+ *
+ * Queued rows sort by `queuedAt` and committed messages by their timeline order,
+ * so the queue always trails the transcript in send order.
  */
 export function selectConversationMessages(state: ConversationMessagesState): ChatMessage[] {
   let projected = [...state.committed];
+  // Pi echoes the user message before the queue drops its row, so for one
+  // update the prompt is in both lists. The committed one is the message; the
+  // queued row is only a placeholder for it.
+  const confirmed = new Set(projected.map((message) => message.id));
+  for (const message of state.queued) {
+    if (!confirmed.has(message.id)) projected = upsert(projected, message);
+  }
   for (const item of state.pending) {
     if (item.sessionPath && item.sessionPath !== state.sessionPath) continue;
     projected = upsert(projected, item.message);

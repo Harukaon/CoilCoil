@@ -355,9 +355,15 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     return id;
   }
 
-  protected queueClientMessage(active: ActiveSession, clientMessageId?: string): void {
-    if (!clientMessageId || active.pendingUserMessageIds.includes(clientMessageId)) return;
-    active.pendingUserMessageIds.push(clientMessageId);
+  /**
+   * Remember that `text` was sent on this client message's behalf.
+   *
+   * The text is what correlates Pi's echoed user message back to this id; see
+   * {@link matchPendingUserPrompt}.
+   */
+  protected queueClientMessage(active: ActiveSession, clientMessageId: string | undefined, text: string): void {
+    if (!clientMessageId || active.pendingUserPrompts.some((prompt) => prompt.id === clientMessageId)) return;
+    active.pendingUserPrompts.push({ id: clientMessageId, text });
   }
 
   protected publishPromptQueue(active: ActiveSession): void {
@@ -378,31 +384,33 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     clientMessageId?: string,
   ): void {
     const id = clientMessageId || `queued-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    if (active.promptQueue.some((item) => item.id === id) || active.pendingUserMessageIds.includes(id)) return;
+    if (active.promptQueue.some((item) => item.id === id) || active.pendingUserPrompts.some((prompt) => prompt.id === id)) return;
     active.promptQueue.push({
       id,
       text,
       images: images?.map((image) => ({ ...image })),
       queuedAt: Date.now(),
     });
+    this.log.info("prompt-queue", "enqueued", { id, queued: active.promptQueue.length });
     this.publishPromptQueue(active);
     // Protect this session runtime from idle retirement during the small gap
     // between one Pi run settling and the next queued prompt starting.
-    this.emitEvent({ type: "run_state", running: true });
+    this.publishRunning(true, "prompt_enqueued", { id });
   }
 
   protected removeQueuedPrompt(active: ActiveSession, id: string): boolean {
     const index = active.promptQueue.findIndex((item) => item.id === id);
     if (index < 0) return false;
     active.promptQueue.splice(index, 1);
+    this.log.info("prompt-queue", "removed", { id, queued: active.promptQueue.length });
     this.publishPromptQueue(active);
     return true;
   }
 
   protected rejectClientMessage(active: ActiveSession, clientMessageId?: string): void {
     if (!clientMessageId) return;
-    const index = active.pendingUserMessageIds.indexOf(clientMessageId);
-    if (index >= 0) active.pendingUserMessageIds.splice(index, 1);
+    const index = active.pendingUserPrompts.findIndex((prompt) => prompt.id === clientMessageId);
+    if (index >= 0) active.pendingUserPrompts.splice(index, 1);
     this.emitEvent({ type: "message_rejected", id: clientMessageId, revision: ++active.messageRevision });
   }
 

@@ -48,11 +48,25 @@ import {
   CoilCoilRuntimeOptions,
 } from "./runtime-state.js";
 import {
+  DIAGNOSTIC_LEVEL_ENV,
+  DIAGNOSTIC_LOG_DIRECTORY,
+  DiagnosticLog,
+  levelFromEnvironment,
+} from "@coilcoil/diagnostics";
+import {
   setGlobalToolPurposeAuditEnabled,
 } from "./session-values.js";
 
 export abstract class RuntimeBase {
   readonly agentDir: string;
+
+  /**
+   * Where this runtime records what it did.
+   *
+   * Every session runtime in the process shares one file, so a symptom that
+   * spans a session switch still reads as a single timeline.
+   */
+  readonly log: DiagnosticLog;
 
   readonly sessionDir: string;
 
@@ -97,6 +111,11 @@ export abstract class RuntimeBase {
     configureHttpDispatcher();
     this.agentDir = resolve(options.agentDir);
     this.sessionDir = resolve(options.sessionDir);
+    this.log = options.log ?? new DiagnosticLog({
+      directory: join(this.agentDir, DIAGNOSTIC_LOG_DIRECTORY),
+      process: "runtime",
+      level: levelFromEnvironment(process.env[DIAGNOSTIC_LEVEL_ENV]),
+    });
     setGlobalToolPurposeAuditEnabled(this.readToolPurposeAuditSetting());
     this.workflowDir = resolveWorkflowDirectory(options.workflowDir);
     this.browserScopeId = options.browserScopeId;
@@ -120,6 +139,25 @@ export abstract class RuntimeBase {
       : false;
     migrateLegacyResponsesWsIdentity(this.agentDir);
     mkdirSync(this.sessionDir, { recursive: true });
+  }
+
+  /**
+   * Say whether this session is busy, and record what decided it.
+   *
+   * Nine places used to answer this question independently, and a composer that
+   * kept spinning after a reply had visibly ended could not be pinned on any of
+   * them from the outside — the event carries a boolean and nothing else. They
+   * all come through here now, so the log always names the last thing that
+   * changed the answer and what it saw when it did.
+   */
+  protected publishRunning(
+    running: boolean,
+    reason: string,
+    detail?: { aborting?: boolean } & Record<string, unknown>,
+  ): void {
+    const { aborting, ...rest } = detail ?? {};
+    this.log.info("run-state", "run_state", { running, reason, ...(aborting === undefined ? {} : { aborting }), ...rest });
+    this.emitEvent({ type: "run_state", running, ...(aborting === undefined ? {} : { aborting }) });
   }
 
   abstract getConfiguration(): Promise<RuntimeConfiguration>;

@@ -264,7 +264,7 @@ export function MessageView({
           </div>
         ) : (
           <button
-            className="user-bubble user-bubble-button"
+            className={`user-bubble user-bubble-button ${message.status === "queued" ? "queued" : ""}`}
             type="button"
             title={message.entryId ? "点击编辑并从这里重新开始" : undefined}
             data-prompt-value={value}

@@ -7,8 +7,10 @@ import {
 } from "@coilcoil/runtime-protocol";
 import {
   assistantToolCalls,
+  contentParts,
   extractExitCode,
   mapMessage,
+  matchPendingUserPrompt,
   planFromResult,
   preparePromptImages,
   subagentActivityFromDetails,
@@ -58,7 +60,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     try {
       switch (event.type) {
         case "agent_start":
-          this.emitEvent({ type: "run_state", running: true });
+          this.publishRunning(true, "agent_start");
           break;
         case "agent_settled":
           // Nothing is in flight once the agent has settled, so any card still
@@ -79,7 +81,8 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           // Keep the runtime visibly busy while accepted FIFO work remains.
           // The promise that owns the completed Pi run starts the next item only
           // after AgentSession.prompt() has fully resolved.
-          if (active.promptQueue.length === 0) this.emitEvent({ type: "run_state", running: false });
+          this.log.info("run-state", "agent_settled", { queued: active.promptQueue.length });
+          if (active.promptQueue.length === 0) this.publishRunning(false, "agent_settled");
           // Settling is the second, independent chance to start queued work.
           // Relying only on the owning run's `finally` deadlocks a prompt that
           // was accepted after that callback had already been and gone, which
@@ -91,6 +94,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           void this.listSessions(active.cwd);
           break;
         case "compaction_start":
+          this.log.info("compaction", "compaction_start", { reason: event.reason });
           active.summaryActivity = {
             id: `compaction-${active.sessionRevision}-${Date.now()}`,
             kind: "compaction",
@@ -135,6 +139,15 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
               willRetry: event.willRetry,
             };
           }
+          this.log.info("compaction", "compaction_end", {
+            reason: event.reason,
+            succeeded: Boolean(event.result),
+            aborted: event.aborted,
+            willRetry: event.willRetry,
+            tokensBefore: event.result?.tokensBefore,
+            estimatedTokensAfter: event.result?.estimatedTokensAfter,
+            error: event.errorMessage,
+          });
           this.publishRuntimeInspection(active);
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
           break;
@@ -219,7 +232,23 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
         case "message_start": {
           const raw = event.message as unknown;
           const role = isRecord(raw) ? stringValue(raw.role) : "message";
-          const clientMessageId = role === "user" ? active.pendingUserMessageIds.shift() : undefined;
+          // Not every user message came from a client. A running `/goal` loop
+          // sends itself one each round, and claiming a pending id for it stole
+          // the identity of a message the user was still waiting to send.
+          const pendingIndex = role === "user"
+            ? matchPendingUserPrompt(active.pendingUserPrompts, contentParts(isRecord(raw) ? raw.content : undefined).text)
+            : -1;
+          const clientMessageId = pendingIndex >= 0
+            ? active.pendingUserPrompts.splice(pendingIndex, 1)[0]!.id
+            : undefined;
+          if (role === "user" && pendingIndex < 0 && active.pendingUserPrompts.length > 0) {
+            // Expected for a `/goal` round, which nobody is waiting on. Anywhere
+            // else it means a prompt's bubble is about to lose its identity.
+            this.log.warn("message-correlation", "user_message_claimed_nothing", {
+              pending: active.pendingUserPrompts.map((prompt) => prompt.id),
+              textPreview: contentParts(isRecord(raw) ? raw.content : undefined).text.slice(0, 120),
+            });
+          }
           const id = clientMessageId || this.messageId(raw, role || "message");
           if (clientMessageId && isRecord(raw)) active.messageIds.set(raw, clientMessageId);
           const order = active.nextTimelineOrder++;
@@ -422,6 +451,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           break;
       }
     } catch (error) {
+      this.log.error("session-event", "handler_failed", error, { eventType: event.type });
       this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
     }
   }
@@ -434,7 +464,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     queued: boolean,
   ): Promise<void> {
     this.promptStarting = true;
-    this.emitEvent({ type: "run_state", running: true });
+    this.publishRunning(true, "prompt_starting", { queued });
     try {
       // A model selected while the previous turn was running is committed at
       // this prompt boundary, never in the middle of the previous turn.
@@ -444,7 +474,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
       const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
       if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
 
-      this.queueClientMessage(active, clientMessageId);
+      this.queueClientMessage(active, clientMessageId, expandedPrompt);
       const run = active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
         preflightResult: () => { this.promptStarting = false; },
@@ -453,11 +483,12 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
         // Extension commands may complete without producing a Pi user message.
         // Such an item must still leave the queue instead of blocking all later
         // prompts, and its optimistic chat bubble must be withdrawn.
-        if (clientMessageId && active.pendingUserMessageIds.includes(clientMessageId)) {
+        if (clientMessageId && active.pendingUserPrompts.some((prompt) => prompt.id === clientMessageId)) {
           if (queued) this.removeQueuedPrompt(active, clientMessageId);
           this.rejectClientMessage(active, clientMessageId);
         }
       }).catch((error) => {
+        this.log.error("prompt", "prompt_failed", error, { clientMessageId, queued });
         if (clientMessageId && queued) this.removeQueuedPrompt(active, clientMessageId);
         this.rejectClientMessage(active, clientMessageId);
         this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
@@ -466,7 +497,11 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
         if (queued) active.promptDrainInProgress = false;
         if (this.active !== active) return;
         if (active.promptQueue.length > 0) void this.drainPromptQueue(active);
-        else if (!active.session.isStreaming) this.emitEvent({ type: "run_state", running: false });
+        // The turn is over as far as this prompt is concerned. Whether the
+        // spinner clears here is exactly the question "回复结束了输入框还在转"
+        // asks, so record what this saw even when it decides to leave it on.
+        else if (!active.session.isStreaming) this.publishRunning(false, "prompt_finished", { clientMessageId });
+        else this.log.info("run-state", "run_state_held", { reason: "prompt_finished", streaming: true });
       });
     } catch (error) {
       this.promptStarting = false;
@@ -507,6 +542,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     // A promoted entry is mid-steer and still sitting in the queue so the UI can
     // show it leaving; starting it here would send the same message twice.
     if (next.promoting) return;
+    this.log.info("prompt-queue", "drain_start", { id: next.id, queued: active.promptQueue.length });
     active.promptDrainInProgress = true;
     try {
       if (this.modelTransition) await this.modelTransition;
@@ -514,11 +550,12 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
       await this.startPrompt(active, next.text, next.images, next.id, true);
     } catch (error) {
       active.promptDrainInProgress = false;
+      this.log.error("prompt-queue", "drain_failed", error, { id: next.id });
       this.removeQueuedPrompt(active, next.id);
       this.rejectClientMessage(active, next.id);
       this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       if (active.promptQueue.length > 0) queueMicrotask(() => { void this.drainPromptQueue(active); });
-      else this.emitEvent({ type: "run_state", running: false });
+      else this.publishRunning(false, "drain_failed");
     }
   }
 }

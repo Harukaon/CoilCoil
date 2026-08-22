@@ -56,7 +56,7 @@ test("a mid-stream snapshot includes the in-progress assistant message instead o
     project: { cwd: root, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
     messageIds: new WeakMap(),
     messageRevision: 0,
-    pendingUserMessageIds: [],
+    pendingUserPrompts: [],
     promptQueue: [],
     promptDrainInProgress: false,
     // Deliberately far from reconstructState's own local order counter (which starts at
@@ -150,7 +150,7 @@ test("assistant tool calls stay visible before a result and survive a live snaps
     project: { cwd: root, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
     messageIds: new WeakMap(),
     messageRevision: 0,
-    pendingUserMessageIds: [],
+    pendingUserPrompts: [],
     promptQueue: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 1,

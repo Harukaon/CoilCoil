@@ -21,6 +21,7 @@ import type {
   TokenUsage,
 } from "@coilcoil/runtime-protocol";
 import { summarizeCacheUsage } from "@coilcoil/runtime-protocol";
+import { diagnostics } from "../../diagnostics";
 import { Modal } from "../../ui/dialog";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { Tooltip } from "../../ui/tooltip";
@@ -237,7 +238,24 @@ export function RuntimePanel({
   return (
     <div className="runtime-panel">
       <section className="runtime-overview">
-        <header><strong>当前运行时</strong><small>会话版本 {inspection?.sessionRevision ?? 0}</small></header>
+        <header>
+          <strong>当前运行时</strong>
+          <small>会话版本 {inspection?.sessionRevision ?? 0}</small>
+          {/* 遇到说不清的问题时，这里是唯一能把现场交出去的入口。 */}
+          <button
+            className="runtime-log-button"
+            type="button"
+            title="三个进程的运行日志都写在这里，出问题时把它发给开发者"
+            onClick={() => {
+              diagnostics.flush();
+              void window.coilcoil.revealDiagnostics().catch((caught) => {
+                toastError(caught instanceof Error ? caught.message : String(caught));
+              });
+            }}
+          >
+            打开日志
+          </button>
+        </header>
         <div className="runtime-context-card">
           {contextUsage ? <span className="runtime-progress"><i style={{ width: `${Math.max(0, Math.min(100, contextUsage.percent ?? 0))}%` }} /></span> : null}
           <div className="runtime-context-total">

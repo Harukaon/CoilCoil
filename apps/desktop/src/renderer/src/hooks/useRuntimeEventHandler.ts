@@ -16,6 +16,7 @@ import type {
 import type { SessionActivityState } from "../features/workspaces/WorkspaceSidebar";
 import { upsertSessionSummary } from "../features/workspaces/sessionList";
 import type { conversationMessagesReducer } from "../features/conversation/conversationMessages";
+import { diagnostics } from "../diagnostics";
 import { toastError, toastInfo, toastSuccess } from "../ui/toast";
 
 type ConversationMessageAction = Parameters<typeof conversationMessagesReducer>[1];
@@ -192,13 +193,22 @@ export function useRuntimeEventHandler({
         setProjectState(event.project);
         break;
       case "metrics_updated":
-        setSnapshot((current) => current ? {
-          ...current,
-          responseMetrics: event.responseMetrics,
-          responseMetricsHistory: event.responseMetricsHistory,
-          contextUsage: event.contextUsage,
-          tokenUsage: event.tokenUsage,
-        } : current);
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = {
+            ...current,
+            responseMetrics: event.responseMetrics,
+            responseMetricsHistory: event.responseMetricsHistory,
+            contextUsage: event.contextUsage,
+            tokenUsage: event.tokenUsage,
+          };
+          // The ref and the cache are what a session switch and every
+          // synchronous read see. Leaving them behind here made the context
+          // ring fall back to a stale token count on the way back to a session.
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
         break;
       case "runtime_inspection_updated":
         setSnapshot((current) => {
@@ -210,6 +220,7 @@ export function useRuntimeEventHandler({
         });
         break;
       case "runtime_notice":
+        diagnostics.info("runtime-notice", event.level, { message: event.message });
         if (event.level === "error") toastError(event.message);
         else if (event.level === "success") toastSuccess(event.message);
         else toastInfo(event.message);
@@ -219,6 +230,9 @@ export function useRuntimeEventHandler({
         setAgentPhase(event.running ? "思考" : undefined);
         break;
       case "runtime_error":
+        // The toast is gone in seconds and never showed `detail` at all, so the
+        // stack behind a failure had nowhere to land until now.
+        diagnostics.error("runtime-error", "runtime_error", event.message, { detail: event.detail, runtimeId });
         toastError(event.message);
         break;
       default:

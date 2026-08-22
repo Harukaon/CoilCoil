@@ -98,7 +98,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     if (!this.removeQueuedPrompt(active, id)) return { cancelled: false };
     this.rejectClientMessage(active, id);
     if (active.promptQueue.length === 0 && !active.session.isStreaming && !this.promptStarting) {
-      this.emitEvent({ type: "run_state", running: false });
+      this.publishRunning(false, "queue_cancelled", { id });
     }
     return { cancelled: true };
   }
@@ -126,7 +126,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       // Pi branch. Rewinding changes that branch, so refresh the right-hand
       // runtime inspector without blocking the new prompt on MCP discovery.
       void this.refreshRuntimeInspectionSources(active);
-      this.queueClientMessage(active, clientMessageId);
+      this.queueClientMessage(active, clientMessageId, expandedPrompt);
       void active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
         preflightResult: () => { this.promptStarting = false; },
@@ -134,7 +134,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
         this.promptStarting = false;
         this.rejectClientMessage(active, clientMessageId);
         this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
-        this.emitEvent({ type: "run_state", running: false });
+        this.publishRunning(false, "rewind_failed");
       });
       return { accepted: true };
     } catch (error) {
@@ -182,7 +182,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   ): Promise<void> {
     const prepared = await preparePromptImages(images);
     const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-    this.queueClientMessage(active, clientMessageId);
+    this.queueClientMessage(active, clientMessageId, expandedPrompt);
     try {
       await active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
@@ -254,6 +254,13 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     const active = this.requireActive();
     // Stopping is how a user ends a `/goal` loop: without this the loop would
     // simply start the next round after the aborted turn settles.
+    const requestedAt = Date.now();
+    this.log.info("abort", "abort_requested", {
+      streaming: active.session.isStreaming,
+      aborting: active.aborting === true,
+      queued: active.promptQueue.length,
+      runningTools: [...active.tools.values()].filter((tool) => tool.status === "running").map((tool) => tool.name),
+    });
     const stoppedGoal = await this.stopGoalIfRunning(active);
     // Stopping means the conversation stops. Anything still waiting in the FIFO
     // would otherwise start the moment the aborted turn settles, which looks
@@ -262,6 +269,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     if (!active.session.isStreaming) {
       // A stop pressed against a run this session no longer has still has a job
       // to do: publish what is actually true, so a stale spinner clears.
+      this.log.info("abort", "abort_without_live_run", { cancelledQueue, stoppedGoal });
       this.publishRunState(active);
       return { aborted: stoppedGoal || cancelledQueue > 0, aborting: false, cancelledQueue };
     }
@@ -276,6 +284,10 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       .finally(() => {
         clearTimeout(stallNotice);
         active.aborting = false;
+        // The gap between this and `abort_requested` is the whole of "I pressed
+        // stop and nothing happened": it is time spent inside a tool call that
+        // had already been dispatched, not a click that went missing.
+        this.log.info("abort", "abort_settled", { elapsedMs: Date.now() - requestedAt });
         if (this.active === active) this.publishRunState(active);
       });
     return { aborted: true, aborting: true, cancelledQueue };
@@ -293,6 +305,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     const running = [...new Set(
       [...active.tools.values()].filter((tool) => tool.status === "running").map((tool) => tool.name),
     )];
+    this.log.warn("abort", "abort_stalled", { waitingOn: running });
     this.emitEvent({
       type: "runtime_notice",
       level: "info",
@@ -304,10 +317,12 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
 
   /** Emit the run state this session actually has, whatever the UI believes. */
   private publishRunState(active: ActiveSession): void {
-    this.emitEvent({
-      type: "run_state",
-      running: active.session.isStreaming || this.promptStarting || active.promptQueue.length > 0,
+    const running = active.session.isStreaming || this.promptStarting || active.promptQueue.length > 0;
+    this.publishRunning(running, "publish_run_state", {
       aborting: active.aborting === true,
+      streaming: active.session.isStreaming,
+      promptStarting: this.promptStarting,
+      queued: active.promptQueue.length,
     });
     void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot })).catch(() => undefined);
   }

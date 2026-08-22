@@ -26,8 +26,14 @@ import {
   readFileSync,
 } from "node:fs";
 import {
+  type DiagnosticLog,
+} from "@coilcoil/diagnostics";
+import {
   EventSink
 } from "./runtime-constants.js";
+import {
+  type PendingUserPrompt,
+} from "./message-helpers.js";
 import {
   isRecord,
   optionalString,
@@ -38,6 +44,8 @@ import { ToolRunIds } from "./tool-run-ids.js";
 export interface CoilCoilRuntimeOptions {
   agentDir: string;
   sessionDir: string;
+  /** Shared with every runtime in this process so one file holds the timeline. */
+  log?: DiagnosticLog;
   workflowDir?: string;
   legacyAgentDir?: string;
   modelRuntime?: ModelRuntime;
@@ -58,7 +66,8 @@ export interface ActiveSession {
   project: ProjectSnapshot;
   messageIds: WeakMap<object, string>;
   messageRevision: number;
-  pendingUserMessageIds: string[];
+  /** Prompts handed to Pi whose user message it has not echoed back yet. */
+  pendingUserPrompts: PendingUserPrompt[];
   promptQueue: QueuedPrompt[];
   promptDrainInProgress: boolean;
   /** Pending re-check for a queue held back only by Pi's streaming flag. */
