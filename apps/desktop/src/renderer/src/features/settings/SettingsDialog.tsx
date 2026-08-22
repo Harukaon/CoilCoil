@@ -9,6 +9,7 @@ import type {
   McpServerRuntimeStatus,
   RuntimeConfiguration,
 } from "@coilcoil/runtime-protocol";
+import { Select, type SelectOption } from "../../ui/Select";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
 import { ModelSettings } from "./ModelSettings";
@@ -23,6 +24,25 @@ const SETTINGS_SIDEBAR_WIDTH_KEY = "coilcoil.settings-sidebar-width";
 const DEFAULT_SETTINGS_SIDEBAR_WIDTH = 220;
 const MINIMUM_SETTINGS_SIDEBAR_WIDTH = 160;
 const MAXIMUM_SETTINGS_SIDEBAR_WIDTH = 360;
+const MCP_SCOPE_OPTIONS: SelectOption[] = [
+  { value: "global", label: "全局" },
+  { value: "project", label: "当前项目" },
+];
+const MCP_TRANSPORT_OPTIONS: SelectOption[] = [
+  { value: "stdio", label: "stdio 命令" },
+  { value: "http", label: "HTTP" },
+];
+const MCP_AUTH_OPTIONS: SelectOption[] = [
+  { value: "auto", label: "自动检测" },
+  { value: "oauth", label: "OAuth" },
+  { value: "bearer", label: "Bearer" },
+  { value: "false", label: "不认证" },
+];
+const MCP_LIFECYCLE_OPTIONS: SelectOption[] = [
+  { value: "lazy", label: "按需连接" },
+  { value: "keep-alive", label: "保持连接" },
+  { value: "eager", label: "启动时连接" },
+];
 
 function storedSettingsSidebarWidth(): number {
   const value = Number(window.localStorage.getItem(SETTINGS_SIDEBAR_WIDTH_KEY));
@@ -397,10 +417,10 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
           {runtimeStatus?.diagnostic ? <p className="mcp-source-note">{runtimeStatus.diagnostic}</p> : null}
           {mounted ? <p className="mcp-source-note">这个服务器挂载自 {mcpOriginLabel(draft)}，定义保存在 <code>{draft.source}</code>。CoilCoil 只叠加启用状态等本地覆盖，要改命令、地址或请求头请到该应用里编辑。</p> : null}
           <fieldset className="mcp-definition-fields" disabled={mounted}>
-          <div className="settings-grid"><label>名称<input value={draft.name} placeholder="例如 github" onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label><label>作用域<select value={draft.scope} disabled={!cwd} onChange={(event) => setDraft((current) => ({ ...current, scope: event.target.value as McpServerConfiguration["scope"] }))}><option value="global">全局</option><option value="project">当前项目</option></select></label></div>
-          <label>连接方式<select value={draft.transport} onChange={(event) => setDraft((current) => ({ ...current, transport: event.target.value as McpServerConfiguration["transport"] }))}><option value="stdio">stdio 命令</option><option value="http">HTTP</option></select></label>
-          {draft.transport === "stdio" ? <><label>启动命令<input value={draft.command ?? ""} placeholder="npx" onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))} /></label><label>参数（每行一个）<textarea value={argsText} placeholder="-y&#10;@modelcontextprotocol/server-filesystem" onChange={(event) => setArgsText(event.target.value)} /></label><div className="settings-grid"><label>工作目录<input value={draft.cwd ?? ""} placeholder="可选" onChange={(event) => setDraft((current) => ({ ...current, cwd: event.target.value }))} /></label><label>环境变量 JSON<textarea value={envText} onChange={(event) => setEnvText(event.target.value)} /></label></div></> : <><label>服务器地址<input value={draft.url ?? ""} placeholder="https://example.com/mcp" onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} /></label><div className="settings-grid"><label>认证<select value={String(draft.auth ?? "auto")} onChange={(event) => setDraft((current) => ({ ...current, auth: event.target.value === "auto" ? undefined : event.target.value === "false" ? false : event.target.value as "oauth" | "bearer" }))}><option value="auto">自动检测</option><option value="oauth">OAuth</option><option value="bearer">Bearer</option><option value="false">不认证</option></select></label><label>Bearer 环境变量<input value={draft.bearerTokenEnv ?? ""} placeholder="例如 GITHUB_TOKEN" onChange={(event) => setDraft((current) => ({ ...current, bearerTokenEnv: event.target.value }))} /></label></div><label>请求头 JSON<textarea value={headersText} onChange={(event) => setHeadersText(event.target.value)} /></label></>}
-          <div className="settings-grid"><label>生命周期<select value={draft.lifecycle} onChange={(event) => setDraft((current) => ({ ...current, lifecycle: event.target.value as McpServerConfiguration["lifecycle"] }))}><option value="lazy">按需连接</option><option value="keep-alive">保持连接</option><option value="eager">启动时连接</option></select></label><label>空闲超时（分钟）<input type="number" min="0" value={draft.idleTimeout ?? ""} placeholder="使用扩展默认值" onChange={(event) => setDraft((current) => ({ ...current, idleTimeout: event.target.value ? Number(event.target.value) : undefined }))} /></label></div>
+          <div className="settings-grid"><label>名称<input value={draft.name} placeholder="例如 github" onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label><label>作用域<Select value={draft.scope} options={MCP_SCOPE_OPTIONS} disabled={!cwd} ariaLabel="MCP 作用域" onChange={(scope) => setDraft((current) => ({ ...current, scope: scope as McpServerConfiguration["scope"] }))} /></label></div>
+          <label>连接方式<Select value={draft.transport} options={MCP_TRANSPORT_OPTIONS} ariaLabel="MCP 连接方式" onChange={(transport) => setDraft((current) => ({ ...current, transport: transport as McpServerConfiguration["transport"] }))} /></label>
+          {draft.transport === "stdio" ? <><label>启动命令<input value={draft.command ?? ""} placeholder="npx" onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))} /></label><label>参数（每行一个）<textarea value={argsText} placeholder="-y&#10;@modelcontextprotocol/server-filesystem" onChange={(event) => setArgsText(event.target.value)} /></label><div className="settings-grid"><label>工作目录<input value={draft.cwd ?? ""} placeholder="可选" onChange={(event) => setDraft((current) => ({ ...current, cwd: event.target.value }))} /></label><label>环境变量 JSON<textarea value={envText} onChange={(event) => setEnvText(event.target.value)} /></label></div></> : <><label>服务器地址<input value={draft.url ?? ""} placeholder="https://example.com/mcp" onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} /></label><div className="settings-grid"><label>认证<Select value={String(draft.auth ?? "auto")} options={MCP_AUTH_OPTIONS} ariaLabel="MCP HTTP 认证方式" onChange={(auth) => setDraft((current) => ({ ...current, auth: auth === "auto" ? undefined : auth === "false" ? false : auth as "oauth" | "bearer" }))} /></label><label>Bearer 环境变量<input value={draft.bearerTokenEnv ?? ""} placeholder="例如 GITHUB_TOKEN" onChange={(event) => setDraft((current) => ({ ...current, bearerTokenEnv: event.target.value }))} /></label></div><label>请求头 JSON<textarea value={headersText} onChange={(event) => setHeadersText(event.target.value)} /></label></>}
+          <div className="settings-grid"><label>生命周期<Select value={draft.lifecycle} options={MCP_LIFECYCLE_OPTIONS} ariaLabel="MCP 生命周期" onChange={(lifecycle) => setDraft((current) => ({ ...current, lifecycle: lifecycle as McpServerConfiguration["lifecycle"] }))} /></label><label>空闲超时（分钟）<input type="number" min="0" value={draft.idleTimeout ?? ""} placeholder="使用扩展默认值" onChange={(event) => setDraft((current) => ({ ...current, idleTimeout: event.target.value ? Number(event.target.value) : undefined }))} /></label></div>
           <div className="settings-grid"><label>请求超时（毫秒）<input type="number" min="0" value={draft.requestTimeoutMs ?? ""} placeholder="使用扩展默认值" onChange={(event) => setDraft((current) => ({ ...current, requestTimeoutMs: event.target.value ? Number(event.target.value) : undefined }))} /></label><label className="checkbox-setting"><input type="checkbox" checked={draft.debug} onChange={(event) => setDraft((current) => ({ ...current, debug: event.target.checked }))} />显示服务器调试输出</label></div>
           <div className="settings-grid"><label>直接注册的工具（每行一个）<textarea value={directToolsText} placeholder="留空时使用下面的全部开关" onChange={(event) => setDirectToolsText(event.target.value)} /></label><label>排除工具（每行一个）<textarea value={excludeToolsText} onChange={(event) => setExcludeToolsText(event.target.value)} /></label></div>
           <div className="settings-grid"><label className="checkbox-setting"><input type="checkbox" checked={draft.directTools === true} disabled={Boolean(directToolsText.trim())} onChange={(event) => setDraft((current) => ({ ...current, directTools: event.target.checked }))} />直接注册全部服务器工具</label><label className="checkbox-setting"><input type="checkbox" checked={draft.exposeResources} onChange={(event) => setDraft((current) => ({ ...current, exposeResources: event.target.checked }))} />向 Agent 暴露资源</label></div>

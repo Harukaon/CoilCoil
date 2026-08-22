@@ -1,10 +1,12 @@
 import {
   AlertCircle,
+  Bot,
   BrainCircuit,
   CheckCircle2,
   CircleDashed,
   GitBranch,
   History,
+  LoaderCircle,
   PlugZap,
   RefreshCw,
   RotateCcw,
@@ -14,15 +16,20 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  ConfigurableSubagentProfile,
   ContextUsage,
   McpServerRuntimeStatus,
+  RuntimeConfiguration,
   RuntimeInspectionSnapshot,
   RuntimeSummaryEvent,
+  SubagentConfiguration,
+  SubagentProfileModels,
   TokenUsage,
 } from "@coilcoil/runtime-protocol";
 import { summarizeCacheUsage } from "@coilcoil/runtime-protocol";
 import { diagnostics } from "../../diagnostics";
 import { Modal } from "../../ui/dialog";
+import { Select, type SelectOption } from "../../ui/Select";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { Tooltip } from "../../ui/tooltip";
 import { tokenNumber, toolDisplayName } from "./runtimePresentation";
@@ -45,6 +52,14 @@ const reasonLabel: Record<NonNullable<RuntimeSummaryEvent["reason"]>, string> = 
   threshold: "达到阈值",
   overflow: "溢出恢复",
 };
+
+const subagentProfiles: Array<{ id: ConfigurableSubagentProfile; label: string; description: string }> = [
+  { id: "explore", label: "Explore", description: "只读搜索与代码梳理" },
+  { id: "worker", label: "Worker", description: "编码实现与文件修改" },
+  { id: "reviewer", label: "Reviewer", description: "独立代码评审" },
+];
+
+const emptySubagentModels = (): SubagentProfileModels => ({ explore: "", worker: "", reviewer: "" });
 
 function percent(value: number): string {
   return new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 1 }).format(value);
@@ -118,20 +133,26 @@ export function RuntimePanel({
   tokenUsage,
   runtimeId,
   cwd,
+  configuration,
 }: {
   inspection?: RuntimeInspectionSnapshot;
   contextUsage?: ContextUsage;
   tokenUsage?: TokenUsage;
   runtimeId?: string;
   cwd?: string;
+  configuration?: RuntimeConfiguration;
 }): React.JSX.Element {
   const [promptOpen, setPromptOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(inspection?.effectiveSystemPrompt ?? "");
   const [busyAction, setBusyAction] = useState<string>();
   const [mcpOverrides, setMcpOverrides] = useState<McpVisibilityOverrides>({});
+  const [subagentModels, setSubagentModels] = useState<SubagentProfileModels>(inspection?.subagent?.models ?? emptySubagentModels());
+  const [subagentSaving, setSubagentSaving] = useState(false);
   const summaries = inspection?.summaryEvents ?? [];
   const activeTools = useMemo(() => inspection?.tools.filter((tool) => tool.active) ?? [], [inspection?.tools]);
+  const availableModels = useMemo(() => configuration?.models.filter((model) => model.configured) ?? [], [configuration?.models]);
+  const configuredSubagentCount = Object.values(subagentModels).filter(Boolean).length;
   const cumulativeCache = useMemo(
     () => summarizeCacheUsage(tokenUsage?.input, tokenUsage?.cacheRead, tokenUsage?.cacheWrite),
     [tokenUsage?.cacheRead, tokenUsage?.cacheWrite, tokenUsage?.input],
@@ -147,6 +168,14 @@ export function RuntimePanel({
   useEffect(() => {
     if (!editingPrompt) setPromptDraft(inspection?.effectiveSystemPrompt ?? "");
   }, [editingPrompt, inspection?.effectiveSystemPrompt]);
+
+  useEffect(() => {
+    setSubagentModels(inspection?.subagent?.models ?? emptySubagentModels());
+  }, [
+    inspection?.subagent?.models.explore,
+    inspection?.subagent?.models.reviewer,
+    inspection?.subagent?.models.worker,
+  ]);
 
   // Once the runtime reports a server in the state we optimistically rendered,
   // drop the override so the panel follows the runtime again.
@@ -188,6 +217,30 @@ export function RuntimePanel({
     setEditingPrompt(false);
     setPromptOpen(false);
     toastSuccess("已恢复当前会话的默认 System Prompt");
+  };
+
+  const saveSubagentModels = async (): Promise<void> => {
+    setSubagentSaving(true);
+    try {
+      const result = await request<SubagentConfiguration>("subagent-models", {
+        type: "save_subagent_configuration",
+        input: {
+          models: {
+            explore: subagentModels.explore.trim(),
+            worker: subagentModels.worker.trim(),
+            reviewer: subagentModels.reviewer.trim(),
+          },
+        },
+      });
+      if (!result) return;
+      setSubagentModels(result.models);
+      const configuredCount = Object.values(result.models).filter(Boolean).length;
+      toastSuccess(configuredCount > 0
+        ? `已保存子 Agent 模型配置（${configuredCount}/3）`
+        : "已清除子 Agent 模型配置，三个 profile 均继承主会话模型");
+    } finally {
+      setSubagentSaving(false);
+    }
   };
 
   const setSkillEnabled = async (filePath: string, enabled: boolean): Promise<void> => {
@@ -288,6 +341,55 @@ export function RuntimePanel({
         <span><BrainCircuit size={14} /><strong>系统提示词</strong></span>
         <small>{inspection?.systemPromptOverride ? "当前会话已修改" : inspection?.estimates.systemPrompt ? `${tokenNumber(inspection.estimates.systemPrompt)} Token` : "等待捕获"}</small>
       </button>
+
+      <RuntimeSection
+        title="子 Agent 模型"
+        icon={<Bot size={14} />}
+        badge={configuredSubagentCount ? `${configuredSubagentCount}/3 已配置` : "均继承主会话"}
+      >
+        <div className="runtime-subagent-models">
+          {subagentProfiles.map((profile) => {
+            const selected = subagentModels[profile.id];
+            const selectedAvailable = availableModels.some((model) => `${model.provider}/${model.id}` === selected);
+            const modelOptions: SelectOption[] = [
+              { value: "", label: "继承主会话模型", detail: "由主 Agent 当前模型决定" },
+              ...(selected && !selectedAvailable
+                ? [{ value: selected, label: selected, detail: "当前不可用", disabled: true }]
+                : []),
+              ...availableModels.map((model) => ({
+                value: `${model.provider}/${model.id}`,
+                label: model.name,
+                detail: `${model.providerName} · ${model.provider}/${model.id}`,
+                keywords: `${model.providerName} ${model.provider} ${model.id}`,
+              })),
+            ];
+            return (
+              <label className="runtime-subagent-model-row" key={profile.id}>
+                <span><strong>{profile.label}</strong><small>{profile.description}</small></span>
+                <Select
+                  value={selected}
+                  options={modelOptions}
+                  onChange={(model) => setSubagentModels((current) => ({ ...current, [profile.id]: model }))}
+                  ariaLabel={`${profile.label} 默认模型`}
+                  className="runtime-subagent-select"
+                  searchable
+                />
+              </label>
+            );
+          })}
+        </div>
+        <div className="runtime-actions">
+          <button
+            className="primary"
+            type="button"
+            disabled={subagentSaving || !runtimeId}
+            onClick={() => { void saveSubagentModels(); }}
+          >
+            {subagentSaving ? <LoaderCircle className="spin" size={12} /> : <Save size={12} />}保存三个配置
+          </button>
+        </div>
+        <p className="runtime-section-footnote">三个 profile 独立配置；未配置的项继承主会话模型，并在对应子 Agent 卡片上显示黄色提示。</p>
+      </RuntimeSection>
 
       <RuntimeSection title="工具" icon={<Wrench size={14} />} badge={inspection?.tools.length ? `${activeTools.length}/${inspection.tools.length} 启用` : undefined}>
         {inspection?.tools.length ? <div className="runtime-chip-grid">{inspection.tools.map((tool) => (

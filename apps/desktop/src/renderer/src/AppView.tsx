@@ -262,6 +262,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             projectPath={project?.path}
             projectState={projectState}
             snapshot={snapshot}
+            configuration={configuration}
             onOpenFiles={inspector.openFilesTab}
             onOpenBrowser={inspector.openBrowserTab}
             onOpenRuntime={inspector.openRuntimeTab}

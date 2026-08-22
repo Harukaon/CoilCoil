@@ -24,7 +24,7 @@ import {
   thinkingLevelsFromMap,
   type ModelCatalogMeta,
 } from "./modelCatalog";
-import { SettingsSelect } from "./SettingsSelect";
+import { Select, type SelectOption } from "../../ui/Select";
 import { UpstreamModelPicker, type UpstreamModelOption } from "./UpstreamModelPicker";
 import { ProviderOAuthDialog } from "./ProviderOAuthDialog";
 
@@ -52,7 +52,7 @@ interface ProviderFormState {
   preserveApiKeyReference: boolean;
 }
 
-const THINKING_OPTIONS: SettingsSelectOption[] = [
+const THINKING_OPTIONS: SelectOption[] = [
   { value: "off", label: "off" },
   { value: "minimal", label: "minimal" },
   { value: "low", label: "low" },
@@ -61,12 +61,6 @@ const THINKING_OPTIONS: SettingsSelectOption[] = [
   { value: "xhigh", label: "xhigh" },
   { value: "max", label: "max" },
 ];
-
-interface SettingsSelectOption {
-  value: string;
-  label: string;
-  detail?: string;
-}
 
 function uid(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -198,7 +192,7 @@ function blankProvider(index: number): ProviderDraft {
   };
 }
 
-function apiOptions(snapshot: ModelProviderConfigurationSnapshot | undefined): SettingsSelectOption[] {
+function apiOptions(snapshot: ModelProviderConfigurationSnapshot | undefined): SelectOption[] {
   return [
     { value: "", label: "继承服务商协议", detail: "仅在模型覆盖时使用" },
     ...(snapshot?.supportedApis ?? []).map((api) => ({ value: api.id, label: api.label, detail: api.description })),
@@ -310,7 +304,7 @@ function ProviderCredentialEditor({
           ? <button type="button" disabled={oauthBusy} onClick={onOAuthLogout}><LogOut size={13} />退出登录</button>
           : <button className="primary" type="button" disabled={oauthBusy} onClick={onOAuthLogin}>{oauthBusy ? <LoaderCircle className="spin" size={13} /> : <LogIn size={13} />}订阅登录</button>}
       </div> : null}
-      {configuration.methods.length > 1 ? <label>API 凭据方式<SettingsSelect value={active?.id ?? ""} options={configuration.methods.map((item) => ({ value: item.id, label: item.label, detail: item.description }))} ariaLabel="服务商 API 凭据方式" onChange={onMethodChange} /></label> : null}
+      {configuration.methods.length > 1 ? <label>API 凭据方式<Select value={active?.id ?? ""} options={configuration.methods.map((item) => ({ value: item.id, label: item.label, detail: item.description }))} ariaLabel="服务商 API 凭据方式" onChange={onMethodChange} /></label> : null}
       {active ? <>
         {active.description && configuration.methods.length > 1 ? <p className="provider-credential-description">{active.description}</p> : null}
         {active.fields.length ? <div className="provider-credential-fields">{active.fields.map((field) => <label className={field.input === "textarea" ? "wide" : ""} key={field.id}>
@@ -335,7 +329,7 @@ function ProviderModelCard({
 }: {
   model: EditableModel;
   index: number;
-  apiOptions: SettingsSelectOption[];
+  apiOptions: SelectOption[];
   advanced: ModelAdvancedText;
   onChange: (next: EditableModel) => void;
   onAdvancedChange: (next: ModelAdvancedText) => void;
@@ -373,7 +367,7 @@ function ProviderModelCard({
     <article className="provider-model-card">
       <header><span><CircleDot size={14} />模型 {index + 1}</span><button type="button" aria-label={`移除模型 ${index + 1}`} onClick={onRemove}><Trash2 size={14} />移除</button></header>
       <div className="settings-grid provider-model-identity"><label>模型 ID<input value={model.id} placeholder="例如 dog-coder-v1" onChange={(event) => onChange({ ...model, id: event.target.value })} /></label><label>显示名称<input value={model.name ?? ""} placeholder="可选，默认使用模型 ID" onChange={(event) => onChange({ ...model, name: event.target.value })} /></label></div>
-      <div className="settings-grid"><label>协议覆盖<SettingsSelect value={model.api ?? ""} options={options} ariaLabel={`模型 ${index + 1} 的协议`} onChange={(api) => onChange({ ...model, api: api || undefined })} searchable /></label><label>模型专用 Base URL<input value={model.baseUrl ?? ""} placeholder="可选，默认继承服务商 Base URL" onChange={(event) => onChange({ ...model, baseUrl: event.target.value })} /></label></div>
+      <div className="settings-grid"><label>协议覆盖<Select value={model.api ?? ""} options={options} ariaLabel={`模型 ${index + 1} 的协议`} onChange={(api) => onChange({ ...model, api: api || undefined })} searchable /></label><label>模型专用 Base URL<input value={model.baseUrl ?? ""} placeholder="可选，默认继承服务商 Base URL" onChange={(event) => onChange({ ...model, baseUrl: event.target.value })} /></label></div>
       <div className="settings-grid provider-model-capabilities"><label>上下文窗口<NumberInput value={model.contextWindow} placeholder="128000" onChange={(contextWindow) => onChange({ ...model, contextWindow })} /></label><label>最大输出 Token<NumberInput value={model.maxTokens} placeholder="16384" onChange={(maxTokens) => onChange({ ...model, maxTokens })} /></label></div>
       <div className="provider-checkbox-row"><label className="checkbox-setting"><input type="checkbox" checked={Boolean(model.reasoning)} onChange={(event) => onChange({ ...model, reasoning: event.target.checked })} />支持 Thinking / 推理</label><label className="checkbox-setting"><input type="checkbox" checked={supportsImages} onChange={toggleImage} />支持图片输入</label></div>
       {model.reasoning ? <div className="provider-thinking-levels">
@@ -917,7 +911,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
             </details>
           </> : <>
             <div className="settings-grid"><label>服务商 ID<input value={draft.id} disabled={Boolean(selectedId)} placeholder="例如 dog-provider" onChange={(event) => setDraft((current) => current ? { ...current, id: event.target.value } : current)} /></label><label>显示名称<input value={draft.name ?? ""} placeholder="例如 DogProvider" onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label></div>
-            <div className="settings-grid"><label>请求协议<SettingsSelect value={draft.api ?? ""} options={protocolOptions.filter((option) => option.value)} ariaLabel="请求协议" placeholder="选择协议" onChange={(api) => setDraft((current) => current ? { ...current, api } : current)} searchable /></label><label>Base URL<input value={draft.baseUrl ?? ""} placeholder={draft.api === "anthropic-messages" ? "https://api.anthropic.com" : "https://api.example.com/v1"} onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></label></div>
+            <div className="settings-grid"><label>请求协议<Select value={draft.api ?? ""} options={protocolOptions.filter((option) => option.value)} ariaLabel="请求协议" placeholder="选择协议" onChange={(api) => setDraft((current) => current ? { ...current, api } : current)} searchable /></label><label>Base URL<input value={draft.baseUrl ?? ""} placeholder={draft.api === "anthropic-messages" ? "https://api.anthropic.com" : "https://api.example.com/v1"} onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></label></div>
             <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
@@ -944,7 +938,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           </section>
           {!isBuiltinProvider ? <section className="provider-test-card">
             <div><strong>测试模型</strong><small>测试只发起一次独立请求，不会创建会话，也不会改变当前或新会话使用的模型。</small></div>
-            <div className="settings-grid"><label>模型<SettingsSelect value={testModelId} options={defaultModels.map((model) => ({ value: model.id, label: model.name || model.id, detail: model.id }))} ariaLabel="要测试的模型" placeholder="请选择模型" onChange={(modelId) => { setTestModelId(modelId); const selected = defaultModels.find((model) => model.id === modelId); const levels: ThinkingLevel[] = selected ? modelThinkingLevels(selected, configuration, draft.id) : ["off"]; setThinkingLevel((current) => levels.includes(current) ? current : levels[0]); }} searchable /></label><label>Thinking<SettingsSelect value={thinkingLevel} options={thinkingOptions} ariaLabel="测试 Thinking 强度" onChange={(value) => setThinkingLevel(value as ThinkingLevel)} disabled={thinkingOptions.length <= 1} /></label></div>
+            <div className="settings-grid"><label>模型<Select value={testModelId} options={defaultModels.map((model) => ({ value: model.id, label: model.name || model.id, detail: model.id }))} ariaLabel="要测试的模型" placeholder="请选择模型" onChange={(modelId) => { setTestModelId(modelId); const selected = defaultModels.find((model) => model.id === modelId); const levels: ThinkingLevel[] = selected ? modelThinkingLevels(selected, configuration, draft.id) : ["off"]; setThinkingLevel((current) => levels.includes(current) ? current : levels[0]); }} searchable /></label><label>Thinking<Select value={thinkingLevel} options={thinkingOptions} ariaLabel="测试 Thinking 强度" onChange={(value) => setThinkingLevel(value as ThinkingLevel)} disabled={thinkingOptions.length <= 1} /></label></div>
             <div className="provider-default-actions"><button className="secondary-button" type="button" disabled={saving || testing || !testModelId} onClick={() => void testConnection()}>{testing ? <LoaderCircle className="spin" size={15} /> : <Zap size={15} />}{testing ? "测试中…" : "测试此模型"}</button></div>
           </section> : null}
           <footer><span>{snapshot?.configPath}</span><span className="provider-runtime-note">内置协议、模型覆盖和凭据都在 CoilCoil 私有运行时中处理。</span></footer>

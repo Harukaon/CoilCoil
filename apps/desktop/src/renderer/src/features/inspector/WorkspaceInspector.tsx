@@ -1,6 +1,6 @@
 import { BrainCircuit, Files, Globe2, Terminal } from "lucide-react";
 import { useCallback } from "react";
-import type { ProjectSnapshot, SessionSnapshot } from "@coilcoil/runtime-protocol";
+import type { ProjectSnapshot, RuntimeConfiguration, SessionSnapshot } from "@coilcoil/runtime-protocol";
 import { BrowserPanel } from "../browser/BrowserPanel";
 import { FilesPanel } from "../files/FilesPanel";
 import { RuntimePanel } from "../runtime/RuntimePanel";
@@ -35,6 +35,7 @@ export interface WorkspaceInspectorProps {
   projectPath?: string;
   projectState: ProjectSnapshot;
   snapshot?: SessionSnapshot;
+  configuration?: RuntimeConfiguration;
   onOpenFiles(): void;
   onOpenBrowser(): void;
   onOpenRuntime(): void;
@@ -57,6 +58,7 @@ export function WorkspaceInspector({
   projectPath,
   projectState,
   snapshot,
+  configuration,
   onOpenFiles,
   onOpenBrowser,
   onOpenRuntime,
@@ -149,6 +151,7 @@ export function WorkspaceInspector({
             tokenUsage={snapshot?.tokenUsage}
             runtimeId={snapshot?.runtimeId}
             cwd={projectPath}
+            configuration={configuration}
           />
         </div>
       ) : null}

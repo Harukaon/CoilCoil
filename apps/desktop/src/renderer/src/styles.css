@@ -21,6 +21,27 @@ html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; back
 button, textarea, input, select { color: inherit; font: inherit; }
 button { border: 0; }
 button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid hsl(var(--th) var(--ts) var(--l-547)); outline-offset: 1px; }
+.coil-select { display: flex; width: 100%; height: 34px; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-235)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px; font-weight: 400; text-align: left; cursor: pointer; }
+.coil-select:hover:not(:disabled), .coil-select[data-state="open"] { border-color: hsl(var(--th) var(--ts) var(--l-743)); background: hsl(var(--th) var(--ts) var(--l-980)); }
+.coil-select:disabled { cursor: default; opacity: .55; }
+.coil-select > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coil-select > svg { flex: 0 0 auto; transition: transform 120ms ease; }
+.coil-select[data-state="open"] > svg { transform: rotate(180deg); }
+.coil-select .placeholder { color: hsl(var(--th) var(--ts) var(--l-602)); }
+.coil-select-popover { z-index: 1200; width: min(360px, calc(100vw - 24px)); min-width: min(var(--radix-popover-trigger-width), calc(100vw - 24px)); overflow: hidden; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: 10px; outline: 0; background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: 0 16px 42px rgb(28 28 25 / 18%); transform-origin: var(--radix-popover-content-transform-origin); animation: model-popover-in 140ms cubic-bezier(.16, 1, .3, 1); }
+.coil-select-arrow { fill: hsl(var(--th) var(--ts) var(--l-976)); filter: drop-shadow(0 1px 0 hsl(var(--th) var(--ts) var(--l-837))); }
+.coil-select-search { display: flex; height: 37px; align-items: center; gap: 7px; padding: 0 10px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-878)); color: hsl(var(--th) var(--ts) var(--l-551)); }
+.coil-select-search input { height: 100%; min-width: 0; flex: 1; padding: 0; border: 0; outline: 0; background: transparent; font-size: 11px; }
+.coil-select-options { max-height: min(278px, var(--radix-popover-content-available-height)); overflow: auto; padding: 5px; outline: 0; }
+.coil-select-options button { display: flex; width: 100%; min-height: 37px; align-items: center; gap: 8px; padding: 6px 7px; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; }
+.coil-select-options button:hover, .coil-select-options button.highlighted, .coil-select-options button.active { background: hsl(var(--th) var(--ts) var(--l-902)); }
+.coil-select-options button.highlighted { box-shadow: inset 0 0 0 1px hsl(var(--th) var(--ts) var(--l-825)); }
+.coil-select-options button:disabled { cursor: default; opacity: .5; }
+.coil-select-options button > span { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.coil-select-options strong, .coil-select-options small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coil-select-options strong { color: hsl(var(--th) var(--ts) var(--l-249)); font-size: 10px; font-weight: 550; }
+.coil-select-options small { color: hsl(var(--th) var(--ts) var(--l-567)); font-size: 9px; font-weight: 400; }
+.coil-select-options p { margin: 0; padding: 22px 10px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; text-align: center; }
 /* 拖拽区永远不参与选中：标题是文本，在它上面按下鼠标会被判定为「选文字」，
    拖拽窗口的动作就丢了——同一次按下只会命中其中一个。表单控件仍然需要能选中，
    所以单独放回 text（当前这些 header 里没有，但规则要能扛住以后加）。 */
@@ -391,6 +412,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .subagent-card-copy strong { color: hsl(var(--th) var(--ts) var(--l-182)); font-size: 12px; font-weight: 650; }
 .subagent-card.panel .subagent-card-copy strong { font-size: 11px; }
 .subagent-card-copy span { color: hsl(var(--th) var(--ts) var(--l-398)); font-size: 11px; }
+.subagent-card-copy .subagent-model-warning { display: inline-flex; width: fit-content; align-items: center; padding: 1px 6px; border-radius: 999px; color: var(--c-amber-text); background: var(--c-amber-subtle); font-size: 8px; font-style: normal; font-weight: 600; white-space: nowrap; }
 .subagent-card-meta { min-width: 0; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 9px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .subagent-card.panel .subagent-card-meta { font-size: 8px; }
 .subagent-card > svg { color: hsl(var(--th) var(--ts) var(--l-547)); }
@@ -781,8 +803,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .inspector-empty-tabs { display: flex; min-height: 100%; align-items: center; flex-direction: column; justify-content: center; padding: 28px 18px; color: hsl(var(--th) var(--ts) var(--l-457)); text-align: center; }
 .inspector-empty-tabs > strong { margin-top: 2px; color: hsl(var(--th) var(--ts) var(--l-302)); font-size: 12px; font-weight: 550; }
 .inspector-empty-tabs > p { max-width: 220px; margin: 6px 0 14px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; line-height: 1.5; }
-.inspector-empty-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; width: min(100%, 260px); }
-.inspector-empty-actions button { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 5px; padding: 7px 6px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-375)); background: hsl(var(--th) var(--ts) var(--l-976)); font-size: 10px; cursor: pointer; }
+.inspector-empty-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; width: min(100%, 220px); }
+.inspector-empty-actions button { display: flex; min-width: 0; align-items: center; justify-content: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-375)); background: hsl(var(--th) var(--ts) var(--l-976)); font-size: 10px; cursor: pointer; }
 .inspector-empty-actions button:hover { border-color: hsl(var(--th) var(--ts) var(--l-769)); background: hsl(var(--th) var(--ts) var(--l-937)); }
 .files-tab-panel { overflow: hidden; }
 .browser-tab-panel { overflow: hidden; }
@@ -883,6 +905,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .runtime-section > summary small { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 8px; font-weight: 500; }
 .runtime-section[open] > summary { border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-918)); border-radius: 10px 10px 0 0; }
 .runtime-section-body { display: grid; gap: 9px; padding: 10px; }
+.runtime-subagent-models { display: grid; gap: 8px; }
+.runtime-subagent-model-row { display: grid; min-width: 0; gap: 4px; }
+.runtime-subagent-model-row + .runtime-subagent-model-row { padding-top: 8px; border-top: 1px solid hsl(var(--th) var(--ts) var(--l-918)); }
+.runtime-subagent-model-row > span { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 6px; }
+.runtime-subagent-model-row strong { color: hsl(var(--th) var(--ts) var(--l-282)); font-size: 9px; }
+.runtime-subagent-model-row small { overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-subagent-model-row .runtime-subagent-select { height: 30px; border-radius: 7px; font-size: 9px; }
 .runtime-prompt-view, .runtime-prompt-editor, .runtime-memory-card { display: grid; gap: 8px; }
 .runtime-prompt-view pre { max-height: 260px; margin: 0; overflow: auto; padding: 8px; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-324)); background: hsl(var(--th) var(--ts) var(--l-955)); font: 8.5px/1.55 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .runtime-prompt-editor textarea { box-sizing: border-box; width: 100%; min-height: 230px; resize: vertical; padding: 8px; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: 7px; outline: 0; color: hsl(var(--th) var(--ts) var(--l-278)); background: hsl(var(--th) var(--ts) var(--l-980)); font: 8.5px/1.55 "SFMono-Regular", Consolas, monospace; }

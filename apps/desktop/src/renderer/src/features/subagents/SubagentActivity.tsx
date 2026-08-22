@@ -76,6 +76,7 @@ export function SubagentCard({
       <span className="subagent-card-copy">
         <strong>{activity.agent}</strong>
         {activity.task ? <span>{activity.task}</span> : null}
+        {activity.modelInherited ? <em className="subagent-model-warning">模型由主 Agent 指定</em> : null}
       </span>
       <small className="subagent-card-meta" title={`${activitySummary(activity)}${activity.currentTool ? ` · 正在调用 ${activity.currentTool}` : ""}`}>
         {activitySummary(activity)}{activity.currentTool ? ` · 正在调用 ${activity.currentTool}` : ""}
