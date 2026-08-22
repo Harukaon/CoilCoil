@@ -15,7 +15,7 @@ export const PANEL_OPEN_WINDOW_WIDTH = 840;
 export const MINIMUM_LEFT_PANEL_WIDTH = 167;
 /** Width of the sidebar until the user drags it. Mirrored by `--sidebar-width` for the first paint. */
 export const DEFAULT_LEFT_PANEL_WIDTH = 235;
-export const MINIMUM_RIGHT_PANEL_WIDTH = 40;
+export const MINIMUM_RIGHT_PANEL_WIDTH = 200;
 
 function panelMinimumWidth(side: "left" | "right"): number {
   return side === "left" ? MINIMUM_LEFT_PANEL_WIDTH : MINIMUM_RIGHT_PANEL_WIDTH;
@@ -50,13 +50,13 @@ export function panelOpenGrowth(windowWidth: number): number {
 }
 
 /**
- * Share a window too narrow for every panel's preferred width.
+ * Fit the panels to the window while honouring the user's preferred widths.
  *
- * The conversation and the inspector aim for two columns of the same width, so
- * a window grown to the 840 threshold reads as an even split rather than a wide
- * chat beside a sliver. Splitting the *shortfall* evenly instead left the
- * conversation its 315px head start and came out 423 / 149. The conversation's
- * floor still wins when even that will not fit, and the sidebar is asked last.
+ * The inspector keeps the width the user dragged it to; it is only narrowed
+ * when the window cannot otherwise leave the conversation its 315px floor.
+ * The inspector never drops below its 200px minimum while open, so on a window
+ * too narrow for both panels plus the conversation floor, the sidebar gives
+ * first and the conversation gives last.
  */
 export function fitPanelWidths({ windowWidth, leftOpen, rightOpen, preferredLeftWidth, preferredRightWidth }: {
   windowWidth: number;
@@ -72,7 +72,7 @@ export function fitPanelWidths({ windowWidth, leftOpen, rightOpen, preferredLeft
     const shared = windowWidth - (leftOpen ? leftWidth : 0);
     rightWidth = Math.max(
       MINIMUM_RIGHT_PANEL_WIDTH,
-      Math.min(rightWidth, Math.round(shared / 2), shared - MINIMUM_CONVERSATION_WIDTH),
+      Math.min(rightWidth, shared - MINIMUM_CONVERSATION_WIDTH),
     );
   }
 

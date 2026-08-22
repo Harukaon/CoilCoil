@@ -22,18 +22,18 @@ const conversationWidth = (windowWidth: number): number => {
   return windowWidth - leftWidth - rightWidth;
 };
 
-test("the conversation sidebar stops at 167 pixels while the inspector keeps its compact minimum", () => {
+test("the sidebar stops at 167 pixels and the inspector at 200 pixels", () => {
   assert.equal(MINIMUM_LEFT_PANEL_WIDTH, 167);
-  assert.equal(MINIMUM_RIGHT_PANEL_WIDTH, 40);
+  assert.equal(MINIMUM_RIGHT_PANEL_WIDTH, 200);
   assert.equal(clampPanelWidth("left", 40, 1_000, 0), 167);
-  assert.equal(clampPanelWidth("right", 20, 1_000, 268), 40);
+  assert.equal(clampPanelWidth("right", 20, 1_000, 268), 200);
 });
 
 test("panel resizing preserves the minimum conversation width", () => {
   assert.equal(clampPanelWidth("left", 900, 1_000, 0), 685);
   assert.equal(clampPanelWidth("right", 900, 1_000, 268), 417);
   assert.equal(minimumWindowWidth(true, false), 482);
-  assert.equal(minimumWindowWidth(true, true), 522);
+  assert.equal(minimumWindowWidth(true, true), 682);
 });
 
 test("a window wide enough to host the inspector never moves to open it", () => {
@@ -50,33 +50,33 @@ test("a window too narrow for the inspector grows exactly up to the threshold", 
   for (const width of [640, 700, 800]) assert.equal(width + panelOpenGrowth(width), PANEL_OPEN_WINDOW_WIDTH);
 });
 
-test("a window grown to the threshold splits the two columns about evenly", () => {
-  // 840 is the width the app grows to when the inspector opens on a narrow
-  // window, so that layout is the one a reader actually lands on.
-  assert.deepEqual(fit(840), { leftWidth: 268, rightWidth: 257 });
-  assert.equal(conversationWidth(840), 315);
-  const ratio = conversationWidth(840) / fit(840).rightWidth;
-  assert.ok(ratio < 1.3, `the two columns should be close to even, was ${ratio.toFixed(2)}:1`);
-});
-
-test("the two columns stay level until the inspector reaches its own width", () => {
-  for (const width of [900, 935, 1_000]) {
-    const gap = Math.abs(conversationWidth(width) - fit(width).rightWidth);
-    if (fit(width).rightWidth < 352) assert.ok(gap <= 2, `columns drifted by ${gap}px at ${width}`);
-  }
-  // Once the inspector has its preferred width the conversation takes the rest.
+test("the inspector keeps the width the user dragged it to on a wide window", () => {
+  // A window with room to spare must not re-split the columns: the inspector
+  // stays at its preferred width and the conversation takes the rest.
+  assert.equal(fit(1_000).rightWidth, 352);
   assert.equal(fit(1_100).rightWidth, 352);
   assert.equal(fit(1_600).rightWidth, 352);
   assert.equal(conversationWidth(1_600), 1_600 - 268 - 352);
 });
 
-test("the conversation never drops below its floor while a panel can still give", () => {
-  for (const width of [560, 620, 700, 840, 935, 1_200]) {
-    assert.ok(conversationWidth(width) >= 315, `chat was ${conversationWidth(width)}px at ${width}`);
-  }
-  // Below that the sidebar is the last one asked.
-  assert.equal(fit(620).rightWidth, 40);
-  assert.equal(fit(620).leftWidth, 265);
+test("the inspector only narrows to leave the conversation its 315px floor", () => {
+  // Below the width that fits both panels plus the floor, the inspector gives
+  // up its preferred width first, but never below its 200px minimum.
+  assert.equal(fit(900).rightWidth, 317);
+  assert.equal(conversationWidth(900), 315);
+  assert.equal(fit(840).rightWidth, 257);
+  assert.equal(conversationWidth(840), 315);
+});
+
+test("the inspector never drops below 200px while open", () => {
+  // On a window too narrow for both panels plus the floor, the sidebar gives
+  // first and the conversation gives last; the inspector holds at 200px.
+  assert.equal(fit(700).rightWidth, 200);
+  assert.equal(fit(700).leftWidth, 185);
+  assert.equal(fit(620).rightWidth, 200);
+  assert.equal(fit(620).leftWidth, 167);
+  assert.equal(fit(560).rightWidth, 200);
+  assert.equal(fit(560).leftWidth, 167);
 });
 
 test("a closed panel is left at the width it will reopen with", () => {

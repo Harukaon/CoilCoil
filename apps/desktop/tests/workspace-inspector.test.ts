@@ -57,6 +57,8 @@ test("closing one workspace tab does not affect another workspace", () => {
 
   assert.deepEqual(states["/workspace/a"], withFiles);
   assert.deepEqual(states["/workspace/b"]?.tabs, []);
+  // 关闭最后一个标签页时，右侧面板自动收回。
+  assert.equal(states["/workspace/b"]?.rightOpen, false);
 });
 
 function openTerminal(state: typeof EMPTY_WORKSPACE_INSPECTOR, sessionId: string): typeof EMPTY_WORKSPACE_INSPECTOR {
@@ -87,6 +89,11 @@ test("each shell gets its own terminal tab in the strip", () => {
 
   const closed = closeWorkspaceInspectorTab(again, terminalInspectorTabId("shell-a"));
   assert.deepEqual(closed.tabs.map((tab) => tab.terminalId), ["shell-b"]);
+  assert.equal(closed.rightOpen, true, "还有标签页时面板保持打开");
+
+  const lastClosed = closeWorkspaceInspectorTab(closed, terminalInspectorTabId("shell-b"));
+  assert.deepEqual(lastClosed.tabs, []);
+  assert.equal(lastClosed.rightOpen, false, "关闭最后一个标签页时面板自动收回");
 });
 
 test("a terminal tab whose shell died is rebound in place", () => {

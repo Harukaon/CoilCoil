@@ -103,6 +103,8 @@ export function closeWorkspaceInspectorTab(
     tabs,
     activeTabId,
     selectedFilePath: selectedFileForTab(active),
+    // 关闭最后一个标签页时自动收回右侧面板，而不是留一个空面板。
+    rightOpen: tabs.length > 0 ? state.rightOpen : false,
   };
 }
 
@@ -145,6 +147,8 @@ export function removeWorkspaceInspectorPath(
     tabs,
     activeTabId,
     selectedFilePath: selectedFileForTab(tabs.find((tab) => tab.id === activeTabId)),
+    // 移除路径清空所有标签页时同样收回右侧面板。
+    rightOpen: tabs.length > 0 ? state.rightOpen : false,
   };
 }
 
