@@ -95,6 +95,8 @@ export interface ActiveSession {
   goal?: GoalState;
   /** A stop was delivered and the run has not settled yet. */
   aborting?: boolean;
+  /** A stop that arrived before the run existed; it lands when the run starts. */
+  abortOnStart?: boolean;
   /** Model selected while a turn was already running; applied before the next prompt. */
   pendingModel?: PendingSessionModel;
   eventBus: EventBusController;
@@ -377,6 +379,11 @@ export async function shutdownAgentSession(
   reason: SessionShutdownEvent["reason"] = "quit",
 ): Promise<void> {
   try {
+    // `abort()` waits for the session to go idle, and a summarization in flight
+    // holds it there for as long as the summary takes. `dispose()` cancels one,
+    // but only in the `finally` below — far too late to keep this wait short.
+    session.abortCompaction();
+    session.abortBranchSummary();
     await session.abort().catch(() => undefined);
     if (session.extensionRunner.hasHandlers("session_shutdown")) {
       await session.extensionRunner.emit({ type: "session_shutdown", reason });

@@ -110,6 +110,8 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");
     if (this.promptStarting) throw new Error("上一条消息正在启动，请稍候。");
+    // A stop belongs to the prompt it was pressed against, never to this one.
+    active.abortOnStart = false;
     this.promptStarting = true;
     try {
       await this.applyPendingSessionModel(active);
@@ -266,12 +268,28 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     // would otherwise start the moment the aborted turn settles, which looks
     // exactly like the stop having been ignored.
     const cancelledQueue = this.dropQueuedPrompts(active);
+    const cancelledSummary = this.cancelSummarization(active);
     if (!active.session.isStreaming) {
+      // A summarization that runs before the prompt owns the window in which no
+      // run exists yet, and Pi sends that prompt as soon as it ends. Cancelling
+      // it here is only half a stop: the run it was preparing still has to be
+      // stopped, and it can only be stopped once it exists.
+      const pending = this.promptStarting;
+      // Remembered, and shown as "正在停止" until it lands, so the composer does
+      // not look like it simply swallowed the press.
+      if (pending) {
+        active.abortOnStart = true;
+        active.aborting = true;
+      }
       // A stop pressed against a run this session no longer has still has a job
       // to do: publish what is actually true, so a stale spinner clears.
-      this.log.info("abort", "abort_without_live_run", { cancelledQueue, stoppedGoal });
+      this.log.info("abort", "abort_without_live_run", { cancelledQueue, stoppedGoal, cancelledSummary, pending });
       this.publishRunState(active);
-      return { aborted: stoppedGoal || cancelledQueue > 0, aborting: false, cancelledQueue };
+      return {
+        aborted: stoppedGoal || cancelledQueue > 0 || cancelledSummary || pending,
+        aborting: pending,
+        cancelledQueue,
+      };
     }
     active.aborting = true;
     this.publishRunState(active);
@@ -291,6 +309,47 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
         if (this.active === active) this.publishRunState(active);
       });
     return { aborted: true, aborting: true, cancelledQueue };
+  }
+
+  /**
+   * Cancel a summarization the stop is really aimed at.
+   *
+   * Compaction is a model request of its own, sitting on either side of a turn:
+   * Pi runs it before it sends a prompt and again after a run ends, and on a
+   * full context it takes minutes. `AgentSession.abort()` does not touch it —
+   * it aborts the agent run and then waits for the session to go idle, which a
+   * running compaction holds — so a stop pressed during one used to do nothing
+   * at all until the summary finished. Cancelling it is what makes the stop
+   * land; the context stays uncompacted and the next prompt compacts again.
+   */
+  protected cancelSummarization(active: ActiveSession): boolean {
+    const summary = active.summaryActivity;
+    if (summary?.status !== "running") return false;
+    if (summary.kind === "branch_summary") active.session.abortBranchSummary();
+    else active.session.abortCompaction();
+    this.log.info("abort", "summarization_cancelled", { kind: summary.kind, reason: summary.reason });
+    return true;
+  }
+
+  /**
+   * Cancel a summarization that a stop already in flight is aimed at.
+   *
+   * A stop taken during a long tool call ends the run, but the message Pi then
+   * checks is the assistant turn that called the tool, not an aborted one, so
+   * the threshold check runs as if nothing had happened and starts a summary
+   * for the turn the user just stopped. That summary holds the stop's own wait
+   * open for as long as it takes — minutes on a full context, which is the
+   * whole of "stop did nothing until the command finished".
+   *
+   * Pi creates the controller this cancels immediately after it announces the
+   * summary, so the cancel is scheduled rather than taken on the spot.
+   */
+  protected cancelSummarizationForStop(active: ActiveSession): void {
+    const timer = setTimeout(() => {
+      if (this.active !== active || active.aborting !== true) return;
+      this.cancelSummarization(active);
+    }, 0);
+    timer.unref?.();
   }
 
   /**

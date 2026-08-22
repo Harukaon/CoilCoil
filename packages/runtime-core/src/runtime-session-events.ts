@@ -61,6 +61,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
       switch (event.type) {
         case "agent_start":
           this.publishRunning(true, "agent_start");
+          this.applyPendingAbort(active);
           break;
         case "agent_settled":
           // Nothing is in flight once the agent has settled, so any card still
@@ -103,6 +104,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             active: true,
             reason: event.reason,
           };
+          // A stop already in flight owns this turn, and the summary Pi has just
+          // announced belongs to it: cancel it instead of waiting it out.
+          if (active.aborting) this.cancelSummarizationForStop(active);
           this.publishRuntimeInspection(active);
           break;
         case "compaction_end": {
@@ -456,6 +460,25 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     }
   }
 
+  /**
+   * Deliver a stop that was pressed before this run existed.
+   *
+   * The window Pi spends preparing a prompt has no run to abort: summarization
+   * owns it, `isStreaming` still reads false, and the prompt is sent the moment
+   * the summary ends. A stop taken there is remembered instead of dropped, and
+   * lands here on `agent_start`, which Pi awaits before it sends anything to
+   * the model — so the turn the user stopped never reaches the provider.
+   */
+  private applyPendingAbort(active: ActiveSession): void {
+    if (!active.abortOnStart) return;
+    active.abortOnStart = false;
+    active.aborting = true;
+    this.publishRunning(true, "abort_applied_at_start", { aborting: true });
+    void active.session.abort().catch((error) => {
+      this.log.error("abort", "abort_at_start_failed", error);
+    });
+  }
+
   protected async startPrompt(
     active: ActiveSession,
     prompt: string,
@@ -463,6 +486,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     clientMessageId: string | undefined,
     queued: boolean,
   ): Promise<void> {
+    // A stop belongs to the prompt it was pressed against, never to this one.
+    active.abortOnStart = false;
+    active.aborting = false;
     this.promptStarting = true;
     this.publishRunning(true, "prompt_starting", { queued });
     try {

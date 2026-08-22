@@ -212,6 +212,9 @@ export abstract class RuntimeBase {
 
   protected abstract publishRuntimeInspection(active: ActiveSession): void;
 
+  /** Cancel a summarization a stop already in flight is waiting on. */
+  protected abstract cancelSummarizationForStop(active: ActiveSession): void;
+
   async initialize(): Promise<RuntimeBootstrap> {
     await this.ready();
     const configuration = await this.getConfiguration();
