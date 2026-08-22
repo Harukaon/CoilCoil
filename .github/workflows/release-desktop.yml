@@ -17,8 +17,31 @@ env:
   NODE_VERSION: 22.19.0
 
 jobs:
+  prepare-release:
+    name: Open the draft release
+    runs-on: ubuntu-latest
+    steps:
+      # Created up front and left as a draft so the platform builds have
+      # somewhere to upload to. Nobody sees it until both have succeeded, which
+      # keeps the all-or-nothing behaviour the separate publish job used to give.
+      - name: Create the draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.1.0-beta.${{ github.run_number }}
+        run: |
+          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --draft \
+              --prerelease \
+              --title "CoilCoil $TAG" \
+              --notes "Automated desktop beta build from ${{ github.sha }}."
+          fi
+
   build-macos:
     name: Build macOS arm64
+    needs: prepare-release
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -46,18 +69,15 @@ jobs:
       - name: Verify macOS app signature
         run: codesign --verify --deep --strict --verbose=2 apps/desktop/release/mac-arm64/CoilCoil.app
 
-      - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-macos-arm64
-          path: |
-            apps/desktop/release/*.dmg
-            apps/desktop/release/*.zip
-          if-no-files-found: error
-          retention-days: 14
+      - name: Attach macOS installers to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.1.0-beta.${{ github.run_number }}
+        run: gh release upload "$TAG" apps/desktop/release/*.dmg apps/desktop/release/*.zip --clobber --repo "${{ github.repository }}"
 
   build-windows:
     name: Build Windows x64 and arm64
+    needs: prepare-release
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -93,43 +113,22 @@ jobs:
       - name: Build NSIS installers and ZIP
         run: npm run package --workspace @coilcoil/desktop -- --win
 
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-windows
-          path: |
-            apps/desktop/release/*.exe
-            apps/desktop/release/*.zip
-          if-no-files-found: error
-          retention-days: 14
+      - name: Attach Windows installers to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.1.0-beta.${{ github.run_number }}
+        run: gh release upload "$TAG" apps/desktop/release/*.exe apps/desktop/release/*.zip --clobber --repo "${{ github.repository }}"
 
-  publish:
-    name: Publish prerelease
+  finalize-release:
+    name: Publish the release
     needs:
       - build-macos
       - build-windows
     runs-on: ubuntu-latest
     steps:
-      - name: Download packaged applications
-        uses: actions/download-artifact@v4
-        with:
-          pattern: desktop-*
-          path: release
-          merge-multiple: true
-
-      - name: Create or refresh GitHub prerelease
+      - name: Take the release out of draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v0.1.0-beta.${{ github.run_number }}
-        run: |
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "$TAG" release/* --clobber --repo "${{ github.repository }}"
-            gh release edit "$TAG" --prerelease --title "CoilCoil $TAG" --repo "${{ github.repository }}"
-          else
-            gh release create "$TAG" release/* \
-              --repo "${{ github.repository }}" \
-              --target "${{ github.sha }}" \
-              --prerelease \
-              --title "CoilCoil $TAG" \
-              --notes "Automated desktop beta build from ${{ github.sha }}."
-          fi
+        run: gh release edit "$TAG" --draft=false --prerelease --repo "${{ github.repository }}"
