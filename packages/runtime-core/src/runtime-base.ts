@@ -47,6 +47,7 @@ import {
   ReconstructedSessionState,
   CoilCoilRuntimeOptions,
 } from "./runtime-state.js";
+import { installModelOverrides } from "./model-overrides.js";
 import {
   DIAGNOSTIC_LEVEL_ENV,
   DIAGNOSTIC_LOG_DIRECTORY,
@@ -124,11 +125,11 @@ export abstract class RuntimeBase {
     this.skillPaths = resources.skills;
     this.promptPaths = resources.prompts;
     this.emitEvent = options.onEvent ?? (() => undefined);
-    this.modelRuntime = options.modelRuntime;
+    this.modelRuntime = options.modelRuntime ? this.withModelOverrides(options.modelRuntime) : undefined;
     if (!this.modelRuntime && options.modelRuntimePromise) {
       this.modelRuntimePromise = options.modelRuntimePromise.then((runtime) => {
-        this.modelRuntime = runtime;
-        return runtime;
+        this.modelRuntime = this.withModelOverrides(runtime);
+        return this.modelRuntime;
       });
     }
     const codingAgentRoot = resolvePackageDirectory("@earendil-works/pi-coding-agent");
@@ -165,6 +166,9 @@ export abstract class RuntimeBase {
   protected abstract readToolPurposeAuditSetting(): boolean;
 
   protected abstract modelWithRuntimeOptions<T extends { provider: string; id: string; contextWindow: number; }>(model: T): T;
+
+  /** CoilCoil's per-model runtime metadata, which Pi's registry does not hold. */
+  protected abstract readModelRuntimeOptions(): Record<string, Record<string, { contextWindow?: number; }>>;
 
   protected abstract refreshAgentMcpConfiguration(eventBus: EventBusController, cwd: string): Promise<void>;
 
@@ -215,6 +219,16 @@ export abstract class RuntimeBase {
     return { configuration, activeSession: this.active ? await this.snapshot() : undefined };
   }
 
+  /**
+   * Apply CoilCoil's per-model overrides at the registry, once per instance.
+   *
+   * A runtime may be handed a ModelRuntime someone else already created — every
+   * session runtime shares one — so this is idempotent.
+   */
+  protected withModelOverrides(runtime: ModelRuntime): ModelRuntime {
+    return installModelOverrides(runtime, (provider, id) => this.readModelRuntimeOptions()[provider]?.[id]);
+  }
+
   protected async ready(): Promise<ModelRuntime> {
     if (this.modelRuntime) return this.modelRuntime;
     this.modelRuntimePromise ??= ModelRuntime.create({
@@ -222,8 +236,8 @@ export abstract class RuntimeBase {
       modelsPath: join(this.agentDir, "models.json"),
       allowModelNetwork: false,
     }).then((runtime) => {
-      this.modelRuntime = runtime;
-      return runtime;
+      this.modelRuntime = this.withModelOverrides(runtime);
+      return this.modelRuntime;
     }).catch((error) => {
       this.modelRuntimePromise = undefined;
       throw error;
