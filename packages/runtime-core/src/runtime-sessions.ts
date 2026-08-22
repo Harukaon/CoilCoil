@@ -35,6 +35,7 @@ import {
 import {
   FAST_STATE_EVENT,
   GOAL_STATE_CHANNEL,
+  HIDDEN_AGENT_TOOLS,
   PLAN_STATE_CHANNEL,
   PROJECT_MEMORY_STATUS_EVENT,
   RUNTIME_BRIDGE_STATE_EVENT,
@@ -386,6 +387,10 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       resourceLoader: loader,
       model: effectiveInitialModel,
       thinkingLevel: effectiveInitialThinkingLevel,
+      // Excluding here rather than deactivating afterwards is what keeps the
+      // guidelines out too: the system prompt is built during bindExtensions,
+      // before any later `setActiveToolsByName` could take them back out.
+      excludeTools: [...HIDDEN_AGENT_TOOLS],
     });
     markTiming("createAgentSession");
     await created.session.bindExtensions({});
@@ -396,7 +401,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     }
     created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => name !== "find"));
     const activeToolNames = new Set(created.session.getActiveToolNames());
-    const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp", "subagent", "plan"];
+    const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp"];
     const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
     if (missingTools.length > 0) {
       await shutdownAgentSession(created.session, "quit").catch(() => undefined);
@@ -426,7 +431,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       project,
       messageIds: new WeakMap(),
       messageRevision: 0,
-      pendingUserMessageIds: [],
+      pendingUserPrompts: [],
       promptQueue: [],
       promptDrainInProgress: false,
       nextTimelineOrder: reconstructed.nextTimelineOrder,

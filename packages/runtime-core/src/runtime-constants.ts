@@ -53,6 +53,20 @@ export const SUBAGENT_RUN_ENTRY_TYPE = "subagent-run";
 /** How long a stop may take before the runtime explains what it is waiting on. */
 export const ABORT_STALL_NOTICE_MS = 10_000;
 
+/**
+ * Tools the workflow registers but the Agent is not told about.
+ *
+ * `plan` and `subagent` are half-built: the approval loop and the subagent
+ * engine both have known gaps, and an Agent that reaches for them mid-task ends
+ * up somewhere worse than one that just does the work. The extensions stay in
+ * the manifest — their RPC channels, their session-entry restore, and the cards
+ * for sessions that already contain plan or subagent runs all keep working —
+ * but Pi is asked to exclude the tools themselves, which drops their schemas
+ * and their prompt guidelines before the system prompt is ever built. Empty
+ * this list to bring them back once they are rewritten along oh-my-pi's lines.
+ */
+export const HIDDEN_AGENT_TOOLS: readonly string[] = ["plan", "subagent"];
+
 export const GOAL_STATE_CHANNEL = "coilcoil:goal:state:v1";
 
 export const PLAN_STATE_CHANNEL = "coilcoil:plan:state:v1";
