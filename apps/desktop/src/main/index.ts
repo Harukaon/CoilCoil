@@ -591,7 +591,12 @@ async function createWindow(): Promise<void> {
   mainWindow.on("show", logActivation("show"));
   mainWindow.on("restore", logActivation("restore"));
 
-  mainWindow.on("ready-to-show", () => mainWindow.show());
+  // `once`, not `on`. Electron re-emits this on the window every time a new
+  // WebContents inside it becomes ready to display, and every <webview> the
+  // built-in browser creates is one — so an Agent opening a page in the
+  // background made the app show itself, raising it over whatever the user was
+  // doing. Showing the window is a startup step; it happens exactly once.
+  mainWindow.once("ready-to-show", () => mainWindow.show());
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
