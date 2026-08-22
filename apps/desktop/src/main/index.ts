@@ -10,10 +10,11 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell } from "electron";
 import { createRequire } from "node:module";
 import type { DiagnosticLogBatch } from "@coilcoil/runtime-protocol";
 import type { BrowserUiViewport, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import { appIconPath } from "./app-icon";
 import { BrowserRuntimeManager } from "./browser-runtime";
 import {
   browserContextMenuItems,
@@ -474,6 +475,13 @@ function installGuestContextMenu(guest: Electron.WebContents, window: BrowserWin
 
 async function createWindow(): Promise<void> {
   const platform = currentPlatform(process.platform);
+  const iconForCurrentTheme = () => nativeImage.createFromPath(appIconPath({
+    dark: nativeTheme.shouldUseDarkColors,
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    mainDirectory: __dirname,
+  }));
+  const initialIcon = iconForCurrentTheme();
   const mainWindow = new BrowserWindow({
     width: 915,
     height: 700,
@@ -482,6 +490,7 @@ async function createWindow(): Promise<void> {
     show: false,
     backgroundColor: WINDOW_BACKGROUND[nativeTheme.shouldUseDarkColors ? "dark" : "light"],
     title: "CoilCoil",
+    ...(platform !== "darwin" && !initialIcon.isEmpty() ? { icon: initialIcon } : {}),
     ...windowChromeOptions(platform),
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
@@ -503,6 +512,15 @@ async function createWindow(): Promise<void> {
     mainWindow.setMenuBarVisibility(false);
     mainWindow.autoHideMenuBar = true;
   }
+  const updateAppIcon = (): void => {
+    const icon = iconForCurrentTheme();
+    if (icon.isEmpty()) return;
+    if (platform === "darwin") app.dock?.setIcon(icon);
+    else if (!mainWindow.isDestroyed()) mainWindow.setIcon(icon);
+  };
+  updateAppIcon();
+  nativeTheme.on("updated", updateAppIcon);
+  mainWindow.once("closed", () => nativeTheme.off("updated", updateAppIcon));
   // The Renderer draws the window buttons, so it has to know which one to show.
   const publishMaximized = (): void => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(WINDOW_MAXIMIZED_CHANNEL, mainWindow.isMaximized());

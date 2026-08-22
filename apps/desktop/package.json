@@ -66,6 +66,16 @@
       "out/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "build/icon-light.png",
+        "to": "icons/icon-light.png"
+      },
+      {
+        "from": "build/icon-dark.png",
+        "to": "icons/icon-dark.png"
+      }
+    ],
     "directories": {
       "output": "release"
     },
