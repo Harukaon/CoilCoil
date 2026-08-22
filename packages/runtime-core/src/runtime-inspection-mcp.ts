@@ -300,6 +300,41 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     return secrets;
   }
 
+  /**
+   * What was last reported as wrong, so a steady failure is logged once.
+   *
+   * Status is refreshed on every inspection, and a server that cannot connect
+   * stays that way — logging each refresh would bury everything else.
+   */
+  private lastMcpTrouble?: string;
+
+  /**
+   * Record MCP trouble where the user can retrieve it.
+   *
+   * A server that will not connect shows in the panel as a status word and
+   * nothing more, and the reason — a refused connection, a missing native
+   * credential store, a rejected token — never left the process. That is
+   * answerable only on the machine it happens on, which may not be this one.
+   *
+   * Server names and statuses only. The diagnostic has already been through
+   * `redactSensitiveText`, and the URL never comes near this: these servers
+   * routinely carry their credential inside the address.
+   */
+  protected recordMcpTrouble(servers: McpServerRuntimeStatus[], diagnostic?: string): void {
+    const failing = servers
+      .filter((server) => !server.disabled && server.status !== "connected")
+      .map((server) => `${server.name}:${server.status}`);
+    const signature = `${failing.join(",")}|${diagnostic ?? ""}`;
+    if (signature === this.lastMcpTrouble) return;
+    this.lastMcpTrouble = signature;
+    if (!failing.length && !diagnostic) return;
+    this.log.warn("mcp", "mcp_not_connected", {
+      failing,
+      diagnostic,
+      connected: servers.filter((server) => server.status === "connected").map((server) => server.name),
+    });
+  }
+
   protected async normalizeMcpStatus(
     reported: McpRuntimeStatus | undefined,
     fallbackState: McpRuntimeStatus["state"],
@@ -323,6 +358,7 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
       } satisfies McpServerRuntimeStatus;
     });
     const visible = servers.filter((server) => !server.disabled && !server.sessionDisabled);
+    this.recordMcpTrouble(servers, diagnostic);
     return {
       servers,
       totalTools: visible.reduce((sum, server) => sum + server.toolCount, 0),
@@ -341,7 +377,9 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     try {
       result = await this.mcpRpc("status");
     } catch (error) {
-      throw new Error(redactSensitiveText(errorMessage(error), secrets));
+      const message = redactSensitiveText(errorMessage(error), secrets);
+      this.log.error("mcp", "mcp_status_failed", message);
+      throw new Error(message);
     }
     const details = isRecord(result.details) ? result.details : {};
     return this.normalizeMcpStatus(
@@ -357,7 +395,11 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     try {
       result = await this.mcpRpc(method, params);
     } catch (error) {
-      throw new Error(redactSensitiveText(errorMessage(error), secrets));
+      const message = redactSensitiveText(errorMessage(error), secrets);
+      // `params.server` is a name, never an address: these servers routinely
+      // carry their credential inside the URL.
+      this.log.error("mcp", "mcp_action_failed", message, { method, server: params.server });
+      throw new Error(message);
     }
     let status: McpRuntimeStatus | undefined;
     try {
