@@ -78,10 +78,28 @@ function restorePolicy(entries: readonly unknown[]): {
 export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   let effectiveSystemPrompt: string | undefined;
   let baseSystemPrompt: string | undefined;
+  let sessionContext: { getSystemPrompt(): string } | undefined;
   let systemPromptOverride: string | undefined;
   let contextMessages: AgentMessage[] | undefined;
   const disabledSkills = new Set<string>();
   const readSkills = new Set<string>();
+
+  /**
+   * Re-read the prompt the session would actually start from.
+   *
+   * `session_start` fires before the session is finished being configured, and
+   * the prompt keeps changing afterwards — the MCP adapter discovers its
+   * servers asynchronously and activates their tools, which rebuilds it. A
+   * value cached at session start therefore describes a session that no longer
+   * exists, and the runtime inspector was reporting it as the effective prompt.
+   *
+   * During a turn Pi's own `systemPrompt` is already the per-turn one, so this
+   * stays correct there too and does not fight `before_agent_start`.
+   */
+  const refreshBaseSystemPrompt = (): void => {
+    const live = sessionContext?.getSystemPrompt();
+    if (live) baseSystemPrompt = live;
+  };
 
   const recomputeEffectiveSystemPrompt = (): void => {
     const filteredBase = baseSystemPrompt === undefined
@@ -120,6 +138,7 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
         if (command.enabled === false) disabledSkills.add(filePath);
         else disabledSkills.delete(filePath);
       }
+      refreshBaseSystemPrompt();
       recomputeEffectiveSystemPrompt();
       if (command.method !== "get") persistPolicy();
       publish();
@@ -161,7 +180,8 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     systemPromptOverride = restored.systemPromptOverride;
     disabledSkills.clear();
     for (const path of restored.disabledSkills) disabledSkills.add(path);
-    baseSystemPrompt = context.getSystemPrompt();
+    sessionContext = context;
+    refreshBaseSystemPrompt();
     recomputeEffectiveSystemPrompt();
     publish();
   });
@@ -170,8 +190,13 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     systemPromptOverride = restored.systemPromptOverride;
     disabledSkills.clear();
     for (const path of restored.disabledSkills) disabledSkills.add(path);
+    sessionContext = context;
+    refreshBaseSystemPrompt();
     recomputeEffectiveSystemPrompt();
     publish();
   });
-  pi.on("session_shutdown", async () => unsubscribe());
+  pi.on("session_shutdown", async () => {
+    sessionContext = undefined;
+    unsubscribe();
+  });
 }

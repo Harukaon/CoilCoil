@@ -151,3 +151,80 @@ test("restores the latest persisted session prompt and Skill policy", async () =
   assert.match(rewoundState.effectiveSystemPrompt, /<name>one<\/name>/);
   assert.match(rewoundState.effectiveSystemPrompt, /<name>two<\/name>/);
 });
+
+test("会话开始后提示词又变了，get 拿到的是当前值而不是开场快照", async () => {
+  const handlers = new Map<string, Function[]>();
+  const listeners = new Map<string, Set<(value: unknown) => void>>();
+  const emitted: Array<{ channel: string; value: any }> = [];
+  const pi = {
+    on(name: string, handler: Function) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
+    events: {
+      on(channel: string, listener: (value: unknown) => void) {
+        const values = listeners.get(channel) ?? new Set();
+        values.add(listener);
+        listeners.set(channel, values);
+        return () => values.delete(listener);
+      },
+      emit(channel: string, value: unknown) {
+        emitted.push({ channel, value });
+        for (const listener of listeners.get(channel) ?? []) listener(value);
+      },
+    },
+    appendEntry() {},
+  };
+  runtimeBridgeExtension(pi as any);
+
+  // 开场时的提示词。
+  let livePrompt = "工具：read, bash";
+  const context = {
+    getSystemPrompt: () => livePrompt,
+    sessionManager: { getBranch: () => [] },
+  };
+  await handlers.get("session_start")?.[0]({}, context);
+
+  // session_start 之后仍会改提示词的真实情况：mcp-adapter 异步发现 MCP 服务后
+  // 调用 setActiveTools，Pi 借此重建系统提示词。
+  livePrompt = "工具：read, bash, mcp__github__search";
+
+  pi.events.emit(RUNTIME_BRIDGE_COMMAND_EVENT, { version: 1, requestId: "after-mcp", method: "get" });
+  const state = emitted.find((event) => event.channel === `${RUNTIME_BRIDGE_REPLY_PREFIX}after-mcp`)?.value.state;
+  assert.equal(state.effectiveSystemPrompt, livePrompt);
+});
+
+test("重新读取实时提示词时仍然套用被禁用的 Skill 过滤", async () => {
+  const handlers = new Map<string, Function[]>();
+  const listeners = new Map<string, Set<(value: unknown) => void>>();
+  const emitted: Array<{ channel: string; value: any }> = [];
+  const pi = {
+    on(name: string, handler: Function) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
+    events: {
+      on(channel: string, listener: (value: unknown) => void) {
+        const values = listeners.get(channel) ?? new Set();
+        values.add(listener);
+        listeners.set(channel, values);
+        return () => values.delete(listener);
+      },
+      emit(channel: string, value: unknown) {
+        emitted.push({ channel, value });
+        for (const listener of listeners.get(channel) ?? []) listener(value);
+      },
+    },
+    appendEntry() {},
+  };
+  runtimeBridgeExtension(pi as any);
+  let livePrompt = "<available_skills>\n  <skill>\n    <name>one</name>\n    <location>/skills/one/SKILL.md</location>\n  </skill>\n</available_skills>";
+  await handlers.get("session_start")?.[0]({}, {
+    getSystemPrompt: () => livePrompt,
+    sessionManager: { getBranch: () => [] },
+  });
+  pi.events.emit(RUNTIME_BRIDGE_COMMAND_EVENT, {
+    version: 1, requestId: "disable", method: "set-skill-enabled",
+    filePath: "/skills/one/SKILL.md", enabled: false,
+  });
+  // 提示词随后又被重建（技能块还在里面）。
+  livePrompt = `新的前言\n${livePrompt}`;
+  pi.events.emit(RUNTIME_BRIDGE_COMMAND_EVENT, { version: 1, requestId: "recheck", method: "get" });
+  const state = emitted.find((event) => event.channel === `${RUNTIME_BRIDGE_REPLY_PREFIX}recheck`)?.value.state;
+  assert.match(state.effectiveSystemPrompt, /新的前言/);
+  assert.doesNotMatch(state.effectiveSystemPrompt, /<name>one<\/name>/);
+});
