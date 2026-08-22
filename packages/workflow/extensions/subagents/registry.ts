@@ -177,6 +177,7 @@ export class SubagentRegistry {
       durationMs: (run.finishedAt ?? Date.now()) - run.startedAt,
       usage: { total: run.tokens, turns: run.turnCount || undefined },
       planId: run.planId,
+      modelInherited: run.modelInherited,
     };
   }
 

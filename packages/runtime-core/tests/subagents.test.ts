@@ -91,6 +91,7 @@ test("historical live subagents restore as stopped and only advertise a usable s
       task: "后台任务",
       status: "running",
       background: true,
+      modelInherited: true,
       sessionFile: childSession,
     },
     isError: false,
@@ -100,6 +101,7 @@ test("historical live subagents restore as stopped and only advertise a usable s
     id: "sa-pending",
     runId: "sa-pending",
     status: "pending",
+    modelInherited: true,
     sessionFile: join(root, "missing-child.jsonl"),
   }));
 
@@ -112,11 +114,13 @@ test("historical live subagents restore as stopped and only advertise a usable s
   assert.equal(running?.status, "stopped");
   assert.equal(running?.controlReady, false);
   assert.equal(running?.resumable, true);
+  assert.equal(running?.modelInherited, true, "tool details must keep the inherited-model warning");
 
   const pending = reconstructed.subagents.get("sa-pending");
   assert.equal(pending?.status, "stopped");
   assert.equal(pending?.controlReady, false);
   assert.equal(pending?.resumable, undefined);
+  assert.equal(pending?.modelInherited, true, "persisted activity payloads must keep the inherited-model warning");
 });
 
 test("status queries remain ordinary tools and never create fake child runs", (context) => {
@@ -164,6 +168,18 @@ test("terminal child updates clear stale current tool labels", (context) => {
 
   assert.equal(subagents.get("sa-live")?.currentTool, undefined);
   assert.equal(subagents.get("sa-live")?.currentPath, undefined);
+});
+
+test("partial child updates do not erase an inherited-model warning", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-runtime-subagent-model-warning-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const runtime = createRuntime(root) as unknown as RuntimeInternals;
+  const subagents = new Map<string, SubagentActivity>([["sa-live", activity({ modelInherited: true })]]);
+  runtime.active = { eventBus: createEventBus(), subagents };
+
+  runtime.mergeSubagentActivities([activity({ modelInherited: undefined, status: "completed" })]);
+
+  assert.equal(subagents.get("sa-live")?.modelInherited, true);
 });
 
 test("stopSubagent preserves a terminal activity returned by the RPC bridge", async (context) => {

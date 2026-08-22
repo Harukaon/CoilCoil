@@ -559,6 +559,14 @@ test("registry activity reflects live and terminal states", () => {
   assert.equal(registry.liveCount(), 1);
 });
 
+test("registry projects inherited-model warnings to activity events and tool details", () => {
+  const registry = new SubagentRegistry();
+  const run = makeRun({ modelInherited: true });
+
+  assert.equal(registry.toActivity(run).modelInherited, true);
+  assert.equal(registry.toDetails(run).modelInherited, true);
+});
+
 test("registry caps recent output entries", () => {
   const registry = new SubagentRegistry();
   const run = makeRun();

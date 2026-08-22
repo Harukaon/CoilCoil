@@ -98,6 +98,8 @@ export interface SubagentToolDetails {
   agent: string;
   task?: string;
   model?: string;
+  /** True when the run inherited the parent session's model instead of a user-configured default. */
+  modelInherited?: boolean;
   status: SubagentRunStatus;
   sessionFile?: string;
   worktreePath?: string;

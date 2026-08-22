@@ -435,6 +435,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         currentTool: activity.currentTool,
         currentPath: activity.currentPath,
         model: activity.model ?? existing.model,
+        modelInherited: activity.modelInherited ?? existing.modelInherited,
         recentTools: activity.recentTools ?? existing.recentTools,
         recentOutput: activity.recentOutput ?? existing.recentOutput,
         messages: activity.messages ?? existing.messages,
