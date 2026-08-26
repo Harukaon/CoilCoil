@@ -125,8 +125,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .primary-nav.compact .nav-button span, .primary-nav.compact .nav-button kbd { display: none; }
 .primary-nav.compact .nav-skills { order: 1; }
 .primary-nav.compact .nav-memory { order: 2; }
-.primary-nav.compact .nav-new { order: 3; color: hsl(var(--th) var(--ts) var(--l-171)); background: hsl(var(--th) var(--ts) var(--l-888)); }
-.primary-nav.compact .nav-new:disabled { background: transparent; }
+/* The three read as one control strip, so none of them carries a resting fill;
+   hover and the active state are what distinguish them, as everywhere else. */
+.primary-nav.compact .nav-new { order: 3; }
 .nav-button, .conversation-row, .inspector-nav button { display: flex; align-items: center; width: 100%; background: transparent; cursor: pointer; }
 .nav-button { gap: 9px; min-height: 34px; padding: 0 8px; border-radius: 7px; font-size: 13px; font-weight: 500; }
 .nav-button kbd { margin-left: auto; color: hsl(var(--th) var(--ts) var(--l-598)); font-size: 10px; font-family: inherit; }
