@@ -264,10 +264,11 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       runningTools: [...active.tools.values()].filter((tool) => tool.status === "running").map((tool) => tool.name),
     });
     const stoppedGoal = await this.stopGoalIfRunning(active);
-    // Stopping means the conversation stops. Anything still waiting in the FIFO
-    // would otherwise start the moment the aborted turn settles, which looks
-    // exactly like the stop having been ignored.
-    const cancelledQueue = this.dropQueuedPrompts(active);
+    // Stopping means the conversation stops. Anything still waiting — in this
+    // runtime's FIFO or in Pi's own steering queue — would otherwise be sent the
+    // moment the aborted turn settles, which looks exactly like the stop having
+    // been ignored.
+    const cancelledQueue = this.dropQueuedPrompts(active) + this.clearSteeredQueue(active);
     const cancelledSummary = this.cancelSummarization(active);
     if (!active.session.isStreaming) {
       // A summarization that runs before the prompt owns the window in which no

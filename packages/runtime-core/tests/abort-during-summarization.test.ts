@@ -34,6 +34,7 @@ function createAbortHarness(root: string) {
     // summarization delays; a promise that never settles stands in for that.
     abort: () => { calls.push("abort"); return new Promise<void>(() => undefined); },
     abortCompaction: () => { calls.push("abortCompaction"); },
+    clearQueue: () => ({ steering: [] as string[], followUp: [] as string[] }),
     abortBranchSummary: () => { calls.push("abortBranchSummary"); },
   };
   internals.active = {

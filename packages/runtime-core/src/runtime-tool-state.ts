@@ -407,11 +407,31 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     return true;
   }
 
-  protected rejectClientMessage(active: ActiveSession, clientMessageId?: string): void {
+  /**
+   * Drop the messages Pi has already taken for the turn that is being stopped.
+   *
+   * A steered message waits inside Pi's own queue until the agent loop pulls it
+   * in, and `AgentSession.abort()` leaves it there — so a stop pressed just
+   * after a steer still delivered that message on the next turn, which reads as
+   * the stop having been ignored. Clearing the queue hands the text back, and
+   * every message a composer is still waiting on is returned to it.
+   */
+  protected clearSteeredQueue(active: ActiveSession): number {
+    const cleared = active.session.clearQueue();
+    const texts = [...cleared.steering, ...cleared.followUp];
+    for (const text of texts) {
+      const pending = active.pendingUserPrompts.find((prompt) => prompt.text === text);
+      if (pending) this.rejectClientMessage(active, pending.id, text);
+    }
+    if (texts.length > 0) this.log.info("prompt-queue", "steered_cleared", { cleared: texts.length });
+    return texts.length;
+  }
+
+  protected rejectClientMessage(active: ActiveSession, clientMessageId?: string, text?: string): void {
     if (!clientMessageId) return;
     const index = active.pendingUserPrompts.findIndex((prompt) => prompt.id === clientMessageId);
     if (index >= 0) active.pendingUserPrompts.splice(index, 1);
-    this.emitEvent({ type: "message_rejected", id: clientMessageId, revision: ++active.messageRevision });
+    this.emitEvent({ type: "message_rejected", id: clientMessageId, revision: ++active.messageRevision, text });
   }
 
   protected publishSubagents(): void {

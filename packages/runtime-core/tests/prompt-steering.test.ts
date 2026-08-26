@@ -31,11 +31,20 @@ function createSteerHarness(root: string) {
     isStreaming: false,
     aborted: false,
     abort: async () => { session.aborted = true; },
+    // Pi holds a steered message in its own queue until the agent loop pulls it
+    // in, and hands the untaken ones back from clearQueue().
+    steering: [] as string[],
+    clearQueue: () => {
+      const steering = [...(session.steering as string[])];
+      session.steering = [];
+      return { steering, followUp: [] as string[] };
+    },
     messages: [],
     setSessionName: () => undefined,
     prompt: async (text: string, options?: { preflightResult?: (ok: boolean) => void; streamingBehavior?: string }) => {
       calls.push({ text, streamingBehavior: options?.streamingBehavior });
       options?.preflightResult?.(true);
+      if (options?.streamingBehavior === "steer") (session.steering as string[]).push(text);
       if (!options?.streamingBehavior) {
         session.isStreaming = true;
         internals.handleSessionEvent({
@@ -186,4 +195,26 @@ test("a stopped goal loop gets the ordinary queue back", async (context) => {
 
   assert.deepEqual(calls.map((call) => call.streamingBehavior), [undefined]);
   assert.equal(active.promptQueue.length, 1);
+});
+
+test("stopping takes back a steered message Pi has not delivered yet", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-steer-abort-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const { runtime, events, session, active } = createSteerHarness(root);
+
+  await runtime.prompt("第一条", undefined, "client-1");
+  await runtime.steer("补充一句", undefined, "client-2");
+  assert.deepEqual(session.steering, ["补充一句"]);
+
+  const result = await runtime.abort();
+
+  // Left in Pi's queue it would have been sent on the next turn.
+  assert.deepEqual(session.steering, []);
+  assert.equal(result.cancelledQueue, 1);
+  // The composer gets its text back rather than losing it.
+  const rejected = events.filter((event) => event.type === "message_rejected") as { id: string; text?: string }[];
+  assert.deepEqual(rejected.map((event) => event.id), ["client-2"]);
+  // The text rides along so the composer can put it back for editing.
+  assert.equal(rejected[0]?.text, "补充一句");
+  assert.equal(active.pendingUserPrompts.some((prompt: { id: string }) => prompt.id === "client-2"), false);
 });

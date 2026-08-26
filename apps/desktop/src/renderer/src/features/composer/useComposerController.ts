@@ -20,6 +20,7 @@ export interface ComposerController {
   modelMenuOpen: boolean;
   modelChanging: boolean;
   setDraft: (value: string) => void;
+  restoreDraft: (value: string) => void;
   setImages: React.Dispatch<React.SetStateAction<PromptImage[]>>;
   setModelMenuOpen: (open: boolean) => void;
   reset: () => void;
@@ -69,6 +70,19 @@ export function useComposerController({
   const reset = useCallback((): void => {
     setDraft("");
     setImages([]);
+  }, []);
+
+  /**
+   * Put a message the runtime handed back into the composer.
+   *
+   * Stopping a run gives back the steered message Pi had not delivered yet. It
+   * belongs where the user can edit and resend it, but never on top of
+   * something they have already started typing since.
+   */
+  const restoreDraft = useCallback((value: string): void => {
+    if (!value.trim()) return;
+    setDraft((current) => (current.trim() ? current : value));
+    requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
   const focus = useCallback((): void => {
@@ -170,6 +184,7 @@ export function useComposerController({
     modelMenuOpen,
     modelChanging,
     setDraft,
+    restoreDraft,
     setImages,
     setModelMenuOpen,
     reset,

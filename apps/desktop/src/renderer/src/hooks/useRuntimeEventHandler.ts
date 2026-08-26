@@ -37,6 +37,7 @@ export function useRuntimeEventHandler({
   optimisticSessionsRef,
   applySnapshot,
   dispatchConversationMessages,
+  restoreDraft,
   setSnapshot,
   setSessionActivity,
   setConfiguration,
@@ -52,6 +53,7 @@ export function useRuntimeEventHandler({
   optimisticSessionsRef: MutableRefObject<Map<string, SessionSummary>>;
   applySnapshot(next: SessionSnapshot): void;
   dispatchConversationMessages: Dispatch<ConversationMessageAction>;
+  restoreDraft(text: string): void;
   setSnapshot: Dispatch<SetStateAction<SessionSnapshot | undefined>>;
   setSessionActivity: Dispatch<SetStateAction<Record<string, SessionActivityState>>>;
   setConfiguration: Dispatch<SetStateAction<RuntimeConfiguration | undefined>>;
@@ -156,6 +158,9 @@ export function useRuntimeEventHandler({
         break;
       case "message_rejected":
         dispatchConversationMessages({ type: "reject", id: event.id, revision: event.revision });
+        // A stop hands back the steered message Pi never delivered; without this
+        // it would only vanish from the transcript, which loses what was typed.
+        if (event.text) restoreDraft(event.text);
         break;
       case "tool_started":
         setAgentPhase("工具");
@@ -238,7 +243,7 @@ export function useRuntimeEventHandler({
       default:
         break;
     }
-  }, [applySnapshot, dispatchConversationMessages, optimisticSessionsRef, runtimeSessionRef,
+  }, [applySnapshot, dispatchConversationMessages, optimisticSessionsRef, restoreDraft, runtimeSessionRef,
     setAgentPhase, setConfiguration, setProjectState, setSessionActivity, setSessionsByProject,
     setSnapshot, setSubagents, setTools, snapshotCacheRef, snapshotRef]);
 }

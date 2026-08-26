@@ -1109,7 +1109,8 @@ export type RuntimeEvent =
   | { type: "message_started"; message: ChatMessage; revision: number }
   | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; revision: number }
   | { type: "message_finished"; message: ChatMessage; revision: number }
-  | { type: "message_rejected"; id: string; revision: number }
+  /** `text` is present when the runtime is handing the message back for the composer to keep. */
+  | { type: "message_rejected"; id: string; revision: number; text?: string }
   | { type: "tool_started"; tool: ToolRun }
   | { type: "tool_updated"; tool: ToolRun }
   | { type: "tool_finished"; tool: ToolRun }
