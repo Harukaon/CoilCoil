@@ -18,14 +18,15 @@
     "packages/workflow"
   ],
   "scripts": {
-    "setup": "npm ci --prefix vendor/pi --ignore-scripts && npm run hydrate:model-data --prefix vendor/pi && npm run build:offline --prefix vendor/pi && npm ci --ignore-scripts && npm run patch:chrome-devtools-mcp && npm rebuild node-pty esbuild && node node_modules/electron/install.js",
+    "setup": "npm ci --prefix vendor/pi --ignore-scripts && npm run hydrate:model-data --prefix vendor/pi && npm ci --ignore-scripts && npm run build:pi && npm run patch:chrome-devtools-mcp && npm rebuild node-pty esbuild && node node_modules/electron/install.js",
     "postinstall": "npm run patch:chrome-devtools-mcp",
     "patch:chrome-devtools-mcp": "node scripts/patch-chrome-devtools-mcp.mjs",
+    "clean:pi-nested-deps": "node scripts/clean-vendor-pi-nested-deps.mjs",
     "release:version": "node scripts/set-release-version.mjs",
     "migrate:coilcoil-data": "node --experimental-strip-types scripts/migrate-coilcoil-data.mjs",
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "build:pi": "npm run build:offline --prefix vendor/pi",
+    "build:pi": "npm run clean:pi-nested-deps && npm run build:offline --prefix vendor/pi",
     "build": "npm run build:pi && npm run build --workspace @coilcoil/openai-responses-ws && npm run build --workspace @coilcoil/cli && npm run build --workspace @coilcoil/desktop",
     "dev": "npm run dev --workspace @coilcoil/desktop",
     "cli": "npm run dev --workspace @coilcoil/cli --",
