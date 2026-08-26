@@ -268,11 +268,12 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 [data-platform="darwin"] .app-shell.left-collapsed .memory-workspace-header { padding-left: 82px; }
 .conversation-header { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; }
 [data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 82px; }
-/* 标题文字单独设为 no-drag，再用透明拖拽层盖住它：Chromium 在文字节点上有时会优先启动选区，
-   导致同一次按下没有交给 Electron 的窗口拖拽。覆盖层不承载内容，所以标题始终只能拖窗，按钮仍由 no-drag 区域处理。 */
-.conversation-title { position: relative; display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; -webkit-user-select: none; user-select: none; }
-.conversation-title-drag-surface { position: absolute; z-index: 1; inset: -3px 0; -webkit-app-region: drag; -webkit-user-select: none; user-select: none; }
-.conversation-title strong, .conversation-title span { position: relative; z-index: 0; -webkit-user-select: none; user-select: none; }
+/* 标题整块交给 header 的拖拽区，文字自身不接收指针事件：Chromium 在文字节点上有时会优先启动
+   选区，导致同一次按下没有交给 Electron 的窗口拖拽。以前是盖一层透明拖拽层来绕开，但那一层的
+   矩形会随标题区尺寸变化，而 Electron 只在 app-region 属性变化时才重算拖拽区，于是尺寸一变就
+   留下一个失效的旧矩形。少一层元素，几何就只剩 header 自己（见 useDraggableRegion）。 */
+.conversation-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; pointer-events: none; -webkit-user-select: none; user-select: none; }
+.conversation-title strong, .conversation-title span { -webkit-user-select: none; user-select: none; }
 .conversation-title strong { display: block; width: 100%; max-width: 620px; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-title span { color: hsl(var(--th) var(--ts) var(--l-531)); font-size: 10px; }
 .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }

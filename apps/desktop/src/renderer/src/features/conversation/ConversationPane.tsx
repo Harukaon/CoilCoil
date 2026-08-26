@@ -19,6 +19,7 @@ import type {
   SubagentActivity,
 } from "@coilcoil/runtime-protocol";
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
+import { useDraggableRegion } from "../../hooks/useDraggableRegion";
 import { ActivityPanel } from "../activity/ActivityPanel";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
@@ -156,6 +157,9 @@ export function ConversationPane({
   const [visibleTimelineStart, setVisibleTimelineStart] = useState<number>();
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [showLoadEarlier, setShowLoadEarlier] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+  // Electron leaves a stale drag rectangle behind when this header changes size.
+  useDraggableRegion(headerRef);
   const pendingScrollRestore = useRef<{ height: number; top: number } | undefined>(undefined);
   const pendingAnchorScroll = useRef<string>(undefined);
   const [selectedSubagentId, setSelectedSubagentId] = useState<string>();
@@ -285,11 +289,10 @@ export function ConversationPane({
 
   return (
     <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""} ${hasComposerActivity ? "has-composer-activity" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-      <header className="conversation-header window-drag">
+      <header className="conversation-header window-drag" ref={headerRef}>
         {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
-        <div className="conversation-title no-drag">
-          <div className="conversation-title-drag-surface" aria-hidden="true" />
-          <strong title={conversationTitle}>{conversationTitle}</strong>{project ? <span>{project.name}</span> : null}
+        <div className="conversation-title" title={conversationTitle}>
+          <strong>{conversationTitle}</strong>{project ? <span>{project.name}</span> : null}
         </div>
         <div className="header-actions no-drag">{!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={onOpenRight}><PanelRight size={17} /></button> : null}</div>
       </header>

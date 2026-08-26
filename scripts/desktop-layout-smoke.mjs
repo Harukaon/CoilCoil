@@ -122,6 +122,31 @@ async function main() {
     })()`);
     assert.deepEqual(conversation, { hasActivity: false, paddingBottom: 76 });
 
+    // The title bar's drag region is the header itself. It used to be a transparent
+    // overlay inside the title, whose rectangle moved with the title's size - and
+    // Electron only rebuilds drag rectangles when an app-region property changes,
+    // so a resize left a stale one behind and the bar stopped dragging.
+    const titleBar = await client.evaluate(`(() => {
+      const header = document.querySelector(".conversation-header");
+      const title = document.querySelector(".conversation-title");
+      if (!(header instanceof HTMLElement) || !(title instanceof HTMLElement)) return null;
+      return {
+        headerRegion: getComputedStyle(header).webkitAppRegion,
+        titleRegion: getComputedStyle(title).webkitAppRegion,
+        titlePointerEvents: getComputedStyle(title).pointerEvents,
+        overlays: document.querySelectorAll(".conversation-title-drag-surface").length,
+      };
+    })()`);
+    // app-region does not inherit: the title's own value stays "none", which is
+    // what leaves the header's rectangle covering it. "no-drag" here would punch
+    // a hole in the drag region and is exactly what this guards against.
+    assert.deepEqual(titleBar, {
+      headerRegion: "drag",
+      titleRegion: "none",
+      titlePointerEvents: "none",
+      overlays: 0,
+    }, "The conversation title bar must be one drag region with no overlay inside it.");
+
     const narrowActivity = await client.evaluate(`(() => {
       const pane = document.querySelector(".conversation-pane");
       const stack = document.querySelector(".composer-stack");
