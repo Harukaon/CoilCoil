@@ -5,13 +5,16 @@ import {
   collectPinnedSessions,
   collapsedSessionLimit,
   conversationStatusKind,
+  NAV_COMPACT_WORKSPACES,
+  shouldCompactNav,
   nextExpandedSessionLimit,
   summarizeWorkspaceActivity,
   titleFromPrompt,
   upsertSessionSummary,
   workspaceActivityLabel,
 } from "../src/renderer/src/features/workspaces/sessionList.ts";
-import { NAV_COMPACT_SAVING, shouldCompactNav } from "../src/renderer/src/features/workspaces/useCompactNav.ts";
+
+const project = (name: string): ProjectSelection => ({ kind: "workspace", name, path: `/projects/${name}` });
 
 function session(overrides: Partial<SessionSummary>): SessionSummary {
   return {
@@ -131,21 +134,21 @@ test("the pin only speaks when the conversation is quiet", () => {
   assert.equal(conversationStatusKind(undefined, false), "none");
 });
 
-test("the nav collapses once the sidebar list overflows", () => {
-  // Nothing to scroll past yet: the labelled buttons are worth their height.
-  assert.equal(shouldCompactNav(false, 400, 600), false);
-  assert.equal(shouldCompactNav(false, 601, 600), true);
+test("the nav keeps its labels while few workspaces are mounted", () => {
+  const projects = Array.from({ length: NAV_COMPACT_WORKSPACES - 1 }, (_, index) => project(`w${index}`));
+  assert.equal(shouldCompactNav(projects), false);
 });
 
-test("the nav only expands again with room to spare", () => {
-  // Expanding costs back the height that compacting freed, so restoring at the
-  // first spare pixel would re-create the overflow and flip on every render.
-  assert.equal(shouldCompactNav(true, 590, 600), true);
-  assert.equal(shouldCompactNav(true, 600 - NAV_COMPACT_SAVING, 600), true);
-  assert.equal(shouldCompactNav(true, 600 - NAV_COMPACT_SAVING - 24, 600), false);
+test("enough mounted workspaces collapse the nav into one row", () => {
+  const projects = Array.from({ length: NAV_COMPACT_WORKSPACES }, (_, index) => project(`w${index}`));
+  assert.equal(shouldCompactNav(projects), true);
 });
 
-test("an unmeasured sidebar keeps whatever layout it has", () => {
-  assert.equal(shouldCompactNav(true, 0, 0), true);
-  assert.equal(shouldCompactNav(false, 0, 0), false);
+test("the home project does not count towards the crowding", () => {
+  // It is always present, so counting it would compact one workspace early.
+  const projects = [
+    { kind: "home" as const, name: "主目录", path: "/Users/hao" },
+    ...Array.from({ length: NAV_COMPACT_WORKSPACES - 1 }, (_, index) => project(`w${index}`)),
+  ];
+  assert.equal(shouldCompactNav(projects), false);
 });
