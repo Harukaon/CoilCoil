@@ -28,7 +28,7 @@ import { OrbitLoader } from "../../ui/loaders";
 import { CoilLogo } from "../../ui/CoilLogo";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
-import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, type RecentOpens } from "./recentSessions";
+import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed } from "./recentSessions";
 import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, shouldCompactNav, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
@@ -146,7 +146,6 @@ export function WorkspaceSidebar({
   pendingProjectPath,
   sessionsByProject,
   sessionActivity,
-  recentOpens,
   expandedProjects,
   expandedSessionLimits,
   modelLabel,
@@ -177,7 +176,6 @@ export function WorkspaceSidebar({
   pendingProjectPath?: string;
   sessionsByProject: Record<string, SessionSummary[]>;
   sessionActivity: Record<string, SessionActivityState>;
-  recentOpens: RecentOpens;
   expandedProjects: Set<string>;
   expandedSessionLimits: Record<string, number>;
   modelLabel: string;
@@ -213,7 +211,7 @@ export function WorkspaceSidebar({
   const [recentCollapsed, setRecentCollapsed] = useState(loadRecentSectionCollapsed);
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_ROWS);
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
-  const recentSessions = collectRecentSessions(projects, sessionsByProject, recentOpens);
+  const recentSessions = collectRecentSessions(projects, sessionsByProject);
   const visibleRecent = recentSessions.slice(0, recentLimit);
   // The home project is recomputed as the first entry on every launch, so only
   // the mounted workspaces have an order worth persisting.
