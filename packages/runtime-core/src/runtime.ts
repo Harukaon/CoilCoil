@@ -194,6 +194,20 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       this.rejectClientMessage(active, clientMessageId);
       throw error;
     }
+    // Pi has the message, but it only reaches the model at the end of the turn
+    // the tools are still inside. Announcing it here is what keeps it visible
+    // for that stretch: it has left the queue, and it is not in the transcript
+    // yet, so without this it reads as a message that was swallowed.
+    if (clientMessageId) {
+      this.emitEvent({
+        type: "message_steering",
+        id: clientMessageId,
+        text: expandedPrompt,
+        images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ mimeType, data })) : undefined,
+        timestamp: Date.now(),
+        revision: ++active.messageRevision,
+      });
+    }
   }
 
   /**

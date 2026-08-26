@@ -6,10 +6,12 @@ import {
   ChevronRight,
   ChevronUp,
   Circle,
+  Copy,
   Folder,
   FolderInput,
   FolderOpen,
   GitFork,
+  Hash,
   MessageSquarePlus,
   MoreHorizontal,
   Pencil,
@@ -25,6 +27,7 @@ import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { OrbitLoader } from "../../ui/loaders";
 import { CoilLogo } from "../../ui/CoilLogo";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
+import { copyText } from "../files/pathActions";
 import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, type RecentOpens } from "./recentSessions";
 import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
@@ -76,6 +79,20 @@ function ConversationListControls({ hiddenCount, expandedBy, onShowMore, onColla
       ? <button className="more-conversations" type="button" aria-label="收起对话" onClick={onCollapse}><ChevronUp size={15} /></button>
       : null}
   </div>;
+}
+
+/**
+ * The copy actions every conversation row offers, wherever it is listed.
+ *
+ * A session is addressed two ways outside this window — by the transcript file
+ * on disk and by its id — and both are needed often enough that hunting for
+ * them in the session directory is the wrong answer.
+ */
+function ConversationCopyItems({ session }: { session: SessionSummary }): React.JSX.Element {
+  return <>
+    <ContextMenu.Item className="conversation-context-item" onSelect={() => { void copyText(session.path, "会话路径"); }}><Copy size={13} /><span>复制会话路径</span></ContextMenu.Item>
+    <ContextMenu.Item className="conversation-context-item" onSelect={() => { void copyText(session.id, "会话 ID"); }}><Hash size={13} /><span>复制会话 ID</span></ContextMenu.Item>
+  </>;
 }
 
 /**
@@ -240,6 +257,7 @@ export function WorkspaceSidebar({
               onArchive={() => onArchiveConversation(entry.project, entry.session)}
               menu={<>
                 <ContextMenu.Item className="conversation-context-item" onSelect={() => onPinConversation(entry.project, entry.session, false)}><PinOff size={13} /><span>取消置顶</span></ContextMenu.Item>
+                <ConversationCopyItems session={entry.session} />
                 <ContextMenu.Separator className="conversation-context-separator" />
                 <ContextMenu.Item className="conversation-context-item" onSelect={() => onArchiveConversation(entry.project, entry.session)}>归档对话</ContextMenu.Item>
               </>}
@@ -269,6 +287,7 @@ export function WorkspaceSidebar({
               onArchive={() => onArchiveConversation(entry.project, entry.session)}
               menu={<>
                 <ContextMenu.Item className="conversation-context-item" onSelect={() => onPinConversation(entry.project, entry.session, true)}><Pin size={13} /><span>置顶</span></ContextMenu.Item>
+                <ConversationCopyItems session={entry.session} />
                 <ContextMenu.Separator className="conversation-context-separator" />
                 <ContextMenu.Item className="conversation-context-item" onSelect={() => onArchiveConversation(entry.project, entry.session)}>归档对话</ContextMenu.Item>
               </>}
@@ -458,6 +477,7 @@ export function WorkspaceSidebar({
                               </ContextMenu.SubContent>
                             </ContextMenu.Portal>
                           </ContextMenu.Sub>
+                          <ConversationCopyItems session={session} />
                           <ContextMenu.Separator className="conversation-context-separator" />
                           <ContextMenu.Item className="conversation-context-item" disabled={activity?.running} onSelect={() => onArchiveConversation(project, session)}>归档对话</ContextMenu.Item>
                         </ContextMenu.Content>

@@ -4,6 +4,14 @@
 .inline-preview-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 10px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-886)); }
 .inline-preview-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; color: hsl(var(--th) var(--ts) var(--l-375)); }
 .inline-preview-title strong { min-width: 0; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-247)); font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.inline-preview-heading { display: grid; min-width: 0; gap: 1px; }
+/* The path is a control, not a caption: one click copies it, so it takes the
+   copy affordance on hover instead of a permanently loud icon. */
+.inline-preview-path { display: flex; min-width: 0; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: hsl(var(--th) var(--ts) var(--l-592)); font-size: 9px; text-align: left; cursor: pointer; }
+.inline-preview-path:hover { color: hsl(var(--th) var(--ts) var(--l-324)); }
+.inline-preview-path-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inline-preview-path svg { flex: 0 0 auto; opacity: 0; transition: opacity 120ms ease; }
+.inline-preview-path:hover svg { opacity: 1; }
 .inline-preview-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .preview-zoom { display: flex; flex: 0 0 auto; align-items: center; gap: 1px; padding: 2px; border-radius: 7px; background: hsl(var(--th) var(--ts) var(--l-918)); }
 .preview-zoom button { display: grid; height: 25px; min-width: 24px; padding: 0 5px; place-items: center; border-radius: 6px; color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; font-size: 8px; cursor: pointer; }
@@ -11,8 +19,8 @@
 .preview-zoom button:disabled { cursor: default; opacity: .35; }
 .preview-zoom .preview-zoom-value { min-width: 34px; color: hsl(var(--th) var(--ts) var(--l-324)); font-variant-numeric: tabular-nums; }
 .preview-mode { display: flex; flex: 0 0 auto; gap: 2px; padding: 2px; border-radius: 7px; background: hsl(var(--th) var(--ts) var(--l-918)); }
-.preview-mode button, .inline-preview-close { display: grid; width: 25px; height: 25px; padding: 0; place-items: center; border-radius: 6px; color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; cursor: pointer; }
-.preview-mode button:hover, .inline-preview-close:hover { color: hsl(var(--th) var(--ts) var(--l-192)); background: hsl(var(--th) var(--ts) var(--l-890)); }
+.preview-mode button, .inline-preview-close, .inline-preview-reveal { display: grid; width: 25px; height: 25px; padding: 0; place-items: center; border-radius: 6px; color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; cursor: pointer; }
+.preview-mode button:hover, .inline-preview-close:hover, .inline-preview-reveal:hover { color: hsl(var(--th) var(--ts) var(--l-192)); background: hsl(var(--th) var(--ts) var(--l-890)); }
 .preview-mode button.active { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 1px 2px rgb(20 20 18 / 8%); }
 .preview-warning { padding: 6px 9px; border-bottom: 1px solid var(--c-amber-border); color: var(--c-amber-text); background: var(--c-amber-subtle); font-size: 9px; }
 .inline-preview-content { min-width: 0; min-height: 0; overflow: auto; }

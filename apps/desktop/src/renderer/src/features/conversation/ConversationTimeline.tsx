@@ -1,4 +1,5 @@
-import { AlertCircle, Check, ChevronRight, Copy, FileText, Folder, LoaderCircle } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Copy, FileText, Folder, FolderOpen, LoaderCircle } from "lucide-react";
+import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ClipboardEvent as ReactClipboardEvent, FormEvent } from "react";
@@ -19,6 +20,7 @@ import type {
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { ConfirmDialog } from "../../ui/dialog";
+import { copyPath, revealLabel, revealPath } from "../files/pathActions";
 import { parseMarkdownFileHref, type MarkdownFileTarget } from "./markdownFileLinks";
 import { useFileLinkKind } from "./fileLinkKinds";
 import { TerminalNoticeCard } from "./TerminalNoticeCard";
@@ -62,19 +64,31 @@ function MarkdownFileLink({
   const location = file.line ? `L${file.line}${file.column ? `:${file.column}` : ""}` : undefined;
   const directory = kind === "directory";
   return (
-    <a
-      {...props}
-      className={[className, "markdown-file-link", directory ? "directory" : ""].filter(Boolean).join(" ")}
-      data-file-path={file.path}
-      data-file-line={file.line}
-      data-file-kind={kind ?? "unknown"}
-      href={href}
-      title={directory ? `${file.path}（在文件管理器中打开）` : file.path}
-    >
-      {directory ? <Folder size={13} /> : <FileText size={13} />}
-      <span className="markdown-file-link-label">{children}</span>
-      {location ? <span className="markdown-file-link-location">{location}</span> : null}
-    </a>
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <a
+          {...props}
+          className={[className, "markdown-file-link", directory ? "directory" : ""].filter(Boolean).join(" ")}
+          data-file-path={file.path}
+          data-file-line={file.line}
+          data-file-kind={kind ?? "unknown"}
+          href={href}
+          title={directory ? `${file.path}（在文件管理器中打开）` : file.path}
+        >
+          {directory ? <Folder size={13} /> : <FileText size={13} />}
+          <span className="markdown-file-link-label">{children}</span>
+          {location ? <span className="markdown-file-link-location">{location}</span> : null}
+        </a>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
+          {/* The label the transcript shows is often a short name; what is worth
+              copying is the absolute path underneath it. */}
+          <ContextMenu.Item className="conversation-context-item" onSelect={() => { void copyPath(file.path); }}><Copy size={13} /><span>复制路径</span></ContextMenu.Item>
+          <ContextMenu.Item className="conversation-context-item" onSelect={() => revealPath(file.path)}><FolderOpen size={13} /><span>{revealLabel()}</span></ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   );
 }
 
@@ -264,7 +278,7 @@ export function MessageView({
           </div>
         ) : (
           <button
-            className={`user-bubble user-bubble-button ${message.status === "queued" ? "queued" : ""}`}
+            className={`user-bubble user-bubble-button ${message.status === "queued" ? "queued" : ""} ${message.status === "steering" ? "steering" : ""}`}
             type="button"
             title={message.entryId ? "点击编辑并从这里重新开始" : undefined}
             data-prompt-value={value}
@@ -275,6 +289,11 @@ export function MessageView({
             <ImageStrip images={images} />
             {message.status === "queued" ? (
               <span className="user-message-queue-status"><LoaderCircle className="spin" size={12} />排队中</span>
+            ) : null}
+            {/* Pi already has this one; it reaches the model when the running turn
+                ends, which is why it waits here instead of vanishing. */}
+            {message.status === "steering" ? (
+              <span className="user-message-queue-status"><LoaderCircle className="spin" size={12} />介入中 · 本轮结束后送达</span>
             ) : null}
           </button>
         )}

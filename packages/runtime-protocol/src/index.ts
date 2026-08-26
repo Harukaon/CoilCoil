@@ -513,7 +513,8 @@ export interface ChatMessage {
   toolName?: string;
   toolCallId?: string;
   isError?: boolean;
-  status?: "queued" | "running" | "succeeded" | "failed" | "aborted";
+  /** `steering` is a message Pi has accepted for the running turn but has not delivered yet. */
+  status?: "queued" | "steering" | "running" | "succeeded" | "failed" | "aborted";
 }
 
 export interface TodoItem {
@@ -1111,6 +1112,8 @@ export type RuntimeEvent =
   | { type: "message_finished"; message: ChatMessage; revision: number }
   /** `text` is present when the runtime is handing the message back for the composer to keep. */
   | { type: "message_rejected"; id: string; revision: number; text?: string }
+  /** A steered message Pi took for the running turn; it lands when the turn ends. */
+  | { type: "message_steering"; id: string; text: string; images?: PromptImage[]; timestamp: number; revision: number }
   | { type: "tool_started"; tool: ToolRun }
   | { type: "tool_updated"; tool: ToolRun }
   | { type: "tool_finished"; tool: ToolRun }

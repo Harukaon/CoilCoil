@@ -156,6 +156,23 @@ export function useRuntimeEventHandler({
           sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
         });
         break;
+      case "message_steering":
+        // It has left the queue panel and Pi will only append it when the turn
+        // ends, so the transcript carries it, marked, for that whole stretch.
+        dispatchConversationMessages({
+          type: "queue",
+          sessionPath: snapshotRef.current?.session.path,
+          message: {
+            id: event.id,
+            order: event.timestamp,
+            role: "user",
+            text: event.text,
+            images: event.images,
+            timestamp: event.timestamp,
+            status: "steering",
+          },
+        });
+        break;
       case "message_rejected":
         dispatchConversationMessages({ type: "reject", id: event.id, revision: event.revision });
         // A stop hands back the steered message Pi never delivered; without this

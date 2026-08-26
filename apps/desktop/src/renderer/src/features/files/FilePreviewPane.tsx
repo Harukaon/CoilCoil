@@ -1,9 +1,10 @@
-import { Code2, Eye, FileText, Image as ImageIcon, LoaderCircle, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Code2, Copy, Eye, FileText, FolderOpen, Image as ImageIcon, LoaderCircle, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { FilePreviewDocument } from "../../../../shared/desktop-api";
 import { htmlZoomFrameStyle, stepHtmlZoom } from "./htmlZoom";
+import { copyPath, revealLabel, revealPath } from "./pathActions";
 import "./preview.css";
 
 export function FilePreviewPane({ preview, loading, error, onClose }: {
@@ -35,7 +36,15 @@ export function FilePreviewPane({ preview, loading, error, onClose }: {
       <header className="inline-preview-header">
         <div className="inline-preview-title">
           {preview?.kind === "image" ? <ImageIcon size={14} /> : <FileText size={14} />}
-          <strong title={preview?.path}>{preview?.name || "文件预览"}</strong>
+          <div className="inline-preview-heading">
+            <strong title={preview?.path}>{preview?.name || "文件预览"}</strong>
+            {/* The name alone is not enough to act on: the path is what gets pasted
+                into a terminal, so it is shown and one click copies it. */}
+            {preview?.path ? <button className="inline-preview-path" type="button" title={`${preview.path}\n点击复制`} onClick={() => { void copyPath(preview.path); }}>
+              <span className="inline-preview-path-text">{preview.path}</span>
+              <Copy size={11} />
+            </button> : null}
+          </div>
         </div>
         <div className="inline-preview-actions">
           {preview?.kind === "html" && rendered ? (
@@ -51,6 +60,7 @@ export function FilePreviewPane({ preview, loading, error, onClose }: {
               <button className={rendered ? "active" : ""} type="button" title="查看预览" onClick={() => setRendered(true)}><Eye size={13} /></button>
             </div>
           ) : null}
+          {preview?.path ? <button className="inline-preview-reveal" type="button" aria-label={revealLabel()} title={revealLabel()} onClick={() => revealPath(preview.path)}><FolderOpen size={14} /></button> : null}
           <button className="inline-preview-close" type="button" aria-label="关闭文件预览" title="关闭文件预览" onClick={onClose}><X size={15} /></button>
         </div>
       </header>
@@ -61,7 +71,17 @@ export function FilePreviewPane({ preview, loading, error, onClose }: {
         {!loading && !error && preview?.kind === "pdf" ? <embed className="pdf-preview" src={preview.content} type="application/pdf" /> : null}
         {!loading && !error && preview?.kind === "image" ? <div className="image-preview-shell"><img className="image-preview" src={preview.content} alt={preview.name} draggable={false} /></div> : null}
         {!loading && !error && preview?.kind === "markdown" && rendered ? <article className="preview-markdown markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.content}</ReactMarkdown></article> : null}
-        {!loading && !error && preview?.kind === "html" && rendered ? <div className="html-preview-shell"><iframe className="html-preview" title={preview.name} sandbox="" srcDoc={preview.content} style={htmlZoomFrameStyle(htmlZoom)} /></div> : null}
+        {!loading && !error && preview?.kind === "html" && rendered ? <div className="html-preview-shell"><iframe
+          className="html-preview"
+          title={preview.name}
+          // Scripts run so a page's animations and interactions preview as they
+          // will look, but without allow-same-origin the frame stays on an opaque
+          // origin: no access to this window, its storage, or the file's own
+          // directory. Nothing else in the sandbox is granted.
+          sandbox="allow-scripts"
+          srcDoc={preview.content}
+          style={htmlZoomFrameStyle(htmlZoom)}
+        /></div> : null}
         {!loading && !error && preview && (preview.kind === "text" || !rendered) ? <pre className="text-preview"><code>{preview.content}</code></pre> : null}
       </div>
       {preview ? <footer className="inline-preview-status"><span>{kindLabel}</span><span>{new Date(preview.updatedAt).toLocaleTimeString("zh-CN")}</span><span>实时更新</span></footer> : null}

@@ -94,6 +94,21 @@ test("a steered message joins the running turn instead of the queue", async (con
   assert.equal(active.promptQueue.length, 0);
 });
 
+test("an accepted steer is announced so the transcript can hold it", async (context) => {
+  // Pi takes the message now but only appends it when the running turn ends. In
+  // between it is in no queue and no transcript, and without this event the UI
+  // has nothing to show for it.
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-steer-event-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const { runtime, events } = createSteerHarness(root);
+
+  await runtime.prompt("第一条", undefined, "client-1");
+  await runtime.steer("补充一句", undefined, "client-2");
+
+  const steering = events.filter((event) => event.type === "message_steering") as { id: string; text: string }[];
+  assert.deepEqual(steering.map((event) => [event.id, event.text]), [["client-2", "补充一句"]]);
+});
+
 test("with nothing streaming a steer takes the ordinary path", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-steer-idle-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));

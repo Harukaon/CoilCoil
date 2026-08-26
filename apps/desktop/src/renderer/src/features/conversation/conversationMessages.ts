@@ -172,27 +172,21 @@ export function conversationMessagesReducer(
 }
 
 /**
- * Project the committed runtime state, the queue, and local sends into one list.
+ * The transcript as rendered: what Pi has committed, plus what is on its way.
  *
- * A queued prompt stays where it was typed, carrying its `queued` status so the
- * bubble can say it has not been sent yet. Taking it out of the transcript until
- * its turn came read as the message having been swallowed — the row above the
- * input is where it can be withdrawn or interjected, not where it is read.
- *
- * Queued rows sort by `queuedAt` and committed messages by their timeline order,
- * so the queue always trails the transcript in send order.
+ * Queued prompts are deliberately absent. They sit above the composer where they
+ * can be withdrawn or interjected, and drawing them in the transcript as well
+ * claimed they had been sent when they had not. A steered message is the
+ * opposite case: Pi has taken it, nothing can withdraw it, and it only reaches
+ * the model when the running turn ends - so it is shown here, marked, for that
+ * whole stretch rather than disappearing until the turn is over.
  */
 export function selectConversationMessages(state: ConversationMessagesState): ChatMessage[] {
   let projected = [...state.committed];
-  // Pi echoes the user message before the queue drops its row, so for one
-  // update the prompt is in both lists. The committed one is the message; the
-  // queued row is only a placeholder for it.
   const confirmed = new Set(projected.map((message) => message.id));
-  for (const message of state.queued) {
-    if (!confirmed.has(message.id)) projected = upsert(projected, message);
-  }
   for (const item of state.pending) {
     if (item.sessionPath && item.sessionPath !== state.sessionPath) continue;
+    if (confirmed.has(item.message.id)) continue;
     projected = upsert(projected, item.message);
   }
   return projected;
