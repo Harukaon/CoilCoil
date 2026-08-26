@@ -23,6 +23,15 @@ export interface FilePreviewDocument {
   updatedAt: number;
 }
 
+/** The bubble's global shortcut: nothing is claimed until the user picks one. */
+export interface BubbleShortcutState {
+  accelerator?: string;
+  registered: boolean;
+  error?: string;
+  /** Offered in the settings page as a starting point, never applied on its own. */
+  suggestion?: string;
+}
+
 export interface McpConnectionTestInput {
   url: string;
   headers?: Record<string, string>;
@@ -152,6 +161,9 @@ export interface CoilCoilDesktopApi {
   /** Dismiss the floating bubble window; its conversation stays alive. */
   /** Shake hands with an HTTP MCP server and report what it said. */
   testMcpConnection(input: McpConnectionTestInput): Promise<McpConnectionTest>;
+  getBubbleShortcut(): Promise<BubbleShortcutState>;
+  /** Claim an accelerator, or release the current one when given nothing. */
+  setBubbleShortcut(accelerator?: string): Promise<BubbleShortcutState>;
   hideBubble(): Promise<void>;
   /** Hand the bubble's conversation to the main window and dismiss the bubble. */
   openMainWindow(target?: BubbleSessionTarget): Promise<void>;

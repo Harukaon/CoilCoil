@@ -256,6 +256,12 @@ async function main() {
     await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: targetX, y: preview.handleY, button: "left", buttons: 0, clickCount: 1 });
     await client.waitFor(`Math.abs((document.querySelector(".inline-file-preview")?.getBoundingClientRect().width ?? 0) - ${preview.paneWidth}) > 20`, "Preview divider did not resize panes.");
 
+    // Nothing may claim a global shortcut on its own: the settings page must open
+    // with none set, since one taken uninvited breaks whatever already used it.
+    const shortcut = await client.evaluate(`window.coilcoil.getBubbleShortcut().then((state) => ({ ...state, accelerator: state.accelerator ?? null }))`);
+    assert.deepEqual(shortcut, { accelerator: null, registered: false, suggestion: "CommandOrControl+Shift+Space" },
+      "A fresh install must register no global shortcut.");
+
     // The bubble is this same bundle under #bubble. Its own window is opened by a
     // global shortcut, which a headless run cannot press - but loading the hash
     // here still proves the split, the compact view, and its stylesheet.

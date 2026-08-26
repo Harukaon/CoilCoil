@@ -1,15 +1,22 @@
-import { BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
-import type { BubbleSessionTarget } from "../shared/desktop-api";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
+import type { BubbleSessionTarget, BubbleShortcutState } from "../shared/desktop-api";
 
 export const BUBBLE_HIDE_CHANNEL = "bubble:hide";
 export const BUBBLE_OPEN_MAIN_CHANNEL = "bubble:open-main";
 export const BUBBLE_OPEN_SESSION_CHANNEL = "bubble:open-session";
+export const BUBBLE_GET_SHORTCUT_CHANNEL = "bubble:get-shortcut";
+export const BUBBLE_SET_SHORTCUT_CHANNEL = "bubble:set-shortcut";
 
 /**
- * Spotlight's chord is taken on macOS and Windows search owns Win+S, so this
- * adds Shift to a combination both platforms leave free.
+ * A suggestion, not a default.
+ *
+ * Nothing is registered until the user asks for it: a global shortcut is taken
+ * from every other application on the machine, and claiming one uninvited is
+ * how an app silently breaks something the user already relies on.
  */
-export const DEFAULT_BUBBLE_SHORTCUT = "CommandOrControl+Shift+Space";
+export const SUGGESTED_BUBBLE_SHORTCUT = "CommandOrControl+Shift+Space";
 
 const BUBBLE_WIDTH = 680;
 const BUBBLE_HEIGHT = 460;
@@ -23,6 +30,34 @@ export interface BubbleHost {
 }
 
 let bubbleWindow: BrowserWindow | undefined;
+let activeShortcut: string | undefined;
+
+function shortcutFilePath(): string {
+  return join(app.getPath("userData"), "bubble-shortcut.json");
+}
+
+function readStoredShortcut(): string | undefined {
+  try {
+    const path = shortcutFilePath();
+    if (!existsSync(path)) return undefined;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const value = (parsed as { accelerator?: unknown }).accelerator;
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStoredShortcut(accelerator: string | undefined): void {
+  try {
+    const path = shortcutFilePath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify({ accelerator: accelerator ?? null }, null, 2)}\n`, "utf8");
+  } catch (error) {
+    console.warn("[bubble] could not persist the shortcut", error);
+  }
+}
 
 function createBubbleWindow(host: BubbleHost): BrowserWindow {
   const window = new BrowserWindow({
@@ -94,12 +129,50 @@ function hideBubble(): void {
   if (bubbleWindow && !bubbleWindow.isDestroyed()) bubbleWindow.hide();
 }
 
+/**
+ * Claim an accelerator, or release the current one when given nothing.
+ *
+ * Registration is the only honest test of whether a combination is available:
+ * Electron reports failure when the system or another application already owns
+ * it, and that answer goes straight back to the settings page.
+ */
+function applyShortcut(host: BubbleHost, accelerator: string | undefined): BubbleShortcutState {
+  if (activeShortcut) {
+    globalShortcut.unregister(activeShortcut);
+    activeShortcut = undefined;
+  }
+  const wanted = accelerator?.trim();
+  if (!wanted) return { accelerator: undefined, registered: false };
+  let registered = false;
+  try {
+    registered = globalShortcut.register(wanted, () => toggleBubble(host));
+  } catch (error) {
+    return { accelerator: wanted, registered: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  if (!registered) return { accelerator: wanted, registered: false, error: "这个快捷键已被系统或其他应用占用。" };
+  activeShortcut = wanted;
+  return { accelerator: wanted, registered: true };
+}
+
 export function setupBubbleWindow(host: BubbleHost): () => void {
-  const registered = globalShortcut.register(DEFAULT_BUBBLE_SHORTCUT, () => toggleBubble(host));
-  if (!registered) {
-    console.warn(`[bubble] ${DEFAULT_BUBBLE_SHORTCUT} is taken by another application; the bubble has no shortcut.`);
+  const stored = readStoredShortcut();
+  if (stored) {
+    const state = applyShortcut(host, stored);
+    if (!state.registered) console.warn(`[bubble] ${stored} could not be registered: ${state.error ?? "unavailable"}`);
   }
 
+  ipcMain.handle(BUBBLE_GET_SHORTCUT_CHANNEL, (): BubbleShortcutState => ({
+    accelerator: activeShortcut ?? stored,
+    registered: Boolean(activeShortcut),
+    suggestion: SUGGESTED_BUBBLE_SHORTCUT,
+  }));
+  ipcMain.handle(BUBBLE_SET_SHORTCUT_CHANNEL, (_event, accelerator: string | undefined): BubbleShortcutState => {
+    const state = applyShortcut(host, accelerator);
+    // A combination that would not register is not written down: reopening the
+    // page must not offer back a shortcut that never worked.
+    if (state.registered || !accelerator?.trim()) writeStoredShortcut(state.registered ? state.accelerator : undefined);
+    return { ...state, suggestion: SUGGESTED_BUBBLE_SHORTCUT };
+  });
   ipcMain.handle(BUBBLE_HIDE_CHANNEL, (): void => hideBubble());
   ipcMain.handle(BUBBLE_OPEN_MAIN_CHANNEL, (_event, target?: BubbleSessionTarget): void => {
     hideBubble();
@@ -117,7 +190,10 @@ export function setupBubbleWindow(host: BubbleHost): () => void {
 
   return () => {
     nativeTheme.off("updated", publishTheme);
-    globalShortcut.unregister(DEFAULT_BUBBLE_SHORTCUT);
+    if (activeShortcut) globalShortcut.unregister(activeShortcut);
+    activeShortcut = undefined;
+    ipcMain.removeHandler(BUBBLE_GET_SHORTCUT_CHANNEL);
+    ipcMain.removeHandler(BUBBLE_SET_SHORTCUT_CHANNEL);
     ipcMain.removeHandler(BUBBLE_HIDE_CHANNEL);
     ipcMain.removeHandler(BUBBLE_OPEN_MAIN_CHANNEL);
     if (bubbleWindow && !bubbleWindow.isDestroyed()) bubbleWindow.destroy();

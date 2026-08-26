@@ -1,4 +1,4 @@
-import { ArrowLeft, ClipboardPaste, ExternalLink, FileJson, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ClipboardPaste, ExternalLink, FileJson, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
@@ -16,10 +16,11 @@ import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServ
 import { ModelSettings } from "./ModelSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { McpJsonEditor } from "./McpJsonEditor";
+import { ShortcutSettings } from "./ShortcutSettings";
 import { SkillSettings } from "./SkillSettings";
 import "./settings.css";
 
-type SettingsSection = "models" | "mcp" | "skills" | "appearance";
+type SettingsSection = "models" | "mcp" | "skills" | "shortcuts" | "appearance";
 const MASKED_SECRET_VALUE = "••••••";
 const SETTINGS_SIDEBAR_WIDTH_KEY = "coilcoil.settings-sidebar-width";
 const DEFAULT_SETTINGS_SIDEBAR_WIDTH = 220;
@@ -584,6 +585,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
           <button className={section === "models" ? "active" : ""} type="button" onClick={() => setSection("models")}><Settings size={15} />模型与服务商</button>
           <button className={section === "mcp" ? "active" : ""} type="button" onClick={() => setSection("mcp")}><Network size={15} />MCP</button>
           <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />技能</button>
+          <button className={section === "shortcuts" ? "active" : ""} type="button" onClick={() => setSection("shortcuts")}><Keyboard size={15} />快捷键</button>
           <button className={section === "appearance" ? "active" : ""} type="button" onClick={() => setSection("appearance")}><Palette size={15} />外观</button>
         </nav>
         <div className="settings-version" title={appVersion ? `CoilCoil ${appVersion}` : undefined}>
@@ -595,16 +597,18 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
         <header className="settings-page-header window-drag">
           <div>
             <span className="settings-icon">
-              {section === "models" ? <Settings size={17} /> : section === "mcp" ? <Network size={17} /> : section === "appearance" ? <Palette size={17} /> : <Sparkles size={17} />}
+              {section === "models" ? <Settings size={17} /> : section === "mcp" ? <Network size={17} /> : section === "appearance" ? <Palette size={17} /> : section === "shortcuts" ? <Keyboard size={17} /> : <Sparkles size={17} />}
             </span>
             <div>
-              <h1 id="settings-title">{section === "models" ? "模型与服务商" : section === "mcp" ? "MCP" : section === "appearance" ? "外观" : "技能"}</h1>
+              <h1 id="settings-title">{section === "models" ? "模型与服务商" : section === "mcp" ? "MCP" : section === "appearance" ? "外观" : section === "shortcuts" ? "快捷键" : "技能"}</h1>
               <p>
                 {section === "skills"
                   ? "按需加载的专业技能包。"
                   : section === "appearance"
                     ? "全局色调，一键切换并本机保存。"
-                    : "模型凭据和 MCP 配置均保存在 CoilCoil 的私有运行时中。"}
+                    : section === "shortcuts"
+                      ? "全局快捷键会被系统里所有应用共享，所以默认一个都不占用。"
+                      : "模型凭据和 MCP 配置均保存在 CoilCoil 的私有运行时中。"}
               </p>
             </div>
           </div>
@@ -625,6 +629,8 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
             <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} />
           ) : section === "mcp" ? (
             <McpSettings runtimeId={runtimeId} cwd={cwd} reloadKey={mcpReloadKey} />
+          ) : section === "shortcuts" ? (
+            <ShortcutSettings />
           ) : section === "appearance" ? (
             <AppearanceSettings />
           ) : (

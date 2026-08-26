@@ -5,6 +5,7 @@ import type {
   DesktopPlatform,
   BrowserGuestRoster,
   BubbleSessionTarget,
+  BubbleShortcutState,
   McpConnectionTest,
   McpConnectionTestInput,
   BrowserStateSnapshot,
@@ -31,6 +32,8 @@ const APP_VERSION_CHANNEL = "app:version";
 const PATH_CLASSIFY_CHANNEL = "path:classify";
 const PATH_REVEAL_CHANNEL = "path:reveal";
 const MCP_TEST_CHANNEL = "mcp:test-connection";
+const BUBBLE_GET_SHORTCUT_CHANNEL = "bubble:get-shortcut";
+const BUBBLE_SET_SHORTCUT_CHANNEL = "bubble:set-shortcut";
 const BUBBLE_HIDE_CHANNEL = "bubble:hide";
 const BUBBLE_OPEN_MAIN_CHANNEL = "bubble:open-main";
 const BUBBLE_OPEN_SESSION_CHANNEL = "bubble:open-session";
@@ -118,6 +121,9 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(PROJECT_FILE_ACTION_CHANNEL, input) as Promise<ProjectFileActionResult>,
   testMcpConnection: (input: McpConnectionTestInput) =>
     ipcRenderer.invoke(MCP_TEST_CHANNEL, input) as Promise<McpConnectionTest>,
+  getBubbleShortcut: () => ipcRenderer.invoke(BUBBLE_GET_SHORTCUT_CHANNEL) as Promise<BubbleShortcutState>,
+  setBubbleShortcut: (accelerator?: string) =>
+    ipcRenderer.invoke(BUBBLE_SET_SHORTCUT_CHANNEL, accelerator) as Promise<BubbleShortcutState>,
   hideBubble: () => ipcRenderer.invoke(BUBBLE_HIDE_CHANNEL) as Promise<void>,
   openMainWindow: (target?: BubbleSessionTarget) =>
     ipcRenderer.invoke(BUBBLE_OPEN_MAIN_CHANNEL, target) as Promise<void>,
