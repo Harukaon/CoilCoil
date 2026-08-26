@@ -131,6 +131,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .pinned-conversation-row-wrap { min-width: 0; }
 .pinned-conversation-row { min-width: 0; }
 .pinned-conversation-project { flex: 0 1 auto; max-width: 72px; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-592)); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.recent-sessions-section { min-width: 0; padding-bottom: 4px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 55%); }
+.recent-conversation-list { padding-left: 5px; }
+.recent-conversation-row-wrap { min-width: 0; }
+.recent-conversation-row { min-width: 0; }
+/* The heading doubles as the section's collapse control, so it has to shed the
+   button chrome and take the padding the plain headings get from the layout. */
+.section-heading-toggle { width: 100%; padding-right: 6px; border: 0; background: none; text-align: left; cursor: pointer; }
+.section-heading-toggle:hover { color: hsl(var(--th) var(--ts) var(--l-286)); }
+.section-heading-chevron { flex: 0 0 auto; transition: transform 120ms ease; }
+.section-heading-chevron.expanded { transform: rotate(90deg); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; height: 36px; padding-left: 8px; color: hsl(var(--th) var(--ts) var(--l-457)); font-size: 11px; font-weight: 550; text-transform: uppercase; letter-spacing: .04em; }
 .section-heading-actions { display: flex; align-items: center; gap: 1px; }
 .section-heading .icon-button { width: 27px; height: 27px; }
@@ -213,7 +223,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .archive-session button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-141)); background: hsl(var(--th) var(--ts) var(--l-861)); }
 .archive-session button:disabled { opacity: .55; cursor: default; }
 .archive-empty { margin: 0; padding: 34px 12px; color: hsl(var(--th) var(--ts) var(--l-590)); text-align: center; font-size: 11px; }
-.more-conversations { display: flex; width: calc(100% - 4px); height: 24px; align-items: center; justify-content: center; margin: 2px 2px 0; padding: 0; border-radius: 6px; color: hsl(var(--th) var(--ts) var(--l-512)); background: transparent; cursor: pointer; }
+/* Grow and shrink sit side by side; either can be absent, so they share the width. */
+.conversation-list-controls { display: flex; gap: 2px; }
+.conversation-list-controls:empty { display: none; }
+.more-conversations { display: flex; flex: 1 1 0; min-width: 0; width: calc(100% - 4px); height: 24px; align-items: center; justify-content: center; margin: 2px 2px 0; padding: 0; border-radius: 6px; color: hsl(var(--th) var(--ts) var(--l-512)); background: transparent; cursor: pointer; }
 .more-conversations:hover { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-888)); }
 .empty-conversations { margin: 6px 8px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 12px; }
 .open-project-card { display: flex; width: 100%; gap: 8px; align-items: center; padding: 8px; border-radius: 8px; text-align: left; background: transparent; cursor: pointer; }

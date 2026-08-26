@@ -28,6 +28,7 @@ import {
   WorkspaceSidebar,
   type SessionActivityState,
 } from "./features/workspaces/WorkspaceSidebar";
+import type { RecentOpens } from "./features/workspaces/recentSessions";
 import type { useComposerController } from "./features/composer/useComposerController";
 import type { usePanelLayout } from "./hooks/usePanelLayout";
 import { toastError } from "./ui/toast";
@@ -42,6 +43,7 @@ export interface AppViewController {
   pendingProjectPath?: string;
   sessionsByProject: Record<string, SessionSummary[]>;
   sessionActivity: Record<string, SessionActivityState>;
+  recentOpens: RecentOpens;
   expandedProjects: Set<string>;
   expandedSessionLimits: Record<string, number>;
   snapshot?: SessionSnapshot;
@@ -102,7 +104,7 @@ export interface AppViewController {
 export function AppView({ controller }: { controller: AppViewController }): React.JSX.Element {
   const {
     projects, project, activeConversation, pendingProjectPath, sessionsByProject,
-    sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
+    sessionActivity, recentOpens, expandedProjects, expandedSessionLimits, snapshot,
     leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
     timeline, queuedPrompts, running, activityLine, projectState, subagents,
     startingSession, configuration, selectedModel, fileDragActive, timelineRef,
@@ -139,6 +141,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
         pendingProjectPath={pendingProjectPath}
         sessionsByProject={sessionsByProject}
         sessionActivity={sessionActivity}
+        recentOpens={recentOpens}
         expandedProjects={expandedProjects}
         expandedSessionLimits={expandedSessionLimits}
         modelLabel={snapshot?.model ? `${snapshot.model.provider}/${snapshot.model.name}` : "本地 Agent"}

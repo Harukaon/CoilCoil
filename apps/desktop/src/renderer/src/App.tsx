@@ -26,6 +26,7 @@ import {
   selectConversationMessages,
   selectQueuedPrompts,
 } from "./features/conversation/conversationMessages";
+import { useRecentOpens } from "./features/workspaces/useRecentOpens";
 import type { SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
 import { useSessionControls } from "./hooks/useSessionControls";
@@ -73,6 +74,7 @@ export default function App(): React.JSX.Element {
   const [configuration, setConfiguration] = useState<RuntimeConfiguration>();
   const inspector = useWorkspaceInspector(project?.path);
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivityState>>({});
+  const { recentOpens, noteConversationOpened } = useRecentOpens();
   const [pendingProjectPath, setPendingProjectPath] = useState<string>();
   const [expandedSessionLimits, setExpandedSessionLimits] = useState<Record<string, number>>({});
   const [startingSession, setStartingSession] = useState(false);
@@ -368,6 +370,7 @@ export default function App(): React.JSX.Element {
 
   const openConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
     shouldAutoScrollRef.current = true;
+    noteConversationOpened(session.path);
     setWorkspaceSurface("conversation");
     if (owner.path === project?.path && session.id === activeConversation?.id) return;
     const requestId = ++selectionRequestRef.current;
@@ -574,7 +577,7 @@ export default function App(): React.JSX.Element {
     <AppView
       controller={{
         projects, project, activeConversation, pendingProjectPath, sessionsByProject,
-        sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
+        sessionActivity, recentOpens, expandedProjects, expandedSessionLimits, snapshot,
         leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
         timeline, queuedPrompts, running, activityLine, projectState, subagents,
         startingSession, configuration, selectedModel, fileDragActive, timelineRef,

@@ -4,6 +4,7 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Circle,
   Folder,
   FolderInput,
@@ -24,6 +25,7 @@ import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { OrbitLoader } from "../../ui/loaders";
 import { CoilLogo } from "../../ui/CoilLogo";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
+import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, type RecentOpens } from "./recentSessions";
 import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
@@ -51,36 +53,68 @@ function relativeTime(value: string): string {
   return days < 7 ? `${days} 天` : new Date(value).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
-function GlobalPinnedSessionRow({ entry, activity, onOpen, onUnpin, onArchive }: {
-  entry: PinnedSessionEntry;
+/**
+ * The row of controls under a conversation list.
+ *
+ * Growing a list was one-way: every list could only be expanded, so a workspace
+ * opened once to find something stayed tall for the rest of the session. The
+ * two controls sit together and either can be absent.
+ */
+function ConversationListControls({ hiddenCount, expandedBy, onShowMore, onCollapse }: {
+  hiddenCount: number;
+  /** How many rows beyond the default are on screen; zero hides the collapse control. */
+  expandedBy: number;
+  onShowMore: () => void;
+  onCollapse: () => void;
+}): React.JSX.Element | null {
+  if (hiddenCount <= 0 && expandedBy <= 0) return null;
+  return <div className="conversation-list-controls">
+    {hiddenCount > 0
+      ? <button className="more-conversations" type="button" aria-label={`再显示 ${Math.min(SESSION_EXPANSION_BATCH, hiddenCount)} 个对话`} onClick={onShowMore}><MoreHorizontal size={15} /></button>
+      : null}
+    {expandedBy > 0
+      ? <button className="more-conversations" type="button" aria-label="收起对话" onClick={onCollapse}><ChevronUp size={15} /></button>
+      : null}
+  </div>;
+}
+
+/**
+ * A conversation row that names its own workspace.
+ *
+ * The pinned and recent sections both list conversations from every workspace at
+ * once, so unlike the rows nested under a project these have to say where they
+ * come from. Only the context menu differs between the two.
+ */
+function CrossProjectSessionRow({ project, session, activity, pinned, active, timestamp, onOpen, onArchive, menu }: {
+  project: ProjectSelection;
+  session: SessionSummary;
   activity?: SessionActivityState;
+  pinned: boolean;
+  active: boolean;
+  timestamp: string;
   onOpen: () => void;
-  onUnpin: () => void;
   onArchive: () => void;
+  menu: React.ReactNode;
 }): React.JSX.Element {
-  const { project, session } = entry;
-  // A pinned row is usually the one being watched from another project, so it is
-  // the row that most needs to say whether the agent is still working and whether
+  // These are the rows most often watched from another project, so they are the
+  // ones that most need to say whether the agent is still working and whether
   // what it finished has been read.
-  const status = conversationStatusMarker(conversationStatusKind(activity, true));
+  const status = conversationStatusMarker(conversationStatusKind(activity, pinned));
+  const variant = pinned ? "pinned" : "recent";
   return <ContextMenu.Root>
     <ContextMenu.Trigger asChild>
-      <div className="conversation-row-wrap pinned-conversation-row-wrap">
-        <button className="conversation-row pinned-conversation-row" type="button" onClick={onOpen}>
+      <div className={`conversation-row-wrap ${variant}-conversation-row-wrap`}>
+        <button className={`conversation-row ${variant}-conversation-row ${active ? "active" : ""}`} type="button" onClick={onOpen}>
           <span className="conversation-status">{status}</span>
           <span className="conversation-title-text">{session.title}</span>
           <span className="pinned-conversation-project" title={project.path}>{project.name}</span>
-          <time>{relativeTime(session.updatedAt)}</time>
+          <time>{relativeTime(timestamp)}</time>
         </button>
         <button className="conversation-archive-btn" type="button" title="归档" onClick={(event) => { event.stopPropagation(); onArchive(); }}><Archive size={12} /></button>
       </div>
     </ContextMenu.Trigger>
     <ContextMenu.Portal>
-      <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
-        <ContextMenu.Item className="conversation-context-item" onSelect={onUnpin}><PinOff size={13} /><span>取消置顶</span></ContextMenu.Item>
-        <ContextMenu.Separator className="conversation-context-separator" />
-        <ContextMenu.Item className="conversation-context-item" onSelect={onArchive}>归档对话</ContextMenu.Item>
-      </ContextMenu.Content>
+      <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>{menu}</ContextMenu.Content>
     </ContextMenu.Portal>
   </ContextMenu.Root>;
 }
@@ -92,6 +126,7 @@ export function WorkspaceSidebar({
   pendingProjectPath,
   sessionsByProject,
   sessionActivity,
+  recentOpens,
   expandedProjects,
   expandedSessionLimits,
   modelLabel,
@@ -122,6 +157,7 @@ export function WorkspaceSidebar({
   pendingProjectPath?: string;
   sessionsByProject: Record<string, SessionSummary[]>;
   sessionActivity: Record<string, SessionActivityState>;
+  recentOpens: RecentOpens;
   expandedProjects: Set<string>;
   expandedSessionLimits: Record<string, number>;
   modelLabel: string;
@@ -151,7 +187,11 @@ export function WorkspaceSidebar({
   const [draggingPath, setDraggingPath] = useState<string>();
   const [dropTargetPath, setDropTargetPath] = useState<string>();
   const renameRef = useRef<HTMLInputElement>(null);
+  const [recentCollapsed, setRecentCollapsed] = useState(loadRecentSectionCollapsed);
+  const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_ROWS);
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
+  const recentSessions = collectRecentSessions(projects, sessionsByProject, recentOpens);
+  const visibleRecent = recentSessions.slice(0, recentLimit);
   // The home project is recomputed as the first entry on every launch, so only
   // the mounted workspaces have an order worth persisting.
   const reorderable = (target: ProjectSelection): boolean => target.kind === "workspace";
@@ -188,15 +228,58 @@ export function WorkspaceSidebar({
             and a 36px section title only costs vertical space. */}
         {pinnedSessions.length ? <section className="pinned-sessions-section">
           <div className="conversation-list pinned-conversation-list">
-            {pinnedSessions.map((entry) => <GlobalPinnedSessionRow
+            {pinnedSessions.map((entry) => <CrossProjectSessionRow
               key={entry.session.path}
-              entry={entry}
+              project={entry.project}
+              session={entry.session}
               activity={sessionActivity[entry.session.path]}
+              pinned
+              active={entry.project.path === activeProject?.path && entry.session.id === activeSessionId}
+              timestamp={entry.session.updatedAt}
               onOpen={() => onOpenConversation(entry.project, entry.session)}
-              onUnpin={() => onPinConversation(entry.project, entry.session, false)}
               onArchive={() => onArchiveConversation(entry.project, entry.session)}
+              menu={<>
+                <ContextMenu.Item className="conversation-context-item" onSelect={() => onPinConversation(entry.project, entry.session, false)}><PinOff size={13} /><span>取消置顶</span></ContextMenu.Item>
+                <ContextMenu.Separator className="conversation-context-separator" />
+                <ContextMenu.Item className="conversation-context-item" onSelect={() => onArchiveConversation(entry.project, entry.session)}>归档对话</ContextMenu.Item>
+              </>}
             />)}
           </div>
+        </section> : null}
+        {recentSessions.length ? <section className="recent-sessions-section">
+          <button
+            className="section-heading section-heading-toggle"
+            type="button"
+            aria-expanded={!recentCollapsed}
+            onClick={() => setRecentCollapsed((current) => { saveRecentSectionCollapsed(!current); return !current; })}
+          >
+            <span>最近</span>
+            <ChevronRight className={`section-heading-chevron ${recentCollapsed ? "" : "expanded"}`} size={13} strokeWidth={2} />
+          </button>
+          {recentCollapsed ? null : <div className="conversation-list recent-conversation-list">
+            {visibleRecent.map((entry) => <CrossProjectSessionRow
+              key={entry.session.path}
+              project={entry.project}
+              session={entry.session}
+              activity={sessionActivity[entry.session.path]}
+              pinned={false}
+              active={entry.project.path === activeProject?.path && entry.session.id === activeSessionId}
+              timestamp={new Date(entry.at).toISOString()}
+              onOpen={() => onOpenConversation(entry.project, entry.session)}
+              onArchive={() => onArchiveConversation(entry.project, entry.session)}
+              menu={<>
+                <ContextMenu.Item className="conversation-context-item" onSelect={() => onPinConversation(entry.project, entry.session, true)}><Pin size={13} /><span>置顶</span></ContextMenu.Item>
+                <ContextMenu.Separator className="conversation-context-separator" />
+                <ContextMenu.Item className="conversation-context-item" onSelect={() => onArchiveConversation(entry.project, entry.session)}>归档对话</ContextMenu.Item>
+              </>}
+            />)}
+            <ConversationListControls
+              hiddenCount={recentSessions.length - visibleRecent.length}
+              expandedBy={visibleRecent.length - DEFAULT_RECENT_ROWS}
+              onShowMore={() => setRecentLimit(nextExpandedSessionLimit(visibleRecent.length, recentSessions.length))}
+              onCollapse={() => setRecentLimit(DEFAULT_RECENT_ROWS)}
+            />
+          </div>}
         </section> : null}
         <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsDialog projects={projects} activeProject={activeProject} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></span></div>
         {projects.length ? projects.map((project) => {
@@ -381,7 +464,12 @@ export function WorkspaceSidebar({
                       </ContextMenu.Portal>
                     </ContextMenu.Root>;
                   })}
-                  {hiddenCount > 0 ? <button className="more-conversations" type="button" aria-label={`再显示 ${Math.min(SESSION_EXPANSION_BATCH, hiddenCount)} 个对话`} onClick={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleSessions.length, sessions.length))}><MoreHorizontal size={15} /></button> : null}
+                  <ConversationListControls
+                    hiddenCount={hiddenCount}
+                    expandedBy={visibleSessions.length - collapsedLimit}
+                    onShowMore={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleSessions.length, sessions.length))}
+                    onCollapse={() => onShowMoreSessions(project.path, collapsedLimit)}
+                  />
                   {!allSessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
                 </div>
               </div>
