@@ -119,6 +119,14 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .icon-button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-145)); background: hsl(var(--th) var(--ts) var(--l-880)); }
 .icon-button:disabled { opacity: .42; cursor: default; }
 .primary-nav { display: grid; gap: 2px; padding: 2px 12px 8px; }
+/* One row, reordered: skills, memory, then new conversation on the right. */
+.primary-nav.compact { display: flex; gap: 4px; }
+.primary-nav.compact .nav-button { flex: 1 1 0; min-width: 0; justify-content: center; padding: 0; }
+.primary-nav.compact .nav-button span, .primary-nav.compact .nav-button kbd { display: none; }
+.primary-nav.compact .nav-skills { order: 1; }
+.primary-nav.compact .nav-memory { order: 2; }
+.primary-nav.compact .nav-new { order: 3; color: hsl(var(--th) var(--ts) var(--l-171)); background: hsl(var(--th) var(--ts) var(--l-888)); }
+.primary-nav.compact .nav-new:disabled { background: transparent; }
 .nav-button, .conversation-row, .inspector-nav button { display: flex; align-items: center; width: 100%; background: transparent; cursor: pointer; }
 .nav-button { gap: 9px; min-height: 34px; padding: 0 8px; border-radius: 7px; font-size: 13px; font-weight: 500; }
 .nav-button kbd { margin-left: auto; color: hsl(var(--th) var(--ts) var(--l-598)); font-size: 10px; font-family: inherit; }
@@ -376,6 +384,14 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .markdown code { padding: 2px 5px; border-radius: 5px; background: hsl(var(--th) var(--ts) var(--l-918)); font-family: "SFMono-Regular", Consolas, monospace; font-size: .88em; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .markdown pre { width: 100%; min-width: 0; max-width: 100%; overflow: auto; padding: 13px 14px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 10px; background: hsl(var(--th) var(--ts) var(--l-935)); }
 .markdown pre code { padding: 0; background: transparent; }
+/* The wrapper owns the block's spacing so the fold button sits inside it. */
+.markdown .markdown-code-block { position: relative; margin: 0 0 12px; }
+.markdown .markdown-code-block pre { margin: 0; }
+.markdown-code-block.collapsed pre { overflow: hidden; }
+/* Fade the cut so a folded block reads as continuing, not as ending mid-line. */
+.markdown-code-block.collapsed::after { position: absolute; right: 1px; bottom: 0; left: 1px; height: 64px; border-radius: 0 0 10px 10px; background: linear-gradient(hsl(var(--th) var(--ts) var(--l-935) / 0%), hsl(var(--th) var(--ts) var(--l-935))); content: ""; pointer-events: none; }
+.markdown-code-toggle { display: flex; width: 100%; align-items: center; justify-content: center; gap: 5px; height: 26px; margin-top: 4px; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-512)); background: transparent; font-size: 11px; cursor: pointer; }
+.markdown-code-toggle:hover { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-888)); }
 .markdown blockquote { padding-left: 12px; border-left: 2px solid hsl(var(--th) var(--ts) var(--l-814)); color: hsl(var(--th) var(--ts) var(--l-402)); }
 .markdown-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
 .markdown-table-scroll table { width: max-content; min-width: 100%; margin: 0; border-collapse: collapse; }

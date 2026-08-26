@@ -11,6 +11,7 @@ import {
   upsertSessionSummary,
   workspaceActivityLabel,
 } from "../src/renderer/src/features/workspaces/sessionList.ts";
+import { NAV_COMPACT_SAVING, shouldCompactNav } from "../src/renderer/src/features/workspaces/useCompactNav.ts";
 
 function session(overrides: Partial<SessionSummary>): SessionSummary {
   return {
@@ -128,4 +129,23 @@ test("the pin only speaks when the conversation is quiet", () => {
   assert.equal(conversationStatusKind({ running: false, unread: false }, true), "pinned");
   assert.equal(conversationStatusKind(undefined, true), "pinned");
   assert.equal(conversationStatusKind(undefined, false), "none");
+});
+
+test("the nav collapses once the sidebar list overflows", () => {
+  // Nothing to scroll past yet: the labelled buttons are worth their height.
+  assert.equal(shouldCompactNav(false, 400, 600), false);
+  assert.equal(shouldCompactNav(false, 601, 600), true);
+});
+
+test("the nav only expands again with room to spare", () => {
+  // Expanding costs back the height that compacting freed, so restoring at the
+  // first spare pixel would re-create the overflow and flip on every render.
+  assert.equal(shouldCompactNav(true, 590, 600), true);
+  assert.equal(shouldCompactNav(true, 600 - NAV_COMPACT_SAVING, 600), true);
+  assert.equal(shouldCompactNav(true, 600 - NAV_COMPACT_SAVING - 24, 600), false);
+});
+
+test("an unmeasured sidebar keeps whatever layout it has", () => {
+  assert.equal(shouldCompactNav(true, 0, 0), true);
+  assert.equal(shouldCompactNav(false, 0, 0), false);
 });

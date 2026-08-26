@@ -20,6 +20,7 @@ import type {
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { ConfirmDialog } from "../../ui/dialog";
+import { CollapsibleCodeBlock } from "./CollapsibleCodeBlock";
 import { copyPath, revealLabel, revealPath } from "../files/pathActions";
 import { parseMarkdownFileHref, type MarkdownFileTarget } from "./markdownFileLinks";
 import { useFileLinkKind } from "./fileLinkKinds";
@@ -94,6 +95,7 @@ function MarkdownFileLink({
 
 const MARKDOWN_COMPONENTS: Components = {
   table: ({ node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props} /></div>,
+  pre: ({ node: _node, ...props }) => <CollapsibleCodeBlock {...props} />,
   a: ({ node: _node, children, className, href, ...props }) => {
     const file = parseMarkdownFileHref(href);
     if (!file) return <a className={className} href={href} {...props}>{children}</a>;

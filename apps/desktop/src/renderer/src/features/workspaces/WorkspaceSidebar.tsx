@@ -28,6 +28,7 @@ import { OrbitLoader } from "../../ui/loaders";
 import { CoilLogo } from "../../ui/CoilLogo";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
+import { useCompactNav } from "./useCompactNav";
 import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, type RecentOpens } from "./recentSessions";
 import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
@@ -204,6 +205,10 @@ export function WorkspaceSidebar({
   const [draggingPath, setDraggingPath] = useState<string>();
   const [dropTargetPath, setDropTargetPath] = useState<string>();
   const renameRef = useRef<HTMLInputElement>(null);
+  const projectSectionRef = useRef<HTMLElement>(null);
+  // Once the list scrolls, the three tall buttons above it are three rows of
+  // conversations the user has to scroll past on every visit.
+  const compactNav = useCompactNav(projectSectionRef);
   const [recentCollapsed, setRecentCollapsed] = useState(loadRecentSectionCollapsed);
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_ROWS);
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
@@ -235,12 +240,14 @@ export function WorkspaceSidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
-      <nav className="primary-nav">
-        <button className="nav-button" type="button" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>{primaryModifierLabel(window.coilcoil.platform)}N</kbd></button>
-        <button className={`nav-button ${skillsOpen ? "active" : ""}`} type="button" onClick={onOpenSkills}><Sparkles size={16} strokeWidth={1.7} /><span>技能</span></button>
-        <button className={`nav-button ${memoryOpen ? "active" : ""}`} type="button" onClick={onOpenMemory}><BookOpen size={16} strokeWidth={1.7} /><span>记忆</span></button>
+      {/* Compact keeps the same DOM so focus order and shortcuts are unchanged;
+          the row's left-to-right order is CSS. */}
+      <nav className={`primary-nav ${compactNav ? "compact" : ""}`}>
+        <button className="nav-button nav-new" type="button" title="新建对话" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>{primaryModifierLabel(window.coilcoil.platform)}N</kbd></button>
+        <button className={`nav-button nav-skills ${skillsOpen ? "active" : ""}`} type="button" title="技能" onClick={onOpenSkills}><Sparkles size={16} strokeWidth={1.7} /><span>技能</span></button>
+        <button className={`nav-button nav-memory ${memoryOpen ? "active" : ""}`} type="button" title="记忆" onClick={onOpenMemory}><BookOpen size={16} strokeWidth={1.7} /><span>记忆</span></button>
       </nav>
-      <section className="project-section">
+      <section className="project-section" ref={projectSectionRef}>
         {/* No heading and no count: the pin on each row already says what these are,
             and a 36px section title only costs vertical space. */}
         {pinnedSessions.length ? <section className="pinned-sessions-section">
