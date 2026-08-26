@@ -118,11 +118,14 @@ function CrossProjectSessionRow({ project, session, activity, pinned, active, ti
   // what it finished has been read.
   const status = conversationStatusMarker(conversationStatusKind(activity, pinned));
   const variant = pinned ? "pinned" : "recent";
+  // No marker means no slot: a quiet recent row starts its title at the same
+  // place a quiet row under a project does, and a spinner or unread dot pushes
+  // the title along only while there is something to say.
   return <ContextMenu.Root>
     <ContextMenu.Trigger asChild>
       <div className={`conversation-row-wrap ${variant}-conversation-row-wrap`}>
         <button className={`conversation-row ${variant}-conversation-row ${active ? "active" : ""}`} type="button" onClick={onOpen}>
-          <span className="conversation-status">{status}</span>
+          {status ? <span className="conversation-status">{status}</span> : null}
           <span className="conversation-title-text">{session.title}</span>
           <span className="pinned-conversation-project" title={project.path}>{project.name}</span>
           <time>{relativeTime(timestamp)}</time>
