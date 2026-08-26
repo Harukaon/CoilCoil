@@ -75,3 +75,22 @@ export function workspaceActivityLabel(summary: WorkspaceActivitySummary): strin
   if (summary.unread) return `${summary.unread} 个对话有新回复`;
   return undefined;
 }
+
+export type ConversationStatusKind = "running" | "unread" | "pinned" | "none";
+
+/**
+ * Which marker a conversation row carries.
+ *
+ * Running beats unread beats the pin. What a row most needs to say is whether
+ * the agent is still working, and then whether what it finished has been read;
+ * the pin is only worth a slot when nothing is happening, and in the pinned
+ * section it is the least surprising thing about the row anyway.
+ */
+export function conversationStatusKind(
+  activity: { running: boolean; unread: boolean } | undefined,
+  pinned: boolean,
+): ConversationStatusKind {
+  if (activity?.running) return "running";
+  if (activity?.unread) return "unread";
+  return pinned ? "pinned" : "none";
+}

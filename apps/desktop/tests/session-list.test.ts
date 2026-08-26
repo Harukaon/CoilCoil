@@ -4,6 +4,7 @@ import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protoco
 import {
   collectPinnedSessions,
   collapsedSessionLimit,
+  conversationStatusKind,
   nextExpandedSessionLimit,
   summarizeWorkspaceActivity,
   titleFromPrompt,
@@ -110,4 +111,21 @@ test("a finished conversation only counts as unread once it stops running", () =
 test("a quiet workspace shows nothing", () => {
   assert.equal(workspaceActivityLabel(summarizeWorkspaceActivity([], {})), undefined);
   assert.equal(workspaceActivityLabel(summarizeWorkspaceActivity(undefined, {})), undefined);
+});
+
+test("a running conversation says so even when it is pinned", () => {
+  // The pinned rows are the ones watched from another project, so losing the
+  // spinner to the pin is exactly where a long job goes unnoticed.
+  assert.equal(conversationStatusKind({ running: true, unread: false }, true), "running");
+  assert.equal(conversationStatusKind({ running: true, unread: true }, true), "running");
+});
+
+test("a pinned conversation that finished unwatched shows the unread mark", () => {
+  assert.equal(conversationStatusKind({ running: false, unread: true }, true), "unread");
+});
+
+test("the pin only speaks when the conversation is quiet", () => {
+  assert.equal(conversationStatusKind({ running: false, unread: false }, true), "pinned");
+  assert.equal(conversationStatusKind(undefined, true), "pinned");
+  assert.equal(conversationStatusKind(undefined, false), "none");
 });

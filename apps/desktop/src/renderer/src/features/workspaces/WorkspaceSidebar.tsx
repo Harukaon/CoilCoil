@@ -24,12 +24,20 @@ import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { OrbitLoader } from "../../ui/loaders";
 import { CoilLogo } from "../../ui/CoilLogo";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
-import { collectPinnedSessions, collapsedSessionLimit, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type PinnedSessionEntry } from "./sessionList";
+import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
   runtimeId?: string;
   running: boolean;
   unread: boolean;
+}
+
+/** The icon for a row's status; see {@link conversationStatusKind} for the order. */
+function conversationStatusMarker(kind: ConversationStatusKind): React.JSX.Element | null {
+  if (kind === "running") return <OrbitLoader size={10} />;
+  if (kind === "unread") return <i className="conversation-unread" />;
+  if (kind === "pinned") return <Pin size={11} strokeWidth={2} />;
+  return null;
 }
 
 function relativeTime(value: string): string {
@@ -43,18 +51,23 @@ function relativeTime(value: string): string {
   return days < 7 ? `${days} 天` : new Date(value).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
-function GlobalPinnedSessionRow({ entry, onOpen, onUnpin, onArchive }: {
+function GlobalPinnedSessionRow({ entry, activity, onOpen, onUnpin, onArchive }: {
   entry: PinnedSessionEntry;
+  activity?: SessionActivityState;
   onOpen: () => void;
   onUnpin: () => void;
   onArchive: () => void;
 }): React.JSX.Element {
   const { project, session } = entry;
+  // A pinned row is usually the one being watched from another project, so it is
+  // the row that most needs to say whether the agent is still working and whether
+  // what it finished has been read.
+  const status = conversationStatusMarker(conversationStatusKind(activity, true));
   return <ContextMenu.Root>
     <ContextMenu.Trigger asChild>
       <div className="conversation-row-wrap pinned-conversation-row-wrap">
         <button className="conversation-row pinned-conversation-row" type="button" onClick={onOpen}>
-          <span className="conversation-status"><Pin size={11} strokeWidth={2} /></span>
+          <span className="conversation-status">{status}</span>
           <span className="conversation-title-text">{session.title}</span>
           <span className="pinned-conversation-project" title={project.path}>{project.name}</span>
           <time>{relativeTime(session.updatedAt)}</time>
@@ -178,6 +191,7 @@ export function WorkspaceSidebar({
             {pinnedSessions.map((entry) => <GlobalPinnedSessionRow
               key={entry.session.path}
               entry={entry}
+              activity={sessionActivity[entry.session.path]}
               onOpen={() => onOpenConversation(entry.project, entry.session)}
               onUnpin={() => onPinConversation(entry.project, entry.session, false)}
               onArchive={() => onArchiveConversation(entry.project, entry.session)}
@@ -264,13 +278,7 @@ export function WorkspaceSidebar({
                   {visibleSessions.map((session) => {
                     const activity = sessionActivity[session.path];
                     const renaming = renamingPath === session.path;
-                    const status = activity?.running
-                      ? <OrbitLoader size={10} />
-                      : activity?.unread
-                        ? <i className="conversation-unread" />
-                        : session.pinned
-                          ? <Pin size={11} strokeWidth={2} />
-                          : null;
+                    const status = conversationStatusMarker(conversationStatusKind(activity, Boolean(session.pinned)));
                     return <ContextMenu.Root key={session.id}>
                       <ContextMenu.Trigger asChild>
                         <div className="conversation-row-wrap">
