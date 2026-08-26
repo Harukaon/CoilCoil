@@ -4,6 +4,9 @@ import type { FileNode } from "@coilcoil/runtime-protocol";
 import type {
   DesktopPlatform,
   BrowserGuestRoster,
+  BubbleSessionTarget,
+  McpConnectionTest,
+  McpConnectionTestInput,
   BrowserStateSnapshot,
   BrowserUiViewport,
   FilePreviewDocument,
@@ -27,6 +30,10 @@ const PROJECT_HOME_CHANNEL = "project:home";
 const APP_VERSION_CHANNEL = "app:version";
 const PATH_CLASSIFY_CHANNEL = "path:classify";
 const PATH_REVEAL_CHANNEL = "path:reveal";
+const MCP_TEST_CHANNEL = "mcp:test-connection";
+const BUBBLE_HIDE_CHANNEL = "bubble:hide";
+const BUBBLE_OPEN_MAIN_CHANNEL = "bubble:open-main";
+const BUBBLE_OPEN_SESSION_CHANNEL = "bubble:open-session";
 const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const WINDOW_GROW_WIDTH_CHANNEL = "window:grow-width";
@@ -109,6 +116,16 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(PREVIEW_CLOSE_CHANNEL, id) as Promise<void>,
   performProjectFileAction: (input: ProjectFileActionInput) =>
     ipcRenderer.invoke(PROJECT_FILE_ACTION_CHANNEL, input) as Promise<ProjectFileActionResult>,
+  testMcpConnection: (input: McpConnectionTestInput) =>
+    ipcRenderer.invoke(MCP_TEST_CHANNEL, input) as Promise<McpConnectionTest>,
+  hideBubble: () => ipcRenderer.invoke(BUBBLE_HIDE_CHANNEL) as Promise<void>,
+  openMainWindow: (target?: BubbleSessionTarget) =>
+    ipcRenderer.invoke(BUBBLE_OPEN_MAIN_CHANNEL, target) as Promise<void>,
+  onOpenBubbleSession: (listener: (target: BubbleSessionTarget) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, target: BubbleSessionTarget): void => listener(target);
+    ipcRenderer.on(BUBBLE_OPEN_SESSION_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(BUBBLE_OPEN_SESSION_CHANNEL, handler);
+  },
   onFilePreviewUpdated: (listener: (document: FilePreviewDocument) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, document: FilePreviewDocument): void => listener(document);
     ipcRenderer.on(PREVIEW_UPDATED_CHANNEL, handler);

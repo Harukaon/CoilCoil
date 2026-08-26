@@ -13,8 +13,10 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell } from "electron";
 import { createRequire } from "node:module";
 import type { DiagnosticLogBatch } from "@coilcoil/runtime-protocol";
-import type { BrowserUiViewport, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import type { BrowserUiViewport, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { appIconPath } from "./app-icon";
+import { BUBBLE_OPEN_SESSION_CHANNEL, setupBubbleWindow } from "./bubble-window.js";
+import { testMcpConnection } from "./mcp-connection-test.js";
 import { BrowserRuntimeManager } from "./browser-runtime";
 import {
   browserContextMenuItems,
@@ -67,6 +69,7 @@ const CSS_COLOR = /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d\s.,%/-]+\))$/i;
 const EXTERNAL_OPEN_CHANNEL = "external:open";
 const PATH_CLASSIFY_CHANNEL = "path:classify";
 const PATH_REVEAL_CHANNEL = "path:reveal";
+const MCP_TEST_CHANNEL = "mcp:test-connection";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
@@ -473,6 +476,9 @@ function installGuestContextMenu(guest: Electron.WebContents, window: BrowserWin
   });
 }
 
+let primaryWindow: BrowserWindow | undefined;
+let disposeBubble: (() => void) | undefined;
+
 async function createWindow(): Promise<void> {
   const platform = currentPlatform(process.platform);
   const iconForCurrentTheme = () => nativeImage.createFromPath(appIconPath({
@@ -615,10 +621,38 @@ async function createWindow(): Promise<void> {
   // background made the app show itself, raising it over whatever the user was
   // doing. Showing the window is a startup step; it happens exactly once.
   mainWindow.once("ready-to-show", () => mainWindow.show());
+  loadRendererInto(mainWindow);
+  primaryWindow = mainWindow;
+  mainWindow.once("closed", () => {
+    if (primaryWindow !== mainWindow) return;
+    primaryWindow = undefined;
+    // The bubble only ever hides, so it would keep the app alive on platforms
+    // that quit with the last window. Closing the workspace closes it too.
+    disposeBubble?.();
+    disposeBubble = undefined;
+  });
+  disposeBubble?.();
+  disposeBubble = setupBubbleWindow({
+    preloadPath: join(__dirname, "../preload/index.cjs"),
+    // The bubble is the same renderer bundle: the hash is what makes it draw the
+    // compact view instead of the full workspace.
+    loadRenderer: (window) => loadRendererInto(window, "bubble"),
+    revealMainWindow: (target) => {
+      const window = primaryWindow;
+      if (!window || window.isDestroyed()) return;
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      if (target) window.webContents.send(BUBBLE_OPEN_SESSION_CHANNEL, target);
+    },
+  });
+}
+
+function loadRendererInto(window: BrowserWindow, hash?: string): void {
   if (process.env.ELECTRON_RENDERER_URL) {
-    void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+    void window.loadURL(hash ? `${process.env.ELECTRON_RENDERER_URL}#${hash}` : process.env.ELECTRON_RENDERER_URL);
   } else {
-    void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    void window.loadFile(join(__dirname, "../renderer/index.html"), hash ? { hash } : undefined);
   }
 }
 
@@ -687,6 +721,7 @@ app.whenReady().then(async () => {
     });
   });
 
+  ipcMain.handle(MCP_TEST_CHANNEL, async (_event, input: McpConnectionTestInput) => testMcpConnection(input));
   ipcMain.handle(APP_VERSION_CHANNEL, (): string => app.getVersion());
   ipcMain.handle(PROJECT_HOME_CHANNEL, async (): Promise<ProjectSelection> => {
     const path = join(app.getPath("userData"), "Home");

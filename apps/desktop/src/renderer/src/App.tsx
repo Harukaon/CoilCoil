@@ -27,6 +27,7 @@ import {
   selectQueuedPrompts,
 } from "./features/conversation/conversationMessages";
 import { useRecentOpens } from "./features/workspaces/useRecentOpens";
+import { useBubbleHandoff } from "./hooks/useBubbleHandoff";
 import type { SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
 import { useSessionControls } from "./hooks/useSessionControls";
@@ -393,6 +394,8 @@ export default function App(): React.JSX.Element {
       if (requestId === selectionRequestRef.current) setLoading(false);
     }
   };
+  // The bubble hands its conversation over by path; the runtime is already shared.
+  useBubbleHandoff({ projects, sessionsByProject, openConversation, onError: toastError });
 
   const {
     archiveConversation, renameConversation, pinConversation, forkConversation,

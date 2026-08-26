@@ -1,0 +1,104 @@
+/* The window itself is transparent, so this card is the whole visible bubble. */
+html.bubble, html.bubble body, html.bubble #root { height: 100%; background: transparent; }
+
+.bubble-shell {
+  display: grid;
+  height: 100%;
+  grid-template-rows: 38px minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 70%);
+  border-radius: 16px;
+  background: hsl(var(--th) var(--ts) var(--l-988));
+  box-shadow: 0 24px 60px rgb(15 15 14 / 22%);
+  /* Called up by a keystroke, so it arrives with a little movement rather than
+     appearing fully formed - enough to place it, not enough to wait for. */
+  animation: bubble-in 140ms cubic-bezier(.2, .8, .3, 1);
+}
+
+@keyframes bubble-in {
+  from { opacity: 0; transform: scale(.965) translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble-shell { animation: none; }
+}
+
+.bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-886));
+}
+
+.bubble-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: hsl(var(--th) var(--ts) var(--l-375));
+  font-size: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.bubble-icon-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border-radius: 6px;
+  color: hsl(var(--th) var(--ts) var(--l-457));
+  background: transparent;
+  cursor: pointer;
+}
+
+.bubble-icon-button:hover { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-890)); }
+
+.bubble-messages { display: grid; align-content: start; gap: 10px; padding: 12px 14px; overflow-y: auto; }
+
+.bubble-hint { display: flex; align-items: center; gap: 6px; margin: 0; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 11px; }
+
+.bubble-message { max-width: 100%; font-size: 13px; line-height: 1.6; }
+.bubble-message.user { justify-self: end; max-width: 82%; padding: 7px 11px; border-radius: 12px; color: hsl(var(--th) var(--ts) var(--l-171)); background: hsl(var(--th) var(--ts) var(--l-918)); white-space: pre-wrap; }
+.bubble-message.assistant { color: hsl(var(--th) var(--ts) var(--l-208)); }
+.bubble-message.assistant > :last-child { margin-bottom: 0; }
+
+.bubble-composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid hsl(var(--th) var(--ts) var(--l-886)); }
+
+.bubble-composer textarea {
+  min-height: 34px;
+  max-height: 132px;
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--th) var(--ts) var(--l-861));
+  border-radius: 10px;
+  outline: 0;
+  color: hsl(var(--th) var(--ts) var(--l-171));
+  background: hsl(var(--th) var(--ts) var(--l-1000));
+  font: inherit;
+  font-size: 13px;
+  resize: none;
+}
+
+.bubble-composer textarea:focus { border-color: hsl(var(--th) var(--ts) var(--l-700)); }
+
+.bubble-send {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border-radius: 10px;
+  color: hsl(var(--th) var(--ts) var(--l-171));
+  background: hsl(var(--th) var(--ts) var(--l-918));
+  cursor: pointer;
+}
+
+.bubble-send:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-880)); }
+.bubble-send:disabled { cursor: default; opacity: .45; }

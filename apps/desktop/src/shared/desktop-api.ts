@@ -23,6 +23,22 @@ export interface FilePreviewDocument {
   updatedAt: number;
 }
 
+export interface McpConnectionTestInput {
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** What an MCP server answered when asked to shake hands. */
+export type McpConnectionTest =
+  | { ok: true; status: number; statusText: string; body: string }
+  | { ok: false; error: string };
+
+/** Which conversation the bubble was on when it handed over to the main window. */
+export interface BubbleSessionTarget {
+  cwd: string;
+  sessionPath: string;
+}
+
 export interface OpenFilePreviewInput {
   root: string;
   path: string;
@@ -133,6 +149,14 @@ export interface CoilCoilDesktopApi {
   closeFilePreview(id: string): Promise<void>;
   performProjectFileAction(input: ProjectFileActionInput): Promise<ProjectFileActionResult>;
   onFilePreviewUpdated(listener: (document: FilePreviewDocument) => void): () => void;
+  /** Dismiss the floating bubble window; its conversation stays alive. */
+  /** Shake hands with an HTTP MCP server and report what it said. */
+  testMcpConnection(input: McpConnectionTestInput): Promise<McpConnectionTest>;
+  hideBubble(): Promise<void>;
+  /** Hand the bubble's conversation to the main window and dismiss the bubble. */
+  openMainWindow(target?: BubbleSessionTarget): Promise<void>;
+  /** The main window listens for a conversation handed over from the bubble. */
+  onOpenBubbleSession(listener: (target: BubbleSessionTarget) => void): () => void;
   listProjectDirectory(root: string, path?: string): Promise<FileNode[]>;
   setBrowserScope(scopeId: string): Promise<BrowserStateSnapshot>;
   getBrowserState(scopeId: string): Promise<BrowserStateSnapshot>;

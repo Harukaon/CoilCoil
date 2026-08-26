@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { BubbleApp } from "./BubbleApp";
 import { BrowserGuestLayer } from "./features/browser/BrowserGuestLayer";
 import { diagnostics, installRendererErrorHandlers } from "./diagnostics";
 import { AppErrorBoundary } from "./ui/AppErrorBoundary";
@@ -17,7 +18,19 @@ diagnostics.info("process", "renderer_started", { userAgent: navigator.userAgent
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root element");
 
-createRoot(root).render(
+// The bubble is this same bundle loaded with #bubble: one renderer to build, and
+// the workspace's reducers and styles come along unchanged.
+const isBubble = window.location.hash === "#bubble";
+if (isBubble) document.documentElement.classList.add("bubble");
+
+createRoot(root).render(isBubble ? (
+  <StrictMode>
+    <AppErrorBoundary>
+      <BubbleApp />
+    </AppErrorBoundary>
+    <ToastHost />
+  </StrictMode>
+) : (
   <StrictMode>
     <AppErrorBoundary>
       <App />
@@ -31,5 +44,5 @@ createRoot(root).render(
     <WindowControls />
     <ToastHost />
     <UpdateDialog />
-  </StrictMode>,
-);
+  </StrictMode>
+));

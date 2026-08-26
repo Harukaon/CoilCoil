@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, FileJson, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ClipboardPaste, ExternalLink, FileJson, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
@@ -9,6 +9,7 @@ import type {
   McpServerRuntimeStatus,
   RuntimeConfiguration,
 } from "@coilcoil/runtime-protocol";
+import { parseMcpServerSnippets } from "@coilcoil/runtime-protocol";
 import { Select, type SelectOption } from "../../ui/Select";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
@@ -133,6 +134,10 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   const [argsText, setArgsText] = useState("");
   const [envText, setEnvText] = useState("{}");
   const [headersText, setHeadersText] = useState("{}");
+  const [snippetOpen, setSnippetOpen] = useState(false);
+  const [snippetText, setSnippetText] = useState("");
+  const [probing, setProbing] = useState(false);
+  const [probeResult, setProbeResult] = useState<string>();
   const [originalEnv, setOriginalEnv] = useState<Record<string, string>>({});
   const [originalHeaders, setOriginalHeaders] = useState<Record<string, string>>({});
   const [directToolsText, setDirectToolsText] = useState("");
@@ -150,6 +155,70 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   const editVersionRef = useRef(0);
   const loadVersionRef = useRef(0);
 
+  /**
+   * Fill the form from a pasted configuration.
+   *
+   * What people have to hand is whatever a README or another app showed them,
+   * which is usually a bare server object with no name. Everything it carries
+   * lands in the form, and the pi-specific choices - scope, lifecycle, auth -
+   * stay where they are, to be set here afterwards.
+   */
+  const applySnippet = (): void => {
+    const result = parseMcpServerSnippets(snippetText);
+    if (!result.ok) {
+      toastError(result.error);
+      return;
+    }
+    const [snippet, ...rest] = result.servers;
+    if (!snippet) return;
+    setDraft((current) => ({
+      ...current,
+      name: snippet.name ?? current.name,
+      transport: snippet.transport,
+      command: snippet.transport === "stdio" ? snippet.command ?? "" : undefined,
+      url: snippet.transport === "http" ? snippet.url ?? "" : undefined,
+      cwd: snippet.cwd,
+    }));
+    setArgsText(snippet.args.join("\n"));
+    setEnvText(JSON.stringify(snippet.env, null, 2));
+    setHeadersText(JSON.stringify(snippet.headers, null, 2));
+    // Pasted secrets are the real values, so the masking table must forget what
+    // it held for the server that was on screen a moment ago.
+    setOriginalEnv({});
+    setOriginalHeaders({});
+    setSnippetOpen(false);
+    setSnippetText("");
+    toastSuccess(rest.length
+      ? `已填入「${snippet.name ?? "未命名"}」，另外 ${rest.length} 个服务器请分别粘贴。`
+      : snippet.name ? `已填入「${snippet.name}」，确认后保存。` : "已填入配置，请补一个名称后保存。");
+  };
+
+  /**
+   * Ask the server itself whether the address and headers are right.
+   *
+   * "Failed to connect" is the same message for a wrong URL, a rejected key and
+   * a server that is down. The handshake reply usually names the problem, so it
+   * is shown verbatim rather than summarised into another vague sentence.
+   */
+  const probeConnection = async (): Promise<void> => {
+    setProbing(true);
+    setProbeResult(undefined);
+    try {
+      const headers = parseStringMap(headersText, "请求头", originalHeaders);
+      const result = await window.coilcoil.testMcpConnection({ url: draft.url ?? "", headers });
+      if (!result.ok) {
+        setProbeResult(`连接失败：${result.error}`);
+        return;
+      }
+      const healthy = result.status >= 200 && result.status < 300;
+      setProbeResult(`HTTP ${result.status} ${result.statusText}${healthy ? "" : " · 服务器拒绝了这次握手"}${result.body ? `\n${result.body}` : ""}`);
+    } catch (caught) {
+      setProbeResult(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setProbing(false);
+    }
+  };
+
   const selectServer = (server?: McpServerConfiguration, userInitiated = false): void => {
     if (userInitiated) editVersionRef.current += 1;
     const next = server ? { ...server, args: [...server.args], env: { ...server.env }, headers: { ...server.headers } } : blankMcpServer();
@@ -164,6 +233,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     setExcludeToolsText(next.excludeTools.join("\n"));
     setAuthorizationUrl(undefined);
     setAuthInput("");
+    setProbeResult(undefined);
     setRemoveArmed(false);
     setListRemoveArmed(undefined);
   };
@@ -416,10 +486,20 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
           {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpEnablementClass(draft, selectedStatus)}`} /><strong>{mcpEnablementLabel(draft, selectedStatus)}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={togglingEnabled || actionBusy || !cwd} onClick={() => void setEnabled()}>{togglingEnabled ? <LoaderCircle className="spin" size={13} /> : <Power size={13} />}{draft.disabled ? "启用" : "停用"}</button>{supportsAuth ? <><button type="button" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void startAuth()}><ExternalLink size={13} />认证</button><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void logout()}><LogOut size={13} />登出</button></> : null}</div> : null}
           {runtimeStatus?.diagnostic ? <p className="mcp-source-note">{runtimeStatus.diagnostic}</p> : null}
           {mounted ? <p className="mcp-source-note">这个服务器挂载自 {mcpOriginLabel(draft)}，定义保存在 <code>{draft.source}</code>。CoilCoil 只叠加启用状态等本地覆盖，要改命令、地址或请求头请到该应用里编辑。</p> : null}
+          {mounted ? null : <div className="mcp-snippet">
+            <button className="mcp-snippet-toggle" type="button" onClick={() => setSnippetOpen((current) => !current)}><ClipboardPaste size={13} />{snippetOpen ? "收起 JSON 粘贴" : "粘贴 MCP JSON 配置"}</button>
+            {snippetOpen ? <>
+              <textarea value={snippetText} placeholder={'{\n  "command": "npx",\n  "args": ["-y", "chrome-devtools-mcp@latest"]\n}'} onChange={(event) => setSnippetText(event.target.value)} />
+              <div className="mcp-snippet-actions">
+                <small>支持完整的 mcpServers 文档、单个服务器对象，或「名称: 配置」这一对。</small>
+                <button type="button" onClick={applySnippet}>填入表单</button>
+              </div>
+            </> : null}
+          </div>}
           <fieldset className="mcp-definition-fields" disabled={mounted}>
           <div className="settings-grid"><label>名称<input value={draft.name} placeholder="例如 github" onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label><label>作用域<Select value={draft.scope} options={MCP_SCOPE_OPTIONS} disabled={!cwd} ariaLabel="MCP 作用域" onChange={(scope) => setDraft((current) => ({ ...current, scope: scope as McpServerConfiguration["scope"] }))} /></label></div>
           <label>连接方式<Select value={draft.transport} options={MCP_TRANSPORT_OPTIONS} ariaLabel="MCP 连接方式" onChange={(transport) => setDraft((current) => ({ ...current, transport: transport as McpServerConfiguration["transport"] }))} /></label>
-          {draft.transport === "stdio" ? <><label>启动命令<input value={draft.command ?? ""} placeholder="npx" onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))} /></label><label>参数（每行一个）<textarea value={argsText} placeholder="-y&#10;@modelcontextprotocol/server-filesystem" onChange={(event) => setArgsText(event.target.value)} /></label><div className="settings-grid"><label>工作目录<input value={draft.cwd ?? ""} placeholder="可选" onChange={(event) => setDraft((current) => ({ ...current, cwd: event.target.value }))} /></label><label>环境变量 JSON<textarea value={envText} onChange={(event) => setEnvText(event.target.value)} /></label></div></> : <><label>服务器地址<input value={draft.url ?? ""} placeholder="https://example.com/mcp" onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} /></label><div className="settings-grid"><label>认证<Select value={String(draft.auth ?? "auto")} options={MCP_AUTH_OPTIONS} ariaLabel="MCP HTTP 认证方式" onChange={(auth) => setDraft((current) => ({ ...current, auth: auth === "auto" ? undefined : auth === "false" ? false : auth as "oauth" | "bearer" }))} /></label><label>Bearer 环境变量<input value={draft.bearerTokenEnv ?? ""} placeholder="例如 GITHUB_TOKEN" onChange={(event) => setDraft((current) => ({ ...current, bearerTokenEnv: event.target.value }))} /></label></div><label>请求头 JSON<textarea value={headersText} onChange={(event) => setHeadersText(event.target.value)} /></label></>}
+          {draft.transport === "stdio" ? <><label>启动命令<input value={draft.command ?? ""} placeholder="npx" onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))} /></label><label>参数（每行一个）<textarea value={argsText} placeholder="-y&#10;@modelcontextprotocol/server-filesystem" onChange={(event) => setArgsText(event.target.value)} /></label><div className="settings-grid"><label>工作目录<input value={draft.cwd ?? ""} placeholder="可选" onChange={(event) => setDraft((current) => ({ ...current, cwd: event.target.value }))} /></label><label>环境变量 JSON<textarea value={envText} onChange={(event) => setEnvText(event.target.value)} /></label></div></> : <><label>服务器地址<input value={draft.url ?? ""} placeholder="https://example.com/mcp" onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} /></label><div className="settings-grid"><label>认证<Select value={String(draft.auth ?? "auto")} options={MCP_AUTH_OPTIONS} ariaLabel="MCP HTTP 认证方式" onChange={(auth) => setDraft((current) => ({ ...current, auth: auth === "auto" ? undefined : auth === "false" ? false : auth as "oauth" | "bearer" }))} /></label><label>Bearer 环境变量<input value={draft.bearerTokenEnv ?? ""} placeholder="例如 GITHUB_TOKEN" onChange={(event) => setDraft((current) => ({ ...current, bearerTokenEnv: event.target.value }))} /></label></div><label>请求头 JSON<textarea value={headersText} onChange={(event) => setHeadersText(event.target.value)} /></label><div className="mcp-probe"><button type="button" disabled={probing || !draft.url?.trim()} onClick={() => void probeConnection()}>{probing ? <LoaderCircle className="spin" size={13} /> : <Network size={13} />}测试连接</button>{probeResult ? <pre className="mcp-probe-result">{probeResult}</pre> : null}</div></>}
           <div className="settings-grid"><label>生命周期<Select value={draft.lifecycle} options={MCP_LIFECYCLE_OPTIONS} ariaLabel="MCP 生命周期" onChange={(lifecycle) => setDraft((current) => ({ ...current, lifecycle: lifecycle as McpServerConfiguration["lifecycle"] }))} /></label><label>空闲超时（分钟）<input type="number" min="0" value={draft.idleTimeout ?? ""} placeholder="使用扩展默认值" onChange={(event) => setDraft((current) => ({ ...current, idleTimeout: event.target.value ? Number(event.target.value) : undefined }))} /></label></div>
           <div className="settings-grid"><label>请求超时（毫秒）<input type="number" min="0" value={draft.requestTimeoutMs ?? ""} placeholder="使用扩展默认值" onChange={(event) => setDraft((current) => ({ ...current, requestTimeoutMs: event.target.value ? Number(event.target.value) : undefined }))} /></label><label className="checkbox-setting"><input type="checkbox" checked={draft.debug} onChange={(event) => setDraft((current) => ({ ...current, debug: event.target.checked }))} />显示服务器调试输出</label></div>
           <div className="settings-grid"><label>直接注册的工具（每行一个）<textarea value={directToolsText} placeholder="留空时使用下面的全部开关" onChange={(event) => setDirectToolsText(event.target.value)} /></label><label>排除工具（每行一个）<textarea value={excludeToolsText} onChange={(event) => setExcludeToolsText(event.target.value)} /></label></div>

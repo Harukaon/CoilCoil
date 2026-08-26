@@ -787,3 +787,21 @@
 .provider-thinking-options button { height: 26px; padding: 0 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-841)); border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-420)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px; cursor: pointer; }
 .provider-thinking-options button.active { border-color: hsl(var(--th) var(--ts) var(--l-620)); color: hsl(var(--th) var(--ts) var(--l-182)); font-weight: 620; }
 .provider-thinking-invalid { color: hsl(var(--th) var(--ts) var(--l-541)); font-size: 10px; }
+
+/* Pasting a configuration is the usual way a server arrives, so the control sits
+   above the fields it fills rather than behind a separate dialog. */
+.mcp-snippet { display: grid; gap: 6px; margin-bottom: 10px; }
+.mcp-snippet-toggle { display: flex; width: fit-content; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-375)); background: hsl(var(--th) var(--ts) var(--l-935)); font-size: 11px; cursor: pointer; }
+.mcp-snippet-toggle:hover { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-890)); }
+.mcp-snippet textarea { min-height: 108px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; }
+.mcp-snippet-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mcp-snippet-actions small { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 10px; }
+.mcp-snippet-actions button { padding: 5px 12px; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-171)); background: hsl(var(--th) var(--ts) var(--l-890)); font-size: 11px; cursor: pointer; }
+.mcp-snippet-actions button:hover { background: hsl(var(--th) var(--ts) var(--l-843)); }
+
+/* The server's own answer, shown as it came back. */
+.mcp-probe { display: grid; gap: 6px; }
+.mcp-probe > button { display: flex; width: fit-content; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-375)); background: hsl(var(--th) var(--ts) var(--l-935)); font-size: 11px; cursor: pointer; }
+.mcp-probe > button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-890)); }
+.mcp-probe > button:disabled { cursor: default; opacity: .5; }
+.mcp-probe-result { max-height: 132px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-286)); background: hsl(var(--th) var(--ts) var(--l-948)); font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }

@@ -328,6 +328,101 @@ function isStringRecord(value: unknown, label: string): string | undefined {
 }
 
 /** Validate Cursor-compatible mcp.json text before writing. Rejects invalid JSON to keep MCP usable. */
+/** One server pulled out of a pasted MCP configuration, ready to fill the editor. */
+export interface McpServerSnippet {
+  /** Absent when the snippet was a bare server object with nothing to name it. */
+  name?: string;
+  transport: McpTransport;
+  command?: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers: Record<string, string>;
+}
+
+export type McpSnippetResult =
+  | { ok: true; servers: McpServerSnippet[] }
+  | { ok: false; error: string };
+
+function stringRecordOrUndefined(value: unknown): Record<string, string> | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const entries = Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  return Object.fromEntries(entries);
+}
+
+function looksLikeServerEntry(value: unknown): value is Record<string, unknown> {
+  if (!isPlainObject(value)) return false;
+  return typeof value.command === "string" || typeof value.url === "string" || typeof value.httpUrl === "string";
+}
+
+function snippetFromEntry(name: string | undefined, entry: Record<string, unknown>): McpServerSnippet {
+  // `url` is what CoilCoil and Claude write; `httpUrl` and `serverUrl` turn up in
+  // configurations copied from other hosts and mean the same thing.
+  const url = [entry.url, entry.httpUrl, entry.serverUrl].find((value) => typeof value === "string" && value.trim()) as string | undefined;
+  const command = typeof entry.command === "string" && entry.command.trim() ? entry.command.trim() : undefined;
+  // A `type` of "http"/"sse"/"stdio" rides along in Claude Code exports. The
+  // transport is decided by which of command/url is present, so type only breaks
+  // the tie when a snippet somehow carries both.
+  const declaredType = typeof entry.type === "string" ? entry.type.toLowerCase() : undefined;
+  const transport: McpTransport = url && (!command || declaredType === "http" || declaredType === "sse") ? "http" : "stdio";
+  const args = Array.isArray(entry.args)
+    ? entry.args.filter((item): item is string => typeof item === "string")
+    : [];
+  return {
+    ...(name ? { name } : {}),
+    transport,
+    ...(transport === "stdio" ? { command } : {}),
+    args: transport === "stdio" ? args : [],
+    env: transport === "stdio" ? stringRecordOrUndefined(entry.env) ?? {} : {},
+    ...(transport === "stdio" && typeof entry.cwd === "string" && entry.cwd.trim() ? { cwd: entry.cwd.trim() } : {}),
+    ...(transport === "http" ? { url: url?.trim() } : {}),
+    headers: transport === "http" ? stringRecordOrUndefined(entry.headers) ?? {} : {},
+  };
+}
+
+/**
+ * Read a pasted MCP configuration in whatever shape it was copied in.
+ *
+ * The JSON people have on hand is rarely CoilCoil's file: it may be a whole
+ * `{ "mcpServers": {…} }` document, the `{ "servers": {…} }` VS Code writes, a
+ * single `{ "name": {…} }` pair, or - most often, because it is what a README
+ * shows - a bare server object with no name at all. Rejecting everything but the
+ * first shape is what makes a copied snippet impossible to use, so all four are
+ * accepted here and the caller asks for a name only when there is none.
+ */
+export function parseMcpServerSnippets(text: string): McpSnippetResult {
+  const trimmed = text.trim();
+  if (!trimmed) return { ok: false, error: "请先粘贴 MCP 配置 JSON。" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    return { ok: false, error: `JSON 语法错误：${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!isPlainObject(parsed)) return { ok: false, error: "MCP 配置必须是 JSON 对象。" };
+
+  const container = isPlainObject(parsed.mcpServers)
+    ? parsed.mcpServers
+    : isPlainObject(parsed.servers)
+      ? parsed.servers
+      : undefined;
+  if (container) {
+    const servers = Object.entries(container)
+      .filter((entry): entry is [string, Record<string, unknown>] => looksLikeServerEntry(entry[1]))
+      .map(([name, entry]) => snippetFromEntry(name, entry));
+    if (!servers.length) return { ok: false, error: "没有找到带 command 或 url 的 MCP 服务器。" };
+    return { ok: true, servers };
+  }
+
+  if (looksLikeServerEntry(parsed)) return { ok: true, servers: [snippetFromEntry(undefined, parsed)] };
+
+  const pairs = Object.entries(parsed).filter((entry): entry is [string, Record<string, unknown>] => looksLikeServerEntry(entry[1]));
+  if (pairs.length) return { ok: true, servers: pairs.map(([name, entry]) => snippetFromEntry(name, entry)) };
+
+  return { ok: false, error: "没有找到 MCP 服务器定义：需要 command（stdio）或 url（HTTP）。" };
+}
+
 export function validateMcpJsonText(text: string): McpJsonValidationResult {
   let parsed: unknown;
   try {

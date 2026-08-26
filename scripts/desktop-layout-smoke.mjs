@@ -256,6 +256,31 @@ async function main() {
     await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: targetX, y: preview.handleY, button: "left", buttons: 0, clickCount: 1 });
     await client.waitFor(`Math.abs((document.querySelector(".inline-file-preview")?.getBoundingClientRect().width ?? 0) - ${preview.paneWidth}) > 20`, "Preview divider did not resize panes.");
 
+    // The bubble is this same bundle under #bubble. Its own window is opened by a
+    // global shortcut, which a headless run cannot press - but loading the hash
+    // here still proves the split, the compact view, and its stylesheet.
+    await client.evaluate(`(() => { window.location.hash = "#bubble"; window.location.reload(); })()`);
+    await client.waitFor(`Boolean(document.querySelector(".bubble-shell"))`, "Bubble view did not render.", 45_000);
+    const bubble = await client.evaluate(`(() => {
+      const shell = document.querySelector(".bubble-shell");
+      if (!(shell instanceof HTMLElement)) return null;
+      return {
+        rooted: document.documentElement.classList.contains("bubble"),
+        composer: Boolean(document.querySelector('textarea[aria-label="向 CoilCoil 提问"]')),
+        handOver: Boolean(document.querySelector('button[aria-label="在 CoilCoil 中打开"]')),
+        workspace: document.querySelectorAll(".sidebar, .inspector-pane").length,
+        radius: getComputedStyle(shell).borderTopLeftRadius,
+      };
+    })()`);
+    assert.deepEqual(bubble, {
+      rooted: true,
+      composer: true,
+      handOver: true,
+      // The point of the bubble is that neither side panel comes with it.
+      workspace: 0,
+      radius: "16px",
+    }, "The bubble view must render its own compact shell.");
+
     process.stdout.write("CoilCoil desktop layout smoke passed.\n");
   } finally {
     client?.close();
