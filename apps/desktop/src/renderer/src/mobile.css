@@ -1,0 +1,187 @@
+/*
+ * Phone layout.
+ *
+ * The same renderer runs in the desktop window and in a phone browser, so the
+ * phone gets a layout override rather than a second interface.
+ *
+ * Every rule is gated on `[data-client="remote"]`, which only the browser-side
+ * bridge sets. A width query alone would also fire in the desktop window the
+ * moment someone dragged it narrow, and the desktop must never get the swipe
+ * deck. Width still decides inside that gate, so opening the remote URL on a
+ * laptop keeps the three columns.
+ *
+ * Loaded after styles.css so these rules win without !important, except where
+ * a third-party inline style has to be undone.
+ */
+
+@media (max-width: 780px) {
+  /* Mobile Safari's `100%` height is the tallest viewport, not the one left
+   * over once the keyboard is up, which pushes the composer off screen the
+   * moment it is tapped. The dynamic viewport unit tracks the real height. */
+  html[data-client="remote"],
+  html[data-client="remote"] body,
+  html[data-client="remote"] #root { height: 100dvh; }
+
+  /* ---------------------------------------------------------------- deck
+   * The three panes stop being grid columns and become one full-width pane
+   * each on a horizontal snap track. Swiping is then the browser's own
+   * scrolling — no gesture handling, no drag threshold to tune, and it keeps
+   * the rubber-band feel iOS users expect.
+   */
+  [data-client="remote"] .app-shell,
+  [data-client="remote"] .app-shell.left-collapsed,
+  [data-client="remote"] .app-shell.right-collapsed,
+  [data-client="remote"] .app-shell.left-collapsed.right-collapsed {
+    display: flex;
+    grid-template-columns: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  [data-client="remote"] .app-shell::-webkit-scrollbar { display: none; }
+
+  [data-client="remote"] .app-shell > .sidebar,
+  [data-client="remote"] .app-shell > .conversation-pane,
+  [data-client="remote"] .app-shell > .inspector-pane,
+  [data-client="remote"] .app-shell > .skills-workspace,
+  [data-client="remote"] .app-shell > .memory-workspace {
+    flex: 0 0 100%;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    grid-column: auto;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+
+  /* Panels are switched by swiping, so there is nothing left to drag or
+   * collapse, and the title bar has no window to move. */
+  [data-client="remote"] .panel-resizer,
+  [data-client="remote"] .sidebar-toggle,
+  [data-client="remote"] .window-controls,
+  [data-client="remote"] .sidebar-drag-region { display: none; }
+
+  [data-client="remote"] .window-drag { -webkit-app-region: no-drag; }
+  [data-client="remote"] .sidebar-drag { flex-basis: 12px; }
+  [data-client="remote"][data-platform="darwin"] .sidebar-drag { flex-basis: 12px; }
+
+  /* The pane borders read as seams between screens rather than columns. */
+  [data-client="remote"] .sidebar { border-right: 0; }
+  [data-client="remote"] .inspector-pane { border-left: 0; }
+
+  /* --------------------------------------------------------- bottom sheet
+   * Radix positions popovers against their trigger, which on a phone puts a
+   * cramped bubble over the very control being used. The remaining popovers
+   * become a sheet across the bottom: full width, their own scroll, and out
+   * from under the thumb that opened them. The wrapper carries Floating UI's
+   * inline transform, so this is the one place that overrides inline styles.
+   *
+   * The model picker does not go through this at all — it renders its own
+   * modal sheet, because its list lived in a submenu that opened off screen.
+   */
+  [data-client="remote"] [data-radix-popper-content-wrapper] {
+    position: fixed !important;
+    z-index: 1200;
+    inset: auto 0 0 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    transform: none !important;
+  }
+
+  [data-client="remote"] .coil-select-popover {
+    width: 100%;
+    max-width: 100%;
+    max-height: 78vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 40px rgb(0 0 0 / 28%);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Touch targets: the desktop sizes are tuned for a cursor. */
+  [data-client="remote"] .model-popover-list [role="option"],
+  [data-client="remote"] .model-parameter-options button,
+  [data-client="remote"] .model-parameter-toggle,
+  [data-client="remote"] .model-submenu-trigger,
+  [data-client="remote"] .model-settings-link { min-height: 40px; }
+
+  [data-client="remote"] .icon-button { width: 38px; height: 38px; }
+
+  /* The home indicator overlaps anything flush with the bottom edge. */
+  [data-client="remote"] .composer-wrap {
+    width: calc(100% - 20px);
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  [data-client="remote"] .composer-width-resizer { display: none; }
+}
+
+@keyframes mobile-sheet-in {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes mobile-sheet-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/*
+ * The remote browser panel.
+ *
+ * Frames of the Mac's own browser, not an embedded one: the phone can still
+ * open tabs, navigate and watch what the agent is doing on the page.
+ */
+[data-client="remote"] .browser-remote-host {
+  position: relative;
+  overflow: auto;
+  background: hsl(var(--th) var(--ts) var(--l-920));
+}
+
+[data-client="remote"] .browser-remote-frame {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/*
+ * Settings on a phone: one wide canvas, panned.
+ *
+ * Pages like MCP are dense tables and long paths, and giving each one a mobile
+ * design would be a project of its own. They keep their desktop widths instead
+ * and the phone pans across them — swipe left for the section list, swipe right
+ * for the page. One horizontal scroller, no per-page adaptation, and every page
+ * behaves the same way.
+ */
+@media (max-width: 780px) {
+  [data-client="remote"] .settings-screen {
+    display: flex;
+    min-width: 0;
+    grid-template-columns: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  [data-client="remote"] .settings-screen::-webkit-scrollbar { display: none; }
+
+  /* Keep in step with SETTINGS_MOBILE_SIDEBAR_WIDTH in SettingsDialog.tsx. */
+  [data-client="remote"] .settings-sidebar { flex: 0 0 220px; }
+
+  /* Wide enough for the widest page to keep its desktop layout intact. */
+  [data-client="remote"] .settings-page { flex: 0 0 880px; }
+
+  /* Dragging a panel edge has no meaning when the whole thing is panned. */
+  [data-client="remote"] .settings-sidebar-resizer,
+  [data-client="remote"] .settings-window-drag { display: none; }
+
+  [data-client="remote"] .settings-sidebar-home,
+  [data-client="remote"] .settings-tabs button { height: 44px; }
+}

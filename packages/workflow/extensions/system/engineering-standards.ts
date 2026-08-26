@@ -46,3 +46,14 @@ Testing and verification after code changes:
 6. Do not introduce a new test framework into a project that has no test system.
 7. When adjacent code has an established test pattern, add corresponding coverage for important behavior.
 8. Never claim that a test or check was run unless it was actually run.`;
+
+/**
+ * Appended to the standards only when the PowerShell tool is exposed, which
+ * CoilCoil does on Windows alone. The model otherwise reaches for the `bash`
+ * tool and spends turns fighting POSIX quoting rules that never applied.
+ */
+export const COILCOIL_WINDOWS_SHELL_STANDARDS = `Windows shell usage:
+- This machine runs Windows and the powershell tool is available. Prefer it for shell work and write native PowerShell, not Bash.
+- Do not translate a command into Bash syntax or fight POSIX quoting and escaping rules; use PowerShell quoting, cmdlets, pipelines, and native Windows paths directly.
+- The powershell tool runs one command to completion and has no default timeout. Pass an explicit timeout for anything that may hang.
+- Use the bash tool only for work the powershell tool cannot do: long-running or background processes that need the managed terminal, interactive sessions, or a script that genuinely requires a POSIX shell.`;

@@ -7,13 +7,13 @@ import type {
 } from "@coilcoil/runtime-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { lstat, mkdir, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell } from "electron";
 import { createRequire } from "node:module";
 import type { DiagnosticLogBatch } from "@coilcoil/runtime-protocol";
-import type { BrowserUiViewport, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import type { BrowserUiViewport, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RemoteAccessInput, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { appIconPath } from "./app-icon";
 import { BUBBLE_OPEN_SESSION_CHANNEL, setupBubbleWindow } from "./bubble-window.js";
 import { testMcpConnection } from "./mcp-connection-test.js";
@@ -38,6 +38,7 @@ import {
   processStartupData,
 } from "@coilcoil/diagnostics";
 import { TerminalRuntimeManager } from "./terminal-runtime";
+import { RemoteAccessController } from "./remote/remote-access";
 import {
   checkForUpdate,
   UPDATE_FIRST_CHECK_MS,
@@ -73,6 +74,12 @@ const MCP_TEST_CHANNEL = "mcp:test-connection";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
 const RUNTIME_EVENT_CHANNEL = "runtime:event";
+const REMOTE_GET_CHANNEL = "remote:get";
+const REMOTE_SAVE_CHANNEL = "remote:save";
+const REMOTE_NEW_CODE_CHANNEL = "remote:new-code";
+const REMOTE_ACCOUNT_CHANNEL = "remote:account";
+const REMOTE_REVOKE_CHANNEL = "remote:revoke";
+const REMOTE_STATE_CHANNEL = "remote:state";
 const WINDOW_MINIMIZE_CHANNEL = "window:minimize";
 const WINDOW_TOGGLE_MAXIMIZED_CHANNEL = "window:toggle-maximized";
 const WINDOW_IS_MAXIMIZED_CHANNEL = "window:is-maximized";
@@ -87,6 +94,7 @@ const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
 const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
+const BROWSER_CAPTURE_CHANNEL = "browser:capture";
 const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
@@ -393,6 +401,9 @@ class RuntimeBridge {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
     }
+    // Remote clients are additional viewers of the same session, so they see
+    // exactly what the desktop window sees, at the same moment.
+    remoteAccess?.broadcast(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
   };
 
   private runtimeHost(): RuntimeHost {
@@ -419,6 +430,88 @@ class RuntimeBridge {
 }
 
 const runtime = new RuntimeBridge();
+
+let remoteAccess: RemoteAccessController | undefined;
+
+/**
+ * Shared by the window's IPC handlers and the remote entry point, so a phone
+ * and the desktop window always get the same answer.
+ */
+async function homeProject(): Promise<ProjectSelection> {
+  const path = join(app.getPath("userData"), "Home");
+  await mkdir(path, { recursive: true });
+  return { name: "Home", path, kind: "home" };
+}
+
+/** What an absolute path in the transcript actually is, so a link can be routed. */
+async function classifyPaths(paths: string[]): Promise<Record<string, PathKind>> {
+  if (!Array.isArray(paths)) throw new Error("路径列表无效。");
+  const entries = await Promise.all(paths.slice(0, 200).map(async (candidate): Promise<[string, PathKind]> => {
+    if (typeof candidate !== "string" || !candidate.trim() || !isAbsolute(candidate)) return [String(candidate), "missing"];
+    try {
+      const stats = await stat(candidate);
+      return [candidate, stats.isDirectory() ? "directory" : "file"];
+    } catch {
+      return [candidate, "missing"];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+
+function remoteController(): RemoteAccessController {
+  if (remoteAccess) return remoteAccess;
+  remoteAccess = new RemoteAccessController({
+    configFile: join(app.getPath("userData"), "remote.json"),
+    authFile: join(app.getPath("userData"), "remote-devices.json"),
+    platform: process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "win32" : "linux",
+    rendererUrl: process.env.ELECTRON_RENDERER_URL,
+    rendererDir: join(__dirname, "../renderer"),
+    invoke: async (channel, args) => {
+      if (channel === RUNTIME_REQUEST_CHANNEL) {
+        const payload = args[0] as RuntimeRequestPayload;
+        try {
+          return { ok: true, value: await runtime.request(payload) } satisfies RuntimeRequestResult;
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) } satisfies RuntimeRequestResult;
+        }
+      }
+      if (channel === APP_VERSION_CHANNEL) return app.getVersion();
+      if (channel === PROJECT_HOME_CHANNEL) return homeProject();
+      if (channel === PROJECT_DIRECTORY_LIST_CHANNEL) return listProjectDirectory(args[0] as string, args[1] as string | undefined);
+      if (channel === PATH_CLASSIFY_CHANNEL) return classifyPaths(args[0] as string[]);
+      // The phone drives the same browser the agent drives — the one belonging
+      // to the desktop window — rather than a browser of its own, which it has
+      // no way to host anyway.
+      if (channel.startsWith("browser:")) {
+        const browser = primaryBrowserRuntime;
+        if (!browser) throw new Error("内置浏览器尚未就绪，请先在 Mac 上打开 CoilCoil 窗口。");
+        const scopeId = args[0] as string;
+        switch (channel) {
+          case BROWSER_GET_STATE_CHANNEL: return browser.state(scopeId);
+          case BROWSER_CAPTURE_CHANNEL: return browser.captureTab(scopeId);
+          case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, scopeId);
+          case BROWSER_SELECT_TAB_CHANNEL: return browser.selectTab(args[1] as string, scopeId);
+          case BROWSER_CLOSE_TAB_CHANNEL: return browser.closeTab(args[1] as string, scopeId);
+          case BROWSER_NAVIGATE_CHANNEL: return browser.navigate(args[1] as string, scopeId);
+          case BROWSER_BACK_CHANNEL: return browser.back(scopeId);
+          case BROWSER_FORWARD_CHANNEL: return browser.forward(scopeId);
+          case BROWSER_RELOAD_CHANNEL: return browser.reload(scopeId);
+          default: break;
+        }
+      }
+      throw new Error(`远程会话不支持 ${channel}。`);
+    },
+    log: (level, event, data) => diagnosticLog().log(level, "remote", event, data),
+    // The pairing code is shown in settings and nowhere else, so any change to
+    // it has to reach an open settings screen on its own.
+    onStateChanged: (state) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(REMOTE_STATE_CHANNEL, state);
+      }
+    },
+  });
+  return remoteAccess;
+}
 
 /**
  * Give a browser guest the right-click menu Electron does not provide.
@@ -723,11 +816,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(MCP_TEST_CHANNEL, async (_event, input: McpConnectionTestInput) => testMcpConnection(input));
   ipcMain.handle(APP_VERSION_CHANNEL, (): string => app.getVersion());
-  ipcMain.handle(PROJECT_HOME_CHANNEL, async (): Promise<ProjectSelection> => {
-    const path = join(app.getPath("userData"), "Home");
-    await mkdir(path, { recursive: true });
-    return { name: "Home", path, kind: "home" };
-  });
+  ipcMain.handle(PROJECT_HOME_CHANNEL, () => homeProject());
   ipcMain.handle(PROJECT_SELECT_CHANNEL, async (): Promise<ProjectSelection | null> => {
     const result = await dialog.showOpenDialog({
       title: "打开项目",
@@ -778,19 +867,7 @@ app.whenReady().then(async () => {
   });
   // What an absolute path in the transcript actually is, so a link can be drawn
   // and routed as the file or the folder it points at.
-  ipcMain.handle(PATH_CLASSIFY_CHANNEL, async (_event, paths: string[]): Promise<Record<string, PathKind>> => {
-    if (!Array.isArray(paths)) throw new Error("路径列表无效。");
-    const entries = await Promise.all(paths.slice(0, 200).map(async (candidate): Promise<[string, PathKind]> => {
-      if (typeof candidate !== "string" || !candidate.trim() || !isAbsolute(candidate)) return [String(candidate), "missing"];
-      try {
-        const stats = await stat(candidate);
-        return [candidate, stats.isDirectory() ? "directory" : "file"];
-      } catch {
-        return [candidate, "missing"];
-      }
-    }));
-    return Object.fromEntries(entries);
-  });
+  ipcMain.handle(PATH_CLASSIFY_CHANNEL, (_event, paths: string[]) => classifyPaths(paths));
   // A folder belongs to the file manager: the right-hand panel is the workspace
   // tree and single-file previews, not a second file browser.
   ipcMain.handle(PATH_REVEAL_CHANNEL, async (_event, rawPath: string): Promise<boolean> => {
@@ -829,6 +906,7 @@ app.whenReady().then(async () => {
   };
   ipcMain.handle(BROWSER_SET_SCOPE_CHANNEL, (event, scopeId: string) => browserFor(event).setUiScope(scopeId));
   ipcMain.handle(BROWSER_GET_STATE_CHANNEL, (event, scopeId: string) => browserFor(event).state(scopeId));
+  ipcMain.handle(BROWSER_CAPTURE_CHANNEL, (event, scopeId: string) => browserFor(event).captureTab(scopeId));
   ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string) => browserFor(event).createTab(url, true, scopeId));
   ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).selectTab(id, scopeId));
   ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).closeTab(id, scopeId));
@@ -888,6 +966,12 @@ app.whenReady().then(async () => {
     return log.filePath;
   });
 
+  ipcMain.handle(REMOTE_GET_CHANNEL, () => remoteController().state());
+  ipcMain.handle(REMOTE_SAVE_CHANNEL, (_event, input: RemoteAccessInput) => remoteController().apply(input ?? {}));
+  ipcMain.handle(REMOTE_NEW_CODE_CHANNEL, () => remoteController().regenerateCode());
+  ipcMain.handle(REMOTE_ACCOUNT_CHANNEL, (_event, username: string, password: string) => remoteController().setAccount(username ?? "", password ?? ""));
+  ipcMain.handle(REMOTE_REVOKE_CHANNEL, () => remoteController().revokeDevices());
+
   ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (_event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
     try {
       return { ok: true, value: await runtime.request(payload) };
@@ -898,6 +982,7 @@ app.whenReady().then(async () => {
   await createWindow();
   scheduleUpdateChecks();
   runtime.start();
+  void remoteController().start();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       void createWindow().then(() => runtime.start());
@@ -913,6 +998,8 @@ app.on("before-quit", () => {
   for (const terminal of terminalRuntimes.values()) terminal.dispose();
   browserRuntimes.clear();
   terminalRuntimes.clear();
+  remoteAccess?.stop();
+  remoteAccess = undefined;
   runtime.stop();
 });
 

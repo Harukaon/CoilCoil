@@ -10,6 +10,7 @@ import {
 } from "node:path";
 import { resolvePackageDirectory } from "./package-resolution.js";
 import {
+  MCP_AGENT_CONFIG_CHANNEL,
   MCP_AGENT_CONFIG_REGISTRY,
   require
 } from "./runtime-constants.js";
@@ -45,6 +46,29 @@ export function mcpAgentConfigRegistry(): WeakMap<object, McpAdapterEffectiveCon
   return registry;
 }
 
+export interface McpAgentConfigRequest {
+  configuration?: McpAdapterEffectiveConfig;
+}
+
+/**
+ * Answer the adapter extension's request for CoilCoil's server list.
+ *
+ * Registered once per session against the same bus the extension will emit on.
+ * The handler is synchronous on purpose: the extension reads the answer the
+ * moment `emit` returns.
+ */
+export function serveMcpAgentConfig(
+  bus: { on?(channel: string, handler: (data: unknown) => void): () => void },
+  read: () => McpAdapterEffectiveConfig | undefined,
+): () => void {
+  // A host that offers no subscription simply never gets asked.
+  if (typeof bus.on !== "function") return () => undefined;
+  return bus.on(MCP_AGENT_CONFIG_CHANNEL, (data) => {
+    if (!data || typeof data !== "object") return;
+    (data as McpAgentConfigRequest).configuration = read();
+  });
+}
+
 export function mcpConfigurationForAgent(
   configuration: McpAdapterEffectiveConfig,
   hiddenNames: ReadonlySet<string>,
@@ -59,6 +83,32 @@ export function mcpConfigurationForAgent(
         .map(([name, definition]) => [name, { ...definition }]),
     ),
   };
+}
+
+/**
+ * Drop imported Chrome DevTools servers that drive a browser CoilCoil does not own.
+ *
+ * CoilCoil imports MCP servers from other tools' configs, and those configs
+ * commonly carry a plain `chrome-devtools-mcp` entry with no endpoint, which
+ * attaches to whatever Chrome is on the machine. Side by side with the bundled
+ * server the Agent has two indistinguishable sets of browser tools, and picking
+ * the imported one silently drives the user's real Chrome instead of the
+ * built-in browser the panel shows. The bundled server is the one CoilCoil can
+ * show, scope per session, and clean up, so it wins.
+ *
+ * An entry that names its own `--wsEndpoint` is left alone: it was pointed at a
+ * specific browser on purpose.
+ */
+export function withoutRivalBrowserServers(
+  servers: Record<string, Record<string, unknown>>,
+): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(Object.entries(servers).filter(([, definition]) => {
+    const args = Array.isArray(definition.args) ? definition.args.map(String) : [];
+    const command = typeof definition.command === "string" ? definition.command : "";
+    const usesDevtoolsMcp = /chrome-devtools-mcp/i.test([command, ...args].join(" "));
+    if (!usesDevtoolsMcp) return true;
+    return args.includes("--wsEndpoint") || args.includes("--browserUrl");
+  }));
 }
 
 export function withBundledBrowserMcp(
@@ -102,7 +152,7 @@ export function withBundledBrowserMcp(
     return {
       ...configuration,
       mcpServers: {
-        ...configuration.mcpServers,
+        ...withoutRivalBrowserServers(configuration.mcpServers),
         "coilcoil-browser": {
           ...browser,
           // Preload Chrome DevTools metadata for gateway search, while keeping

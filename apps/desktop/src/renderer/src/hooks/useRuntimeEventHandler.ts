@@ -20,7 +20,7 @@ import { diagnostics } from "../diagnostics";
 import { toastError, toastInfo, toastSuccess } from "../ui/toast";
 
 type ConversationMessageAction = Parameters<typeof conversationMessagesReducer>[1];
-type AgentPhase = "思考" | "回复" | "工具";
+type AgentPhase = "思考" | "回复" | "工具" | "重试";
 
 function upsertTool(tools: ToolRun[], tool: ToolRun): ToolRun[] {
   const index = tools.findIndex((item) => item.id === tool.id);
@@ -240,6 +240,22 @@ export function useRuntimeEventHandler({
           if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
           return next;
         });
+        break;
+      case "agent_retry":
+        // Silent retries were indistinguishable from the Agent giving up, which
+        // is why a flaky upstream felt like a bug in CoilCoil.
+        diagnostics.warn("agent-retry", "agent_retry", {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          message: event.message,
+        });
+        setAgentPhase("重试");
+        toastInfo(`上游中断，${Math.round(event.delayMs / 1000)} 秒后重试（第 ${event.attempt}/${event.maxAttempts} 次）`);
+        break;
+      case "agent_retry_finished":
+        setAgentPhase(event.success ? "思考" : undefined);
+        if (!event.success) toastError(`重试 ${event.attempt} 次后仍未成功：${event.error ?? "上游持续不可用"}`);
         break;
       case "runtime_notice":
         diagnostics.info("runtime-notice", event.level, { message: event.message });

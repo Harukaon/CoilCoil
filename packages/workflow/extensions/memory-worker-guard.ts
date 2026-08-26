@@ -1,7 +1,7 @@
-import { realpath, unlink } from "node:fs/promises";
+import { readFile, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { buildMemoryCountCommand } from "./project-memory.ts";
+import { buildMemorySizeNotice, PROJECT_MEMORY_MAX_CHARS } from "./memory-settings.ts";
 
 interface GuardConfig {
   sessionFile: string;
@@ -9,6 +9,7 @@ interface GuardConfig {
   requestedMemoryFile: string;
   detailsDir: string;
   lockFile?: string;
+  maximum: number;
 }
 
 export interface MemoryWorkerGuardOptions {
@@ -62,12 +63,14 @@ async function loadGuardConfig(env: NodeJS.ProcessEnv): Promise<GuardConfig> {
     requiredPath(env, "PI_MEMORY_WORKER_DETAILS_DIR"),
   );
   const lockFile = env.PI_MEMORY_WORKER_LOCK_FILE?.trim();
+  const maximum = Number.parseInt(env.PI_MEMORY_WORKER_MAX_CHARS?.trim() ?? "", 10);
   return {
     sessionFile,
     memoryFile,
     requestedMemoryFile,
     detailsDir,
     lockFile: lockFile ? resolve(lockFile) : undefined,
+    maximum: Number.isFinite(maximum) && maximum > 0 ? maximum : PROJECT_MEMORY_MAX_CHARS,
   };
 }
 
@@ -90,20 +93,6 @@ function canWrite(config: GuardConfig, path: string): boolean {
   return isProjectMarkdown(config.detailsDir, path);
 }
 
-function shellQuote(path: string): string {
-  return `'${path.replaceAll("'", "'\\''")}'`;
-}
-
-function isMemoryCountCommand(command: string, memoryFiles: string[]): boolean {
-  const normalized = command.trim();
-  return memoryFiles.some((memoryFile) =>
-    normalized === buildMemoryCountCommand(memoryFile) ||
-    normalized === `wc -m < ${shellQuote(memoryFile)}` ||
-    normalized === `wc -m ${JSON.stringify(memoryFile)}` ||
-    normalized === `wc -m ${shellQuote(memoryFile)}`
-  );
-}
-
 function blocked(reason: string): { block: true; reason: string } {
   return { block: true, reason: `记忆工作节点文件守卫：${reason}` };
 }
@@ -123,21 +112,11 @@ export default function memoryWorkerGuard(
       return blocked(error instanceof Error ? error.message : String(error));
     }
 
-    if (!["read", "grep", "write", "edit", "bash"].includes(event.toolName)) {
+    if (!["read", "grep", "write", "edit"].includes(event.toolName)) {
       return blocked(`工具 ${event.toolName} 不在允许列表中`);
     }
 
     const input = event.input as Record<string, unknown>;
-    if (event.toolName === "bash") {
-      const command = input.command;
-      return typeof command === "string" && isMemoryCountCommand(command, [
-          config.memoryFile,
-          config.requestedMemoryFile,
-        ])
-        ? undefined
-        : blocked("bash 只允许执行 MEMORY.md 的 wc -m 字符数检查");
-    }
-
     const rawPath = input.path;
     if (typeof rawPath !== "string" || !rawPath.trim()) {
       return blocked(`${event.toolName} 必须显式指定 path`);
@@ -158,6 +137,41 @@ export default function memoryWorkerGuard(
 
     if (!canWrite(config, path)) return blocked(`禁止修改 ${path}`);
     return undefined;
+  });
+
+  // The character budget is reported here rather than by asking the model to
+  // run `wc -m`: the worker has no shell at all now, and counting in-process
+  // works the same on Windows as it does on macOS.
+  pi.on("tool_result", async (event, ctx) => {
+    if (event.isError) return undefined;
+    if (event.toolName !== "write" && event.toolName !== "edit") return undefined;
+    let config: GuardConfig;
+    try {
+      config = await configPromise;
+    } catch {
+      return undefined;
+    }
+    const rawPath = (event.input as Record<string, unknown>).path;
+    if (typeof rawPath !== "string" || !rawPath.trim()) return undefined;
+    let path: string;
+    try {
+      path = await canonicalCandidate(rawPath, ctx.cwd);
+    } catch {
+      return undefined;
+    }
+    if (path !== config.memoryFile && path !== config.requestedMemoryFile) return undefined;
+    let content: string;
+    try {
+      content = await readFile(path, "utf8");
+    } catch {
+      return undefined;
+    }
+    return {
+      content: [
+        ...event.content,
+        { type: "text" as const, text: buildMemorySizeNotice(config.memoryFile, content, config.maximum) },
+      ],
+    };
   });
 
   pi.on("session_shutdown", async () => {

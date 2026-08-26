@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import memoryWorkerGuard from "../extensions/memory-worker-guard.ts";
-import { buildMemoryCountCommand } from "../extensions/project-memory.ts";
 
 async function temporaryDirectory(t: test.TestContext): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "hao-pi-memory-guard-"));
@@ -12,7 +11,7 @@ async function temporaryDirectory(t: test.TestContext): Promise<string> {
   return directory;
 }
 
-async function createGuardHarness(t: test.TestContext) {
+async function createGuardHarness(t: test.TestContext, maximum?: number) {
   const root = await temporaryDirectory(t);
   const memoryRoot = join(root, ".pi", "agent", "memory");
   const detailsDir = join(memoryRoot, "A");
@@ -39,6 +38,7 @@ async function createGuardHarness(t: test.TestContext) {
       PI_MEMORY_WORKER_MAIN_FILE: memoryFile,
       PI_MEMORY_WORKER_DETAILS_DIR: detailsDir,
       PI_MEMORY_WORKER_LOCK_FILE: lockFile,
+      ...(maximum === undefined ? {} : { PI_MEMORY_WORKER_MAX_CHARS: String(maximum) }),
     },
   });
   const call = handlers.get("tool_call")![0];
@@ -74,7 +74,7 @@ function event(
   return { type: "tool_call", toolName, toolCallId: id, input };
 }
 
-test("guard permits the named session, project Markdown tree, and memory count command", async (t) => {
+test("guard permits the named session and the project Markdown tree", async (t) => {
   const harness = await createGuardHarness(t);
   const outside = join(harness.root, "project", "src", "secret.ts");
   const nestedDetail = join(harness.detailsDir, "ops", "deploy.md");
@@ -108,13 +108,6 @@ test("guard permits the named session, project Markdown tree, and memory count c
     undefined,
   );
   assert.equal(
-    await harness.call(event("bash", {
-      command: buildMemoryCountCommand(harness.memoryFile),
-    }), harness.context),
-    undefined,
-  );
-
-  assert.equal(
     (await harness.call(event("read", { path: outside }), harness.context)).block,
     true,
   );
@@ -126,6 +119,55 @@ test("guard permits the named session, project Markdown tree, and memory count c
     (await harness.call(event("bash", { command: "pwd" }), harness.context)).block,
     true,
   );
+  assert.equal(
+    (await harness.call(event("powershell", { command: "Get-Location" }), harness.context)).block,
+    true,
+  );
+});
+
+test("writing the memory file reports its character budget without a shell", async (t) => {
+  const harness = await createGuardHarness(t);
+  const result = await harness.handlers.get("tool_result")![0]({
+    type: "tool_result",
+    toolName: "write",
+    toolCallId: "call-1",
+    input: { path: harness.memoryFile },
+    content: [{ type: "text", text: "written" }],
+    isError: false,
+  }, harness.context);
+
+  const notice = result.content.at(-1).text as string;
+  assert.match(notice, /\[记忆字数\]/);
+  assert.match(notice, /未超出上限/);
+});
+
+test("an oversized memory file is reported as over budget", async (t) => {
+  const harness = await createGuardHarness(t, 100);
+  await writeFile(harness.memoryFile, "服".repeat(120), "utf8");
+  const result = await harness.handlers.get("tool_result")![0]({
+    type: "tool_result",
+    toolName: "edit",
+    toolCallId: "call-2",
+    input: { path: harness.memoryFile },
+    content: [{ type: "text", text: "edited" }],
+    isError: false,
+  }, harness.context);
+
+  assert.match(result.content.at(-1).text as string, /已超出 20 字/);
+});
+
+test("results for other files are left untouched", async (t) => {
+  const harness = await createGuardHarness(t);
+  const result = await harness.handlers.get("tool_result")![0]({
+    type: "tool_result",
+    toolName: "write",
+    toolCallId: "call-3",
+    input: { path: harness.detailFile },
+    content: [{ type: "text", text: "written" }],
+    isError: false,
+  }, harness.context);
+
+  assert.equal(result, undefined);
 });
 
 test("guard applies only the project-folder boundary and Markdown file type", async (t) => {

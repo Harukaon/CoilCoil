@@ -1,6 +1,8 @@
 import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronDown, ChevronRight, CircleDot, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useMobileRemote } from "../../hooks/useMobileRemote";
+import { MobileModelPicker } from "./MobileModelPicker";
 import type { ModelOption, RuntimeConfiguration, SessionSnapshot, ThinkingLevel } from "@coilcoil/runtime-protocol";
 import { hasConfigurableThinkingLevel } from "./modelPickerCapabilities";
 
@@ -48,6 +50,7 @@ export function ModelPicker({
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [modelsOpen, setModelsOpen] = useState(false);
+  const mobile = useMobileRemote();
 
   useEffect(() => {
     if (!open) {
@@ -98,11 +101,38 @@ export function ModelPicker({
     </>
   );
 
+  const trigger = (
+    <button className="agent-mode" type="button"><CircleDot size={13} /><span>{currentModel?.name ?? "选择模型"}</span><ChevronDown size={12} /></button>
+  );
+
+  if (mobile) {
+    return (
+      <>
+        <span onClick={() => onOpenChange(true)}>{trigger}</span>
+        {open ? (
+          <MobileModelPicker
+            configuration={configuration}
+            currentModel={currentModel}
+            currentThinkingLevel={selectedThinking}
+            currentFast={currentFast}
+            busy={busy}
+            thinkingLevels={thinkingAvailable ? thinkingLevels : []}
+            fastAvailable={fastAvailable}
+            activeModel={activeModel}
+            onClose={() => onOpenChange(false)}
+            onSelect={onSelect}
+            onConfigureOptions={onConfigureOptions}
+            onFastChange={onFastChange}
+            onOpenSettings={onOpenSettings}
+          />
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <Popover.Root open={open} onOpenChange={onOpenChange}>
-      <Popover.Trigger asChild>
-        <button className="agent-mode" type="button"><CircleDot size={13} /><span>{currentModel?.name ?? "选择模型"}</span><ChevronDown size={12} /></button>
-      </Popover.Trigger>
+      <Popover.Trigger asChild>{trigger}</Popover.Trigger>
       <Popover.Portal>
         <Popover.Content className={`model-popover ${hasParameterMenu ? "model-parameter-popover" : "model-selection-popover"}`} side={side} align="start" sideOffset={8} collisionPadding={12} avoidCollisions>
           {hasParameterMenu ? <>

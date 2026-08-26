@@ -351,7 +351,7 @@ function toolSummary(tools: ToolRun[], thinkingCount: number): string {
     if (["edit", "write"].includes(tool.name)) edited.add(path || tool.id);
     else if (["read", "ls", "find"].includes(tool.name)) explored += 1;
     else if (tool.name === "grep") searches += 1;
-    else if (["bash", "terminal"].includes(tool.name)) commands += 1;
+    else if (["bash", "powershell", "terminal"].includes(tool.name)) commands += 1;
     else other += 1;
   }
   const parts: string[] = [];
@@ -367,7 +367,7 @@ function toolSummary(tools: ToolRun[], thinkingCount: number): string {
 function toolArgumentsText(tool: ToolRun): string {
   const args = tool.args;
   const path = String(args.path ?? args.filePath ?? "");
-  if (tool.name === "bash") return String(args.command ?? "");
+  if (tool.name === "bash" || tool.name === "powershell") return String(args.command ?? "");
   if (tool.name === "read") {
     const range = [args.offset !== undefined ? `offset=${String(args.offset)}` : "", args.limit !== undefined ? `limit=${String(args.limit)}` : ""].filter(Boolean).join(" · ");
     return [path, range].filter(Boolean).join("\n");

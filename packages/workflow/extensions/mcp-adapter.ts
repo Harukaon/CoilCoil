@@ -35,6 +35,7 @@ const MCP_STATUS_EVENT = "pi-mcp-adapter/status/v1";
 const MCP_TOOL_APPROVAL_REQUEST_EVENT = "pi-mcp-adapter:tool-approval-request";
 const MCP_SESSION_POLICY_ENTRY = "coilcoil-mcp-session-policy";
 const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("coilcoil-workflow.mcp-agent-config-registry");
+const MCP_AGENT_CONFIG_CHANNEL = "coilcoil:mcp:agent-config:v1";
 
 interface McpStatusSnapshot {
   version: 1;
@@ -78,11 +79,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-export function registeredMcpConfiguration(events: object): McpAdapterConfiguration | undefined {
+/**
+ * CoilCoil's own MCP server list, including the bundled browser server.
+ *
+ * Asked for over the event bus rather than looked up by object identity: Pi
+ * hands each extension a `{emit, on}` wrapper around the bus, not the bus
+ * itself, so the old WeakMap lookup always missed and this fell back to the raw
+ * config files — which is how the built-in browser server disappeared and
+ * removed servers came back. Emitting is synchronous, so the answer is present
+ * as soon as `emit` returns. The WeakMap is still tried first for older hosts
+ * that really do pass the bus.
+ */
+export function registeredMcpConfiguration(events: {
+  emit(channel: string, data: unknown): void;
+}): McpAdapterConfiguration | undefined {
   const registry = (globalThis as Record<PropertyKey, unknown>)[MCP_AGENT_CONFIG_REGISTRY];
-  if (!(registry instanceof WeakMap)) return undefined;
-  const configuration = registry.get(events) as McpAdapterConfiguration | undefined;
-  return configuration && isRecord(configuration.mcpServers) ? configuration : undefined;
+  const direct = registry instanceof WeakMap
+    ? registry.get(events) as McpAdapterConfiguration | undefined
+    : undefined;
+  if (direct && isRecord(direct.mcpServers)) return direct;
+
+  const request: { configuration?: McpAdapterConfiguration } = {};
+  try {
+    events.emit(MCP_AGENT_CONFIG_CHANNEL, request);
+  } catch {
+    return undefined;
+  }
+  const supplied = request.configuration;
+  return supplied && isRecord(supplied.mcpServers) ? supplied : undefined;
 }
 
 function requestId(raw: unknown): string {

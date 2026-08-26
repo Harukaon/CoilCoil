@@ -10,6 +10,24 @@ import { initTheme } from "./theme";
 import { ToastHost } from "./ui/toast";
 import { UpdateDialog } from "./ui/update/UpdateDialog";
 import "./styles.css";
+import "./mobile.css";
+import "./features/composer/mobile-model-picker.css";
+
+/**
+ * Mark the browser-side client and turn off Safari's automatic zoom.
+ *
+ * Tapping a field makes iOS scale the whole page up and leave it there, which
+ * on a remote-control screen is disorienting rather than helpful. Doing it in
+ * the viewport declaration keeps the app's own type sizes untouched, and only
+ * the remote client is affected — the desktop window never runs this.
+ */
+if (window.coilcoil?.isRemote) {
+  document.documentElement.dataset.client = "remote";
+  const viewport = document.querySelector<HTMLMetaElement>("meta[name=viewport]");
+  if (viewport) {
+    viewport.content = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover";
+  }
+}
 
 installRendererErrorHandlers();
 initTheme();

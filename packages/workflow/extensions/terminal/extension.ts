@@ -33,6 +33,7 @@ import {
   snapshotOutput,
 } from "./output.ts";
 import { scanTerminalProcesses, stopTerminal } from "./process-cleanup.ts";
+import { terminalShell } from "./shell.ts";
 import {
   createTerminalRunToken,
   outputPathFor,
@@ -210,9 +211,8 @@ export default function terminalExtension(pi: ExtensionAPI): void {
 
     const resolvedSecrets = await resolveSecretEnvironment(request.secretEnv);
     const pty = await loadPty();
-    const shell = process.env.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/sh");
-    const shellArgs = process.platform === "win32" ? ["-NoLogo", "-Command", command] : ["-lc", command];
-    const child = pty.spawn(shell, shellArgs, {
+    const { shell, args: shellArgs } = terminalShell();
+    const child = pty.spawn(shell, shellArgs(command), {
       name: "xterm-256color",
       cols: request.cols ?? 120,
       rows: request.rows ?? 40,

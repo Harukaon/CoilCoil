@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { mkdir, open, stat, unlink } from "node:fs/promises";
 import { basename } from "node:path";
 import type { ProjectMemoryPaths } from "./memory-settings.ts";
-import { buildMemoryWorkerPrompt, expandHome } from "./memory-settings.ts";
+import { buildMemoryWorkerPrompt, expandHome, PROJECT_MEMORY_MAX_CHARS } from "./memory-settings.ts";
 
 const WORKER_LOCK_STALE_MS = 15 * 60_000;
 const WORKER_TIMEOUT_MS = 5 * 60_000;
@@ -114,7 +114,7 @@ export function buildMemoryWorkerLaunch(
       "--no-context-files",
       "--no-skills",
       "--no-prompt-templates",
-      "--tools", "read,write,edit,grep,bash",
+      "--tools", "read,write,edit,grep",
       "--approve",
       "--system-prompt", MEMORY_WORKER_SYSTEM_PROMPT,
       "--print", prompt,
@@ -128,6 +128,7 @@ export function buildMemoryWorkerLaunch(
       PI_MEMORY_WORKER_MAIN_FILE: request.paths.memoryFile,
       PI_MEMORY_WORKER_DETAILS_DIR: request.paths.projectMemoryDir,
       PI_MEMORY_WORKER_LOCK_FILE: request.paths.workerLockFile,
+      PI_MEMORY_WORKER_MAX_CHARS: String(request.maximum ?? PROJECT_MEMORY_MAX_CHARS),
     },
   };
 }

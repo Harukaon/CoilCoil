@@ -17,6 +17,8 @@ import type {
   ProjectFileActionInput,
   ProjectFileActionResult,
   ProjectSelection,
+  RemoteAccessInput,
+  RemoteAccessState,
   RuntimeEventPayload,
   RuntimeRequestPayload,
   RuntimeRequestResult,
@@ -60,6 +62,7 @@ const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
 const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
+const BROWSER_CAPTURE_CHANNEL = "browser:capture";
 const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
@@ -81,6 +84,12 @@ const TERMINAL_WRITE_CHANNEL = "terminal:write";
 const TERMINAL_RESIZE_CHANNEL = "terminal:resize";
 const TERMINAL_CLOSE_CHANNEL = "terminal:close";
 const UPDATE_AVAILABLE_CHANNEL = "update:available";
+const REMOTE_GET_CHANNEL = "remote:get";
+const REMOTE_SAVE_CHANNEL = "remote:save";
+const REMOTE_NEW_CODE_CHANNEL = "remote:new-code";
+const REMOTE_ACCOUNT_CHANNEL = "remote:account";
+const REMOTE_REVOKE_CHANNEL = "remote:revoke";
+const REMOTE_STATE_CHANNEL = "remote:state";
 
 const platform = ((): DesktopPlatform => {
   if (process.platform === "darwin") return "darwin";
@@ -140,6 +149,7 @@ const api: CoilCoilDesktopApi = {
   listProjectDirectory: (root: string, path?: string) => ipcRenderer.invoke(PROJECT_DIRECTORY_LIST_CHANNEL, root, path) as Promise<FileNode[]>,
   setBrowserScope: (scopeId: string) => ipcRenderer.invoke(BROWSER_SET_SCOPE_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   getBrowserState: (scopeId: string) => ipcRenderer.invoke(BROWSER_GET_STATE_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
+  captureBrowserTab: (scopeId: string) => ipcRenderer.invoke(BROWSER_CAPTURE_CHANNEL, scopeId) as Promise<string | undefined>,
   createBrowserTab: (scopeId: string, url?: string) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, scopeId, url) as Promise<BrowserStateSnapshot>,
   selectBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_SELECT_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
   closeBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
@@ -203,6 +213,16 @@ const api: CoilCoilDesktopApi = {
   /** Fire-and-forget: logging must never be able to stall the Renderer. */
   writeDiagnostics: (batch: DiagnosticLogBatch) => ipcRenderer.send(DIAGNOSTIC_LOG_CHANNEL, batch),
   revealDiagnostics: () => ipcRenderer.invoke(DIAGNOSTIC_REVEAL_CHANNEL) as Promise<string>,
+  getRemoteAccess: () => ipcRenderer.invoke(REMOTE_GET_CHANNEL) as Promise<RemoteAccessState>,
+  saveRemoteAccess: (input: RemoteAccessInput) => ipcRenderer.invoke(REMOTE_SAVE_CHANNEL, input) as Promise<RemoteAccessState>,
+  regenerateRemotePairingCode: () => ipcRenderer.invoke(REMOTE_NEW_CODE_CHANNEL) as Promise<RemoteAccessState>,
+  setRemoteAccount: (username: string, password: string) => ipcRenderer.invoke(REMOTE_ACCOUNT_CHANNEL, username, password) as Promise<RemoteAccessState>,
+  revokeRemoteDevices: () => ipcRenderer.invoke(REMOTE_REVOKE_CHANNEL) as Promise<RemoteAccessState>,
+  onRemoteAccessChanged: (listener: (state: RemoteAccessState) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: RemoteAccessState): void => listener(state);
+    ipcRenderer.on(REMOTE_STATE_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(REMOTE_STATE_CHANNEL, handler);
+  },
   onRuntimeEvent: (listener: (event: RuntimeEvent, runtimeId?: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: RuntimeEventPayload): void => listener(value.event, value.runtimeId);
     ipcRenderer.on(RUNTIME_EVENT_CHANNEL, handler);

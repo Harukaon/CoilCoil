@@ -3,7 +3,9 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mcpConfigurationForAgent, CoilCoilRuntime, withBundledBrowserMcp } from "../src/index.js";
+import { mcpConfigurationForAgent, CoilCoilRuntime, serveMcpAgentConfig, withBundledBrowserMcp } from "../src/index.js";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
+import { registeredMcpConfiguration } from "../../workflow/extensions/mcp-adapter.js";
 
 test("Agent MCP configuration contains enabled servers only", () => {
   const source = {
@@ -180,4 +182,54 @@ test("each workspace gets its own stored configuration", () => {
   assert.notEqual(first, second);
   assert.notEqual(first, sameName, "two workspaces sharing a folder name must not share a file");
   assert.match(first, /alpha-[0-9a-f]{12}\/mcp\.json$/);
+});
+
+test("an imported chrome-devtools server that drives some other browser is dropped", () => {
+  const configuration = withBundledBrowserMcp({
+    mcpServers: {
+      // What CoilCoil imports from another tool's config: no endpoint, so it
+      // attaches to whatever Chrome happens to be on the machine.
+      "chrome-devtools": { command: "npx", args: ["-y", "chrome-devtools-mcp@latest"] },
+      keenable: { url: "https://api.keenable.ai/mcp" },
+    },
+  }, {
+    COILCOIL_BROWSER_MCP_COMMAND: "/private/node",
+    COILCOIL_BROWSER_MCP_ARGS: JSON.stringify(["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools"]),
+  });
+
+  assert.deepEqual(Object.keys(configuration.mcpServers).sort(), ["coilcoil-browser", "keenable"]);
+});
+
+test("a devtools server aimed at a named browser is left alone", () => {
+  const configuration = withBundledBrowserMcp({
+    mcpServers: {
+      "my-chrome": { command: "npx", args: ["-y", "chrome-devtools-mcp@latest", "--browserUrl", "http://127.0.0.1:9222"] },
+    },
+  }, {
+    COILCOIL_BROWSER_MCP_COMMAND: "/private/node",
+    COILCOIL_BROWSER_MCP_ARGS: JSON.stringify(["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools"]),
+  });
+
+  assert.ok(configuration.mcpServers["my-chrome"]);
+  assert.ok(configuration.mcpServers["coilcoil-browser"]);
+});
+
+test("the adapter gets CoilCoil's servers even when Pi wraps the event bus", () => {
+  // Pi hands extensions a {emit, on} wrapper, not the bus, so identity lookups
+  // miss and the adapter used to fall back to the raw config files.
+  const bus = createEventBus();
+  const supplied = { mcpServers: { "coilcoil-browser": { command: "/node", args: [] } } };
+  serveMcpAgentConfig(bus, () => supplied);
+
+  const wrapper = {
+    emit: (channel: string, data: unknown) => bus.emit(channel, data),
+    on: (channel: string, handler: (data: unknown) => void) => bus.on(channel, handler),
+  };
+  assert.deepEqual(registeredMcpConfiguration(wrapper as never), supplied);
+});
+
+test("a host with no CoilCoil config gets nothing rather than a stale answer", () => {
+  const bus = createEventBus();
+  const wrapper = { emit: (channel: string, data: unknown) => bus.emit(channel, data) };
+  assert.equal(registeredMcpConfiguration(wrapper as never), undefined);
 });

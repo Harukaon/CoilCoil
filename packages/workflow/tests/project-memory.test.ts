@@ -16,7 +16,6 @@ import test from "node:test";
 import {
   PROJECT_MEMORY_MAX_CHARS,
   PROJECT_MEMORY_STATUS_EVENT,
-  buildMemoryCountCommand,
   buildMemoryWorkerLaunch,
   buildMemoryWorkerPrompt,
   buildProjectMemoryPrompt,
@@ -224,8 +223,8 @@ test("system prompt injects current project memory and soft limit guidance", asy
   assert.match(prompt, /可以使用 read、write、edit/);
   assert.match(prompt, /并不要求是索引/);
   assert.match(prompt, /采用软约束/);
-  assert.match(prompt, /wc -m/);
-  assert.match(prompt, new RegExp(buildMemoryCountCommand(paths.memoryFile).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(prompt, /\[记忆字数\]/);
+  assert.doesNotMatch(prompt, /wc -m/);
   assert.doesNotMatch(prompt, /强制只读|硬上限/);
   assert.match(prompt, new RegExp(paths.projectMemoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(prompt, /不存在全局记忆索引|不要跨项目搜索记忆/);
@@ -251,7 +250,8 @@ test("worker prompt contains paths and policy but never embeds session contents"
   assert.match(prompt, /严禁读取或修改任何其他文件或目录/);
   assert.match(prompt, /普通记忆正文，也可能是索引/);
   assert.match(prompt, /采用软约束/);
-  assert.match(prompt, /wc -m/);
+  assert.match(prompt, /\[记忆字数\]/);
+  assert.doesNotMatch(prompt, /wc -m/);
   assert.doesNotMatch(prompt, /第一行以“索引：”开头|最多 4 个/);
 });
 
@@ -284,7 +284,7 @@ test("worker launch runs inside the global project memory folder with isolated r
   assert.ok(launch.args.includes(paths.workerSessionsDir));
   assert.match(joined, /--no-extensions --extension \/guard\.ts/);
   assert.match(joined, /--no-context-files --no-skills --no-prompt-templates/);
-  assert.match(joined, /--tools read,write,edit,grep,bash/);
+  assert.match(joined, /--tools read,write,edit,grep(?!,)/);
   assert.doesNotMatch(joined, /not-in-argv/);
   assert.equal(launch.env.PI_MEMORY_WORKER, "1");
   assert.equal(launch.env.PI_MEMORY_WORKER_LOCK_FILE, paths.workerLockFile);

@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { BrowserWindow, session, webContents as webContentsRegistry, type WebContents } from "electron";
 import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
+import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { normalizeBrowserUrl } from "./browser-navigation";
@@ -290,6 +291,11 @@ export class BrowserRuntimeManager {
       });
     this.pendingEnsure.set(scopeId, attempt);
     return attempt;
+  }
+
+  /** Frames of the active tab, for a remote client that cannot host the view. */
+  async captureTab(scopeId = this.uiScopeId): Promise<string | undefined> {
+    return captureGuestFrame(this.activeTab(scopeId)?.guest);
   }
 
   selectTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {

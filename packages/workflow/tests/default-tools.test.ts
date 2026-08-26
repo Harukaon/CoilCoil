@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import defaultToolsExtension, {
+  coreGuidelines,
+  extraToolsForPlatform,
   removePiDocumentationGuide,
   removeRedundantToolCatalog,
   removeToolPromptGuidelines,
   trimNativeSystemPrompt,
 } from "../extensions/default-tools.ts";
-import { COILCOIL_ENGINEERING_STANDARDS } from "../extensions/system/engineering-standards.ts";
+import {
+  COILCOIL_ENGINEERING_STANDARDS,
+  COILCOIL_WINDOWS_SHELL_STANDARDS,
+} from "../extensions/system/engineering-standards.ts";
 
 function createHarness() {
   const handlers = new Map<string, Array<(...args: any[]) => any>>();
@@ -128,4 +133,32 @@ ${COILCOIL_ENGINEERING_STANDARDS}
 
 Current working directory: /project`,
   });
+});
+
+test("the PowerShell tool is activated on Windows only", () => {
+  assert.deepEqual(extraToolsForPlatform("darwin"), ["grep", "ls"]);
+  assert.deepEqual(extraToolsForPlatform("linux"), ["grep", "ls"]);
+  assert.deepEqual(extraToolsForPlatform("win32"), ["grep", "ls", "powershell"]);
+});
+
+test("Windows adds the PowerShell preference to the engineering standards", () => {
+  assert.equal(coreGuidelines("darwin"), `\n\n${COILCOIL_ENGINEERING_STANDARDS}`);
+  assert.equal(
+    coreGuidelines("win32"),
+    `\n\n${COILCOIL_ENGINEERING_STANDARDS}\n\n${COILCOIL_WINDOWS_SHELL_STANDARDS}`,
+  );
+  assert.match(COILCOIL_WINDOWS_SHELL_STANDARDS, /Prefer it for shell work/);
+});
+
+test("the Windows system prompt carries the PowerShell guidance", () => {
+  const prompt = `Base
+
+Guidelines:
+- Be concise in your responses
+
+Pi documentation (read only when asked about pi):
+- docs`;
+
+  assert.match(removeToolPromptGuidelines(prompt, "win32"), /powershell tool is available/);
+  assert.doesNotMatch(removeToolPromptGuidelines(prompt, "darwin"), /powershell tool is available/);
 });

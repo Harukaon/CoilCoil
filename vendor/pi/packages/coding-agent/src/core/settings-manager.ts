@@ -29,8 +29,9 @@ export interface ProviderRetrySettings {
 
 export interface RetrySettings {
 	enabled?: boolean; // default: true
-	maxRetries?: number; // default: 3
-	baseDelayMs?: number; // default: 2000 (exponential backoff: 2s, 4s, 8s)
+	maxRetries?: number; // default: 8
+	baseDelayMs?: number; // default: 1500 (exponential backoff: 1.5s, 3s, 6s, ...)
+	maxDelayMs?: number; // default: 30000 (ceiling for the backoff above)
 	provider?: ProviderRetrySettings;
 }
 
@@ -875,11 +876,16 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number } {
+	getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number; maxDelayMs: number } {
 		return {
 			enabled: this.getRetryEnabled(),
-			maxRetries: this.settings.retry?.maxRetries ?? 3,
-			baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,
+			// An unstable upstream usually recovers, and giving up after three
+			// attempts leaves the user resuming a half-finished run by hand.
+			maxRetries: this.settings.retry?.maxRetries ?? 8,
+			baseDelayMs: this.settings.retry?.baseDelayMs ?? 1500,
+			// Doubling without a ceiling reaches minutes per attempt long before
+			// the budget runs out, which reads as a hang rather than a retry.
+			maxDelayMs: this.settings.retry?.maxDelayMs ?? 30_000,
 		};
 	}
 

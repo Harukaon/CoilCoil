@@ -1,4 +1,7 @@
 import { PanelLeft } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { isRemoteClient, MOBILE_DECK_QUERY } from "./hooks/useMobileRemote";
+
 import type {
   ComponentProps,
   Dispatch,
@@ -34,6 +37,7 @@ import { toastError } from "./ui/toast";
 
 type WorkspaceSurface = "conversation" | "skills" | "memory";
 type ConversationProps = ComponentProps<typeof ConversationPane>;
+
 
 export interface AppViewController {
   projects: ProjectSelection[];
@@ -120,6 +124,20 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     draft, images: draftImages, inputRef, modelMenuOpen, modelChanging,
     setDraft, setImages: setDraftImages, setModelMenuOpen,
   } = composer;
+  const shellRef = useRef<HTMLElement | null>(null);
+  // On a phone the three panes are one horizontal snap track, and its natural
+  // resting place is the first pane — the sidebar. The conversation is what the
+  // app opens on, so the track starts one pane in, leaving the sidebar a swipe
+  // to the left and the inspector a swipe to the right.
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || !isRemoteClient() || !window.matchMedia(MOBILE_DECK_QUERY).matches) return;
+    const frame = window.requestAnimationFrame(() => {
+      shell.scrollLeft = shell.clientWidth;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
   useInAppBrowserLinks({
     scopeId: snapshot?.runtimeId ?? project?.path ?? "default",
     openBrowser: inspector.openBrowserTab,
@@ -129,6 +147,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
 
   return (
     <main
+      ref={shellRef}
       className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "" : "right-collapsed"}`}
       style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as React.CSSProperties}
     >

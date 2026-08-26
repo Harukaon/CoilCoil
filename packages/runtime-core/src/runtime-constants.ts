@@ -81,6 +81,21 @@ export const TOOL_PURPOSE_POLICY_STATE = Symbol.for("coilcoil-workflow.tool-purp
 
 export const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("coilcoil-workflow.mcp-agent-config-registry");
 
+/**
+ * How the MCP adapter extension asks for CoilCoil's own server list.
+ *
+ * The list used to be looked up in a WeakMap keyed by the session's event bus,
+ * which worked only while Pi handed extensions that exact object. Pi now gives
+ * each extension a `{emit, on}` wrapper instead, so the lookup silently missed
+ * and the adapter fell back to reading the raw config files — dropping the
+ * bundled browser server and ignoring CoilCoil's removed-server list.
+ *
+ * Asking over the bus needs no shared object identity, so it keeps working
+ * whatever Pi passes as `events`. Emitting is synchronous, so the answer is
+ * filled into the request before `emit` returns.
+ */
+export const MCP_AGENT_CONFIG_CHANNEL = "coilcoil:mcp:agent-config:v1";
+
 export const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 
 export const IGNORED_DIRECTORIES = new Set([
@@ -98,3 +113,13 @@ export const IGNORED_DIRECTORIES = new Set([
 ]);
 
 export type EventSink = (event: RuntimeEvent) => void;
+
+/**
+ * Tools whose runs are one shell command and are mirrored into the terminal
+ * panel. `powershell` is Pi's native Windows shell tool, active only there.
+ */
+export const SHELL_TOOL_NAMES: readonly string[] = ["bash", "powershell"];
+
+export function isShellToolName(name: string): boolean {
+  return SHELL_TOOL_NAMES.includes(name);
+}

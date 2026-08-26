@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolve as resolvePath } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -8,6 +9,7 @@ import {
   PROJECT_MEMORY_MAX_CHARS,
   buildGlobalMemoryPrompt,
   buildProjectMemoryPrompt,
+  buildMemorySizeNotice,
   countCharacters,
   readMemorySettings,
   type ProjectMemoryPaths,
@@ -35,7 +37,7 @@ export {
   MEMORY_PROMPT_MARKER,
   PROJECT_MEMORY_MAX_CHARS,
   buildGlobalMemoryPrompt,
-  buildMemoryCountCommand,
+  buildMemorySizeNotice,
   buildMemoryWorkerPrompt,
   buildProjectMemoryPrompt,
   countCharacters,
@@ -367,6 +369,37 @@ export default function projectMemoryExtension(
       };
     } catch (error) {
       notifyOnce(warningState, notify, error, "项目记忆注入失败");
+      return undefined;
+    }
+  });
+
+  // Counting in-process keeps the budget check working on Windows, where the
+  // shell command the model used to run for it does not exist, and saves a
+  // tool round trip everywhere else.
+  pi.on("tool_result", async (event, ctx) => {
+    if (event.isError) return undefined;
+    if (event.toolName !== "write" && event.toolName !== "edit") return undefined;
+    const rawPath = (event.input as Record<string, unknown>).path;
+    if (typeof rawPath !== "string" || !rawPath.trim()) return undefined;
+    const cwd = ctx.cwd;
+    if (await memoryIsDisabled(cwd, env)) return undefined;
+    try {
+      const settings = await readMemorySettings(env);
+      if (!settings.projectEnabled) return undefined;
+      const paths = await resolveProjectMemoryPaths(cwd, storageRoot);
+      const written = await canonicalPath(resolvePath(cwd, rawPath));
+      if (written !== await canonicalPath(paths.memoryFile)) return undefined;
+      const content = await readUtf8(paths.memoryFile);
+      return {
+        content: [
+          ...event.content,
+          {
+            type: "text" as const,
+            text: buildMemorySizeNotice(paths.memoryFile, content, settings.projectMaxChars),
+          },
+        ],
+      };
+    } catch {
       return undefined;
     }
   });

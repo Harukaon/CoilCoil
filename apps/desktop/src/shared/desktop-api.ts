@@ -134,7 +134,55 @@ export interface UpdateAvailable {
   url: string;
 }
 
+/** How the phone reaches this Mac from outside the local network. */
+export type RemoteTunnelMode = "reverse-proxy" | "tailscale";
+
+export interface RemotePairedDevice {
+  name: string;
+  pairedAt: number;
+  lastSeenAt: number;
+}
+
+export interface RemoteAccessState {
+  enabled: boolean;
+  /** False while enabled means the entry point failed to start; see `error`. */
+  running: boolean;
+  port: number;
+  host: string;
+  mode: RemoteTunnelMode;
+  publicUrl?: string;
+  keepAwake: boolean;
+  keepAwakeActive: boolean;
+  /** Skip the login screen for connections from the user's own tailnet or LAN. */
+  trustLocalNetwork: boolean;
+  /** The account that can sign in without a pairing code, when one is set. */
+  username?: string;
+  /** This Mac's tailnet address, when Tailscale is running. */
+  tailscaleAddress?: string;
+  /** Present only while running: a code means nothing with nothing listening. */
+  pairingCode?: string;
+  devices: RemotePairedDevice[];
+  connectedClients: number;
+  error?: string;
+}
+
+export interface RemoteAccessInput {
+  enabled?: boolean;
+  port?: number;
+  host?: string;
+  mode?: RemoteTunnelMode;
+  publicUrl?: string;
+  keepAwake?: boolean;
+  trustLocalNetwork?: boolean;
+}
+
 export interface CoilCoilDesktopApi {
+  /**
+   * Set only by the browser-side bridge a phone loads. The renderer uses it to
+   * pick the phone layout, which must never be chosen from window width alone:
+   * a desktop window dragged narrow is still a desktop window.
+   */
+  isRemote?: boolean;
   platform: DesktopPlatform;
   /** The running build's version, as packaged. */
   appVersion(): Promise<string>;
@@ -172,6 +220,12 @@ export interface CoilCoilDesktopApi {
   listProjectDirectory(root: string, path?: string): Promise<FileNode[]>;
   setBrowserScope(scopeId: string): Promise<BrowserStateSnapshot>;
   getBrowserState(scopeId: string): Promise<BrowserStateSnapshot>;
+  /**
+   * A JPEG data URL of the built-in browser's current page, or undefined when
+   * no tab can be captured. Used by the remote client, which cannot host the
+   * `<webview>` the desktop window renders the page into.
+   */
+  captureBrowserTab(scopeId: string): Promise<string | undefined>;
   createBrowserTab(scopeId: string, url?: string): Promise<BrowserStateSnapshot>;
   selectBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
   closeBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
@@ -210,6 +264,12 @@ export interface CoilCoilDesktopApi {
   writeDiagnostics(batch: DiagnosticLogBatch): void;
   /** Show the log in the file manager and return its path. */
   revealDiagnostics(): Promise<string>;
+  getRemoteAccess(): Promise<RemoteAccessState>;
+  saveRemoteAccess(input: RemoteAccessInput): Promise<RemoteAccessState>;
+  regenerateRemotePairingCode(): Promise<RemoteAccessState>;
+  setRemoteAccount(username: string, password: string): Promise<RemoteAccessState>;
+  revokeRemoteDevices(): Promise<RemoteAccessState>;
+  onRemoteAccessChanged(listener: (state: RemoteAccessState) => void): () => void;
 }
 
 

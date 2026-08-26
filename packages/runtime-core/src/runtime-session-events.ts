@@ -17,7 +17,9 @@ import {
   titleFromText,
   toolResultText,
 } from "./message-helpers.js";
+import { agentRetryRuntimeEvent } from "./runtime-agent-retry.js";
 import {
+  isShellToolName,
   MAX_TERMINAL_OUTPUT,
   RESPONSE_METRICS_ENTRY_TYPE,
 } from "./runtime-constants.js";
@@ -156,6 +158,10 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
           break;
         }
+        case "auto_retry_start":
+        case "auto_retry_end":
+          this.emitEvent(agentRetryRuntimeEvent(event, this.log));
+          break;
         case "summarization_retry_scheduled":
           active.summaryActivity = {
             ...(active.summaryActivity ?? {
@@ -433,7 +439,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           }
           this.emitEvent({ type: "tool_finished", tool: { ...tool } });
           this.publishProjectFromMemory();
-          if (["write", "edit", "bash", "terminal"].includes(event.toolName)) this.scheduleProjectRefresh();
+          if (["write", "edit", "terminal"].includes(event.toolName) || isShellToolName(event.toolName)) this.scheduleProjectRefresh();
           break;
         }
         case "bash_execution_update": {

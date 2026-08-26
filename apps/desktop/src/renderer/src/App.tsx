@@ -41,6 +41,7 @@ import { useAgentActivityLine } from "./hooks/useAgentActivityLine";
 import { useConversationViewport } from "./hooks/useConversationViewport";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
 import { toastError } from "./ui/toast";
+import type { AgentPhase } from "./features/conversation/agentActivity";
 import {
   ACTIVE_PROJECT_STORAGE_KEY,
   EMPTY_PROJECT,
@@ -84,7 +85,7 @@ export default function App(): React.JSX.Element {
   });
   const rightOpen = inspector.state.rightOpen;
 
-  const [agentPhase, setAgentPhase] = useState<"思考" | "回复" | "工具">();
+  const [agentPhase, setAgentPhase] = useState<AgentPhase>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"models" | "mcp" | "skills" | "appearance">("models");
   const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("conversation");

@@ -87,6 +87,21 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 
 	// gRPC based providers (e.g. NVIDIA NIM)
 	"ResourceExhausted",
+
+	// Gateways in front of a provider report a dropped upstream stream in their
+	// own wording, which matched none of the patterns above. These were the
+	// errors that ended a run outright and left the user resuming by hand.
+	"upstream[_ ]?stream[_ ]?break",
+	"upstream[_ ]?error",
+	"upstream[_ ]?request failed",
+	"stream ended prematurely",
+	"safe to retry",
+	"premature close",
+	"ECONNRESET",
+	"EPIPE",
+	"ETIMEDOUT",
+	"aborted by the (server|upstream)",
+	"openai[_ ]?error",
 ]);
 
 /**

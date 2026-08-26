@@ -549,10 +549,21 @@ export class AgentSession {
 			const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
 			const previousContext = previousSnapshot?.context ?? turn.context;
 
+			// Mid-turn compaction checkpoint. Upstream only checks the threshold
+			// between user turns, so one long tool-calling turn can run far past the
+			// context window and is only rescued when the provider rejects the
+			// request (earendil-works/pi#6879). This hook is the loop's own seam for
+			// swapping the context before the next provider request, which is
+			// exactly where the check belongs.
+			const compacted = await this._checkMidTurnCompaction(turn.message);
+
 			return {
 				...previousSnapshot,
 				context: {
 					...previousContext,
+					// Compaction rewrites agent state, so the loop's own copy of the
+					// conversation is stale the moment it runs.
+					messages: compacted ? this.agent.state.messages.slice() : previousContext.messages,
 					systemPrompt: this._systemPromptOverride ?? this._baseSystemPrompt,
 					tools: this.agent.state.tools.slice(),
 				},
@@ -2869,6 +2880,43 @@ export class AgentSession {
 	}
 
 	/**
+	 * Threshold compaction inside a running turn.
+	 *
+	 * Deliberately narrower than `_checkCompaction`: only the size threshold, and
+	 * never the overflow path. Overflow mid-loop means the request already failed
+	 * and the loop is ending anyway, and the recovery there has to decide whether
+	 * to retry the turn — a decision that belongs to the end-of-run handler, not
+	 * to a hook that must hand a usable context straight back to the loop.
+	 *
+	 * @returns whether the conversation was rewritten, so the caller can refresh
+	 * the loop's copy of it.
+	 */
+	private async _checkMidTurnCompaction(assistantMessage: AssistantMessage): Promise<boolean> {
+		const settings = this.settingsManager.getCompactionSettings();
+		if (!settings.enabled) return false;
+		if (assistantMessage.stopReason === "aborted" || assistantMessage.stopReason === "error") return false;
+		// A compaction already running owns the conversation; a second one would
+		// summarize a moving target.
+		if (this.isCompacting) return false;
+
+		const contextWindow = this.model?.contextWindow ?? 0;
+		if (contextWindow <= 0) return false;
+		if (assistantMessage.provider !== this.model?.provider || assistantMessage.model !== this.model.id) return false;
+
+		// Usage from a message written before the last compaction still describes
+		// the pre-compaction conversation and would trigger an immediate second one.
+		const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
+		if (compactionEntry && assistantMessage.timestamp <= new Date(compactionEntry.timestamp).getTime()) return false;
+
+		const contextTokens = assistantMessage.usage ? calculateContextTokens(assistantMessage.usage) : 0;
+		if (contextTokens <= 0) return false;
+		if (!shouldCompact(contextTokens, contextWindow, settings)) return false;
+
+		await this._runAutoCompaction("threshold", false);
+		return true;
+	}
+
+	/**
 	 * Prepare a retryable error for continuation with exponential backoff.
 	 * @returns true if the caller should continue the agent, false otherwise
 	 */
@@ -2886,7 +2934,7 @@ export class AgentSession {
 			return false;
 		}
 
-		const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
+		const delayMs = Math.min(settings.baseDelayMs * 2 ** (this._retryAttempt - 1), settings.maxDelayMs);
 
 		this._emit({
 			type: "auto_retry_start",

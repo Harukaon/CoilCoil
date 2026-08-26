@@ -402,6 +402,9 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => name !== "find"));
     const activeToolNames = new Set(created.session.getActiveToolNames());
     const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp"];
+    // Pi only builds the PowerShell tool on Windows, where CoilCoil asks the
+    // Agent to prefer it over the Bash-flavoured shell tool.
+    if (process.platform === "win32") requiredTools.push("powershell");
     const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
     if (missingTools.length > 0) {
       await shutdownAgentSession(created.session, "quit").catch(() => undefined);

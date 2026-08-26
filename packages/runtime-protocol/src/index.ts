@@ -1224,6 +1224,14 @@ export type RuntimeEvent =
       contextUsage?: ContextUsage;
       tokenUsage: TokenUsage;
     }
+  /**
+   * The upstream dropped the turn and the runtime is retrying it.
+   *
+   * Retries used to be silent, so an unstable provider looked like the Agent
+   * randomly stopping. `delayMs` is how long the wait before this attempt is.
+   */
+  | { type: "agent_retry"; attempt: number; maxAttempts: number; delayMs: number; message: string }
+  | { type: "agent_retry_finished"; success: boolean; attempt: number; error?: string }
   | { type: "runtime_inspection_updated"; inspection: RuntimeInspectionSnapshot }
   | { type: "runtime_notice"; level: "info" | "success" | "error"; message: string }
   | { type: "run_state"; running: boolean; aborting?: boolean }

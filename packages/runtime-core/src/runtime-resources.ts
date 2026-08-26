@@ -44,6 +44,7 @@ import {
   loadMcpAdapterConfigModule,
   mcpAgentConfigRegistry,
   mcpConfigurationForAgent,
+  serveMcpAgentConfig,
   withBundledBrowserMcp,
 } from "./browser-mcp.js";
 import { RuntimeProviderAuth } from "./runtime-provider-auth.js";
@@ -251,6 +252,13 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     this.reloadActiveSessionResources("MCP 扩展重新加载失败");
   }
 
+  /**
+   * Buses already answering config requests; subscribing twice would duplicate
+   * work. Created on first use because this method can run before a subclass's
+   * field initializers have.
+   */
+  private mcpConfigServed?: WeakSet<object>;
+
   protected async refreshAgentMcpConfiguration(eventBus: EventBusController, cwd: string): Promise<void> {
     const adapter = await loadMcpAdapterConfigModule();
     const resolvedCwd = this.mcpCwd(cwd);
@@ -263,11 +271,19 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       ...this.readRemovedMcpServers(),
       ...this.readDisabledMcpServers(),
     ]);
-    mcpAgentConfigRegistry().set(eventBus, withBundledBrowserMcp(
+    const registry = mcpAgentConfigRegistry();
+    registry.set(eventBus, withBundledBrowserMcp(
       mcpConfigurationForAgent(configuration, hiddenNames),
       process.env,
       this.browserScopeId,
     ));
+    // Pi no longer hands extensions the bus object itself, so identity lookups
+    // miss. Answering over the bus is what actually reaches the adapter.
+    this.mcpConfigServed ??= new WeakSet<object>();
+    if (!this.mcpConfigServed.has(eventBus)) {
+      this.mcpConfigServed.add(eventBus);
+      serveMcpAgentConfig(eventBus, () => registry.get(eventBus));
+    }
   }
 
   protected async reloadActiveSessionNow(active: ActiveSession): Promise<void> {

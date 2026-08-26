@@ -1,4 +1,4 @@
-export type AgentPhase = "思考" | "回复" | "工具";
+export type AgentPhase = "思考" | "回复" | "工具" | "重试";
 
 /**
  * What a short wait shows.
@@ -11,6 +11,9 @@ const PHASE_COPY: Record<AgentPhase, string> = {
   思考: "思考中",
   回复: "组织回答中",
   工具: "动手处理中",
+  // A retry is the one phase that means something went wrong, so it says so
+  // instead of hiding behind a quip.
+  重试: "上游中断，正在重试",
 };
 
 const PHASE_FALLBACK = "工作中";
@@ -184,6 +187,7 @@ export function startQuipRotation(
 
 /** The line to show: a quip once there is one, the phase until then. */
 export function agentActivityLine(phase: AgentPhase | undefined, quip?: string): string {
+  if (phase === "重试") return `${PHASE_COPY.重试}…`;
   if (quip) return quip;
   return `${phase ? PHASE_COPY[phase] : PHASE_FALLBACK}…`;
 }

@@ -25,6 +25,7 @@ import {
 } from "./message-helpers.js";
 import {
   ABANDONED_TOOL_OUTPUT,
+  isShellToolName,
   MAX_TERMINAL_OUTPUT,
   PLAN_ENTRY_TYPE,
   PLAN_RPC_REQUEST_CHANNEL,
@@ -144,7 +145,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         const activity = subagentActivityFromDetails(rawMessage.details, id);
         if (activity) subagents.set(activity.id, restoredSubagentActivity(activity));
       }
-      if (name === "bash" || (name === "terminal" && args.action === "start")) {
+      if (isShellToolName(name) || (name === "terminal" && args.action === "start")) {
         const terminalId = terminalIdFromResult(rawMessage.details) ?? id;
         const terminalStatus = terminalStatusFromResult(rawMessage.details, failed);
         terminals.set(terminalId, {
@@ -173,7 +174,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         startedAt: call.timestamp,
         endedAt: call.timestamp,
       });
-      if (call.name === "bash" || (call.name === "terminal" && call.args.action === "start")) {
+      if (isShellToolName(call.name) || (call.name === "terminal" && call.args.action === "start")) {
         terminals.set(call.id, {
           id: call.id,
           command: stringValue(call.args.command) || call.name,
@@ -229,7 +230,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
   ): string {
     const purpose = restoredPurpose ?? liveToolPurpose(sessionId, toolCallId) ?? purposeFromArgs(args);
     if (purpose) return purpose;
-    if (name === "bash") return `运行 ${stringValue(args.command) || "命令"}`;
+    if (isShellToolName(name)) return `运行 ${stringValue(args.command) || "命令"}`;
     if (name === "read") return `查看 ${stringValue(args.path) || "文件"}`;
     if (name === "write") return `写入 ${stringValue(args.path) || "文件"}`;
     if (name === "edit") return `编辑 ${stringValue(args.path) || "文件"}`;
@@ -282,7 +283,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         this.publishSubagents();
       }
     }
-    if (call.name === "bash" || (call.name === "terminal" && call.args.action === "start")) {
+    if (isShellToolName(call.name) || (call.name === "terminal" && call.args.action === "start")) {
       const terminal = active.terminals.get(tool.id);
       active.terminals.set(tool.id, {
         id: tool.id,

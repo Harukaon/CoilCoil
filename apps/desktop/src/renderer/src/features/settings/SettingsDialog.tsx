@@ -1,4 +1,4 @@
-import { ArrowLeft, ClipboardPaste, ExternalLink, FileJson, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ClipboardPaste, ExternalLink, FileJson, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Smartphone, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
@@ -16,11 +16,16 @@ import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServ
 import { ModelSettings } from "./ModelSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { McpJsonEditor } from "./McpJsonEditor";
+import { useMobileRemote } from "../../hooks/useMobileRemote";
+import { RemoteSettings } from "./RemoteSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
 import { SkillSettings } from "./SkillSettings";
 import "./settings.css";
 
-type SettingsSection = "models" | "mcp" | "skills" | "shortcuts" | "appearance";
+/** Keep in step with the sidebar width in mobile.css. */
+const SETTINGS_MOBILE_SIDEBAR_WIDTH = 220;
+
+type SettingsSection = "models" | "mcp" | "skills" | "shortcuts" | "remote" | "appearance";
 const MASKED_SECRET_VALUE = "••••••";
 const SETTINGS_SIDEBAR_WIDTH_KEY = "coilcoil.settings-sidebar-width";
 const DEFAULT_SETTINGS_SIDEBAR_WIDTH = 220;
@@ -532,6 +537,16 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
   initialSection?: SettingsSection;
 }): React.JSX.Element | null {
   const [section, setSection] = useState<SettingsSection>(initialSection);
+  const mobile = useMobileRemote();
+  /**
+   * Two pages stay on the Mac.
+   *
+   * A global shortcut only means anything to the machine the keyboard is
+   * attached to, and remote access is the thing the phone is currently holding
+   * open — turning it off from there would strand whoever is using it.
+   */
+  const hidden = mobile && (section === "shortcuts" || section === "remote");
+  const shown: SettingsSection = hidden ? "models" : section;
   const [sidebarWidth, setSidebarWidth] = useState(storedSettingsSidebarWidth);
   const [mcpJsonOpen, setMcpJsonOpen] = useState(false);
   const [mcpReloadKey, setMcpReloadKey] = useState(0);
@@ -575,9 +590,29 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
     window.addEventListener("pointerup", stop, { once: true });
   }, [sidebarWidth]);
 
+  /**
+   * The settings screen is one wide canvas on a phone, not a rebuilt layout.
+   *
+   * Pages like MCP carry dense tables and long paths that would each need their
+   * own mobile design. Keeping the desktop widths and letting the phone pan
+   * across them costs nothing and behaves the same on every page: swipe left
+   * for the section list, swipe right for the page itself.
+   */
+  const screenRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const screen = screenRef.current;
+    if (!open || !mobile || !screen) return;
+    const frame = window.requestAnimationFrame(() => {
+      // Land on the page rather than the section list: the caller already chose
+      // which page to open.
+      screen.scrollLeft = SETTINGS_MOBILE_SIDEBAR_WIDTH;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, mobile]);
+
   if (!open) return null;
   return (
-    <main className="settings-screen" aria-labelledby="settings-title" style={{ "--settings-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+    <main ref={screenRef} className="settings-screen" aria-labelledby="settings-title" style={{ "--settings-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
       <aside className="settings-sidebar">
         <div className="settings-window-drag window-drag" />
         <button className="settings-sidebar-home" type="button" aria-label="返回工作区" onClick={onClose}><ArrowLeft size={15} /><span>返回工作区</span></button>
@@ -585,7 +620,8 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
           <button className={section === "models" ? "active" : ""} type="button" onClick={() => setSection("models")}><Settings size={15} />模型与服务商</button>
           <button className={section === "mcp" ? "active" : ""} type="button" onClick={() => setSection("mcp")}><Network size={15} />MCP</button>
           <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />技能</button>
-          <button className={section === "shortcuts" ? "active" : ""} type="button" onClick={() => setSection("shortcuts")}><Keyboard size={15} />快捷键</button>
+          {mobile ? null : <button className={section === "shortcuts" ? "active" : ""} type="button" onClick={() => setSection("shortcuts")}><Keyboard size={15} />快捷键</button>}
+          {mobile ? null : <button className={section === "remote" ? "active" : ""} type="button" onClick={() => setSection("remote")}><Smartphone size={15} />远程控制</button>}
           <button className={section === "appearance" ? "active" : ""} type="button" onClick={() => setSection("appearance")}><Palette size={15} />外观</button>
         </nav>
         <div className="settings-version" title={appVersion ? `CoilCoil ${appVersion}` : undefined}>
@@ -597,24 +633,26 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
         <header className="settings-page-header window-drag">
           <div>
             <span className="settings-icon">
-              {section === "models" ? <Settings size={17} /> : section === "mcp" ? <Network size={17} /> : section === "appearance" ? <Palette size={17} /> : section === "shortcuts" ? <Keyboard size={17} /> : <Sparkles size={17} />}
+              {shown === "models" ? <Settings size={17} /> : shown === "mcp" ? <Network size={17} /> : shown === "appearance" ? <Palette size={17} /> : shown === "shortcuts" ? <Keyboard size={17} /> : shown === "remote" ? <Smartphone size={17} /> : <Sparkles size={17} />}
             </span>
             <div>
-              <h1 id="settings-title">{section === "models" ? "模型与服务商" : section === "mcp" ? "MCP" : section === "appearance" ? "外观" : section === "shortcuts" ? "快捷键" : "技能"}</h1>
+              <h1 id="settings-title">{shown === "models" ? "模型与服务商" : shown === "mcp" ? "MCP" : shown === "appearance" ? "外观" : shown === "shortcuts" ? "快捷键" : shown === "remote" ? "远程控制" : "技能"}</h1>
               <p>
-                {section === "skills"
+                {shown === "remote"
+                  ? "从手机遥控这台 Mac，配对码只在这里显示。"
+                  : shown === "skills"
                   ? "按需加载的专业技能包。"
-                  : section === "appearance"
+                  : shown === "appearance"
                     ? "全局色调，一键切换并本机保存。"
-                    : section === "shortcuts"
+                    : shown === "shortcuts"
                       ? "全局快捷键会被系统里所有应用共享，所以默认一个都不占用。"
                       : "模型凭据和 MCP 配置均保存在 CoilCoil 的私有运行时中。"}
               </p>
             </div>
           </div>
-          {section === "models" ? (
+          {shown === "models" ? (
             <ToolPurposePolicyToggle configuration={configuration} runtimeId={runtimeId} onSaved={onSaved} />
-          ) : section === "mcp" ? (
+          ) : shown === "mcp" ? (
             <button
               className="settings-header-action no-window-drag"
               type="button"
@@ -625,13 +663,15 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
           ) : null}
         </header>
         <div className="settings-page-content">
-          {section === "models" ? (
+          {shown === "models" ? (
             <ModelSettings configuration={configuration} onSaved={onSaved} runtimeId={runtimeId} />
-          ) : section === "mcp" ? (
+          ) : shown === "mcp" ? (
             <McpSettings runtimeId={runtimeId} cwd={cwd} reloadKey={mcpReloadKey} />
-          ) : section === "shortcuts" ? (
+          ) : shown === "shortcuts" ? (
             <ShortcutSettings />
-          ) : section === "appearance" ? (
+          ) : shown === "remote" ? (
+            <RemoteSettings />
+          ) : shown === "appearance" ? (
             <AppearanceSettings />
           ) : (
             <SkillSettings runtimeId={runtimeId} cwd={cwd} />
