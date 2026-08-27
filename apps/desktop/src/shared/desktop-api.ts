@@ -113,6 +113,75 @@ export interface BrowserUiViewport {
   height: number;
 }
 
+/** A browser CoilCoil can import an existing signed-in state from. */
+export type ImportableBrowserId =
+  | "chrome"
+  | "chrome-beta"
+  | "chrome-canary"
+  | "chromium"
+  | "edge"
+  | "brave"
+  | "vivaldi"
+  | "arc"
+  | "safari";
+
+/**
+ * One profile of one installed browser. Chrome keeps a separate persona per
+ * profile directory, so the user must be able to say which one to take.
+ */
+export interface ImportableProfile {
+  browser: ImportableBrowserId;
+  browserName: string;
+  /** Profile directory name, or "default" for browsers without profiles. */
+  id: string;
+  name: string;
+  email?: string;
+  /** Absent when the count could not be read without asking for credentials. */
+  cookieCount?: number;
+  passwordCount?: number;
+  available: boolean;
+  /** Why it cannot be imported right now, when `available` is false. */
+  problem?: string;
+}
+
+export interface ImportBrowserCookiesInput {
+  browser: ImportableBrowserId;
+  profile: string;
+  /** Saved logins are a separate decision from sessions, so they are opt-in. */
+  includePasswords?: boolean;
+}
+
+export interface BrowserImportSummary {
+  imported: number;
+  /** Expired or malformed records that were never worth writing. */
+  skipped: number;
+  /** Records the built-in browser refused. */
+  failed: number;
+  /** Records that could not be decrypted or parsed at the source. */
+  unreadable: number;
+  /** Distinct sites now carrying a session. */
+  hosts: number;
+  /** Saved logins written into CoilCoil's own encrypted store. */
+  passwords: number;
+  /** Something was skipped but the import itself succeeded. */
+  note?: string;
+  error?: string;
+}
+
+/** What the built-in browser currently remembers. */
+export interface BrowserDataStats {
+  cookies: number;
+  hosts: number;
+  savedLogins: number;
+}
+
+/** A saved login as it may be shown on screen: never the password itself. */
+export interface SavedLoginSummary {
+  origin: string;
+  username: string;
+  importedAt: number;
+}
+
 export interface TerminalSessionSnapshot {
   id: string;
   cwd: string;
@@ -234,6 +303,15 @@ export interface CoilCoilDesktopApi {
   browserForward(scopeId: string): Promise<BrowserStateSnapshot>;
   reloadBrowser(scopeId: string): Promise<BrowserStateSnapshot>;
   setBrowserUiViewport(viewport: BrowserUiViewport): Promise<void>;
+  /** Browsers installed on this Mac whose signed-in state can be taken over. */
+  listImportableBrowsers(): Promise<ImportableProfile[]>;
+  /** Copy one profile's cookies into the built-in browser. May prompt for the keychain. */
+  importBrowserCookies(input: ImportBrowserCookiesInput): Promise<BrowserImportSummary>;
+  getBrowserDataStats(): Promise<BrowserDataStats>;
+  /** Origins and usernames of the imported logins; the passwords never leave main. */
+  listSavedLogins(): Promise<SavedLoginSummary[]>;
+  /** Sign the built-in browser out of everything, including saved logins. */
+  clearBrowserData(): Promise<BrowserDataStats>;
   /** The guest layer has mounted; returns the roster it must reconcile against. */
   browserGuestLayerReady(): Promise<BrowserGuestRoster>;
   /** Report the guest created for a roster slot. Rejects rather than rebinding. */

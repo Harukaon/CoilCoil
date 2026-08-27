@@ -75,6 +75,33 @@ API（[#1335](https://github.com/electron/electron/issues/1335) 2015 起、
 `Emulation.setDeviceMetricsOverride` 给出真实视口，截图恢复可用；活动标签页则清除
 该覆盖，让页面按面板实际宽度回流。
 
+## 导入登录状态与一键清空
+
+内置浏览器的 `persist:coilcoil-browser` 分区与用户日常使用的浏览器互不相通，
+Agent 因此在每个网站都是未登录状态。「设置 → 浏览器」提供两个互为对称的动作：
+把某个已有浏览器配置文件的登录状态复制进来，以及一键把内置浏览器清空。
+
+- **Cookie 导入**：Chrome 系浏览器的 Cookie 库是 SQLite，值用 macOS 登录钥匙串里的
+  `<Browser> Safe Storage` 口令派生的 AES-128-CBC 加密（PBKDF2-SHA1、盐 `saltysalt`、
+  1003 次迭代、IV 为 16 个空格）。较新的 Chrome 会在明文前加 32 字节的
+  `sha256(host_key)` 做域绑定，只有确实等于该哈希时才剥掉，否则旧记录会被截断。
+  读取前把数据库连同 `-wal`/`-journal` 复制到临时目录，绝不在用户浏览器持有的文件上
+  开写事务。Safari 的 `Cookies.binarycookies` 不加密，但位于沙盒容器内，
+  需要「完全磁盘访问权限」，被系统拒绝时给出明确指引而不是报错。
+- **配置文件选择**：Chrome 按角色分目录（`Default`、`Profile 1`…），显示名和登录邮箱
+  来自 `Local State` 的 `profile.info_cache`——不显示这两项的话，用户无从分辨要导入哪一个。
+- **密码导入（可选）**：来自同一把钥匙串密钥下的 `Login Data`，但密码在 Electron 里
+  没有归宿，因此存进 CoilCoil 自己的库：`safeStorage` 加密后写在 userData 下的
+  `browser-credentials.bin`。**密码不进入模型、不进入工具、不随远程控制离开这台 Mac**，
+  唯一的消费者是内置浏览器页面里的自动填充：同源、且只匹配到一条凭据、且密码框为空时
+  才填，且永不自动提交。Safari 的密码是逐条受控的钥匙串项，系统不允许整批导出。
+- **一键清空**：`clearStorageData` + `clearCache` + `clearAuthCache` 三者缺一不可
+  （只清前者会留下 HTTP 缓存和代理凭据，网站仍可能认出用户），并同时删除密码库。
+  把登录态交给一个 Agent 是可以接受的，前提是收回它只要一次点击。
+
+目前仅 macOS。Chrome 127 起 Windows 改用 App-Bound Encryption，其他应用无法读取，
+因此在 Windows 上界面直接说明不支持，而不是给一个必然失败的按钮。
+
 ## 上游复用方式
 
 Chrome DevTools MCP 作为 Apache-2.0 npm 依赖保留，CoilCoil 不复制它的通用工具层。

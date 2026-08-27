@@ -4,6 +4,7 @@ import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } fro
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserGuestRegistry } from "./browser-guests";
+import { fillSavedCredentials } from "./browser-import";
 import { normalizeBrowserUrl } from "./browser-navigation";
 import {
   DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
@@ -548,6 +549,9 @@ export class BrowserRuntimeManager {
     contents.on("page-title-updated", update);
     contents.on("did-navigate", update);
     contents.on("did-navigate-in-page", update);
+    // A login form is only worth filling once the document exists; anything the
+    // user has already typed is left alone by the fill itself.
+    contents.on("dom-ready", () => fillSavedCredentials(contents));
     contents.on("render-process-gone", update);
   }
 

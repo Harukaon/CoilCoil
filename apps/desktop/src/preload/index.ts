@@ -8,8 +8,12 @@ import type {
   BubbleShortcutState,
   McpConnectionTest,
   McpConnectionTestInput,
+  BrowserDataStats,
+  BrowserImportSummary,
   BrowserStateSnapshot,
   BrowserUiViewport,
+  ImportBrowserCookiesInput,
+  ImportableProfile,
   FilePreviewDocument,
   OpenFilePreviewInput,
   OpenFilePreviewResult,
@@ -22,6 +26,7 @@ import type {
   RuntimeEventPayload,
   RuntimeRequestPayload,
   RuntimeRequestResult,
+  SavedLoginSummary,
   CoilCoilDesktopApi,
   TerminalDataEvent,
   TerminalSessionSnapshot,
@@ -72,6 +77,11 @@ const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_UI_VIEWPORT_CHANNEL = "browser:ui-viewport";
+const BROWSER_IMPORT_LIST_CHANNEL = "browser:import-list";
+const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
+const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
+const BROWSER_SAVED_LOGINS_CHANNEL = "browser:saved-logins";
+const BROWSER_DATA_CLEAR_CHANNEL = "browser:data-clear";
 const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
 const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
 const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
@@ -158,6 +168,12 @@ const api: CoilCoilDesktopApi = {
   browserForward: (scopeId: string) => ipcRenderer.invoke(BROWSER_FORWARD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   reloadBrowser: (scopeId: string) => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   setBrowserUiViewport: (viewport: BrowserUiViewport) => ipcRenderer.invoke(BROWSER_UI_VIEWPORT_CHANNEL, viewport) as Promise<void>,
+  listImportableBrowsers: () => ipcRenderer.invoke(BROWSER_IMPORT_LIST_CHANNEL) as Promise<ImportableProfile[]>,
+  importBrowserCookies: (input: ImportBrowserCookiesInput) =>
+    ipcRenderer.invoke(BROWSER_IMPORT_COOKIES_CHANNEL, input) as Promise<BrowserImportSummary>,
+  getBrowserDataStats: () => ipcRenderer.invoke(BROWSER_DATA_STATS_CHANNEL) as Promise<BrowserDataStats>,
+  listSavedLogins: () => ipcRenderer.invoke(BROWSER_SAVED_LOGINS_CHANNEL) as Promise<SavedLoginSummary[]>,
+  clearBrowserData: () => ipcRenderer.invoke(BROWSER_DATA_CLEAR_CHANNEL) as Promise<BrowserDataStats>,
   browserGuestLayerReady: () => ipcRenderer.invoke(BROWSER_GUEST_LAYER_READY_CHANNEL) as Promise<BrowserGuestRoster>,
   registerBrowserGuest: (tabId: string, nonce: string, webContentsId: number) =>
     ipcRenderer.invoke(BROWSER_REGISTER_GUEST_CHANNEL, tabId, nonce, webContentsId) as Promise<void>,

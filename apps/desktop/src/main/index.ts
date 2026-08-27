@@ -13,7 +13,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell } from "electron";
 import { createRequire } from "node:module";
 import type { DiagnosticLogBatch } from "@coilcoil/runtime-protocol";
-import type { BrowserUiViewport, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RemoteAccessInput, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import type { BrowserUiViewport, ImportBrowserCookiesInput, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RemoteAccessInput, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
 import { appIconPath } from "./app-icon";
 import { BUBBLE_OPEN_SESSION_CHANNEL, setupBubbleWindow } from "./bubble-window.js";
 import { testMcpConnection } from "./mcp-connection-test.js";
@@ -24,6 +24,7 @@ import {
   type GuestContextMenuParams,
 } from "./browser-context-menu";
 import { hardenGuestPreferences } from "./browser-webview-policy";
+import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
@@ -104,6 +105,11 @@ const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_UI_VIEWPORT_CHANNEL = "browser:ui-viewport";
+const BROWSER_IMPORT_LIST_CHANNEL = "browser:import-list";
+const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
+const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
+const BROWSER_SAVED_LOGINS_CHANNEL = "browser:saved-logins";
+const BROWSER_DATA_CLEAR_CHANNEL = "browser:data-clear";
 const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
 const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
 const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
@@ -914,6 +920,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_BACK_CHANNEL, (event, scopeId: string) => browserFor(event).back(scopeId));
   ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event, scopeId: string) => browserFor(event).forward(scopeId));
   ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event, scopeId: string) => browserFor(event).reload(scopeId));
+  ipcMain.handle(BROWSER_IMPORT_LIST_CHANNEL, () => listImportableProfiles());
+  ipcMain.handle(BROWSER_IMPORT_COOKIES_CHANNEL, (_event, input: ImportBrowserCookiesInput) => importBrowserCookies(input));
+  ipcMain.handle(BROWSER_DATA_STATS_CHANNEL, () => browserDataStats());
+  ipcMain.handle(BROWSER_SAVED_LOGINS_CHANNEL, () => savedLogins());
+  ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, () => clearBrowserData());
   ipcMain.handle(BROWSER_GUEST_LAYER_READY_CHANNEL, (event) => browserFor(event).markGuestLayerReady());
   ipcMain.handle(BROWSER_REGISTER_GUEST_CHANNEL, (event, tabId: string, nonce: string, webContentsId: number): void => {
     // Throws on any failed check so the renderer drops the element it created

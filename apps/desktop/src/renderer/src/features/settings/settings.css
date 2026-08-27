@@ -870,3 +870,39 @@
 .remote-device-name { min-width: 0; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-306)); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .remote-device-when { flex: none; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; font-variant-numeric: tabular-nums; }
 .remote-field-hint { color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; font-weight: 400; line-height: 1.6; }
+
+/* 浏览器：导入登录状态与清空内置浏览器数据 */
+.browser-settings { display: grid; height: 100%; align-content: start; gap: 26px; overflow-y: auto; padding: 22px 26px 26px; }
+.browser-section { display: grid; gap: 12px; }
+.browser-section h3 { margin: 0; font-size: 13px; font-weight: 650; }
+.browser-lead { margin: 0; max-width: 62ch; color: hsl(var(--th) var(--ts) var(--l-489)); font-size: 11px; line-height: 1.7; }
+.browser-empty { margin: 0; padding: 16px 18px; border: 1px dashed hsl(var(--th) var(--ts) var(--l-861)); border-radius: 10px; color: hsl(var(--th) var(--ts) var(--l-560)); font-size: 11px; }
+.browser-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.browser-section-head > div { display: grid; gap: 6px; min-width: 0; }
+.browser-ghost-button,
+.browser-danger-button,
+.browser-import-button { display: inline-flex; height: 30px; flex: none; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid hsl(var(--th) var(--ts) var(--l-841)); border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-306)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px; cursor: pointer; }
+.browser-ghost-button:hover,
+.browser-import-button:hover { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-920)); }
+.browser-danger-button { color: var(--c-red-muted, hsl(0 60% 48%)); }
+.browser-danger-button:hover { background: hsl(0 60% 48% / 8%); }
+.browser-ghost-button:disabled,
+.browser-danger-button:disabled,
+.browser-import-button:disabled { opacity: .5; cursor: default; }
+.browser-profile-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.browser-profile-list li { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid hsl(var(--th) var(--ts) var(--l-841)); border-radius: 10px; background: hsl(var(--th) var(--ts) var(--l-1000)); }
+.browser-profile-list li.unavailable { opacity: .62; }
+.browser-profile-icon { display: flex; width: 30px; height: 30px; flex: none; align-items: center; justify-content: center; border-radius: 8px; background: hsl(var(--th) var(--ts) var(--l-936)); color: hsl(var(--th) var(--ts) var(--l-406)); }
+.browser-profile-label { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.browser-profile-label strong { overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-175)); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.browser-profile-name { color: hsl(var(--th) var(--ts) var(--l-489)); font-weight: 500; }
+.browser-profile-meta { overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-560)); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.browser-check { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid hsl(var(--th) var(--ts) var(--l-882)); border-radius: 10px; background: hsl(var(--th) var(--ts) var(--l-955)); cursor: pointer; }
+.browser-check input { margin-top: 3px; }
+.browser-check span { display: grid; gap: 4px; }
+.browser-check strong { color: hsl(var(--th) var(--ts) var(--l-198)); font-size: 11.5px; font-weight: 600; }
+.browser-check small { max-width: 62ch; color: hsl(var(--th) var(--ts) var(--l-560)); font-size: 10px; line-height: 1.7; }
+.browser-login-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.browser-login-list li { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid hsl(var(--th) var(--ts) var(--l-882)); border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-406)); font-size: 11px; }
+.browser-login-origin { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-login-user { color: hsl(var(--th) var(--ts) var(--l-560)); font-size: 10px; }
