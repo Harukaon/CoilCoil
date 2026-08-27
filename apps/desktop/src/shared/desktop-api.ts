@@ -163,6 +163,8 @@ export interface BrowserImportSummary {
   hosts: number;
   /** Saved logins written into CoilCoil's own encrypted store. */
   passwords: number;
+  /** Sites behind `failed` and `unreadable`, so the user can see what is missing. */
+  problemHosts: string[];
   /** Something was skipped but the import itself succeeded. */
   note?: string;
   error?: string;

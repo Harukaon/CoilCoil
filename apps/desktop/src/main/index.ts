@@ -924,7 +924,9 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_IMPORT_COOKIES_CHANNEL, (_event, input: ImportBrowserCookiesInput) => importBrowserCookies(input));
   ipcMain.handle(BROWSER_DATA_STATS_CHANNEL, () => browserDataStats());
   ipcMain.handle(BROWSER_SAVED_LOGINS_CHANNEL, () => savedLogins());
-  ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, () => clearBrowserData());
+  ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, () => clearBrowserData(
+    (event, data) => diagnosticLog().info("browser-data", event, data),
+  ));
   ipcMain.handle(BROWSER_GUEST_LAYER_READY_CHANNEL, (event) => browserFor(event).markGuestLayerReady());
   ipcMain.handle(BROWSER_REGISTER_GUEST_CHANNEL, (event, tabId: string, nonce: string, webContentsId: number): void => {
     // Throws on any failed check so the renderer drops the element it created

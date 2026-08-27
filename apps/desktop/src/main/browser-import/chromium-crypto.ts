@@ -23,11 +23,35 @@ const KEY_ITERATIONS = 1003;
 const KEY_LENGTH = 16;
 const VERSION_TAG = "v10";
 
+/**
+ * macOS `security` exit codes worth telling apart.
+ *
+ * 36 is `errSecInteractionNotAllowed`: the keychain would have asked the user,
+ * but the process has no window session to ask in. That is not a refusal, and
+ * saying "denied" for it sends the user looking for a prompt that never came.
+ * 44 is the item simply not being there, which means that browser has never run.
+ */
+const INTERACTION_NOT_ALLOWED = 36;
+const ITEM_NOT_FOUND = 44;
+
 export class KeychainDeniedError extends Error {
-  constructor(browserName: string) {
-    super(`无法读取「${browserName}」的钥匙串密码，导入已取消。`);
+  constructor(message: string) {
+    super(message);
     this.name = "KeychainDeniedError";
   }
+}
+
+function keychainFailure(browserName: string, code: number | undefined): KeychainDeniedError {
+  if (code === ITEM_NOT_FOUND) {
+    return new KeychainDeniedError(`钥匙串里没有「${browserName}」的加密密码，这个浏览器可能从未在本机运行过。`);
+  }
+  if (code === INTERACTION_NOT_ALLOWED) {
+    return new KeychainDeniedError(
+      `系统不允许弹出钥匙串授权窗口，所以读不到「${browserName}」的密码。`
+      + "这通常是因为 CoilCoil 不是从桌面启动的（例如从远程终端启动）；请从访达或程序坞正常打开 CoilCoil 后重试。",
+    );
+  }
+  return new KeychainDeniedError(`无法读取「${browserName}」的钥匙串密码，导入已取消。`);
 }
 
 export async function readSafeStorageKey(browser: ChromiumBrowserDescriptor): Promise<Buffer> {
@@ -42,12 +66,11 @@ export async function readSafeStorageKey(browser: ChromiumBrowserDescriptor): Pr
       browser.keychainAccount,
     ]);
     passphrase = stdout.trim();
-  } catch {
-    // Either the entry does not exist (browser never launched) or the user
-    // dismissed the keychain prompt. Both mean the same thing here.
-    throw new KeychainDeniedError(browser.name);
+  } catch (error) {
+    const code = (error as { code?: number }).code;
+    throw keychainFailure(browser.name, typeof code === "number" ? code : undefined);
   }
-  if (!passphrase) throw new KeychainDeniedError(browser.name);
+  if (!passphrase) throw keychainFailure(browser.name, undefined);
   return pbkdf2Sync(passphrase, KEY_SALT, KEY_ITERATIONS, KEY_LENGTH, "sha1");
 }
 

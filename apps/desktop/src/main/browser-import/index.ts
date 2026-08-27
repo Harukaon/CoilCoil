@@ -93,18 +93,24 @@ async function harvestLogins(input: ImportBrowserCookiesInput): Promise<{ saved:
 }
 
 export async function importBrowserCookies(input: ImportBrowserCookiesInput): Promise<BrowserImportSummary> {
-  const empty = { imported: 0, skipped: 0, failed: 0, unreadable: 0, hosts: 0, passwords: 0 };
+  const empty = { imported: 0, skipped: 0, failed: 0, unreadable: 0, hosts: 0, passwords: 0, problemHosts: [] };
   if (!importSupported()) return { ...empty, error: "目前只支持在 macOS 上导入。" };
   try {
-    const { cookies, unreadable } = await harvestCookies(input);
+    const { cookies, unreadable, unreadableHosts } = await harvestCookies(input);
     const written = await writeCookies(cookies);
     // The keychain has already been unlocked for the cookies by this point, so
     // the passwords cost the user no second prompt.
     const logins = input.includePasswords ? await harvestLogins(input) : { saved: 0, unreadable: 0, note: undefined };
+    // Naming the sites is the difference between "19 条读不出来" and knowing
+    // whether the one site that mattered came over.
+    const problemHosts = [...new Set([...(unreadableHosts ?? []), ...written.failedHosts])]
+      .map((host) => host.replace(/^\./, ""))
+      .sort();
     return {
       ...written,
       unreadable: unreadable + logins.unreadable,
       passwords: logins.saved,
+      problemHosts,
       note: logins.note,
     };
   } catch (error) {
@@ -123,19 +129,69 @@ export function savedLogins(): SavedLoginSummary[] {
   return listSavedLogins();
 }
 
+/** How long any one clearing step may take before it is reported as stuck. */
+const CLEAR_STEP_TIMEOUT_MS = 10_000;
+
+export type ClearStepLogger = (event: string, data: Record<string, unknown>) => void;
+
+/**
+ * Run one clearing step under a deadline.
+ *
+ * Chromium's storage teardown can block on a database that is busy or damaged,
+ * and an `await` that never settles leaves the user watching a spinner with
+ * nothing to act on. A step that overruns is reported by name instead, so the
+ * rest of the clearing still happens and the log says which store is at fault.
+ */
+async function clearStep(label: string, work: () => Promise<unknown>, log?: ClearStepLogger): Promise<string | undefined> {
+  const started = Date.now();
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      work(),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} 超时`)), CLEAR_STEP_TIMEOUT_MS);
+      }),
+    ]);
+    log?.("browser_clear_step", { step: label, elapsedMs: Date.now() - started });
+    return undefined;
+  } catch (error) {
+    log?.("browser_clear_step_failed", {
+      step: label,
+      elapsedMs: Date.now() - started,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return label;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Everything the built-in browser remembers about the user, removed.
  *
  * `clearStorageData` alone leaves the HTTP cache and the credentials of any
  * authenticated proxy behind, and both can keep a site recognising the user
- * after a "clear". The four calls together are what "signed out of everything"
+ * after a "clear". The four steps together are what "signed out of everything"
  * actually takes.
  */
-export async function clearBrowserData(): Promise<BrowserDataStats> {
+export async function clearBrowserData(log?: ClearStepLogger): Promise<BrowserDataStats> {
   const store = browserSession();
-  await store.clearStorageData();
-  await store.clearCache();
-  await store.clearAuthCache();
+  log?.("browser_clear_started", {});
+  const stuck: string[] = [];
+  for (const [label, work] of [
+    ["cookies", () => store.clearStorageData({ storages: ["cookies"] })],
+    ["storage", () => store.clearStorageData()],
+    ["cache", () => store.clearCache()],
+    ["auth", () => store.clearAuthCache()],
+  ] as [string, () => Promise<unknown>][]) {
+    const failed = await clearStep(label, work, log);
+    if (failed) stuck.push(failed);
+  }
   clearSavedLogins();
-  return browserDataStats();
+  const stats = await browserDataStats();
+  log?.("browser_clear_finished", { ...stats, stuck });
+  if (stuck.length > 0 && stats.cookies > 0) {
+    throw new Error(`清空没有完成：${stuck.join("、")} 这一步没有响应，浏览器里还剩 ${stats.cookies} 条 Cookie。`);
+  }
+  return stats;
 }

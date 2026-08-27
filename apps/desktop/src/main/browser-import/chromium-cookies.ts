@@ -4,24 +4,32 @@ import { decryptChromiumValue, readSafeStorageKey } from "./chromium-crypto";
 import type { CookieHarvest, ImportedCookie } from "./cookie-record";
 import { chromiumTimeToUnixSeconds, withDatabaseCopy } from "./sqlite-snapshot";
 
+/**
+ * Every integer arrives as a BigInt.
+ *
+ * Chromium stores timestamps as microseconds since 1601, which passed
+ * `Number.MAX_SAFE_INTEGER` in 1885 — `node:sqlite` refuses to narrow those to a
+ * JavaScript number and throws. Reading the whole row as BigInt is the only way
+ * to get the cookie at all; the small columns are narrowed back below.
+ */
 interface CookieRow {
   host_key: string;
   name: string;
   value: string;
   encrypted_value: Uint8Array;
   path: string;
-  expires_utc: number | bigint;
-  is_secure: number;
-  is_httponly: number;
-  is_persistent: number;
-  samesite: number;
+  expires_utc: bigint;
+  is_secure: bigint;
+  is_httponly: bigint;
+  is_persistent: bigint;
+  samesite: bigint;
 }
 
 /** Chromium's SameSite enum, which is not the string Electron wants. */
-function sameSiteOf(value: number): ImportedCookie["sameSite"] {
-  if (value === 0) return "no_restriction";
-  if (value === 1) return "lax";
-  if (value === 2) return "strict";
+function sameSiteOf(value: bigint): ImportedCookie["sameSite"] {
+  if (value === 0n) return "no_restriction";
+  if (value === 1n) return "lax";
+  if (value === 2n) return "strict";
   return "unspecified";
 }
 
@@ -45,14 +53,19 @@ export async function readChromiumCookies(
 ): Promise<CookieHarvest> {
   const database = cookieDatabasePath(profilePath);
   if (!database) return { cookies: [], unreadable: 0 };
-  const key = await readSafeStorageKey(browser);
+  return cookiesFromDatabase(database, await readSafeStorageKey(browser));
+}
+
+/** Split from the reader above so the row handling can be tested without a keychain. */
+export function cookiesFromDatabase(database: string, key: Buffer): CookieHarvest {
   return withDatabaseCopy(database, (connection) => {
-    const rows = connection
-      .prepare(
-        "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, is_persistent, samesite FROM cookies",
-      )
-      .all() as unknown as CookieRow[];
+    const statement = connection.prepare(
+      "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, is_persistent, samesite FROM cookies",
+    );
+    statement.setReadBigInts(true);
+    const rows = statement.all() as unknown as CookieRow[];
     const cookies: ImportedCookie[] = [];
+    const unreadableHosts = new Set<string>();
     let unreadable = 0;
     for (const row of rows) {
       const encrypted = Buffer.from(row.encrypted_value ?? new Uint8Array());
@@ -61,6 +74,7 @@ export async function readChromiumCookies(
       const value = encrypted.length > 0 ? decryptChromiumValue(encrypted, row.host_key, key) : row.value;
       if (value === undefined) {
         unreadable += 1;
+        unreadableHosts.add(row.host_key);
         continue;
       }
       const expiresAt = chromiumTimeToUnixSeconds(row.expires_utc);
@@ -69,12 +83,12 @@ export async function readChromiumCookies(
         name: row.name,
         value,
         path: row.path || "/",
-        secure: row.is_secure === 1,
-        httpOnly: row.is_httponly === 1,
-        expiresAt: row.is_persistent === 1 && expiresAt > 0 ? expiresAt : undefined,
+        secure: row.is_secure === 1n,
+        httpOnly: row.is_httponly === 1n,
+        expiresAt: row.is_persistent === 1n && expiresAt > 0 ? expiresAt : undefined,
         sameSite: sameSiteOf(row.samesite),
       });
     }
-    return { cookies, unreadable };
+    return { cookies, unreadable, unreadableHosts: [...unreadableHosts] };
   });
 }

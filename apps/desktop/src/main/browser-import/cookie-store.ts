@@ -13,6 +13,8 @@ export interface CookieWriteResult {
   skipped: number;
   failed: number;
   hosts: number;
+  /** Sites the built-in browser refused a cookie for, so a report can name them. */
+  failedHosts: string[];
 }
 
 /**
@@ -27,6 +29,7 @@ export async function writeCookies(cookies: readonly ImportedCookie[]): Promise<
   const store = browserSession().cookies;
   const now = Math.floor(Date.now() / 1000);
   const hosts = new Set<string>();
+  const failedHosts = new Set<string>();
   let imported = 0;
   let skipped = 0;
   let failed = 0;
@@ -54,10 +57,13 @@ export async function writeCookies(cookies: readonly ImportedCookie[]): Promise<
       await store.set(toElectronCookie(cookie));
       hosts.add(cookie.host.replace(/^\./, ""));
     }));
-    for (const result of results) {
+    results.forEach((result, offset) => {
       if (result.status === "fulfilled") imported += 1;
-      else failed += 1;
-    }
+      else {
+        failed += 1;
+        failedHosts.add(slice[offset].host);
+      }
+    });
   }
-  return { imported, skipped, failed, hosts: hosts.size };
+  return { imported, skipped, failed, hosts: hosts.size, failedHosts: [...failedHosts] };
 }

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createCipheriv, createHash, pbkdf2Sync } from "node:crypto";
 import test from "node:test";
+import { cookiesFromDatabase } from "../src/main/browser-import/chromium-cookies.ts";
 import { toElectronCookie } from "../src/main/browser-import/cookie-record.ts";
 import { decryptChromiumValue } from "../src/main/browser-import/chromium-crypto.ts";
 import { parseBinaryCookies } from "../src/main/browser-import/safari-cookies.ts";
@@ -153,4 +158,39 @@ test("an insecure cookie cannot claim SameSite=None, which Electron would reject
   assert.equal(mapped.url, "http://example.com/");
   assert.equal(mapped.sameSite, "unspecified");
   assert.equal(mapped.expirationDate, undefined);
+});
+
+test("a cookie whose expiry overflows a JavaScript number is still imported", () => {
+  // Chromium's microseconds-since-1601 timestamps passed Number.MAX_SAFE_INTEGER
+  // in the 19th century, so every real cookie carries one that node:sqlite
+  // refuses to narrow. Reading a live Chrome profile fails outright without this.
+  const directory = mkdtempSync(join(tmpdir(), "coilcoil-cookie-test-"));
+  const path = join(directory, "Cookies");
+  try {
+    const database = new DatabaseSync(path);
+    database.exec(`CREATE TABLE cookies(
+      creation_utc INTEGER NOT NULL, host_key TEXT NOT NULL, top_frame_site_key TEXT NOT NULL,
+      name TEXT NOT NULL, value TEXT NOT NULL, encrypted_value BLOB NOT NULL, path TEXT NOT NULL,
+      expires_utc INTEGER NOT NULL, is_secure INTEGER NOT NULL, is_httponly INTEGER NOT NULL,
+      last_access_utc INTEGER NOT NULL, has_expires INTEGER NOT NULL, is_persistent INTEGER NOT NULL,
+      priority INTEGER NOT NULL, samesite INTEGER NOT NULL, source_scheme INTEGER NOT NULL,
+      source_port INTEGER NOT NULL, last_update_utc INTEGER NOT NULL, source_type INTEGER NOT NULL,
+      has_cross_site_ancestor INTEGER NOT NULL)`);
+    database
+      .prepare(
+        "INSERT INTO cookies VALUES (0, '.example.com', '', 'sid', '', ?, '/', 13453916603943569, 1, 1, 0, 1, 1, 1, 2, 2, 443, 0, 0, 0)",
+      )
+      .run(encrypt("token", ".example.com"));
+    database.close();
+
+    const { cookies, unreadable } = cookiesFromDatabase(path, KEY);
+    assert.equal(unreadable, 0);
+    assert.equal(cookies[0].value, "token");
+    assert.equal(cookies[0].secure, true);
+    assert.equal(cookies[0].httpOnly, true);
+    assert.equal(cookies[0].sameSite, "strict");
+    assert.equal(cookies[0].expiresAt, Math.round(13_453_916_603_943_569 / 1_000_000 - 11_644_473_600));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

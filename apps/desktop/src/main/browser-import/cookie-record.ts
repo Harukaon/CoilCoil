@@ -16,6 +16,8 @@ export interface CookieHarvest {
   cookies: ImportedCookie[];
   /** Records that could not be decrypted or parsed; reported, never thrown. */
   unreadable: number;
+  /** Which sites those records belonged to, so a report can name them. */
+  unreadableHosts?: string[];
 }
 
 /** The subset of Electron's `cookies.set` input this import produces. */

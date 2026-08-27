@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Plus, RotateCw, X } from "
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
+import { BrowserDataMenu } from "./BrowserDataMenu";
 import { setGuestPlacement } from "./guestLayer";
 
 /** Fast enough to follow the agent clicking through a page, cheap enough to stream. */
@@ -124,6 +125,8 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
           ))}
           <button className="browser-new-tab" type="button" aria-label="新建浏览器标签页" onClick={() => void window.coilcoil.createBrowserTab(scopeId).then(setState)}><Plus size={13} /></button>
         </div>
+        {/* Importing reads this Mac's keychain, so it stays on the Mac's own window. */}
+        {mobile ? null : <BrowserDataMenu />}
       </div>
       <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
         <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => void window.coilcoil.browserBack(scopeId).then(setState)}><ArrowLeft size={13} /></button>

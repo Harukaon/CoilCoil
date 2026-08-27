@@ -1,4 +1,4 @@
-import { ArrowLeft, ClipboardPaste, ExternalLink, FileJson, Globe, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Smartphone, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ClipboardPaste, ExternalLink, FileJson, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Smartphone, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
@@ -18,7 +18,6 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { McpJsonEditor } from "./McpJsonEditor";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
 import { RemoteSettings } from "./RemoteSettings";
-import { BrowserSettings } from "./BrowserSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
 import { SkillSettings } from "./SkillSettings";
 import "./settings.css";
@@ -26,7 +25,7 @@ import "./settings.css";
 /** Keep in step with the sidebar width in mobile.css. */
 const SETTINGS_MOBILE_SIDEBAR_WIDTH = 220;
 
-type SettingsSection = "models" | "mcp" | "skills" | "shortcuts" | "remote" | "browser" | "appearance";
+type SettingsSection = "models" | "mcp" | "skills" | "shortcuts" | "remote" | "appearance";
 const MASKED_SECRET_VALUE = "••••••";
 const SETTINGS_SIDEBAR_WIDTH_KEY = "coilcoil.settings-sidebar-width";
 const DEFAULT_SETTINGS_SIDEBAR_WIDTH = 220;
@@ -546,7 +545,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
    * attached to, and remote access is the thing the phone is currently holding
    * open — turning it off from there would strand whoever is using it.
    */
-  const hidden = mobile && (section === "shortcuts" || section === "remote" || section === "browser");
+  const hidden = mobile && (section === "shortcuts" || section === "remote");
   const shown: SettingsSection = hidden ? "models" : section;
   const [sidebarWidth, setSidebarWidth] = useState(storedSettingsSidebarWidth);
   const [mcpJsonOpen, setMcpJsonOpen] = useState(false);
@@ -623,7 +622,6 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
           <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />技能</button>
           {mobile ? null : <button className={section === "shortcuts" ? "active" : ""} type="button" onClick={() => setSection("shortcuts")}><Keyboard size={15} />快捷键</button>}
           {mobile ? null : <button className={section === "remote" ? "active" : ""} type="button" onClick={() => setSection("remote")}><Smartphone size={15} />远程控制</button>}
-          {mobile ? null : <button className={section === "browser" ? "active" : ""} type="button" onClick={() => setSection("browser")}><Globe size={15} />浏览器</button>}
           <button className={section === "appearance" ? "active" : ""} type="button" onClick={() => setSection("appearance")}><Palette size={15} />外观</button>
         </nav>
         <div className="settings-version" title={appVersion ? `CoilCoil ${appVersion}` : undefined}>
@@ -635,14 +633,12 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
         <header className="settings-page-header window-drag">
           <div>
             <span className="settings-icon">
-              {shown === "models" ? <Settings size={17} /> : shown === "mcp" ? <Network size={17} /> : shown === "appearance" ? <Palette size={17} /> : shown === "shortcuts" ? <Keyboard size={17} /> : shown === "remote" ? <Smartphone size={17} /> : shown === "browser" ? <Globe size={17} /> : <Sparkles size={17} />}
+              {shown === "models" ? <Settings size={17} /> : shown === "mcp" ? <Network size={17} /> : shown === "appearance" ? <Palette size={17} /> : shown === "shortcuts" ? <Keyboard size={17} /> : shown === "remote" ? <Smartphone size={17} /> : <Sparkles size={17} />}
             </span>
             <div>
-              <h1 id="settings-title">{shown === "models" ? "模型与服务商" : shown === "mcp" ? "MCP" : shown === "appearance" ? "外观" : shown === "shortcuts" ? "快捷键" : shown === "remote" ? "远程控制" : shown === "browser" ? "浏览器" : "技能"}</h1>
+              <h1 id="settings-title">{shown === "models" ? "模型与服务商" : shown === "mcp" ? "MCP" : shown === "appearance" ? "外观" : shown === "shortcuts" ? "快捷键" : shown === "remote" ? "远程控制" : "技能"}</h1>
               <p>
-                {shown === "browser"
-                  ? "内置浏览器的登录状态：从别的浏览器导入，或者一键清空。"
-                  : shown === "remote"
+                {shown === "remote"
                   ? "从手机遥控这台 Mac，配对码只在这里显示。"
                   : shown === "skills"
                   ? "按需加载的专业技能包。"
@@ -675,8 +671,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
             <ShortcutSettings />
           ) : shown === "remote" ? (
             <RemoteSettings />
-          ) : shown === "browser" ? (
-            <BrowserSettings />
+
           ) : shown === "appearance" ? (
             <AppearanceSettings />
           ) : (
