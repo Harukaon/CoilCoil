@@ -71,9 +71,9 @@ export const THEME_MODES: ThemeModeDefinition[] = [
 export const LIGHT_TONES: LightToneDefinition[] = [
   {
     id: "paper",
-    name: "暖纸",
-    description: "CoilCoil 自己的暖纸色调，取值原样保留。",
-    swatch: { hue: 60, saturation: 6, chrome: 93.4, content: 96.9, raised: 100, border: 86.1, muted: 56, text: 13.7 },
+    name: "纯白",
+    description: "纯白配 #F9F9F9 的中性两档，不带任何色偏。",
+    swatch: { hue: 0, saturation: 0, chrome: 97.6, content: 100, raised: 100, border: 89.6, muted: 56, text: 13.7 },
   },
   {
     id: "snow",

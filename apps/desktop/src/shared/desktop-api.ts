@@ -230,6 +230,8 @@ export interface RemoteAccessState {
   username?: string;
   /** This Mac's tailnet address, when Tailscale is running. */
   tailscaleAddress?: string;
+  /** Free-form notes the user keeps on this screen; saved with the settings. */
+  notes: string;
   /** Present only while running: a code means nothing with nothing listening. */
   pairingCode?: string;
   devices: RemotePairedDevice[];
@@ -245,6 +247,7 @@ export interface RemoteAccessInput {
   publicUrl?: string;
   keepAwake?: boolean;
   trustLocalNetwork?: boolean;
+  notes?: string;
 }
 
 export interface CoilCoilDesktopApi {

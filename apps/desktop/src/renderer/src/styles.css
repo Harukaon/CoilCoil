@@ -342,20 +342,21 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .agent-turn-content { display: block; }
 .message-label { margin-bottom: 7px; color: hsl(var(--th) var(--ts) var(--l-512)); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
 .user-message { display: flex; width: 100%; min-width: 0; align-items: stretch; flex-direction: column; }
-.user-bubble { display: block; width: 100%; min-width: 0; padding: 12px 16px; overflow-wrap: anywhere; word-break: break-word; border: 1px solid hsl(var(--th) var(--ts) var(--l-886)); border-radius: 12px; background: hsl(var(--th) var(--ts) var(--l-920)); box-shadow: none; color: hsl(var(--th) var(--ts) var(--l-157)); font-size: 14px; line-height: 1.55; text-align: left; white-space: pre-wrap; }
+.user-bubble { display: block; width: 100%; min-width: 0; padding: 12px 16px; overflow-wrap: anywhere; word-break: break-word; border: 0; border-radius: 12px; background: hsl(var(--th) var(--ts) var(--l-943)); box-shadow: none; color: hsl(var(--th) var(--ts) var(--l-157)); font-size: 14px; line-height: 1.55; text-align: left; white-space: pre-wrap; }
 /* 上限只管文本：一条很长的粘贴会把整屏占掉，截到 5 行（约 133px，含气泡内边距
    142px 以内），多出来的收成一个真正的省略号而不是半行字。全文点进编辑态可见。
    图片不在这个限制里——它按自己的比例正常显示。 */
 .user-bubble-text { display: -webkit-box; max-height: 118px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
 .user-bubble-button { cursor: text; }
-.user-bubble-button:hover { background: hsl(var(--th) var(--ts) var(--l-896)); }
+.user-bubble-button:hover { background: hsl(var(--th) var(--ts) var(--l-929)); }
 .user-bubble-button:disabled { cursor: default; }
-.user-bubble-button:disabled:hover { background: hsl(var(--th) var(--ts) var(--l-920)); }
-/* 还没发出去的消息：留在原地，但用虚线边框和淡下来的正文说明它只是排着队。 */
-.user-bubble.queued { border-style: dashed; background: transparent; color: hsl(var(--th) var(--ts) var(--l-437)); }
-/* Accepted, not yet delivered: solid like a sent message, dimmed like one still in flight. */
-.user-bubble.steering { border-style: dashed; border-color: var(--c-green-muted); color: hsl(var(--th) var(--ts) var(--l-375)); }
-.user-bubble-button.queued:disabled:hover { background: transparent; }
+.user-bubble-button:disabled:hover { background: hsl(var(--th) var(--ts) var(--l-943)); }
+/* 还没发出去的消息：留在原地，但底色更浅、正文淡下来，左边一道竖条说明它只是
+   排着队。以前这里是虚线边框——气泡一律不画边框后，状态改由这道竖条来说。 */
+.user-bubble.queued { background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: inset 3px 0 0 hsl(var(--th) var(--ts) var(--l-861)); color: hsl(var(--th) var(--ts) var(--l-437)); }
+/* Accepted, not yet delivered: the same bar, in the colour that means "running". */
+.user-bubble.steering { background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: inset 3px 0 0 var(--c-green-muted); color: hsl(var(--th) var(--ts) var(--l-375)); }
+.user-bubble-button.queued:disabled:hover { background: hsl(var(--th) var(--ts) var(--l-976)); }
 .user-message-queue-status { display: flex; width: fit-content; align-items: center; gap: 5px; margin-top: 7px; color: hsl(var(--th) var(--ts) var(--l-512)); font-size: 11px; line-height: 1; }
 .message-images { display: grid; margin-top: 8px; grid-template-columns: repeat(auto-fit, minmax(88px, 150px)); gap: 7px; }
 .message-images:first-child { margin-top: 0; }
@@ -472,7 +473,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .subagent-mini-chat { width: min(560px, 100%); margin: 0 auto; }
 .subagent-task-message { display: grid; justify-items: end; gap: 5px; margin: 0 0 24px; }
 .subagent-task-message > span { color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; }
-.subagent-task-message > div { max-width: 86%; padding: 10px 13px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 12px 12px 4px 12px; color: hsl(var(--th) var(--ts) var(--l-182)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.subagent-task-message > div { max-width: 86%; padding: 10px 13px; border: 0; border-radius: 12px 12px 4px 12px; color: hsl(var(--th) var(--ts) var(--l-182)); background: hsl(var(--th) var(--ts) var(--l-943)); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .subagent-mini-chat .agent-turn { margin: 0; }
 .subagent-mini-chat .agent-turn-content { width: 100%; }
 .subagent-dialog-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 160px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 12px; }

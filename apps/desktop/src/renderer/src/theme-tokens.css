@@ -13,8 +13,10 @@
 
 :root,
 :root[data-light-tone="paper"] {
-  --th: 60;
-  --ts: 6%;
+  /* 纯中性：色相与饱和度都归零，白就是 #FFFFFF，97.6% 就是 #F9F9F9。
+   * 之前这一档带 6% 的暖色，整屏灰中泛黄，看久了发闷。 */
+  --th: 0;
+  --ts: 0%;
   --l-1000: 100.0%;
   --l-988: 98.8%;
   --l-984: 98.4%;
@@ -1952,17 +1954,19 @@
 
 :root,
 :root:not([data-theme="dark"])[data-light-tone="paper"] {
-  --shell-fill: hsl(var(--th) var(--ts) 96.9%);
-  --side-fill: hsl(var(--th) var(--ts) 96.9%);
-  --pane-fill: hsl(var(--th) var(--ts) 96.9%);
-  --composer-fill: hsl(var(--th) var(--ts) 96.9%);
+  /* 两档就够：正文区纯白，外圈 #F9F9F9。深浅差本身就是分界，
+   * 不需要再画一条边框线。 */
+  --shell-fill: hsl(var(--th) var(--ts) 97.6%);
+  --side-fill: hsl(var(--th) var(--ts) 97.6%);
+  --pane-fill: hsl(var(--th) var(--ts) 100%);
+  --composer-fill: hsl(var(--th) var(--ts) 100%);
 }
 
 :root[data-surface="layered"],
 :root:not([data-theme="dark"])[data-light-tone="paper"][data-surface="layered"] {
-  --shell-fill: hsl(var(--th) var(--ts) 93.4%);
-  --side-fill: hsl(var(--th) var(--ts) 93.4%);
-  --pane-fill: hsl(var(--th) var(--ts) 96.9%);
+  --shell-fill: hsl(var(--th) var(--ts) 95.3%);
+  --side-fill: hsl(var(--th) var(--ts) 95.3%);
+  --pane-fill: hsl(var(--th) var(--ts) 100%);
   --composer-fill: hsl(var(--th) var(--ts) 100%);
 }
 

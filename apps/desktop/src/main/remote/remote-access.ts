@@ -20,6 +20,40 @@ interface StoredRemoteConfig {
   publicUrl?: string;
   keepAwake: boolean;
   trustLocalNetwork: boolean;
+  /** The user's own scratch notes for this screen; never interpreted. */
+  notes?: string;
+}
+
+/**
+ * Which address the entry point listens on, derived rather than stored.
+ *
+ * Tailscale has to be reached on the tailnet address, while a reverse proxy
+ * tunnels into loopback — so the two modes need different hosts. Storing the
+ * live one would mean switching to Tailscale overwrites the proxy setup's host
+ * and switching back leaves the entry point on an address the tunnel does not
+ * reach. Deriving it keeps `host` meaning "what the user chose for the proxy",
+ * which is the only value worth remembering.
+ */
+/**
+ * Undo the old behaviour, which wrote the live listening address into `host`.
+ *
+ * A config saved by an earlier build can carry `0.0.0.0` or a tailnet address
+ * there. Kept as-is, switching back to the reverse proxy would leave the entry
+ * point on an address the tunnel never reaches, which is exactly the bug the
+ * derived host fixes — so those two shapes are read back as the loopback
+ * default they should have been.
+ */
+function storedProxyHost(value: unknown): string {
+  const host = typeof value === "string" ? value.trim() : "";
+  if (!host || host === "0.0.0.0") return DEFAULT_HOST;
+  const [a, b] = host.split(".").map((part) => Number.parseInt(part, 10));
+  if (a === 100 && b >= 64 && b <= 127) return DEFAULT_HOST;
+  return host;
+}
+
+function listenHost(config: StoredRemoteConfig): string {
+  if (config.mode !== "tailscale") return config.host;
+  return tailscaleAddress() ?? "0.0.0.0";
 }
 
 /**
@@ -90,13 +124,14 @@ export class RemoteAccessController {
     return {
       enabled: forced || stored.enabled === true,
       port: normalizePort(process.env.COILCOIL_REMOTE_PORT ?? stored.port, DEFAULT_PORT),
-      host: process.env.COILCOIL_REMOTE_HOST?.trim() || (typeof stored.host === "string" && stored.host.trim() ? stored.host.trim() : DEFAULT_HOST),
+      host: process.env.COILCOIL_REMOTE_HOST?.trim() || storedProxyHost(stored.host),
       mode: normalizeMode(stored.mode),
       publicUrl: typeof stored.publicUrl === "string" && stored.publicUrl.trim() ? stored.publicUrl.trim() : undefined,
       keepAwake: stored.keepAwake === true,
       // On by default only for Tailscale, where every peer is already a machine
       // the user signed into their own tailnet.
       trustLocalNetwork: stored.trustLocalNetwork ?? normalizeMode(stored.mode) === "tailscale",
+      notes: typeof stored.notes === "string" ? stored.notes : undefined,
     };
   }
 
@@ -113,9 +148,10 @@ export class RemoteAccessController {
       enabled: this.config.enabled,
       running: !!this.server,
       port: this.config.port,
-      host: this.config.host,
+      host: listenHost(this.config),
       mode: this.config.mode,
       publicUrl: this.config.publicUrl,
+      notes: this.config.notes ?? "",
       keepAwake: this.config.keepAwake,
       trustLocalNetwork: this.config.trustLocalNetwork,
       username: this.server?.auth.username() ?? this.pendingUsername,
@@ -142,17 +178,12 @@ export class RemoteAccessController {
       publicUrl: input.publicUrl === undefined ? this.config.publicUrl : (input.publicUrl.trim() || undefined),
       keepAwake: input.keepAwake ?? this.config.keepAwake,
       trustLocalNetwork: input.trustLocalNetwork ?? this.config.trustLocalNetwork,
+      notes: input.notes === undefined ? this.config.notes : input.notes,
     };
-    // Tailscale reaches this Mac over its tailnet address, so loopback would
-    // make the entry point unreachable from the phone.
-    const wantedHost = next.mode === "tailscale" && input.host === undefined
-      ? tailscaleAddress() ?? "0.0.0.0"
-      : next.host;
-    next.host = wantedHost;
     // Restarting on every save would drop a connected phone for a change it
     // does not care about, so only the values the server is built from count.
     const restart = this.server !== undefined
-      && (next.port !== this.config.port || next.host !== this.config.host);
+      && (next.port !== this.config.port || listenHost(next) !== listenHost(this.config));
     this.config = next;
     this.persist();
 
@@ -206,7 +237,7 @@ export class RemoteAccessController {
   private async startServer(): Promise<void> {
     if (this.server) return;
     const server = new RemoteServer({
-      host: this.config.host,
+      host: listenHost(this.config),
       port: this.config.port,
       platform: this.options.platform,
       rendererUrl: this.options.rendererUrl,

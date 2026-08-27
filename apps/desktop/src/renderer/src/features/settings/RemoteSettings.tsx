@@ -1,5 +1,5 @@
 import { Copy, LoaderCircle, RefreshCw, Smartphone, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RemoteAccessInput, RemoteAccessState, RemoteTunnelMode } from "../../../../shared/desktop-api";
 import { toastError, toastSuccess } from "../../ui/toast";
 
@@ -38,6 +38,8 @@ export function RemoteSettings(): React.JSX.Element {
   const [publicUrl, setPublicUrl] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [notes, setNotes] = useState("");
+  const notesTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +50,7 @@ export function RemoteSettings(): React.JSX.Element {
         setPort(String(next.port));
         setPublicUrl(next.publicUrl ?? "");
         setUsername(next.username ?? "");
+        setNotes(next.notes ?? "");
       })
       .catch((caught: unknown) => { if (!cancelled) toastError(caught instanceof Error ? caught.message : String(caught)); });
     // The code rotates on every pairing and the connected count changes on its
@@ -162,7 +165,9 @@ export function RemoteSettings(): React.JSX.Element {
               type="button"
               disabled={!candidate.available || saving}
               aria-pressed={state.mode === candidate.id}
-              onClick={() => void save({ mode: candidate.id })}
+              // Switching modes must not throw away an address the user just
+              // typed but has not saved yet — that is the value they came for.
+              onClick={() => void save({ mode: candidate.id, port: Number.parseInt(port, 10), publicUrl })}
             >
               <span className="remote-mode-name">
                 {candidate.name}
@@ -226,6 +231,28 @@ export function RemoteSettings(): React.JSX.Element {
             <button className="remote-action primary" type="submit" disabled={saving}>保存</button>
           </footer>
         </form>
+      </section>
+
+      <section className="remote-section">
+        <h3>备忘</h3>
+        <p className="remote-lead">
+          自己记东西的地方：隧道命令、域名、服务器上改过什么。内容只存在这台 Mac 上，跟着远程设置一起保存，谁都不会读它。
+        </p>
+        <textarea
+          className="remote-notes"
+          value={notes}
+          spellCheck={false}
+          rows={6}
+          placeholder={"例如：\nssh -N -R 7788:127.0.0.1:7788 vps\nhttps://coil.example.com"}
+          onChange={(event) => {
+            const next = event.target.value;
+            setNotes(next);
+            // Typing should not fire a write per keystroke, and there is no save
+            // button to press: the box is a scratchpad, not a form.
+            if (notesTimer.current !== undefined) window.clearTimeout(notesTimer.current);
+            notesTimer.current = window.setTimeout(() => { void save({ notes: next }); }, 700);
+          }}
+        />
       </section>
 
       <section className="remote-section">

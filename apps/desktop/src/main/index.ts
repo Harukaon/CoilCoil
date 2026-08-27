@@ -24,6 +24,7 @@ import {
   type GuestContextMenuParams,
 } from "./browser-context-menu";
 import { hardenGuestPreferences } from "./browser-webview-policy";
+import { proxyEnvironment, refreshProxyEnvironment } from "./system-proxy";
 import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
@@ -292,6 +293,9 @@ class RuntimeHost {
       execPath: process.execPath,
       env: {
         ...process.env,
+        // Node ignores the system proxy; without this the runtime's model
+        // requests and WebSockets go out directly. See system-proxy.ts.
+        ...proxyEnvironment(),
         ELECTRON_RUN_AS_NODE: "1",
         COILCOIL_AGENT_DIR: join(app.getPath("userData"), "agent"),
         COILCOIL_SESSION_DIR: join(app.getPath("userData"), "sessions"),
@@ -320,7 +324,14 @@ class RuntimeHost {
     this.child = child;
 
     this.stderrTail = [];
-    diagnosticLog().info("runtime-host", "runtime_spawned", { pid: child.pid, entry: runtimeEntry });
+    diagnosticLog().info("runtime-host", "runtime_spawned", {
+      pid: child.pid,
+      entry: runtimeEntry,
+      proxy: proxyEnvironment().HTTPS_PROXY ?? "direct",
+    });
+    // Keep the cache current so the next respawn follows a VPN that came up or
+    // went away since; the running child keeps the proxy it was started with.
+    void refreshProxyEnvironment((event, data) => diagnosticLog().info("network", event, data));
     child.stdout?.on("data", (chunk: Buffer) => process.stdout.write(`[runtime] ${chunk.toString()}`));
     child.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
@@ -994,6 +1005,13 @@ app.whenReady().then(async () => {
   });
   await createWindow();
   scheduleUpdateChecks();
+  // Resolved before the first spawn so the runtime never starts a session on a
+  // direct connection it will lose the moment another tunnel takes the route.
+  const noteProxy = (event: string, data: Record<string, unknown>): void => diagnosticLog().info("network", event, data);
+  await refreshProxyEnvironment(noteProxy);
+  // A VPN that comes up after launch should be picked up without a relaunch;
+  // the value is read again every time the runtime child is spawned.
+  setInterval(() => { void refreshProxyEnvironment(noteProxy); }, 45_000).unref();
   runtime.start();
   void remoteController().start();
   app.on("activate", () => {
