@@ -1,0 +1,31 @@
+{
+  "id": 5,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r1b",
+      "at": "2026-08-29T00:00:00.000Z",
+      "text": "先回答三个「为什么」。\n\n【为什么左上角 100% 有效】那一块是一整块空的拖动带：`.sidebar-drag` 里只放了一个什么都没有的方块，宽度还特意躲开了右边 50px（收起侧栏那个按钮就在那 50px 里）。也就是说，那块拖动区上面永远不会压着任何按钮，尺寸也只在拉侧栏宽度时才变。chat 和右侧栏不一样：那两处是「把标题栏本身设成可拖动」，标题栏里同时还塞着标题、按钮、标签条，谁长大一点就吃掉一块拖动区。\n\n【为什么右侧栏多开几个标签就拖不动】这条是纯几何、和玄学无关，看 CSS 就能算出来：标签条最多允许占到「整条标题栏减 80px」，可是右边那两个按钮 + 左右内边距 + 间距本身就要 92px。标签一多，标签条顶到上限，中间那条真正能按住拖窗的空带被压到只剩 12px（CSS 里写死的最小值），再多还会把右上角按钮顶出可视区。12px 那么细，人是按不中的，看起来就是「拖动效果没了」。\n\n【为什么 chat 上方会丢、随便 resize 一下又好了】这条是 Electron/Chromium 的老毛病：可拖动区域不是实时算的，Chromium 只在「某个元素的 app-region 属性值发生变化」时才重新收集一遍矩形清单，然后交给 macOS。矩形只是移动、变大变小（面板拉宽、标题多一行、窗口变高），或者一个曾经在标题栏上「挖过洞」的浮层（弹出菜单、右键菜单、提示气泡）被关掉，都不会触发重算——旧清单就一直用着，那块区域按下去当然没反应。resize 窗口会顺带触发一次重算，所以「随便调一下窗口大小就好了」。这也说明它不是 CSS 写漏了，之前几次修复给某个元素补 CSS 之所以治不干净，就是因为漏的是「什么时候重算」，不是「哪里少写了一条」。\n\n【这次改成什么结构】不再逐个元素打补丁，改成一条统一约定：\n1. 每条标题栏都由同一个组件（WindowDragBar）铺一层「空的拖动层」，铺满整条标题栏、里面什么都不放，而且必须放在标题栏的第一个位置——这样后面的按钮会自动在它上面挖出自己的洞，新加的 UI 也不会再把整条拖动带盖掉。左上角那块之所以一直好用就是这个形状，现在 chat、右侧栏、技能页、记忆页全部统一成它。\n2. 右侧栏给拖动带留了一段永远不会被标签占掉的空位（48px），标签条超出就横向滚动，右上角按钮也不会再被顶出去。这笔账（48+62+14+16=140）写进了测试，以后谁改其中一个数字，测试会当场报错。\n3. 最关键的一条：鼠标一移进任何一条标题栏，就主动让系统重算一次可拖动区域。系统是在你按下鼠标那一刻才去查的，而按下之前鼠标一定先移进来，所以这一下永远赶得上；鼠标不在标题栏时完全没有开销。重算用的是一个 0×0 的隐形哨兵元素，不会有哪怕一帧让真正的拖动带失效（旧写法是把标题栏自己临时关掉再打开，那一帧里按下去反而拖不动）。\n\n【怎么验】打包后的 app 里：\n1. chat 界面上方空白处按住拖窗口，来回拖十几次；中途开关左右侧栏、切几个会话、让标题变长/变短、随便右键点几下侧栏的会话（弹出菜单开了再关），再回去拖——应该每次都能拖动。\n2. 右侧栏连开 4~6 个标签页（终端、浏览器、文件等），看标签条右边是否始终留着一小段空白，在那段空白上按住拖窗口应该有效；同时右上角的「+」和「收起右侧栏」两个按钮不能被挤出去。\n3. 左上角那块照旧应该 100% 有效（这次也换成了同一个组件，要确认没有退化）。\n4. 技能页、记忆页的标题栏也顺手拖一下。\n5. 顺便确认标题栏里的按钮还都点得动（展开侧栏、展开作业栏、标签页的关闭叉、右侧栏的 + 和收起）——拖动层是铺在它们下面的，这一条是防止盖住点击。\n\n【留的口子】窗口里那两条拉宽面板的竖条（panel-resizer）在标题栏高度范围内本来就按不动（会变成拖窗口），这是改动之前就有的，和本次问题无关，没顺手动它以免影响别的行为。"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "7f5b7203c",
+      "at": "2026-08-29T00:00:00.000Z",
+      "message": "fix(desktop): give every title bar one drag layer that stays fresh (#5)",
+      "files": [
+        "apps/desktop/src/renderer/src/ui/window-drag.ts",
+        "apps/desktop/src/renderer/src/ui/WindowDragBar.tsx",
+        "apps/desktop/src/renderer/src/styles.css",
+        "apps/desktop/src/renderer/src/main.tsx",
+        "apps/desktop/src/renderer/src/features/conversation/ConversationPane.tsx",
+        "apps/desktop/src/renderer/src/features/inspector/InspectorPane.tsx",
+        "apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx",
+        "apps/desktop/src/renderer/src/features/settings/SkillsWorkspace.tsx",
+        "apps/desktop/src/renderer/src/features/memory/MemoryWorkspace.tsx",
+        "apps/desktop/tests/window-drag.test.ts",
+        "scripts/desktop-layout-smoke.mjs"
+      ]
+    }
+  ]
+}
