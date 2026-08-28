@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SuoCode Issue 看板</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --panel-2:#fbfbfc;
+    --ink:#1c1f24; --ink-2:#5b6472; --ink-3:#8b95a3;
+    --line:#e4e7ec; --line-2:#eef0f3;
+    --accent:#4f6bed;
+    --todo:#9aa4b2; --doing:#3b82f6; --review:#8b5cf6; --reply:#ef4444; --done:#10b981;
+    --hi:#e5484d; --mid:#f5a524; --lo:#94a3b8;
+    --radius:14px; --shadow:0 1px 2px rgba(16,24,40,.05),0 6px 20px rgba(16,24,40,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme=light]){
+      --bg:#15171b; --panel:#1c1f24; --panel-2:#20242a;
+      --ink:#e8eaed; --ink-2:#a3adba; --ink-3:#6e7783;
+      --line:#2b3038; --line-2:#23272e;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme=dark]{
+    --bg:#15171b; --panel:#1c1f24; --panel-2:#20242a;
+    --ink:#e8eaed; --ink-2:#a3adba; --ink-3:#6e7783;
+    --line:#2b3038; --line-2:#23272e;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC",system-ui,sans-serif;
+  }
+  .wrap{max-width:1680px;margin:0 auto;padding:22px 24px 60px}
+
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+  .sub{color:var(--ink-3);font-size:12.5px}
+
+  .bar{
+    display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:10px 12px;margin-bottom:18px;box-shadow:var(--shadow);
+  }
+  button,.btn{
+    font:inherit;font-size:13px;padding:7px 13px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
+    cursor:pointer;transition:background .15s,border-color .15s,transform .1s;
+  }
+  button:hover{background:var(--line-2);border-color:var(--ink-3)}
+  button:active{transform:translateY(1px)}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:#4459d8;border-color:#4459d8}
+  .btn-danger{background:transparent;border-color:var(--hi);color:var(--hi)}
+  .btn-danger:hover{background:var(--hi);color:#fff}
+  .btn-ok{background:var(--done);border-color:var(--done);color:#fff}
+  .btn-ok:hover{filter:brightness(.94)}
+  .spacer{flex:1}
+  input[type=search]{
+    font:inherit;font-size:13px;padding:7px 11px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);min-width:200px;
+  }
+  .dirty{color:var(--mid);font-size:12.5px;display:none}
+  .dirty.on{display:inline}
+
+  .board{display:grid;grid-template-columns:repeat(5,minmax(240px,1fr));gap:14px;align-items:start}
+  @media (max-width:1200px){.board{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:680px){.board{grid-template-columns:1fr}}
+
+  .col{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+       box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:120px}
+  .col-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line-2)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .col-h .name{font-weight:600;font-size:13px}
+  .col-h .n{margin-left:auto;color:var(--ink-3);font-size:12px;font-variant-numeric:tabular-nums}
+  .col-b{padding:10px;display:flex;flex-direction:column;gap:9px;min-height:60px}
+  .col.over .col-b{background:var(--line-2);border-radius:0 0 var(--radius) var(--radius)}
+
+  .card{
+    background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--lo);
+    border-radius:11px;padding:11px 12px;cursor:pointer;
+    transition:border-color .15s,transform .1s,box-shadow .15s;
+  }
+  .card:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(16,24,40,.09);border-color:var(--ink-3)}
+  .card.p-high{border-left-color:var(--hi)}
+  .card.p-medium{border-left-color:var(--mid)}
+  .card.dragging{opacity:.4}
+  .card .id{font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .card .t{font-weight:600;font-size:13px;margin:3px 0 6px;line-height:1.45}
+  .card .m{display:flex;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--ink-2)}
+  .chip{background:var(--line-2);border-radius:20px;padding:2px 8px}
+  .chip.warn{color:var(--mid)}
+
+  dialog{
+    border:none;border-radius:16px;padding:0;background:var(--panel);color:var(--ink);
+    max-width:760px;width:calc(100vw - 40px);box-shadow:0 24px 60px rgba(0,0,0,.3);
+  }
+  dialog::backdrop{background:rgba(10,12,16,.55)}
+  .d-h{display:flex;align-items:flex-start;gap:12px;padding:20px 22px 14px;border-bottom:1px solid var(--line-2)}
+  .d-h h2{margin:0;font-size:17px;line-height:1.4;flex:1}
+  .d-h .x{border:none;background:transparent;font-size:22px;line-height:1;color:var(--ink-3);padding:2px 6px}
+  .d-b{padding:18px 22px;max-height:min(62vh,600px);overflow:auto}
+  .d-f{display:flex;gap:8px;padding:14px 22px;border-top:1px solid var(--line-2);flex-wrap:wrap}
+
+  .body-text{white-space:pre-wrap;color:var(--ink-2);background:var(--panel-2);
+             border:1px solid var(--line-2);border-radius:11px;padding:12px 14px;font-size:13px}
+  .sec{margin-top:20px}
+  .sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin:0 0 9px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  label.f{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--ink-2)}
+  select,textarea,input[type=text]{
+    font:inherit;font-size:13px;padding:7px 10px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
+  }
+  textarea{width:100%;min-height:82px;resize:vertical;line-height:1.6}
+
+  .note{border:1px solid var(--line-2);border-left:3px solid var(--accent);
+        border-radius:10px;padding:10px 12px;margin-bottom:9px;background:var(--panel-2);font-size:13px}
+  .note.mine{border-left-color:var(--done)}
+  .note .h{display:flex;gap:8px;font-size:11px;color:var(--ink-3);margin-bottom:5px}
+  .note .h b{color:var(--ink-2);font-weight:600}
+  .note .c{white-space:pre-wrap;color:var(--ink-2)}
+  .note img{max-width:100%;border-radius:9px;margin-top:9px;display:block;cursor:zoom-in;border:1px solid var(--line)}
+  .note .del{margin-left:auto;border:none;background:transparent;color:var(--ink-3);font-size:11px;padding:0 3px;cursor:pointer}
+  .note .del:hover{color:var(--hi)}
+  .empty{color:var(--ink-3);font-size:12.5px;padding:2px 0}
+  .drop{border:1px dashed var(--line);border-radius:10px;padding:9px 11px;font-size:12px;color:var(--ink-3);margin:9px 0}
+  .drop.over{border-color:var(--accent);color:var(--accent)}
+  .thumbs{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}
+  .thumb{position:relative}
+  .thumb img{height:52px;border-radius:8px;border:1px solid var(--line);display:block}
+  .thumb button{position:absolute;top:-6px;right:-6px;width:19px;height:19px;padding:0;border-radius:50%;
+                background:var(--hi);color:#fff;border:none;font-size:12px;line-height:1;cursor:pointer}
+  code{background:var(--line-2);padding:1px 5px;border-radius:5px;font-size:12px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .hint{color:var(--ink-3);font-size:12px;margin-top:10px;line-height:1.65}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>SuoCode Issue 看板</h1>
+    <span class="sub" id="meta"></span>
+    <span class="spacer"></span>
+    <span class="dirty" id="dirty">● 有未导出的改动</span>
+  </header>
+
+  <div class="bar">
+    <button class="btn-primary" id="new">＋ 新建 Issue</button>
+    <input type="search" id="q" placeholder="搜索标题 / 正文 / 模块…">
+    <select id="fArea"><option value="">全部模块</option></select>
+    <span class="spacer"></span>
+    <button id="export">⬇ 导出 tasks.json</button>
+    <button id="reset">↺ 丢弃本地改动</button>
+    <button id="theme">◐ 主题</button>
+  </div>
+
+  <div class="board" id="board"></div>
+
+  <p class="hint">
+    卡片可直接拖到别的列改状态，点开可以改状态 / 打回 / 通过、回复文字和贴图（支持 <code>Ctrl/⌘+V</code> 粘贴截图）。<br>
+    你的改动实时存在浏览器 localStorage 里；点「导出 tasks.json」下载后覆盖 <code>docs/taskboard/tasks.json</code>，我这边就能读到你的回复。
+  </p>
+</div>
+
+<dialog id="dlg">
+  <div class="d-h">
+    <h2 id="dTitle"></h2>
+    <button class="x" id="dClose" aria-label="关闭">&times;</button>
+  </div>
+  <div class="d-b" id="dBody"></div>
+  <div class="d-f" id="dFoot"></div>
+</dialog>
+
+<script>
+const SEED = /*__TASKS_JSON__*/null;
+const BUILT_AT = /*__BUILT_AT__*/"";
+const LS = 'suocode-taskboard-v2';
+
+const COLS = [
+  {k:'todo',    name:'待办',   c:'var(--todo)'},
+  {k:'doing',   name:'进行中', c:'var(--doing)'},
+  {k:'review',  name:'待验收', c:'var(--review)'},
+  {k:'reply',   name:'待回复', c:'var(--reply)'},
+  {k:'done',    name:'已完成', c:'var(--done)'},
+];
+const STATUS_NAME = Object.fromEntries(COLS.map(c=>[c.k,c.name]));
+const PRIO_NAME = {high:'高',medium:'中',low:'低'};
+
+let state = load();
+let openId = null;
+let pendingImgs = [];
+
+/* ---------- 存取 ---------- */
+function load(){
+  try{
+    const raw = localStorage.getItem(LS);
+    if(raw){
+      const saved = JSON.parse(raw);
+      // 以 SEED 为骨架合并，这样我新增/改写任务后你的回复不会丢
+      const byId = new Map((saved.tasks||[]).map(t=>[t.id,t]));
+      const merged = SEED.tasks.map(seed=>{
+        const mine = byId.get(seed.id);
+        if(!mine) return structuredClone(seed);
+        return {...structuredClone(seed),
+          status: mine.status ?? seed.status,
+          userComments: mine.userComments ?? [],
+          // agent 侧字段始终以 SEED 为准
+        };
+      });
+      // 你在看板上自己新建的 Issue（SEED 里没有的）保留
+      for(const t of saved.tasks||[]) if(!SEED.tasks.some(s=>s.id===t.id)) merged.push(t);
+      return {meta:SEED.meta, tasks:merged};
+    }
+  }catch(e){ console.warn('本地数据读取失败，回退到内置数据', e); }
+  return structuredClone(SEED);
+}
+function save(){
+  localStorage.setItem(LS, JSON.stringify(state));
+  document.getElementById('dirty').classList.add('on');
+}
+const nextId = () => Math.max(0, ...state.tasks.map(t=>t.id)) + 1;
+const esc = s => String(s??'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const when = iso => { try{ return new Date(iso).toLocaleString('zh-CN',{hour12:false}); }catch{ return iso||''; } };
+
+/* ---------- 渲染看板 ---------- */
+function render(){
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const area = document.getElementById('fArea').value;
+  const hit = t => (!q || (t.title+t.body+t.area).toLowerCase().includes(q)) && (!area || t.area===area);
+
+  document.getElementById('board').innerHTML = COLS.map(col=>{
+    const list = state.tasks.filter(t=>t.status===col.k);
+    const shown = list.filter(hit);
+    return `<section class="col" data-col="${col.k}">
+      <div class="col-h">
+        <span class="dot" style="background:${col.c}"></span>
+        <span class="name">${col.name}</span>
+        <span class="n">${shown.length}${shown.length!==list.length?` / ${list.length}`:''}</span>
+      </div>
+      <div class="col-b" data-drop="${col.k}">
+        ${shown.map(cardHTML).join('') || '<div class="empty">—</div>'}
+      </div>
+    </section>`;
+  }).join('');
+
+  bindDnd();
+  const total = state.tasks.length, done = state.tasks.filter(t=>t.status==='done').length;
+  document.getElementById('meta').textContent =
+    `${total} 个 Issue · 已完成 ${done} · 数据构建于 ${BUILT_AT ? when(BUILT_AT) : '—'}`;
+}
+function cardHTML(t){
+  const nBot = (t.agentNotes||[]).length, nMine = (t.userComments||[]).length, nC = (t.commits||[]).length;
+  return `<article class="card p-${t.priority}" draggable="true" data-id="${t.id}">
+    <div class="id">#${t.id} · ${esc(t.area)}</div>
+    <div class="t">${esc(t.title)}</div>
+    <div class="m">
+      <span class="chip">${PRIO_NAME[t.priority]||t.priority}</span>
+      ${nBot?`<span class="chip">🤖 ${nBot}</span>`:''}
+      ${nMine?`<span class="chip warn">💬 ${nMine}</span>`:''}
+      ${nC?`<span class="chip">📝 ${nC}</span>`:''}
+    </div>
+  </article>`;
+}
+
+/* ---------- 拖拽 ---------- */
+let dragId = null;
+function bindDnd(){
+  document.querySelectorAll('.card').forEach(el=>{
+    el.addEventListener('dragstart', e=>{
+      dragId = +el.dataset.id; el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); dragId=null; });
+    el.addEventListener('click', ()=> openTask(+el.dataset.id));
+  });
+  document.querySelectorAll('[data-drop]').forEach(zone=>{
+    const col = zone.closest('.col');
+    zone.addEventListener('dragover', e=>{ e.preventDefault(); col.classList.add('over'); });
+    zone.addEventListener('dragleave', ()=> col.classList.remove('over'));
+    zone.addEventListener('drop', e=>{
+      e.preventDefault(); col.classList.remove('over');
+      const t = state.tasks.find(x=>x.id===dragId);
+      if(t && t.status !== zone.dataset.drop){ t.status = zone.dataset.drop; save(); render(); }
+    });
+  });
+}
+
+/* ---------- 详情弹窗 ---------- */
+const dlg = document.getElementById('dlg');
+function openTask(id){
+  const t = state.tasks.find(x=>x.id===id);
+  if(!t) return;
+  openId = id; pendingImgs = [];
+
+  document.getElementById('dTitle').innerHTML = `<span style="color:var(--ink-3)">#${t.id}</span> ${esc(t.title)}`;
+
+  document.getElementById('dBody').innerHTML = `
+    <div class="row">
+      <label class="f">状态
+        <select id="eStatus">${COLS.map(c=>`<option value="${c.k}"${t.status===c.k?' selected':''}>${c.name}</option>`).join('')}</select>
+      </label>
+      <label class="f">优先级
+        <select id="ePrio">${Object.entries(PRIO_NAME).map(([k,v])=>`<option value="${k}"${t.priority===k?' selected':''}>${v}</option>`).join('')}</select>
+      </label>
+      <label class="f">模块
+        <input type="text" id="eArea" value="${esc(t.area)}" style="width:130px">
+      </label>
+    </div>
+
+    <div class="body-text">${esc(t.body)}</div>
+
+    <div class="sec">
+      <h3>Agent 进展</h3>
+      ${(t.agentNotes||[]).length
+        ? t.agentNotes.map(n=>`<div class="note"><div class="h"><b>🤖 ${esc(n.by||'agent')}</b><span>${when(n.at)}</span></div><div class="c">${esc(n.text)}</div></div>`).join('')
+        : '<div class="empty">还没有 agent 记录。</div>'}
+    </div>
+
+    <div class="sec">
+      <h3>改动记录</h3>
+      ${(t.commits||[]).length
+        ? t.commits.map(c=>`<div class="note"><div class="h"><b>${esc(c.ref||'—')}</b><span>${when(c.at)}</span></div><div class="c">${esc(c.message)}${(c.files||[]).length?'\n\n'+c.files.map(f=>'· '+f).join('\n'):''}</div></div>`).join('')
+        : '<div class="empty">还没有改动。</div>'}
+    </div>
+
+    <div class="sec">
+      <h3>我的回复</h3>
+      <div id="mine">${renderMine(t)}</div>
+      <textarea id="eNew" placeholder="写下你的反馈…（可直接 Ctrl/⌘+V 粘贴截图）"></textarea>
+      <div class="drop" id="eDrop">把图片拖到这里，或粘贴截图</div>
+      <div class="thumbs" id="eThumbs"></div>
+      <button class="btn-primary" id="eSend">发送回复</button>
+    </div>`;
+
+  document.getElementById('dFoot').innerHTML = `
+    <button class="btn-danger" id="aReject">打回（待回复）</button>
+    <button class="btn-ok" id="aApprove">通过（已完成）</button>
+    <span class="spacer"></span>
+    <button id="aDel">删除</button>
+    <button id="aSave">保存并关闭</button>`;
+
+  wireDialog(t);
+  if(!dlg.open) dlg.showModal();
+}
+function renderMine(t){
+  if(!(t.userComments||[]).length) return '<div class="empty">还没有回复。</div>';
+  return t.userComments.map((c,i)=>`<div class="note mine">
+    <div class="h"><b>👤 我</b><span>${when(c.at)}</span><button class="del" data-del="${i}">删除</button></div>
+    ${c.text?`<div class="c">${esc(c.text)}</div>`:''}
+    ${(c.images||[]).map(src=>`<img src="${src}" alt="附图">`).join('')}
+  </div>`).join('');
+}
+
+function wireDialog(t){
+  const $ = id => document.getElementById(id);
+
+  $('eStatus').onchange = e => { t.status = e.target.value; save(); render(); };
+  $('ePrio').onchange   = e => { t.priority = e.target.value; save(); render(); };
+  $('eArea').onchange   = e => { t.area = e.target.value.trim() || '未分类'; save(); refreshAreas(); render(); };
+
+  // 图片：拖入 / 粘贴
+  const drop = $('eDrop');
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); addFiles(e.dataTransfer.files); };
+  $('eNew').onpaste = e => {
+    const files = [...(e.clipboardData?.items||[])]
+      .filter(i=>i.kind==='file' && i.type.startsWith('image/'))
+      .map(i=>i.getAsFile()).filter(Boolean);
+    if(files.length){ e.preventDefault(); addFiles(files); }
+  };
+
+  $('eSend').onclick = () => {
+    const text = $('eNew').value.trim();
+    if(!text && !pendingImgs.length) return;
+    (t.userComments ||= []).push({at:new Date().toISOString(), text, images:[...pendingImgs]});
+    pendingImgs = []; save();
+    $('mine').innerHTML = renderMine(t); bindDel(t);
+    $('eNew').value = ''; drawThumbs(); render();
+  };
+
+  bindDel(t);
+
+  $('aReject').onclick  = () => { t.status='reply'; save(); render(); dlg.close(); };
+  $('aApprove').onclick = () => { t.status='done';  save(); render(); dlg.close(); };
+  $('aSave').onclick    = () => { save(); render(); dlg.close(); };
+  $('aDel').onclick     = () => {
+    if(!confirm(`删除 #${t.id}「${t.title}」？`)) return;
+    state.tasks = state.tasks.filter(x=>x.id!==t.id); save(); render(); dlg.close();
+  };
+
+  function bindDel(task){
+    document.querySelectorAll('[data-del]').forEach(b=>{
+      b.onclick = () => {
+        task.userComments.splice(+b.dataset.del,1); save();
+        $('mine').innerHTML = renderMine(task); bindDel(task); render();
+      };
+    });
+  }
+  function addFiles(files){
+    [...files].filter(f=>f.type.startsWith('image/')).forEach(f=>{
+      const r = new FileReader();
+      r.onload = ev => { pendingImgs.push(ev.target.result); drawThumbs(); };
+      r.readAsDataURL(f);
+    });
+  }
+  function drawThumbs(){
+    $('eThumbs').innerHTML = pendingImgs.map((src,i)=>
+      `<div class="thumb"><img src="${src}" alt=""><button data-rm="${i}">×</button></div>`).join('');
+    document.querySelectorAll('[data-rm]').forEach(b=>{
+      b.onclick = () => { pendingImgs.splice(+b.dataset.rm,1); drawThumbs(); };
+    });
+  }
+}
+
+document.getElementById('dClose').onclick = () => dlg.close();
+dlg.addEventListener('click', e => { if(e.target===dlg) dlg.close(); });
+dlg.addEventListener('close', () => { openId=null; pendingImgs=[]; });
+
+/* 点开图片放大 */
+document.addEventListener('click', e => {
+  if(e.target.matches('.note img')) window.open(e.target.src,'_blank');
+});
+
+/* ---------- 新建 ---------- */
+document.getElementById('new').onclick = () => {
+  const title = prompt('Issue 标题');
+  if(!title?.trim()) return;
+  const body = prompt('详细描述（可留空）') || '';
+  state.tasks.push({
+    id: nextId(), title: title.trim(), body,
+    area:'未分类', priority:'medium', status:'todo',
+    agentNotes:[], userComments:[], commits:[],
+    createdBy:'user', createdAt:new Date().toISOString(),
+  });
+  save(); refreshAreas(); render();
+};
+
+/* ---------- 导出 / 重置 / 主题 ---------- */
+document.getElementById('export').onclick = () => {
+  const out = JSON.stringify({...state, meta:{...state.meta, exportedAt:new Date().toISOString()}}, null, 2);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([out],{type:'application/json'}));
+  a.download = 'tasks.json'; a.click(); URL.revokeObjectURL(a.href);
+  document.getElementById('dirty').classList.remove('on');
+};
+document.getElementById('reset').onclick = () => {
+  if(!confirm('丢弃所有本地改动，回到内置数据？')) return;
+  localStorage.removeItem(LS);
+  state = structuredClone(SEED);
+  document.getElementById('dirty').classList.remove('on');
+  refreshAreas(); render();
+};
+document.getElementById('theme').onclick = () => {
+  const cur = document.documentElement.dataset.theme;
+  const next = cur === 'dark' ? 'light' : cur === 'light' ? '' : 'dark';
+  if(next) document.documentElement.dataset.theme = next;
+  else delete document.documentElement.dataset.theme;
+};
+
+/* ---------- 筛选 ---------- */
+function refreshAreas(){
+  const sel = document.getElementById('fArea');
+  const keep = sel.value;
+  const areas = [...new Set(state.tasks.map(t=>t.area))].sort();
+  sel.innerHTML = '<option value="">全部模块</option>' + areas.map(a=>`<option>${esc(a)}</option>`).join('');
+  sel.value = areas.includes(keep) ? keep : '';
+}
+document.getElementById('q').oninput = render;
+document.getElementById('fArea').onchange = render;
+
+refreshAreas();
+render();
+</script>
+</body>
+</html>

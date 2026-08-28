@@ -1,0 +1,328 @@
+{
+  "meta": {
+    "source": "docs/requirements-2026-08-29.md",
+    "createdAt": "2026-08-29",
+    "note": "agent 只写 agentNotes / commits / status；userComments 由看板导出写回，agent 不覆盖。"
+  },
+  "tasks": [
+    {
+      "id": 1,
+      "title": "终端强制滚动到底部 + 长时间后渲染错乱",
+      "body": "在内置终端启动 claudecode 后，每次滚动刷新内容都会强制滚动到底部；运行久了终端渲染直接出问题。查清成因并修复，实在找不到方案就参照 VSCode 终端的实现（那个绝对没问题）。",
+      "area": "终端",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 2,
+      "title": "浏览器首次打开网页很卡",
+      "body": "首次打开网页明显卡顿，codex 内置浏览器开同样网站很快，应该不是网络问题。定位首屏慢的真实原因并优化。",
+      "area": "浏览器",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 3,
+      "title": "浏览器标签页改为顶部多开（与终端一致）",
+      "body": "现在是「浏览器标签页打开后内部才是多个标签页」，需要重写为和终端一致的效果：在上方多开。不能影响 agent MCP 工具——agent 打开新标签页、关闭标签页、控制标签页的行为全部不变，只是渲染位置换到上方。",
+      "area": "浏览器",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 4,
+      "title": "右侧文件面板支持编辑文本文件",
+      "body": "文件面板需要支持编辑基本文本文件：md、txt、json、jsonl 等。预览状态下不可编辑。",
+      "area": "文件面板",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 5,
+      "title": "标题栏拖动在特定情况下失效",
+      "body": "修过很多遍了，特定情况下仍然无法拖动，非常恼火。失效后随便调整一下窗口大小、或者去左侧上方拖两下就恢复。左侧上方那块拖动 100% 有效，chat 界面上方失效，右侧栏在多开几个标签页后拖动效果也没了。查清左侧为什么必然有效、另外两处为什么会丢。",
+      "area": "窗口",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 6,
+      "title": "左侧「最近」和「项目」两栏支持调整顺序",
+      "body": "左侧的最近和项目两栏需要支持调整上下顺序。",
+      "area": "侧边栏",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 7,
+      "title": "取消多工作区下左上角三并排模式",
+      "body": "多个工作区时左上角会变成三个并排的模式，取消掉，恢复原来的样子。",
+      "area": "窗口",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 8,
+      "title": "【提问】/memory 自动整理是默认多少轮触发？",
+      "body": "回答：目前的记忆整理 /memory 是默认设置了多少轮自动整理吗？这是一个问题，不是改动需求——查代码给出确切答案。",
+      "area": "问答",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 9,
+      "title": "删除系统提示词里的子 agent 提示词",
+      "body": "系统提示词里面的子 agent 提示词删除。",
+      "area": "提示词",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 10,
+      "title": "设置界面「返回工作区」按钮：悬浮阴影 + 文本居中",
+      "body": "设置界面的返回工作区按钮，悬浮时显示阴影；另外文本似乎没有居中，一并修掉。",
+      "area": "设置",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 11,
+      "title": "置顶的对话也要在「最近」里显示",
+      "body": "为什么置顶的对话不在最近里面显示？希望置顶对话同样出现在最近列表中。",
+      "area": "侧边栏",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 12,
+      "title": "skill 界面启用/停用标志不明显",
+      "body": "skill 界面的启用和停用标志不明显，需要更清晰的视觉区分。",
+      "area": "Skill",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 13,
+      "title": "更换 chat 等待 AI 回复的加载动画",
+      "body": "chat 界面等待 AI 回复的加载状态换一个。项目里应该已经准备了多个加载图标，找一下换一个。",
+      "area": "Chat",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 14,
+      "title": "【检查】左下角 logo 是否用的 build/logo.svg",
+      "body": "找到 /Users/hao/Desktop/project/SuoCode/apps/desktop/build/logo.svg，检查左下角 logo 是不是用这个实现的。",
+      "area": "品牌",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 15,
+      "title": "Home 空态的加载图标换成 logo.svg",
+      "body": "「你想构建什么？ / CoilCoil 已在 Home 中准备就绪。」上面是不是有一个加载图标？把那个取消，换成 apps/desktop/build/logo.svg。",
+      "area": "品牌",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 16,
+      "title": "chat 代码块右下角加复制按钮",
+      "body": "chat 界面的代码块渲染，右下角需要显示一个复制按钮——位置必须是右下角。",
+      "area": "Chat",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 17,
+      "title": "chat 回到底部箭头需要触发阈值",
+      "body": "chat 界面的下箭头可以快速回到底部，但需要一个触发阈值——往上滚一点点不应该就触发显示。",
+      "area": "Chat",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 18,
+      "title": "【提问】会话文件现在存在哪里、能否按文件夹区分？",
+      "body": "回答：我们的会话现在是怎么放的，统一放到 coilcoil 的内置目录下面吗？如果我有文件夹 A 和文件夹 B，它们的会话我能在文件里面区分吗？这是提问，给出确切的存储路径与区分方式。",
+      "area": "问答",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 19,
+      "title": "输入框与悬浮气泡取消边框、阴影调小",
+      "body": "chat 的输入框 + 所有悬浮气泡，全都取消边框；并且气泡的阴影调小一点点即可。",
+      "area": "视觉",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 20,
+      "title": "设置界面加入字体切换",
+      "body": "字体可以修改吗？想在设置界面搞几个字体供选择。",
+      "area": "设置",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 21,
+      "title": "默认色调左侧栏偏白一点",
+      "body": "默认色调的左侧栏色调，稍微偏白一点点。",
+      "area": "视觉",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 22,
+      "title": "整个窗口启用透明度参数",
+      "body": "整个窗口需要启动透明度参数，希望能稍微透明一点。",
+      "area": "窗口",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 23,
+      "title": "设置界面配色未与主界面同步",
+      "body": "设置界面的色调没有和主界面同步，明明选的是同一套配色，结果设置界面和主界面不一致。",
+      "area": "设置",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 24,
+      "title": "MCP 改为手动按需导入",
+      "body": "去 mcp 看看我们是不是自动发现 mcp 的？能不能让我们手动控制：可以选择「发现所有 mcp」，然后出现一个弹窗，按需勾选导入。",
+      "area": "MCP",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 25,
+      "title": "整体按钮/悬浮元素圆角加大一点",
+      "body": "整体按钮、悬浮的一些东西，圆角都稍微大一点点。",
+      "area": "视觉",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 26,
+      "title": "滚动条颜色调淡（含 hover / active）",
+      "body": "滚动条需要淡一点，现在颜色有点深了，包括悬浮和点击状态。",
+      "area": "视觉",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 27,
+      "title": "【方案讨论】工作区内置 Issue 看板面板",
+      "body": "这是一个大功能，不着急做，先给想法。在每个工作区（挂载的文件夹）里加一个和现在这个看板类似的功能——因为我研究下来「对话管理」是伪需求。文件夹那里右侧不是有个加号用来新建对话吗，在加号左侧再加一个按钮，点击把主面板切换到看板模式：打开后 chat 界面和右侧栏都没了，像 skill 那样整块渲染成看板。我提 Issue，后台 agent 去修复、改状态，我来审查，每个 Issue 下有 agent 评论和我的评论。后台 agent 的流转逻辑、是否能用内置浏览器等还要再讨论，这块大概率要深度用 git worktree。参考项目 https://github.com/multica-ai/multica ，但它做得很复杂，我肯定不做那么复杂。本条只要产出方案，不要直接动手实现。",
+      "area": "新功能",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 28,
+      "title": "Mac 会话状态指示改为红点未读 + Dock 数字角标",
+      "body": "Mac 上会话的 agent 完成任务会显示小绿点，改成红点表示未读；正在处理的状态用加载状态（例如圆圈），不要绿点扩散的效果；完成后显示红点。另外 Mac 扩展坞图标右上角需要显示 1、2 这种数字小红点。",
+      "area": "通知",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 29,
+      "title": "右侧目录顶部 tab 支持鼠标中键关闭",
+      "body": "右侧目录上方的 tab 需要支持鼠标中键关闭。",
+      "area": "文件面板",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    }
+  ]
+}

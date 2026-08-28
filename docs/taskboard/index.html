@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SuoCode Issue 看板</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --panel-2:#fbfbfc;
+    --ink:#1c1f24; --ink-2:#5b6472; --ink-3:#8b95a3;
+    --line:#e4e7ec; --line-2:#eef0f3;
+    --accent:#4f6bed;
+    --todo:#9aa4b2; --doing:#3b82f6; --review:#8b5cf6; --reply:#ef4444; --done:#10b981;
+    --hi:#e5484d; --mid:#f5a524; --lo:#94a3b8;
+    --radius:14px; --shadow:0 1px 2px rgba(16,24,40,.05),0 6px 20px rgba(16,24,40,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme=light]){
+      --bg:#15171b; --panel:#1c1f24; --panel-2:#20242a;
+      --ink:#e8eaed; --ink-2:#a3adba; --ink-3:#6e7783;
+      --line:#2b3038; --line-2:#23272e;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme=dark]{
+    --bg:#15171b; --panel:#1c1f24; --panel-2:#20242a;
+    --ink:#e8eaed; --ink-2:#a3adba; --ink-3:#6e7783;
+    --line:#2b3038; --line-2:#23272e;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC",system-ui,sans-serif;
+  }
+  .wrap{max-width:1680px;margin:0 auto;padding:22px 24px 60px}
+
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+  .sub{color:var(--ink-3);font-size:12.5px}
+
+  .bar{
+    display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:10px 12px;margin-bottom:18px;box-shadow:var(--shadow);
+  }
+  button,.btn{
+    font:inherit;font-size:13px;padding:7px 13px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
+    cursor:pointer;transition:background .15s,border-color .15s,transform .1s;
+  }
+  button:hover{background:var(--line-2);border-color:var(--ink-3)}
+  button:active{transform:translateY(1px)}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:#4459d8;border-color:#4459d8}
+  .btn-danger{background:transparent;border-color:var(--hi);color:var(--hi)}
+  .btn-danger:hover{background:var(--hi);color:#fff}
+  .btn-ok{background:var(--done);border-color:var(--done);color:#fff}
+  .btn-ok:hover{filter:brightness(.94)}
+  .spacer{flex:1}
+  input[type=search]{
+    font:inherit;font-size:13px;padding:7px 11px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);min-width:200px;
+  }
+  .dirty{color:var(--mid);font-size:12.5px;display:none}
+  .dirty.on{display:inline}
+
+  .board{display:grid;grid-template-columns:repeat(5,minmax(240px,1fr));gap:14px;align-items:start}
+  @media (max-width:1200px){.board{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:680px){.board{grid-template-columns:1fr}}
+
+  .col{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+       box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:120px}
+  .col-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line-2)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .col-h .name{font-weight:600;font-size:13px}
+  .col-h .n{margin-left:auto;color:var(--ink-3);font-size:12px;font-variant-numeric:tabular-nums}
+  .col-b{padding:10px;display:flex;flex-direction:column;gap:9px;min-height:60px}
+  .col.over .col-b{background:var(--line-2);border-radius:0 0 var(--radius) var(--radius)}
+
+  .card{
+    background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--lo);
+    border-radius:11px;padding:11px 12px;cursor:pointer;
+    transition:border-color .15s,transform .1s,box-shadow .15s;
+  }
+  .card:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(16,24,40,.09);border-color:var(--ink-3)}
+  .card.p-high{border-left-color:var(--hi)}
+  .card.p-medium{border-left-color:var(--mid)}
+  .card.dragging{opacity:.4}
+  .card .id{font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .card .t{font-weight:600;font-size:13px;margin:3px 0 6px;line-height:1.45}
+  .card .m{display:flex;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--ink-2)}
+  .chip{background:var(--line-2);border-radius:20px;padding:2px 8px}
+  .chip.warn{color:var(--mid)}
+
+  dialog{
+    border:none;border-radius:16px;padding:0;background:var(--panel);color:var(--ink);
+    max-width:760px;width:calc(100vw - 40px);box-shadow:0 24px 60px rgba(0,0,0,.3);
+  }
+  dialog::backdrop{background:rgba(10,12,16,.55)}
+  .d-h{display:flex;align-items:flex-start;gap:12px;padding:20px 22px 14px;border-bottom:1px solid var(--line-2)}
+  .d-h h2{margin:0;font-size:17px;line-height:1.4;flex:1}
+  .d-h .x{border:none;background:transparent;font-size:22px;line-height:1;color:var(--ink-3);padding:2px 6px}
+  .d-b{padding:18px 22px;max-height:min(62vh,600px);overflow:auto}
+  .d-f{display:flex;gap:8px;padding:14px 22px;border-top:1px solid var(--line-2);flex-wrap:wrap}
+
+  .body-text{white-space:pre-wrap;color:var(--ink-2);background:var(--panel-2);
+             border:1px solid var(--line-2);border-radius:11px;padding:12px 14px;font-size:13px}
+  .sec{margin-top:20px}
+  .sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin:0 0 9px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  label.f{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--ink-2)}
+  select,textarea,input[type=text]{
+    font:inherit;font-size:13px;padding:7px 10px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
+  }
+  textarea{width:100%;min-height:82px;resize:vertical;line-height:1.6}
+
+  .note{border:1px solid var(--line-2);border-left:3px solid var(--accent);
+        border-radius:10px;padding:10px 12px;margin-bottom:9px;background:var(--panel-2);font-size:13px}
+  .note.mine{border-left-color:var(--done)}
+  .note .h{display:flex;gap:8px;font-size:11px;color:var(--ink-3);margin-bottom:5px}
+  .note .h b{color:var(--ink-2);font-weight:600}
+  .note .c{white-space:pre-wrap;color:var(--ink-2)}
+  .note img{max-width:100%;border-radius:9px;margin-top:9px;display:block;cursor:zoom-in;border:1px solid var(--line)}
+  .note .del{margin-left:auto;border:none;background:transparent;color:var(--ink-3);font-size:11px;padding:0 3px;cursor:pointer}
+  .note .del:hover{color:var(--hi)}
+  .empty{color:var(--ink-3);font-size:12.5px;padding:2px 0}
+  .drop{border:1px dashed var(--line);border-radius:10px;padding:9px 11px;font-size:12px;color:var(--ink-3);margin:9px 0}
+  .drop.over{border-color:var(--accent);color:var(--accent)}
+  .thumbs{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}
+  .thumb{position:relative}
+  .thumb img{height:52px;border-radius:8px;border:1px solid var(--line);display:block}
+  .thumb button{position:absolute;top:-6px;right:-6px;width:19px;height:19px;padding:0;border-radius:50%;
+                background:var(--hi);color:#fff;border:none;font-size:12px;line-height:1;cursor:pointer}
+  code{background:var(--line-2);padding:1px 5px;border-radius:5px;font-size:12px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .hint{color:var(--ink-3);font-size:12px;margin-top:10px;line-height:1.65}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>SuoCode Issue 看板</h1>
+    <span class="sub" id="meta"></span>
+    <span class="spacer"></span>
+    <span class="dirty" id="dirty">● 有未导出的改动</span>
+  </header>
+
+  <div class="bar">
+    <button class="btn-primary" id="new">＋ 新建 Issue</button>
+    <input type="search" id="q" placeholder="搜索标题 / 正文 / 模块…">
+    <select id="fArea"><option value="">全部模块</option></select>
+    <span class="spacer"></span>
+    <button id="export">⬇ 导出 tasks.json</button>
+    <button id="reset">↺ 丢弃本地改动</button>
+    <button id="theme">◐ 主题</button>
+  </div>
+
+  <div class="board" id="board"></div>
+
+  <p class="hint">
+    卡片可直接拖到别的列改状态，点开可以改状态 / 打回 / 通过、回复文字和贴图（支持 <code>Ctrl/⌘+V</code> 粘贴截图）。<br>
+    你的改动实时存在浏览器 localStorage 里；点「导出 tasks.json」下载后覆盖 <code>docs/taskboard/tasks.json</code>，我这边就能读到你的回复。
+  </p>
+</div>
+
+<dialog id="dlg">
+  <div class="d-h">
+    <h2 id="dTitle"></h2>
+    <button class="x" id="dClose" aria-label="关闭">&times;</button>
+  </div>
+  <div class="d-b" id="dBody"></div>
+  <div class="d-f" id="dFoot"></div>
+</dialog>
+
+<script>
+const SEED = {
+  "meta": {
+    "source": "docs/requirements-2026-08-29.md",
+    "createdAt": "2026-08-29",
+    "note": "agent 只写 agentNotes / commits / status；userComments 由看板导出写回，agent 不覆盖。"
+  },
+  "tasks": [
+    {
+      "id": 1,
+      "title": "终端强制滚动到底部 + 长时间后渲染错乱",
+      "body": "在内置终端启动 claudecode 后，每次滚动刷新内容都会强制滚动到底部；运行久了终端渲染直接出问题。查清成因并修复，实在找不到方案就参照 VSCode 终端的实现（那个绝对没问题）。",
+      "area": "终端",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 2,
+      "title": "浏览器首次打开网页很卡",
+      "body": "首次打开网页明显卡顿，codex 内置浏览器开同样网站很快，应该不是网络问题。定位首屏慢的真实原因并优化。",
+      "area": "浏览器",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 3,
+      "title": "浏览器标签页改为顶部多开（与终端一致）",
+      "body": "现在是「浏览器标签页打开后内部才是多个标签页」，需要重写为和终端一致的效果：在上方多开。不能影响 agent MCP 工具——agent 打开新标签页、关闭标签页、控制标签页的行为全部不变，只是渲染位置换到上方。",
+      "area": "浏览器",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 4,
+      "title": "右侧文件面板支持编辑文本文件",
+      "body": "文件面板需要支持编辑基本文本文件：md、txt、json、jsonl 等。预览状态下不可编辑。",
+      "area": "文件面板",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 5,
+      "title": "标题栏拖动在特定情况下失效",
+      "body": "修过很多遍了，特定情况下仍然无法拖动，非常恼火。失效后随便调整一下窗口大小、或者去左侧上方拖两下就恢复。左侧上方那块拖动 100% 有效，chat 界面上方失效，右侧栏在多开几个标签页后拖动效果也没了。查清左侧为什么必然有效、另外两处为什么会丢。",
+      "area": "窗口",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 6,
+      "title": "左侧「最近」和「项目」两栏支持调整顺序",
+      "body": "左侧的最近和项目两栏需要支持调整上下顺序。",
+      "area": "侧边栏",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 7,
+      "title": "取消多工作区下左上角三并排模式",
+      "body": "多个工作区时左上角会变成三个并排的模式，取消掉，恢复原来的样子。",
+      "area": "窗口",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 8,
+      "title": "【提问】/memory 自动整理是默认多少轮触发？",
+      "body": "回答：目前的记忆整理 /memory 是默认设置了多少轮自动整理吗？这是一个问题，不是改动需求——查代码给出确切答案。",
+      "area": "问答",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 9,
+      "title": "删除系统提示词里的子 agent 提示词",
+      "body": "系统提示词里面的子 agent 提示词删除。",
+      "area": "提示词",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 10,
+      "title": "设置界面「返回工作区」按钮：悬浮阴影 + 文本居中",
+      "body": "设置界面的返回工作区按钮，悬浮时显示阴影；另外文本似乎没有居中，一并修掉。",
+      "area": "设置",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 11,
+      "title": "置顶的对话也要在「最近」里显示",
+      "body": "为什么置顶的对话不在最近里面显示？希望置顶对话同样出现在最近列表中。",
+      "area": "侧边栏",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 12,
+      "title": "skill 界面启用/停用标志不明显",
+      "body": "skill 界面的启用和停用标志不明显，需要更清晰的视觉区分。",
+      "area": "Skill",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 13,
+      "title": "更换 chat 等待 AI 回复的加载动画",
+      "body": "chat 界面等待 AI 回复的加载状态换一个。项目里应该已经准备了多个加载图标，找一下换一个。",
+      "area": "Chat",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 14,
+      "title": "【检查】左下角 logo 是否用的 build/logo.svg",
+      "body": "找到 /Users/hao/Desktop/project/SuoCode/apps/desktop/build/logo.svg，检查左下角 logo 是不是用这个实现的。",
+      "area": "品牌",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 15,
+      "title": "Home 空态的加载图标换成 logo.svg",
+      "body": "「你想构建什么？ / CoilCoil 已在 Home 中准备就绪。」上面是不是有一个加载图标？把那个取消，换成 apps/desktop/build/logo.svg。",
+      "area": "品牌",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 16,
+      "title": "chat 代码块右下角加复制按钮",
+      "body": "chat 界面的代码块渲染，右下角需要显示一个复制按钮——位置必须是右下角。",
+      "area": "Chat",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 17,
+      "title": "chat 回到底部箭头需要触发阈值",
+      "body": "chat 界面的下箭头可以快速回到底部，但需要一个触发阈值——往上滚一点点不应该就触发显示。",
+      "area": "Chat",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 18,
+      "title": "【提问】会话文件现在存在哪里、能否按文件夹区分？",
+      "body": "回答：我们的会话现在是怎么放的，统一放到 coilcoil 的内置目录下面吗？如果我有文件夹 A 和文件夹 B，它们的会话我能在文件里面区分吗？这是提问，给出确切的存储路径与区分方式。",
+      "area": "问答",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 19,
+      "title": "输入框与悬浮气泡取消边框、阴影调小",
+      "body": "chat 的输入框 + 所有悬浮气泡，全都取消边框；并且气泡的阴影调小一点点即可。",
+      "area": "视觉",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 20,
+      "title": "设置界面加入字体切换",
+      "body": "字体可以修改吗？想在设置界面搞几个字体供选择。",
+      "area": "设置",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 21,
+      "title": "默认色调左侧栏偏白一点",
+      "body": "默认色调的左侧栏色调，稍微偏白一点点。",
+      "area": "视觉",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 22,
+      "title": "整个窗口启用透明度参数",
+      "body": "整个窗口需要启动透明度参数，希望能稍微透明一点。",
+      "area": "窗口",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 23,
+      "title": "设置界面配色未与主界面同步",
+      "body": "设置界面的色调没有和主界面同步，明明选的是同一套配色，结果设置界面和主界面不一致。",
+      "area": "设置",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 24,
+      "title": "MCP 改为手动按需导入",
+      "body": "去 mcp 看看我们是不是自动发现 mcp 的？能不能让我们手动控制：可以选择「发现所有 mcp」，然后出现一个弹窗，按需勾选导入。",
+      "area": "MCP",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 25,
+      "title": "整体按钮/悬浮元素圆角加大一点",
+      "body": "整体按钮、悬浮的一些东西，圆角都稍微大一点点。",
+      "area": "视觉",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 26,
+      "title": "滚动条颜色调淡（含 hover / active）",
+      "body": "滚动条需要淡一点，现在颜色有点深了，包括悬浮和点击状态。",
+      "area": "视觉",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 27,
+      "title": "【方案讨论】工作区内置 Issue 看板面板",
+      "body": "这是一个大功能，不着急做，先给想法。在每个工作区（挂载的文件夹）里加一个和现在这个看板类似的功能——因为我研究下来「对话管理」是伪需求。文件夹那里右侧不是有个加号用来新建对话吗，在加号左侧再加一个按钮，点击把主面板切换到看板模式：打开后 chat 界面和右侧栏都没了，像 skill 那样整块渲染成看板。我提 Issue，后台 agent 去修复、改状态，我来审查，每个 Issue 下有 agent 评论和我的评论。后台 agent 的流转逻辑、是否能用内置浏览器等还要再讨论，这块大概率要深度用 git worktree。参考项目 https://github.com/multica-ai/multica ，但它做得很复杂，我肯定不做那么复杂。本条只要产出方案，不要直接动手实现。",
+      "area": "新功能",
+      "priority": "high",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 28,
+      "title": "Mac 会话状态指示改为红点未读 + Dock 数字角标",
+      "body": "Mac 上会话的 agent 完成任务会显示小绿点，改成红点表示未读；正在处理的状态用加载状态（例如圆圈），不要绿点扩散的效果；完成后显示红点。另外 Mac 扩展坞图标右上角需要显示 1、2 这种数字小红点。",
+      "area": "通知",
+      "priority": "medium",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    },
+    {
+      "id": 29,
+      "title": "右侧目录顶部 tab 支持鼠标中键关闭",
+      "body": "右侧目录上方的 tab 需要支持鼠标中键关闭。",
+      "area": "文件面板",
+      "priority": "low",
+      "status": "todo",
+      "agentNotes": [],
+      "userComments": [],
+      "commits": []
+    }
+  ]
+}
+;
+const BUILT_AT = "2026-08-28T19:55:07.177Z";
+const LS = 'suocode-taskboard-v2';
+
+const COLS = [
+  {k:'todo',    name:'待办',   c:'var(--todo)'},
+  {k:'doing',   name:'进行中', c:'var(--doing)'},
+  {k:'review',  name:'待验收', c:'var(--review)'},
+  {k:'reply',   name:'待回复', c:'var(--reply)'},
+  {k:'done',    name:'已完成', c:'var(--done)'},
+];
+const STATUS_NAME = Object.fromEntries(COLS.map(c=>[c.k,c.name]));
+const PRIO_NAME = {high:'高',medium:'中',low:'低'};
+
+let state = load();
+let openId = null;
+let pendingImgs = [];
+
+/* ---------- 存取 ---------- */
+function load(){
+  try{
+    const raw = localStorage.getItem(LS);
+    if(raw){
+      const saved = JSON.parse(raw);
+      // 以 SEED 为骨架合并，这样我新增/改写任务后你的回复不会丢
+      const byId = new Map((saved.tasks||[]).map(t=>[t.id,t]));
+      const merged = SEED.tasks.map(seed=>{
+        const mine = byId.get(seed.id);
+        if(!mine) return structuredClone(seed);
+        return {...structuredClone(seed),
+          status: mine.status ?? seed.status,
+          userComments: mine.userComments ?? [],
+          // agent 侧字段始终以 SEED 为准
+        };
+      });
+      // 你在看板上自己新建的 Issue（SEED 里没有的）保留
+      for(const t of saved.tasks||[]) if(!SEED.tasks.some(s=>s.id===t.id)) merged.push(t);
+      return {meta:SEED.meta, tasks:merged};
+    }
+  }catch(e){ console.warn('本地数据读取失败，回退到内置数据', e); }
+  return structuredClone(SEED);
+}
+function save(){
+  localStorage.setItem(LS, JSON.stringify(state));
+  document.getElementById('dirty').classList.add('on');
+}
+const nextId = () => Math.max(0, ...state.tasks.map(t=>t.id)) + 1;
+const esc = s => String(s??'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const when = iso => { try{ return new Date(iso).toLocaleString('zh-CN',{hour12:false}); }catch{ return iso||''; } };
+
+/* ---------- 渲染看板 ---------- */
+function render(){
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const area = document.getElementById('fArea').value;
+  const hit = t => (!q || (t.title+t.body+t.area).toLowerCase().includes(q)) && (!area || t.area===area);
+
+  document.getElementById('board').innerHTML = COLS.map(col=>{
+    const list = state.tasks.filter(t=>t.status===col.k);
+    const shown = list.filter(hit);
+    return `<section class="col" data-col="${col.k}">
+      <div class="col-h">
+        <span class="dot" style="background:${col.c}"></span>
+        <span class="name">${col.name}</span>
+        <span class="n">${shown.length}${shown.length!==list.length?` / ${list.length}`:''}</span>
+      </div>
+      <div class="col-b" data-drop="${col.k}">
+        ${shown.map(cardHTML).join('') || '<div class="empty">—</div>'}
+      </div>
+    </section>`;
+  }).join('');
+
+  bindDnd();
+  const total = state.tasks.length, done = state.tasks.filter(t=>t.status==='done').length;
+  document.getElementById('meta').textContent =
+    `${total} 个 Issue · 已完成 ${done} · 数据构建于 ${BUILT_AT ? when(BUILT_AT) : '—'}`;
+}
+function cardHTML(t){
+  const nBot = (t.agentNotes||[]).length, nMine = (t.userComments||[]).length, nC = (t.commits||[]).length;
+  return `<article class="card p-${t.priority}" draggable="true" data-id="${t.id}">
+    <div class="id">#${t.id} · ${esc(t.area)}</div>
+    <div class="t">${esc(t.title)}</div>
+    <div class="m">
+      <span class="chip">${PRIO_NAME[t.priority]||t.priority}</span>
+      ${nBot?`<span class="chip">🤖 ${nBot}</span>`:''}
+      ${nMine?`<span class="chip warn">💬 ${nMine}</span>`:''}
+      ${nC?`<span class="chip">📝 ${nC}</span>`:''}
+    </div>
+  </article>`;
+}
+
+/* ---------- 拖拽 ---------- */
+let dragId = null;
+function bindDnd(){
+  document.querySelectorAll('.card').forEach(el=>{
+    el.addEventListener('dragstart', e=>{
+      dragId = +el.dataset.id; el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); dragId=null; });
+    el.addEventListener('click', ()=> openTask(+el.dataset.id));
+  });
+  document.querySelectorAll('[data-drop]').forEach(zone=>{
+    const col = zone.closest('.col');
+    zone.addEventListener('dragover', e=>{ e.preventDefault(); col.classList.add('over'); });
+    zone.addEventListener('dragleave', ()=> col.classList.remove('over'));
+    zone.addEventListener('drop', e=>{
+      e.preventDefault(); col.classList.remove('over');
+      const t = state.tasks.find(x=>x.id===dragId);
+      if(t && t.status !== zone.dataset.drop){ t.status = zone.dataset.drop; save(); render(); }
+    });
+  });
+}
+
+/* ---------- 详情弹窗 ---------- */
+const dlg = document.getElementById('dlg');
+function openTask(id){
+  const t = state.tasks.find(x=>x.id===id);
+  if(!t) return;
+  openId = id; pendingImgs = [];
+
+  document.getElementById('dTitle').innerHTML = `<span style="color:var(--ink-3)">#${t.id}</span> ${esc(t.title)}`;
+
+  document.getElementById('dBody').innerHTML = `
+    <div class="row">
+      <label class="f">状态
+        <select id="eStatus">${COLS.map(c=>`<option value="${c.k}"${t.status===c.k?' selected':''}>${c.name}</option>`).join('')}</select>
+      </label>
+      <label class="f">优先级
+        <select id="ePrio">${Object.entries(PRIO_NAME).map(([k,v])=>`<option value="${k}"${t.priority===k?' selected':''}>${v}</option>`).join('')}</select>
+      </label>
+      <label class="f">模块
+        <input type="text" id="eArea" value="${esc(t.area)}" style="width:130px">
+      </label>
+    </div>
+
+    <div class="body-text">${esc(t.body)}</div>
+
+    <div class="sec">
+      <h3>Agent 进展</h3>
+      ${(t.agentNotes||[]).length
+        ? t.agentNotes.map(n=>`<div class="note"><div class="h"><b>🤖 ${esc(n.by||'agent')}</b><span>${when(n.at)}</span></div><div class="c">${esc(n.text)}</div></div>`).join('')
+        : '<div class="empty">还没有 agent 记录。</div>'}
+    </div>
+
+    <div class="sec">
+      <h3>改动记录</h3>
+      ${(t.commits||[]).length
+        ? t.commits.map(c=>`<div class="note"><div class="h"><b>${esc(c.ref||'—')}</b><span>${when(c.at)}</span></div><div class="c">${esc(c.message)}${(c.files||[]).length?'\n\n'+c.files.map(f=>'· '+f).join('\n'):''}</div></div>`).join('')
+        : '<div class="empty">还没有改动。</div>'}
+    </div>
+
+    <div class="sec">
+      <h3>我的回复</h3>
+      <div id="mine">${renderMine(t)}</div>
+      <textarea id="eNew" placeholder="写下你的反馈…（可直接 Ctrl/⌘+V 粘贴截图）"></textarea>
+      <div class="drop" id="eDrop">把图片拖到这里，或粘贴截图</div>
+      <div class="thumbs" id="eThumbs"></div>
+      <button class="btn-primary" id="eSend">发送回复</button>
+    </div>`;
+
+  document.getElementById('dFoot').innerHTML = `
+    <button class="btn-danger" id="aReject">打回（待回复）</button>
+    <button class="btn-ok" id="aApprove">通过（已完成）</button>
+    <span class="spacer"></span>
+    <button id="aDel">删除</button>
+    <button id="aSave">保存并关闭</button>`;
+
+  wireDialog(t);
+  if(!dlg.open) dlg.showModal();
+}
+function renderMine(t){
+  if(!(t.userComments||[]).length) return '<div class="empty">还没有回复。</div>';
+  return t.userComments.map((c,i)=>`<div class="note mine">
+    <div class="h"><b>👤 我</b><span>${when(c.at)}</span><button class="del" data-del="${i}">删除</button></div>
+    ${c.text?`<div class="c">${esc(c.text)}</div>`:''}
+    ${(c.images||[]).map(src=>`<img src="${src}" alt="附图">`).join('')}
+  </div>`).join('');
+}
+
+function wireDialog(t){
+  const $ = id => document.getElementById(id);
+
+  $('eStatus').onchange = e => { t.status = e.target.value; save(); render(); };
+  $('ePrio').onchange   = e => { t.priority = e.target.value; save(); render(); };
+  $('eArea').onchange   = e => { t.area = e.target.value.trim() || '未分类'; save(); refreshAreas(); render(); };
+
+  // 图片：拖入 / 粘贴
+  const drop = $('eDrop');
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); addFiles(e.dataTransfer.files); };
+  $('eNew').onpaste = e => {
+    const files = [...(e.clipboardData?.items||[])]
+      .filter(i=>i.kind==='file' && i.type.startsWith('image/'))
+      .map(i=>i.getAsFile()).filter(Boolean);
+    if(files.length){ e.preventDefault(); addFiles(files); }
+  };
+
+  $('eSend').onclick = () => {
+    const text = $('eNew').value.trim();
+    if(!text && !pendingImgs.length) return;
+    (t.userComments ||= []).push({at:new Date().toISOString(), text, images:[...pendingImgs]});
+    pendingImgs = []; save();
+    $('mine').innerHTML = renderMine(t); bindDel(t);
+    $('eNew').value = ''; drawThumbs(); render();
+  };
+
+  bindDel(t);
+
+  $('aReject').onclick  = () => { t.status='reply'; save(); render(); dlg.close(); };
+  $('aApprove').onclick = () => { t.status='done';  save(); render(); dlg.close(); };
+  $('aSave').onclick    = () => { save(); render(); dlg.close(); };
+  $('aDel').onclick     = () => {
+    if(!confirm(`删除 #${t.id}「${t.title}」？`)) return;
+    state.tasks = state.tasks.filter(x=>x.id!==t.id); save(); render(); dlg.close();
+  };
+
+  function bindDel(task){
+    document.querySelectorAll('[data-del]').forEach(b=>{
+      b.onclick = () => {
+        task.userComments.splice(+b.dataset.del,1); save();
+        $('mine').innerHTML = renderMine(task); bindDel(task); render();
+      };
+    });
+  }
+  function addFiles(files){
+    [...files].filter(f=>f.type.startsWith('image/')).forEach(f=>{
+      const r = new FileReader();
+      r.onload = ev => { pendingImgs.push(ev.target.result); drawThumbs(); };
+      r.readAsDataURL(f);
+    });
+  }
+  function drawThumbs(){
+    $('eThumbs').innerHTML = pendingImgs.map((src,i)=>
+      `<div class="thumb"><img src="${src}" alt=""><button data-rm="${i}">×</button></div>`).join('');
+    document.querySelectorAll('[data-rm]').forEach(b=>{
+      b.onclick = () => { pendingImgs.splice(+b.dataset.rm,1); drawThumbs(); };
+    });
+  }
+}
+
+document.getElementById('dClose').onclick = () => dlg.close();
+dlg.addEventListener('click', e => { if(e.target===dlg) dlg.close(); });
+dlg.addEventListener('close', () => { openId=null; pendingImgs=[]; });
+
+/* 点开图片放大 */
+document.addEventListener('click', e => {
+  if(e.target.matches('.note img')) window.open(e.target.src,'_blank');
+});
+
+/* ---------- 新建 ---------- */
+document.getElementById('new').onclick = () => {
+  const title = prompt('Issue 标题');
+  if(!title?.trim()) return;
+  const body = prompt('详细描述（可留空）') || '';
+  state.tasks.push({
+    id: nextId(), title: title.trim(), body,
+    area:'未分类', priority:'medium', status:'todo',
+    agentNotes:[], userComments:[], commits:[],
+    createdBy:'user', createdAt:new Date().toISOString(),
+  });
+  save(); refreshAreas(); render();
+};
+
+/* ---------- 导出 / 重置 / 主题 ---------- */
+document.getElementById('export').onclick = () => {
+  const out = JSON.stringify({...state, meta:{...state.meta, exportedAt:new Date().toISOString()}}, null, 2);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([out],{type:'application/json'}));
+  a.download = 'tasks.json'; a.click(); URL.revokeObjectURL(a.href);
+  document.getElementById('dirty').classList.remove('on');
+};
+document.getElementById('reset').onclick = () => {
+  if(!confirm('丢弃所有本地改动，回到内置数据？')) return;
+  localStorage.removeItem(LS);
+  state = structuredClone(SEED);
+  document.getElementById('dirty').classList.remove('on');
+  refreshAreas(); render();
+};
+document.getElementById('theme').onclick = () => {
+  const cur = document.documentElement.dataset.theme;
+  const next = cur === 'dark' ? 'light' : cur === 'light' ? '' : 'dark';
+  if(next) document.documentElement.dataset.theme = next;
+  else delete document.documentElement.dataset.theme;
+};
+
+/* ---------- 筛选 ---------- */
+function refreshAreas(){
+  const sel = document.getElementById('fArea');
+  const keep = sel.value;
+  const areas = [...new Set(state.tasks.map(t=>t.area))].sort();
+  sel.innerHTML = '<option value="">全部模块</option>' + areas.map(a=>`<option>${esc(a)}</option>`).join('');
+  sel.value = areas.includes(keep) ? keep : '';
+}
+document.getElementById('q').oninput = render;
+document.getElementById('fArea').onchange = render;
+
+refreshAreas();
+render();
+</script>
+</body>
+</html>
