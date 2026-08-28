@@ -1,0 +1,12 @@
+{
+  "id": 18,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r1c",
+      "at": "2026-08-29T05:00:00.000Z",
+      "text": "结论：所有会话都放在 CoilCoil 自己的目录下，而且是**一个大平铺目录**，不按文件夹分子目录；文件夹 A 和文件夹 B 的会话靠的是每个会话文件**第一行里的 cwd 字段**来区分，不是靠路径。\n\n1. 存储根目录（macOS 真实路径）：\n   ~/Library/Application Support/@coilcoil/desktop/sessions\n   这是主进程写死的（apps/desktop/src/main/index.ts 第 301 行，把它作为 COILCOIL_SESSION_DIR 传给运行时）。同级还有 agent/（模型、认证、设置）等目录。\n\n2. 目录结构：sessions/ 下面就是一堆 .jsonl 文件平铺，没有按项目分文件夹。唯一的例外是 sessions/subagents/<父会话 id>/，那是子 Agent 自己的会话（packages/workflow/extensions/subagents/child.ts 第 16、100-103 行）。\n\n3. 单个会话文件的命名：<创建时间戳>_<会话 id>.jsonl，时间戳里的冒号和点都换成了短横线，会话 id 是 uuidv7。例如：\n   ~/Library/Application Support/@coilcoil/desktop/sessions/2026-08-29T04-12-33-123Z_0198f2ac-7c31-7a10-9b6e-4f0c1d2e3a55.jsonl\n   （规则在 vendor/pi/packages/coding-agent/src/core/session-manager.ts 第 953 行。）\n\n4. 靠什么区分工作区：每个 .jsonl 的第一行是会话头，里面有 cwd 字段，记着这个会话属于哪个目录。列表界面按「当前工作区路径 == 会话头里的 cwd」来筛（session-manager.ts 第 630-632 行的精确匹配，以及 list 方法）。也就是说：\n   - 不是子目录区分；\n   - 不是路径 hash 区分；\n   - 就是文件里的一个 cwd 字段。\n   所以你想在文件层面区分 A 和 B，直接看每个 .jsonl 的第一行、或者 grep 那个路径就行。举例第一行长这样（省略后面的内容）：\n   {\"type\":\"session\",\"version\":...,\"id\":\"0198f2ac-...\",\"timestamp\":\"2026-08-29T04:12:33.123Z\",\"cwd\":\"/Users/hao/Desktop/project/A\"}\n\n5. 顺带说明：因为是平铺 + cwd 字段决定归属，所以「把一个会话移动到另一个工作区」在实现上就是改写第一行的 cwd，文件名和会话 id 都不变（packages/runtime-core/src/session-relocation.ts）。这也是为什么不做成子目录——做成子目录的话每次移动都要搬文件、还会打乱按会话路径记录的置顶/归档状态。\n\n6. 注意匹配是**精确路径**匹配：A 的子目录 A/sub 会被当成另一个工作区，不会显示在 A 的会话列表里。\n\n（另外，项目记忆是另一套目录，按项目名分文件夹放在 agent/memory/<项目名>/ 下，和会话文件不是一回事。）"
+    }
+  ],
+  "commits": []
+}
