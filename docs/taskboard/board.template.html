@@ -136,6 +136,27 @@
   code{background:var(--line-2);padding:1px 5px;border-radius:5px;font-size:12px;
        font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
   .hint{color:var(--ink-3);font-size:12px;margin-top:10px;line-height:1.65}
+
+  /* 管控日志：这一轮谁在做什么、我替用户做了哪些决定 */
+  .mgr{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:0 14px;margin-bottom:18px;box-shadow:var(--shadow);
+  }
+  .mgr>summary{
+    cursor:pointer;list-style:none;padding:11px 0;font-size:13px;color:var(--ink-2);
+    display:flex;align-items:center;gap:8px;
+  }
+  .mgr>summary::-webkit-details-marker{display:none}
+  .mgr>summary::before{content:'▸';color:var(--ink-3);transition:transform .15s}
+  .mgr[open]>summary::before{transform:rotate(90deg)}
+  .mgr>summary b{color:var(--ink);font-weight:600}
+  .mgr-b{border-top:1px solid var(--line-2);padding:4px 0 14px}
+  .mgr-i{padding:11px 0 0}
+  .mgr-i+.mgr-i{border-top:1px dashed var(--line-2);margin-top:11px}
+  .mgr-i .h{display:flex;gap:10px;align-items:baseline;margin-bottom:4px}
+  .mgr-i .h b{font-size:13px}
+  .mgr-i .h span{color:var(--ink-3);font-size:11.5px}
+  .mgr-i .c{color:var(--ink-2);font-size:12.5px;white-space:pre-wrap;line-height:1.7}
 </style>
 </head>
 <body>
@@ -156,6 +177,11 @@
     <button id="reset">↺ 丢弃本地改动</button>
     <button id="theme">◐ 主题</button>
   </div>
+
+  <details class="mgr" id="mgr" hidden>
+    <summary><b>管控日志</b><span id="mgrN"></span></summary>
+    <div class="mgr-b" id="mgrB"></div>
+  </details>
 
   <div class="board" id="board"></div>
 
@@ -472,8 +498,23 @@ function refreshAreas(){
 document.getElementById('q').oninput = render;
 document.getElementById('fArea').onchange = render;
 
+/* ---------- 管控日志 ----------
+   这一节的数据只来自内置的 SEED.meta.decisions（管控方写的），不进 localStorage，
+   所以用户在看板上的改动不会被它覆盖，导出再导入也不会丢。 */
+function renderMgr(){
+  const items = (SEED.meta && SEED.meta.decisions) || [];
+  const box = document.getElementById('mgr');
+  if(!items.length) return;
+  box.hidden = false;
+  document.getElementById('mgrN').textContent = `${items.length} 条 · 这一轮的分工和我替你做的决定`;
+  document.getElementById('mgrB').innerHTML = items.map(d=>
+    `<div class="mgr-i"><div class="h"><b>${esc(d.title)}</b><span>${when(d.at)}</span></div>` +
+    `<div class="c">${esc(d.text)}</div></div>`).join('');
+}
+
 refreshAreas();
 render();
+renderMgr();
 </script>
 </body>
 </html>

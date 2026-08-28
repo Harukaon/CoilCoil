@@ -2,7 +2,44 @@
   "meta": {
     "source": "docs/requirements-2026-08-29.md",
     "createdAt": "2026-08-29",
-    "note": "agent 只写 agentNotes / commits / status；userComments 由看板导出写回，agent 不覆盖。"
+    "note": "agent 只写 agentNotes / commits / status；userComments 由看板导出写回，agent 不覆盖。",
+    "decisions": [
+      {
+        "at": "2026-08-28T20:32:20.902405Z",
+        "title": "接手情况：Mac 上那个会话没有留下任何进度",
+        "text": "看板骨架（29 个 Issue、HTML 页面、结果合并脚本）是有的，但 29 个 Issue 全部还是「待办」，一行产品代码都没改。所以这一夜是从零开始跑的，不是接着改。"
+      },
+      {
+        "at": "2026-08-28T20:32:20.902405Z",
+        "title": "你想不起来的那个 w 开头的词 = git worktree",
+        "text": "就是它。一个仓库可以同时检出好几份工作副本，各自在自己的分支上，互不干扰。3 个 agent 各占一份，改完我再逐个合回 main。"
+      },
+      {
+        "at": "2026-08-28T20:32:20.902405Z",
+        "title": "worktree 放在仓库内部的 .worktrees/ 下",
+        "text": "因为这个仓库是「一份文件、两个路径」：Mac 上是 /Users/hao/Desktop/project/SuoCode，我干活的 Ubuntu 虚拟机里是挂载出来的 /home/hao/Workspace/SuoCode。放到仓库外面，虚拟机这边就看不见了。\n\n干净的 worktree 没有依赖包，tsc 和测试跑不起来，所以：node_modules 用软链指回主仓库（省几个 G），dist 构建产物是复制的（软链的话三个 agent 会互相覆盖）。"
+      },
+      {
+        "at": "2026-08-28T20:32:20.902405Z",
+        "title": "分工规则：改文件在虚拟机，跑命令在 Mac",
+        "text": "依赖包是 Mac 原生编译的（esbuild / electron / node-pty），在 Linux 里根本执行不了。所以 agent 在虚拟机里改代码，所有 git / 编译 / 测试都通过 ssh 回到你的 Mac 上跑。包了个 docs/taskboard/mac.sh 脚本，免得每个 agent 自己拼命令拼错。"
+      },
+      {
+        "at": "2026-08-28T20:32:20.902405Z",
+        "title": "测试隔离策略（这是你让我定的那件事）",
+        "text": "三个 agent 同时在你这一台 Mac 上跑，共享的东西必须约束死：\n\n① 每个 agent 只跑自己改到的那个包的 tsc + 单元测试，不跑全仓库，否则三个人互相拖慢。\n② 禁止 agent 打包整个 app（npm run package / smoke）——会抢 electron-builder 缓存和调试端口。端到端冒烟改成由我在合并到 main 之后串行跑一遍。\n③ 绝对禁止碰 ~/Library/Application Support/@coilcoil/desktop/ —— 那是你正在用的 CoilCoil 的真实会话和设置。需要 app 数据目录的一律用临时目录（仓库里现成的冒烟脚本本来就是这么做的）。\n④ 禁止 npm run dev（会弹出真窗口抢你的桌面）、禁止 git push、禁止动别人的 worktree。\n\n结论：你正在用的那个 CoilCoil 全程不会被动到。"
+      },
+      {
+        "at": "2026-08-28T20:32:20.902405Z",
+        "title": "每轮 3 个 agent，按「改到的文件不重叠」分组",
+        "text": "你说每轮 3 个，就 3 个。分组不是按优先级随便切的，是按会动到哪些文件切的——比如所有调色/圆角/滚动条这类只改样式变量的 Issue 会放在同一个 agent 手里，不然两个人同时改一份 CSS，合并的时候必冲突。\n\n每轮结束我负责把三个分支合回 main、解冲突、串行跑一遍端到端冒烟，然后开下一轮。"
+      },
+      {
+        "at": "2026-08-28T20:32:20.902405Z",
+        "title": "第 1 轮分工",
+        "text": "r1a → #1 终端强制贴底 + 长时间渲染错乱（最硬的一个，单独给一个 agent）\nr1b → #5 标题栏拖不动（老大难，要求查到根因、给结构性方案，不许再打补丁）\nr1c → #8 #18 两个提问 + #9 删子 agent 提示词 + #14 检查左下角 logo（都是轻活，凑成一份）"
+      }
+    ]
   },
   "tasks": [
     {
@@ -11,7 +48,7 @@
       "body": "在内置终端启动 claudecode 后，每次滚动刷新内容都会强制滚动到底部；运行久了终端渲染直接出问题。查清成因并修复，实在找不到方案就参照 VSCode 终端的实现（那个绝对没问题）。",
       "area": "终端",
       "priority": "high",
-      "status": "todo",
+      "status": "doing",
       "agentNotes": [],
       "userComments": [],
       "commits": []
@@ -55,7 +92,7 @@
       "body": "修过很多遍了，特定情况下仍然无法拖动，非常恼火。失效后随便调整一下窗口大小、或者去左侧上方拖两下就恢复。左侧上方那块拖动 100% 有效，chat 界面上方失效，右侧栏在多开几个标签页后拖动效果也没了。查清左侧为什么必然有效、另外两处为什么会丢。",
       "area": "窗口",
       "priority": "high",
-      "status": "todo",
+      "status": "doing",
       "agentNotes": [],
       "userComments": [],
       "commits": []
@@ -88,7 +125,7 @@
       "body": "回答：目前的记忆整理 /memory 是默认设置了多少轮自动整理吗？这是一个问题，不是改动需求——查代码给出确切答案。",
       "area": "问答",
       "priority": "low",
-      "status": "todo",
+      "status": "doing",
       "agentNotes": [],
       "userComments": [],
       "commits": []
@@ -99,7 +136,7 @@
       "body": "系统提示词里面的子 agent 提示词删除。",
       "area": "提示词",
       "priority": "medium",
-      "status": "todo",
+      "status": "doing",
       "agentNotes": [],
       "userComments": [],
       "commits": []
@@ -154,7 +191,7 @@
       "body": "找到 /Users/hao/Desktop/project/SuoCode/apps/desktop/build/logo.svg，检查左下角 logo 是不是用这个实现的。",
       "area": "品牌",
       "priority": "low",
-      "status": "todo",
+      "status": "doing",
       "agentNotes": [],
       "userComments": [],
       "commits": []
@@ -198,7 +235,7 @@
       "body": "回答：我们的会话现在是怎么放的，统一放到 coilcoil 的内置目录下面吗？如果我有文件夹 A 和文件夹 B，它们的会话我能在文件里面区分吗？这是提问，给出确切的存储路径与区分方式。",
       "area": "问答",
       "priority": "low",
-      "status": "todo",
+      "status": "doing",
       "agentNotes": [],
       "userComments": [],
       "commits": []
