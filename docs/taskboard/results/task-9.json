@@ -1,0 +1,21 @@
+{
+  "id": 9,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r1c",
+      "at": "2026-08-29T05:00:00.000Z",
+      "text": "做了什么：把系统提示词里那一整段介绍「子 Agent 委派」的内容删掉了。\n\n被删的是 packages/workflow/extensions/system/engineering-standards.ts 里标题为「Subagent delegation and context management」的一节，一共 5 条：叫模型优先考虑委派、主 Agent 只管主线、把支线任务派出去、支线任务包括哪些、以及提醒子 Agent 看不到主会话上下文。其余内容（执行与沟通、什么时候该问用户、Git 安全、改完代码怎么验证）一条没动。\n\n为什么只动这一处：我把提示词的组装链路整个走了一遍。CoilCoil 的系统提示词 = Pi 的原始提示词，经 packages/workflow/extensions/default-tools.ts 处理后，把 Pi 原来的「Available tools」清单和「Guidelines」整段替换成我们自己的这份 engineering-standards.ts，再由记忆扩展在后面追加项目记忆和全局记忆。所以：\n- subagent 工具自己带的那 6 条使用建议（写在 packages/workflow/extensions/subagents.ts 里）本来就落在 Pi 的 Guidelines 段里，而那一整段在拼装时会被我们整体换掉，根本到不了模型眼前，属于死文本，这次没有动它，也不影响。\n- vendor/pi 里的原始提示词模板（vendor/pi/.../core/system-prompt.ts）本身没有任何子 Agent 字样。\n- packages/workflow/agents/ 下的 explore.md / reviewer.md / worker.md 里有「子 Agent」字样，但那是子 Agent 自己启动时读的角色设定，不是主 Agent 的系统提示词，不能删。\n\n需要向你说明的一个发现（我自己拍板没有改）：任务背景里说 plan 和 subagent 两个工具都已经对 Agent 隐藏，但代码里现在只隐藏了 plan 一个——packages/runtime-core/src/runtime-constants.ts 第 68 行的隐藏名单只剩 [\"plan\"]，subagent 是在提交 eb990bd03（按 profile 配置子 Agent 模型）里被从名单里拿掉的，也就是说 subagent 工具目前仍然对 Agent 开放。既然如此，删掉这段提示词的效果是：模型仍然能调用 subagent 工具（工具的名字和说明是随工具定义走的，不在系统提示词里），只是不再被系统提示词主动鼓励去委派。这符合本次的要求「删掉系统提示词里的子 agent 提示词」。如果你其实是想让 subagent 彻底不可用，那要做的是把它加回那份隐藏名单，这属于另一个改动，我没有顺手做。\n\n验证：@coilcoil/workflow 的类型检查通过；单元测试里唯一失败的是已知会偶发失败的终端测试（terminal-cleanup），单独重跑 18 项全过，与本次改动无关。提示词相关的 default-tools 测试 8 项全过。"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "4742cad72",
+      "at": "2026-08-29T05:00:00.000Z",
+      "message": "fix(workflow): 从系统提示词删除子 Agent 委派段 (#9)",
+      "files": [
+        "packages/workflow/extensions/system/engineering-standards.ts"
+      ]
+    }
+  ]
+}

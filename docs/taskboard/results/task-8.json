@@ -1,0 +1,12 @@
+{
+  "id": 8,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r1c",
+      "at": "2026-08-29T05:00:00.000Z",
+      "text": "结论：没有「多少轮自动整理」这个设置。记忆整理不是按轮数攒够了才跑，而是**每次回答彻底结束就跑一次**，并且默认是开着的。\n\n具体是这样：\n1. 触发点：主 Agent 一轮跑完、并且确定不会再自动重试 / 自动压缩 / 继续跑排队消息之后，会发一个「已收尾」的信号，记忆整理就挂在这个信号上。代码在 packages/workflow/extensions/project-memory.ts 第 407-411 行（监听 agent_settled）。所以口语说就是「你每问一次、它答完一次，就整理一次」，没有 3 轮 / 5 轮这种阈值，也没有 token 阈值或上下文占比阈值。\n2. 默认值：开启。配置文件里没写这一项时按开启算，代码在 packages/workflow/extensions/memory-settings.ts 第 62 行（autoSummarize），运行时另有一份同样默认值在 packages/runtime-core/src/runtime-resources.ts 第 107 行。\n3. 你可以改：设置里的「记忆」页有一个勾选框「回复后自动整理」（apps/desktop/src/renderer/src/features/memory/MemoryWorkspace.tsx 第 242 行）。取消勾选后就完全不自动跑，只能手动敲 /memory。\n4. 实际不会疯狂重复跑，有三道闸：\n   - 同一个项目同一时刻只允许有一个整理进程，靠一个锁文件挡住（packages/workflow/extensions/memory-worker.ts 第 54 行起；锁超过 15 分钟没人释放才算失效）。上一次还没整理完就又答完一轮的话，这一次直接跳过，界面上显示「当前项目已有记忆整理正在运行」。\n   - 单次整理最多跑 5 分钟，超时被杀（memory-worker.ts 第 9 行）。\n   - 工作目录如果在 .pi 里面，直接禁用整理，防止自己整理自己。\n5. /memory 这个命令本身做的事：立刻在后台启动一次同样的整理（project-memory.ts 第 314-323 行），跟自动触发走的是同一套流程，只是会给你一条「记忆整理已在后台启动」的提示。\n6. 设置文件真实位置：~/Library/Application Support/@coilcoil/desktop/agent/memory-settings.json。里面 autoSummarize 为 false 就是关，缺省或 true 就是开。\n\n一句话：默认「每答完一次就整理一次」，不是按轮数，且可以在设置里一键关掉。"
+    }
+  ],
+  "commits": []
+}

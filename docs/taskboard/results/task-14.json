@@ -1,0 +1,12 @@
+{
+  "id": 14,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r1c",
+      "at": "2026-08-29T05:00:00.000Z",
+      "text": "结论：是的，左下角那个 logo 用的就是 apps/desktop/build/logo.svg 这个设计稿，画面完全一致，不需要改，我也没有改任何代码。\n\n它是怎么被引用的：不是用 <img src=\"build/logo.svg\"> 这种方式加载文件，而是把那个 svg 的内容原样搬进了一个 React 组件 apps/desktop/src/renderer/src/ui/CoilLogo.tsx，动画样式放在 apps/desktop/src/renderer/src/styles.css 第 480-501 行。左下角的调用点在 apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx 第 508 行（侧边栏底部那一条，logo + CoilCoil + 当前模型 + 设置按钮）。\n\n我逐项比对过：7 个多边形的坐标、黑白遮罩、渐变的三个色标、blur(12px)、contrast 脉冲、每个三角形的旋转时长和错开时间，和 build/logo.svg 一模一样，只有两处刻意的差别，且都是必要的：\n1. 样式钩子从 id 换成了 class，遮罩和渐变的 id 改成每个实例唯一——因为同一屏可能同时渲染好几个 logo，id 重复会互相串味。\n2. 深色主题下把墨色换成纸色（否则黑色墨团在深色背景上看不见）。\n\n为什么不改成直接引用 build/logo.svg 文件：build/ 是打包用的资源目录，不在界面代码的打包范围内，运行时引不到；而且就算复制一份过去用 <img> 加载，外部样式表也管不到图片内部，深色主题下 logo 会变成一团看不见的黑。现在这种内联写法是唯一能同时保住动画和深色适配的做法。所以这一条我判定为「已经是对的」，保持现状。"
+    }
+  ],
+  "commits": []
+}
