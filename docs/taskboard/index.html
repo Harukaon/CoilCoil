@@ -241,6 +241,11 @@ const SEED = {
         "at": "2026-08-28T20:32:20.902405Z",
         "title": "第 1 轮分工",
         "text": "r1a → #1 终端强制贴底 + 长时间渲染错乱（最硬的一个，单独给一个 agent）\nr1b → #5 标题栏拖不动（老大难，要求查到根因、给结构性方案，不许再打补丁）\nr1c → #8 #18 两个提问 + #9 删子 agent 提示词 + #14 检查左下角 logo（都是轻活，凑成一份）"
+      },
+      {
+        "at": "2026-08-28T20:38:51.157096Z",
+        "title": "第 1 轮 r1c 已合并 —— 顺带发现一件需要你拍板的事",
+        "text": "#9 让我删掉系统提示词里的子 Agent 段落，已经删了。但 agent 在排查时发现：子 Agent 这个**工具本身其实还是开着的**，只有 plan 被隐藏了。它是在之前一次「按 profile 配置子 Agent 模型」的改动里被从隐藏名单里移出去的。\n\n所以现在的状态是：提示词不再鼓励模型去委派，但模型真想调还是调得到。\n\n我**没有**顺手把它关掉——「删掉提示词」和「停用工具」是两件事，你当初把它藏起来是打算按 oh-my-pi 的思路重写之后再放开，那次移出隐藏名单到底是有意的还是漏的，只有你知道。要彻底停用的话回我一句，我下一轮加个 Issue 处理。"
       }
     ]
   },
@@ -328,8 +333,14 @@ const SEED = {
       "body": "回答：目前的记忆整理 /memory 是默认设置了多少轮自动整理吗？这是一个问题，不是改动需求——查代码给出确切答案。",
       "area": "问答",
       "priority": "low",
-      "status": "doing",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r1c",
+          "at": "2026-08-29T05:00:00.000Z",
+          "text": "结论：没有「多少轮自动整理」这个设置。记忆整理不是按轮数攒够了才跑，而是**每次回答彻底结束就跑一次**，并且默认是开着的。\n\n具体是这样：\n1. 触发点：主 Agent 一轮跑完、并且确定不会再自动重试 / 自动压缩 / 继续跑排队消息之后，会发一个「已收尾」的信号，记忆整理就挂在这个信号上。代码在 packages/workflow/extensions/project-memory.ts 第 407-411 行（监听 agent_settled）。所以口语说就是「你每问一次、它答完一次，就整理一次」，没有 3 轮 / 5 轮这种阈值，也没有 token 阈值或上下文占比阈值。\n2. 默认值：开启。配置文件里没写这一项时按开启算，代码在 packages/workflow/extensions/memory-settings.ts 第 62 行（autoSummarize），运行时另有一份同样默认值在 packages/runtime-core/src/runtime-resources.ts 第 107 行。\n3. 你可以改：设置里的「记忆」页有一个勾选框「回复后自动整理」（apps/desktop/src/renderer/src/features/memory/MemoryWorkspace.tsx 第 242 行）。取消勾选后就完全不自动跑，只能手动敲 /memory。\n4. 实际不会疯狂重复跑，有三道闸：\n   - 同一个项目同一时刻只允许有一个整理进程，靠一个锁文件挡住（packages/workflow/extensions/memory-worker.ts 第 54 行起；锁超过 15 分钟没人释放才算失效）。上一次还没整理完就又答完一轮的话，这一次直接跳过，界面上显示「当前项目已有记忆整理正在运行」。\n   - 单次整理最多跑 5 分钟，超时被杀（memory-worker.ts 第 9 行）。\n   - 工作目录如果在 .pi 里面，直接禁用整理，防止自己整理自己。\n5. /memory 这个命令本身做的事：立刻在后台启动一次同样的整理（project-memory.ts 第 314-323 行），跟自动触发走的是同一套流程，只是会给你一条「记忆整理已在后台启动」的提示。\n6. 设置文件真实位置：~/Library/Application Support/@coilcoil/desktop/agent/memory-settings.json。里面 autoSummarize 为 false 就是关，缺省或 true 就是开。\n\n一句话：默认「每答完一次就整理一次」，不是按轮数，且可以在设置里一键关掉。"
+        }
+      ],
       "userComments": [],
       "commits": []
     },
@@ -339,10 +350,25 @@ const SEED = {
       "body": "系统提示词里面的子 agent 提示词删除。",
       "area": "提示词",
       "priority": "medium",
-      "status": "doing",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r1c",
+          "at": "2026-08-29T05:00:00.000Z",
+          "text": "做了什么：把系统提示词里那一整段介绍「子 Agent 委派」的内容删掉了。\n\n被删的是 packages/workflow/extensions/system/engineering-standards.ts 里标题为「Subagent delegation and context management」的一节，一共 5 条：叫模型优先考虑委派、主 Agent 只管主线、把支线任务派出去、支线任务包括哪些、以及提醒子 Agent 看不到主会话上下文。其余内容（执行与沟通、什么时候该问用户、Git 安全、改完代码怎么验证）一条没动。\n\n为什么只动这一处：我把提示词的组装链路整个走了一遍。CoilCoil 的系统提示词 = Pi 的原始提示词，经 packages/workflow/extensions/default-tools.ts 处理后，把 Pi 原来的「Available tools」清单和「Guidelines」整段替换成我们自己的这份 engineering-standards.ts，再由记忆扩展在后面追加项目记忆和全局记忆。所以：\n- subagent 工具自己带的那 6 条使用建议（写在 packages/workflow/extensions/subagents.ts 里）本来就落在 Pi 的 Guidelines 段里，而那一整段在拼装时会被我们整体换掉，根本到不了模型眼前，属于死文本，这次没有动它，也不影响。\n- vendor/pi 里的原始提示词模板（vendor/pi/.../core/system-prompt.ts）本身没有任何子 Agent 字样。\n- packages/workflow/agents/ 下的 explore.md / reviewer.md / worker.md 里有「子 Agent」字样，但那是子 Agent 自己启动时读的角色设定，不是主 Agent 的系统提示词，不能删。\n\n需要向你说明的一个发现（我自己拍板没有改）：任务背景里说 plan 和 subagent 两个工具都已经对 Agent 隐藏，但代码里现在只隐藏了 plan 一个——packages/runtime-core/src/runtime-constants.ts 第 68 行的隐藏名单只剩 [\"plan\"]，subagent 是在提交 eb990bd03（按 profile 配置子 Agent 模型）里被从名单里拿掉的，也就是说 subagent 工具目前仍然对 Agent 开放。既然如此，删掉这段提示词的效果是：模型仍然能调用 subagent 工具（工具的名字和说明是随工具定义走的，不在系统提示词里），只是不再被系统提示词主动鼓励去委派。这符合本次的要求「删掉系统提示词里的子 agent 提示词」。如果你其实是想让 subagent 彻底不可用，那要做的是把它加回那份隐藏名单，这属于另一个改动，我没有顺手做。\n\n验证：@coilcoil/workflow 的类型检查通过；单元测试里唯一失败的是已知会偶发失败的终端测试（terminal-cleanup），单独重跑 18 项全过，与本次改动无关。提示词相关的 default-tools 测试 8 项全过。"
+        }
+      ],
       "userComments": [],
-      "commits": []
+      "commits": [
+        {
+          "ref": "4742cad72",
+          "at": "2026-08-29T05:00:00.000Z",
+          "message": "fix(workflow): 从系统提示词删除子 Agent 委派段 (#9)",
+          "files": [
+            "packages/workflow/extensions/system/engineering-standards.ts"
+          ]
+        }
+      ]
     },
     {
       "id": 10,
@@ -394,8 +420,14 @@ const SEED = {
       "body": "找到 /Users/hao/Desktop/project/SuoCode/apps/desktop/build/logo.svg，检查左下角 logo 是不是用这个实现的。",
       "area": "品牌",
       "priority": "low",
-      "status": "doing",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r1c",
+          "at": "2026-08-29T05:00:00.000Z",
+          "text": "结论：是的，左下角那个 logo 用的就是 apps/desktop/build/logo.svg 这个设计稿，画面完全一致，不需要改，我也没有改任何代码。\n\n它是怎么被引用的：不是用 <img src=\"build/logo.svg\"> 这种方式加载文件，而是把那个 svg 的内容原样搬进了一个 React 组件 apps/desktop/src/renderer/src/ui/CoilLogo.tsx，动画样式放在 apps/desktop/src/renderer/src/styles.css 第 480-501 行。左下角的调用点在 apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx 第 508 行（侧边栏底部那一条，logo + CoilCoil + 当前模型 + 设置按钮）。\n\n我逐项比对过：7 个多边形的坐标、黑白遮罩、渐变的三个色标、blur(12px)、contrast 脉冲、每个三角形的旋转时长和错开时间，和 build/logo.svg 一模一样，只有两处刻意的差别，且都是必要的：\n1. 样式钩子从 id 换成了 class，遮罩和渐变的 id 改成每个实例唯一——因为同一屏可能同时渲染好几个 logo，id 重复会互相串味。\n2. 深色主题下把墨色换成纸色（否则黑色墨团在深色背景上看不见）。\n\n为什么不改成直接引用 build/logo.svg 文件：build/ 是打包用的资源目录，不在界面代码的打包范围内，运行时引不到；而且就算复制一份过去用 <img> 加载，外部样式表也管不到图片内部，深色主题下 logo 会变成一团看不见的黑。现在这种内联写法是唯一能同时保住动画和深色适配的做法。所以这一条我判定为「已经是对的」，保持现状。"
+        }
+      ],
       "userComments": [],
       "commits": []
     },
@@ -438,8 +470,14 @@ const SEED = {
       "body": "回答：我们的会话现在是怎么放的，统一放到 coilcoil 的内置目录下面吗？如果我有文件夹 A 和文件夹 B，它们的会话我能在文件里面区分吗？这是提问，给出确切的存储路径与区分方式。",
       "area": "问答",
       "priority": "low",
-      "status": "doing",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r1c",
+          "at": "2026-08-29T05:00:00.000Z",
+          "text": "结论：所有会话都放在 CoilCoil 自己的目录下，而且是**一个大平铺目录**，不按文件夹分子目录；文件夹 A 和文件夹 B 的会话靠的是每个会话文件**第一行里的 cwd 字段**来区分，不是靠路径。\n\n1. 存储根目录（macOS 真实路径）：\n   ~/Library/Application Support/@coilcoil/desktop/sessions\n   这是主进程写死的（apps/desktop/src/main/index.ts 第 301 行，把它作为 COILCOIL_SESSION_DIR 传给运行时）。同级还有 agent/（模型、认证、设置）等目录。\n\n2. 目录结构：sessions/ 下面就是一堆 .jsonl 文件平铺，没有按项目分文件夹。唯一的例外是 sessions/subagents/<父会话 id>/，那是子 Agent 自己的会话（packages/workflow/extensions/subagents/child.ts 第 16、100-103 行）。\n\n3. 单个会话文件的命名：<创建时间戳>_<会话 id>.jsonl，时间戳里的冒号和点都换成了短横线，会话 id 是 uuidv7。例如：\n   ~/Library/Application Support/@coilcoil/desktop/sessions/2026-08-29T04-12-33-123Z_0198f2ac-7c31-7a10-9b6e-4f0c1d2e3a55.jsonl\n   （规则在 vendor/pi/packages/coding-agent/src/core/session-manager.ts 第 953 行。）\n\n4. 靠什么区分工作区：每个 .jsonl 的第一行是会话头，里面有 cwd 字段，记着这个会话属于哪个目录。列表界面按「当前工作区路径 == 会话头里的 cwd」来筛（session-manager.ts 第 630-632 行的精确匹配，以及 list 方法）。也就是说：\n   - 不是子目录区分；\n   - 不是路径 hash 区分；\n   - 就是文件里的一个 cwd 字段。\n   所以你想在文件层面区分 A 和 B，直接看每个 .jsonl 的第一行、或者 grep 那个路径就行。举例第一行长这样（省略后面的内容）：\n   {\"type\":\"session\",\"version\":...,\"id\":\"0198f2ac-...\",\"timestamp\":\"2026-08-29T04:12:33.123Z\",\"cwd\":\"/Users/hao/Desktop/project/A\"}\n\n5. 顺带说明：因为是平铺 + cwd 字段决定归属，所以「把一个会话移动到另一个工作区」在实现上就是改写第一行的 cwd，文件名和会话 id 都不变（packages/runtime-core/src/session-relocation.ts）。这也是为什么不做成子目录——做成子目录的话每次移动都要搬文件、还会打乱按会话路径记录的置顶/归档状态。\n\n6. 注意匹配是**精确路径**匹配：A 的子目录 A/sub 会被当成另一个工作区，不会显示在 A 的会话列表里。\n\n（另外，项目记忆是另一套目录，按项目名分文件夹放在 agent/memory/<项目名>/ 下，和会话文件不是一回事。）"
+        }
+      ],
       "userComments": [],
       "commits": []
     },
@@ -567,7 +605,7 @@ const SEED = {
   ]
 }
 ;
-const BUILT_AT = "2026-08-28T20:32:21.136Z";
+const BUILT_AT = "2026-08-28T20:38:51.844Z";
 const LS = 'suocode-taskboard-v2';
 
 const COLS = [
