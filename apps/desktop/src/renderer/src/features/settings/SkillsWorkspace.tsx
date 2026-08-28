@@ -1,4 +1,5 @@
 import { ArrowLeft, PanelLeft, Sparkles } from "lucide-react";
+import { WindowDragBar } from "../../ui/WindowDragBar";
 import { SkillSettings } from "./SkillSettings";
 
 export function SkillsWorkspace({
@@ -16,7 +17,8 @@ export function SkillsWorkspace({
 }): React.JSX.Element {
   return (
     <section className="skills-workspace" aria-labelledby="skills-workspace-title">
-      <header className="skills-workspace-header window-drag">
+      <header className="skills-workspace-header">
+        <WindowDragBar />
         <div>
           {!leftOpen ? (
             <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}>

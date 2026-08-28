@@ -61,6 +61,15 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .window-drag * { -webkit-user-select: none; user-select: none; }
 .window-drag input, .window-drag textarea, .window-drag [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
 .no-drag, button, textarea, input, select { -webkit-app-region: no-drag; }
+/* 拖动层：标题栏自己不再写 app-region，改由这一层空元素铺满它。整条约定（必须是
+   第一个子节点、必须留出最小宽度的空带、只给交互元素标 no-drag）写在
+   ui/window-drag.ts 的文件头，动标题栏之前先读那里。 */
+.window-drag-layer { position: absolute; z-index: 0; inset: 0; }
+/* 拖动层铺在最底下，标题栏里的内容整体抬到它上面，否则它会把按钮的点击吃掉。 */
+.window-drag-layer ~ * { position: relative; z-index: 1; }
+/* 强制 Chromium 重算拖动矩形用的哨兵：0×0、在窗口外，翻转它的 app-region 只是把
+   整份矩形列表标脏，不会真的挡住或让出任何一块区域（见 ui/window-drag.ts）。 */
+.window-drag-sentinel { position: fixed; z-index: -1; top: 0; left: -1px; width: 0; height: 0; overflow: hidden; opacity: 0; pointer-events: none; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -253,26 +262,24 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 
 .conversation-pane { --chat-content-width: 820px; position: relative; display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: 56px minmax(0, 1fr) auto; background: var(--pane-fill); }
 .skills-workspace { display: grid; min-width: 0; min-height: 0; grid-column: 2 / -1; grid-template-rows: 76px minmax(0, 1fr); background: var(--pane-fill); }
-.skills-workspace-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
+.skills-workspace-header { position: relative; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
 .skills-workspace-header > div { display: flex; min-width: 0; align-items: center; gap: 11px; }
 .skills-workspace-header h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-198)); font-size: 17px; font-weight: 650; }
 .skills-workspace-header p { margin: 4px 0 0; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 10px; }
 .skills-workspace-content { min-width: 0; min-height: 0; overflow: hidden; }
 [data-platform="darwin"] .app-shell.left-collapsed .skills-workspace-header { padding-left: 82px; }
 .memory-workspace { display: grid; min-width: 0; min-height: 0; grid-column: 2 / -1; grid-template-rows: 76px minmax(0, 1fr); background: var(--pane-fill); }
-.memory-workspace-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
+.memory-workspace-header { position: relative; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
 .memory-workspace-header > div:first-child { display: flex; min-width: 0; align-items: center; gap: 11px; }
 .memory-workspace-header h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-198)); font-size: 18px; font-weight: 650; }
 .memory-workspace-header p { margin: 4px 0 0; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 11px; }
 .memory-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .memory-workspace-content { min-width: 0; min-height: 0; overflow: hidden; }
 [data-platform="darwin"] .app-shell.left-collapsed .memory-workspace-header { padding-left: 82px; }
-.conversation-header { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; }
+.conversation-header { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; }
 [data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 82px; }
-/* 标题整块交给 header 的拖拽区，文字自身不接收指针事件：Chromium 在文字节点上有时会优先启动
-   选区，导致同一次按下没有交给 Electron 的窗口拖拽。以前是盖一层透明拖拽层来绕开，但那一层的
-   矩形会随标题区尺寸变化，而 Electron 只在 app-region 属性变化时才重算拖拽区，于是尺寸一变就
-   留下一个失效的旧矩形。少一层元素，几何就只剩 header 自己（见 useDraggableRegion）。 */
+/* 标题文字不接收指针事件：Chromium 在文字节点上有时会优先启动选区，导致同一次按下没有交给
+   Electron 的窗口拖拽。按下会落到它下面的 .window-drag-layer 上（见 ui/window-drag.ts）。 */
 .conversation-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; pointer-events: none; -webkit-user-select: none; user-select: none; }
 .conversation-title strong, .conversation-title span { -webkit-user-select: none; user-select: none; }
 .conversation-title strong { display: block; width: 100%; max-width: 620px; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -813,8 +820,12 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .performance-legend i { width: 10px; height: 10px; border: 1px solid rgb(27 31 36 / 6%); border-radius: 2px; }
 
 .inspector-pane { display: grid; grid-template-rows: 44px minmax(0, 1fr); border-left: 1px solid hsl(var(--th) var(--ts) var(--l-876) / 70%); background: var(--pane-fill); }
-.inspector-header { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 0 8px; color: hsl(var(--th) var(--ts) var(--l-457)); font-size: 12px; font-weight: 550; }
-.inspector-drag-surface { min-width: 12px; align-self: stretch; flex: 1 1 auto; -webkit-app-region: drag; user-select: none; }
+.inspector-header { position: relative; display: flex; min-width: 0; align-items: center; gap: 7px; padding: 0 8px; color: hsl(var(--th) var(--ts) var(--l-457)); font-size: 12px; font-weight: 550; }
+/* 标题栏里唯一保证不会被内容占掉的一段空带——拖动窗口就是按在它上面。48px 是和
+   .inspector-nav 的 max-width 配套算出来的：48（本条）+ 62（右侧两个 30px 按钮 + 2px
+   间距）+ 14（两处 gap）+ 16（左右 padding）= 140，正好是 nav 让出来的那 140px。
+   改任何一个数都要一起改，apps/desktop/tests/window-drag.test.ts 会核对这笔账。 */
+.inspector-drag-surface { min-width: 48px; align-self: stretch; flex: 1 1 auto; user-select: none; }
 .inspector-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
 /* 右栏展开时它在窗口最右上角，正好是窗口按钮的位置。 */
 [data-platform="win32"] .inspector-actions, [data-platform="linux"] .inspector-actions { margin-right: var(--window-controls-width); }
@@ -822,7 +833,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .inspector-add-popover button { display: flex; align-items: center; gap: 6px; padding: 6px 7px; border-radius: 5px; color: hsl(var(--th) var(--ts) var(--l-361)); background: transparent; font-size: 10px; text-align: left; cursor: pointer; }
 .inspector-add-popover button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-196)); background: hsl(var(--th) var(--ts) var(--l-922)); }
 .inspector-add-popover button:disabled { color: hsl(var(--th) var(--ts) var(--l-678)); cursor: default; }
-.inspector-nav { display: flex; min-width: 0; max-width: calc(100% - 80px); flex: 0 0 auto; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
+/* 标签条只能占到给它的那一段，多出来的横向滚动——以前是 calc(100% - 80px)，而右侧
+   按钮 + padding + gap 本身就要 92px，于是标签一多先把拖动带挤没、再把按钮顶出去。 */
+.inspector-nav { display: flex; min-width: 0; max-width: calc(100% - 140px); flex: 0 0 auto; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
 .inspector-nav::-webkit-scrollbar { display: none; }
 .inspector-tab { display: flex; width: max-content; min-width: 0; max-width: 150px; height: 32px; flex: 0 0 auto; align-items: center; overflow: hidden; border: 1px solid transparent; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-402)); font-size: 10px; }
 .inspector-tab:hover, .inspector-tab.active { color: hsl(var(--th) var(--ts) var(--l-153)); background: hsl(var(--th) var(--ts) var(--l-920)); }

@@ -19,12 +19,12 @@ import type {
   SubagentActivity,
 } from "@coilcoil/runtime-protocol";
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
-import { useDraggableRegion } from "../../hooks/useDraggableRegion";
 import { ActivityPanel } from "../activity/ActivityPanel";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { CoilLoader } from "../../ui/CoilLoader";
+import { WindowDragBar } from "../../ui/WindowDragBar";
 import { BlobsLoader } from "../../ui/loaders";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
@@ -157,9 +157,6 @@ export function ConversationPane({
   const [visibleTimelineStart, setVisibleTimelineStart] = useState<number>();
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [showLoadEarlier, setShowLoadEarlier] = useState(false);
-  const headerRef = useRef<HTMLElement>(null);
-  // Electron leaves a stale drag rectangle behind when this header changes size.
-  useDraggableRegion(headerRef);
   const pendingScrollRestore = useRef<{ height: number; top: number } | undefined>(undefined);
   const pendingAnchorScroll = useRef<string>(undefined);
   const [selectedSubagentId, setSelectedSubagentId] = useState<string>();
@@ -289,7 +286,9 @@ export function ConversationPane({
 
   return (
     <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""} ${hasComposerActivity ? "has-composer-activity" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-      <header className="conversation-header window-drag" ref={headerRef}>
+      {/* 拖动层必须排在最前，后面的按钮才能在它上面挖出 no-drag 的洞；见 ui/window-drag.ts。 */}
+      <header className="conversation-header">
+        <WindowDragBar />
         {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
         <div className="conversation-title" title={conversationTitle}>
           <strong>{conversationTitle}</strong>{project ? <span>{project.name}</span> : null}

@@ -6,6 +6,7 @@ import { BrowserGuestLayer } from "./features/browser/BrowserGuestLayer";
 import { diagnostics, installRendererErrorHandlers } from "./diagnostics";
 import { AppErrorBoundary } from "./ui/AppErrorBoundary";
 import { WindowControls } from "./ui/WindowControls";
+import { installWindowDragRegions } from "./ui/window-drag";
 import { initTheme } from "./theme";
 import { ToastHost } from "./ui/toast";
 import { UpdateDialog } from "./ui/update/UpdateDialog";
@@ -31,6 +32,8 @@ if (window.coilcoil?.isRemote) {
 
 installRendererErrorHandlers();
 initTheme();
+// 手机远程端没有窗口可拖，别白挂一个 pointermove 监听。
+if (!window.coilcoil?.isRemote) installWindowDragRegions();
 diagnostics.info("process", "renderer_started", { userAgent: navigator.userAgent });
 
 const root = document.getElementById("root");

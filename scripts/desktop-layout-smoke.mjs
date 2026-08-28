@@ -122,30 +122,68 @@ async function main() {
     })()`);
     assert.deepEqual(conversation, { hasActivity: false, paddingBottom: 76 });
 
-    // The title bar's drag region is the header itself. It used to be a transparent
-    // overlay inside the title, whose rectangle moved with the title's size - and
-    // Electron only rebuilds drag rectangles when an app-region property changes,
-    // so a resize left a stale one behind and the bar stopped dragging.
+    // Every title bar is an empty drag layer laid over the header as its FIRST
+    // child - see src/renderer/src/ui/window-drag.ts for the whole convention.
+    // First matters: Electron unions and subtracts the rectangles in tree order,
+    // so the buttons that follow punch their no-drag holes into the layer. Put
+    // the layer last and it hands the buttons' area back to the window.
     const titleBar = await client.evaluate(`(() => {
       const header = document.querySelector(".conversation-header");
       const title = document.querySelector(".conversation-title");
+      const layer = header?.firstElementChild;
       if (!(header instanceof HTMLElement) || !(title instanceof HTMLElement)) return null;
+      if (!(layer instanceof HTMLElement)) return null;
+      const headerBox = header.getBoundingClientRect();
+      const layerBox = layer.getBoundingClientRect();
       return {
         headerRegion: getComputedStyle(header).webkitAppRegion,
+        layerIsDragLayer: layer.classList.contains("window-drag-layer") && layer.classList.contains("window-drag"),
+        layerRegion: getComputedStyle(layer).webkitAppRegion,
+        layerIsEmpty: layer.childElementCount === 0,
+        layerCoversHeader: Math.round(layerBox.width) === Math.round(headerBox.width)
+          && Math.round(layerBox.height) === Math.round(headerBox.height),
         titleRegion: getComputedStyle(title).webkitAppRegion,
         titlePointerEvents: getComputedStyle(title).pointerEvents,
         overlays: document.querySelectorAll(".conversation-title-drag-surface").length,
       };
     })()`);
     // app-region does not inherit: the title's own value stays "none", which is
-    // what leaves the header's rectangle covering it. "no-drag" here would punch
+    // what leaves the layer's rectangle covering it. "no-drag" here would punch
     // a hole in the drag region and is exactly what this guards against.
     assert.deepEqual(titleBar, {
-      headerRegion: "drag",
+      headerRegion: "none",
+      layerIsDragLayer: true,
+      layerRegion: "drag",
+      layerIsEmpty: true,
+      layerCoversHeader: true,
       titleRegion: "none",
       titlePointerEvents: "none",
       overlays: 0,
-    }, "The conversation title bar must be one drag region with no overlay inside it.");
+    }, "The conversation title bar must be one empty drag layer laid over the header.");
+
+    // The right pane keeps a real drag band no matter how many tabs are open.
+    // Before this, the tab strip could take the whole header (max-width was
+    // 100% - 80px while the buttons, padding and gaps alone need 92px), and the
+    // band collapsed to its 12px minimum - a title bar you cannot press.
+    const inspectorBand = await client.evaluate(`(() => {
+      const header = document.querySelector(".inspector-header");
+      const nav = document.querySelector(".inspector-nav");
+      const surface = document.querySelector(".inspector-drag-surface");
+      const layer = header?.firstElementChild;
+      if (!(header instanceof HTMLElement) || !(nav instanceof HTMLElement)) return null;
+      if (!(surface instanceof HTMLElement) || !(layer instanceof HTMLElement)) return null;
+      return {
+        layerIsDragLayer: layer.classList.contains("window-drag-layer"),
+        // The strip is the hole; the surface is what is left to press.
+        navRegion: getComputedStyle(nav).webkitAppRegion,
+        bandWidth: Math.round(surface.getBoundingClientRect().width),
+        headerOverflows: header.scrollWidth > header.clientWidth + 1,
+      };
+    })()`);
+    assert.equal(inspectorBand?.layerIsDragLayer, true, "The right pane header needs the same drag layer.");
+    assert.equal(inspectorBand?.navRegion, "no-drag");
+    assert.equal(inspectorBand?.headerOverflows, false, "The right pane header must not overflow its own width.");
+    assert.ok(inspectorBand.bandWidth >= 48, `The right pane drag band shrank to ${inspectorBand?.bandWidth}px.`);
 
     const narrowActivity = await client.evaluate(`(() => {
       const pane = document.querySelector(".conversation-pane");

@@ -3,6 +3,7 @@ import { PanelRight, Plus, X } from "lucide-react";
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { WindowDragBar } from "../../ui/WindowDragBar";
 
 export interface InspectorTab<T extends string> {
   id: T;
@@ -36,7 +37,10 @@ export function InspectorPane<T extends string>({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   return (
     <aside className="inspector-pane">
-      <header className="inspector-header window-drag">
+      {/* 拖动层排在最前，标签条和右侧按钮在它上面挖洞；.inspector-drag-surface 是给它
+          留出的那条永远不会被标签占掉的空带，见 ui/window-drag.ts。 */}
+      <header className="inspector-header">
+        <WindowDragBar />
         <nav className="inspector-nav no-drag" aria-label="右侧面板">
           {tabs.map((item) => {
             const Icon = item.icon;

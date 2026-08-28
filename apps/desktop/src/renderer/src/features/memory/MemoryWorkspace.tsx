@@ -6,6 +6,7 @@ import type {
   RuntimeInspectionSnapshot,
 } from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
+import { WindowDragBar } from "../../ui/WindowDragBar";
 import {
   DEFAULT_MEMORY_SCOPE,
   memoryEditorExpanded,
@@ -161,7 +162,8 @@ export function MemoryWorkspace({
 
   return (
     <section className="memory-workspace" aria-labelledby="memory-workspace-title">
-      <header className="memory-workspace-header window-drag">
+      <header className="memory-workspace-header">
+        <WindowDragBar />
         <div>
           {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
           <span className="settings-icon"><BookOpen size={17} /></span>
