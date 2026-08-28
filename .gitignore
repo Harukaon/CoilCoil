@@ -18,3 +18,5 @@ apps/desktop/release/
 
 *.log
 *.tsbuildinfo
+
+.worktrees/
