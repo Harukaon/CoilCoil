@@ -26,6 +26,7 @@ import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protoco
 import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { OrbitLoader } from "../../ui/loaders";
 import { CoilLogo } from "../../ui/CoilLogo";
+import { WindowDragBar } from "../../ui/WindowDragBar";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
 import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed } from "./recentSessions";
@@ -238,7 +239,7 @@ export function WorkspaceSidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-drag"><div className="window-drag sidebar-drag-region" /></div>
+      <div className="sidebar-drag"><WindowDragBar className="sidebar-drag-region" /></div>
       {/* Compact keeps the same DOM so focus order and shortcuts are unchanged;
           the row's left-to-right order is CSS. */}
       <nav className={`primary-nav ${compactNav ? "compact" : ""}`}>
