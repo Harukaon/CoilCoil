@@ -172,17 +172,41 @@ async function main() {
       const layer = header?.firstElementChild;
       if (!(header instanceof HTMLElement) || !(nav instanceof HTMLElement)) return null;
       if (!(surface instanceof HTMLElement) || !(layer instanceof HTMLElement)) return null;
-      return {
+      // 冒烟启动时右栏是收起的，header 只有左右 padding 那 16px 宽，量不出真实版式。
+      // 这里临时把它撑到一个常见宽度并塞满标签，正好复现用户报的那个场景：
+      // 多开几个标签页之后，中间那条能按住拖窗口的空带被挤没。
+      const previousWidth = header.style.width;
+      header.style.width = "404px";
+      const injected = [];
+      for (let index = 0; index < 6; index += 1) {
+        const tab = document.createElement("div");
+        tab.className = "inspector-tab";
+        tab.innerHTML =
+          '<button class="inspector-tab-select"><span>a-fairly-long-file-name.tsx</span></button>' +
+          '<button class="inspector-tab-close">x</button>';
+        nav.append(tab);
+        injected.push(tab);
+      }
+      const headerBox = header.getBoundingClientRect();
+      const actions = header.querySelector(".inspector-actions");
+      const measured = {
         layerIsDragLayer: layer.classList.contains("window-drag-layer"),
         // The strip is the hole; the surface is what is left to press.
         navRegion: getComputedStyle(nav).webkitAppRegion,
         bandWidth: Math.round(surface.getBoundingClientRect().width),
         headerOverflows: header.scrollWidth > header.clientWidth + 1,
+        actionsFitInside: actions instanceof HTMLElement
+          ? Math.round(actions.getBoundingClientRect().right) <= Math.round(headerBox.right)
+          : null,
       };
+      for (const tab of injected) tab.remove();
+      header.style.width = previousWidth;
+      return measured;
     })()`);
     assert.equal(inspectorBand?.layerIsDragLayer, true, "The right pane header needs the same drag layer.");
     assert.equal(inspectorBand?.navRegion, "no-drag");
     assert.equal(inspectorBand?.headerOverflows, false, "The right pane header must not overflow its own width.");
+    assert.equal(inspectorBand?.actionsFitInside, true, "Six open tabs must not push the right pane buttons out of view.");
     assert.ok(inspectorBand.bandWidth >= 48, `The right pane drag band shrank to ${inspectorBand?.bandWidth}px.`);
 
     const narrowActivity = await client.evaluate(`(() => {
