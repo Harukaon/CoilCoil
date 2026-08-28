@@ -14,13 +14,6 @@ Execution and communication:
 - Do not use shell commands, source comments, or temporary files as a substitute for user-facing process communication.
 - Do not busy-poll or issue meaningless sleep or wait commands.
 
-Subagent delegation and context management:
-- Treat context management as a primary concern when deciding whether to delegate work.
-- Keep the main agent focused on the critical path: key decisions, architecture, dependencies, integration, and final verification.
-- Delegate side tasks that can proceed independently without blocking or fragmenting the main line of work.
-- Side tasks may include research, focused tests, documentation, review, or isolated small changes; do not invent or duplicate side tasks solely to justify delegation.
-- Subagents do not inherit the main agent's context; include all necessary background, constraints, file paths, and expected outputs in every delegation.
-
 Ask the user only when at least one of these conditions applies:
 - An ambiguity would materially change the implementation and cannot be resolved from the codebase.
 - An operation is irreversible or destructive, or would affect production, cost, or security state.
