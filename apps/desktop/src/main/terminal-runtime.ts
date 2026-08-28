@@ -3,12 +3,13 @@ import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn, type IPty } from "node-pty";
 import type { TerminalSessionSnapshot } from "../shared/desktop-api";
-
-const MAX_TERMINAL_OUTPUT = 500_000;
+import { TerminalReplayBuffer } from "./terminal-replay";
 
 interface TerminalRecord {
   pty: IPty;
-  snapshot: TerminalSessionSnapshot;
+  /** Everything but `output`, which is materialised from `replay` on demand. */
+  snapshot: Omit<TerminalSessionSnapshot, "output">;
+  replay: TerminalReplayBuffer;
 }
 
 /**
@@ -41,7 +42,7 @@ export class TerminalRuntimeManager {
 
   state(): TerminalSessionSnapshot[] {
     return [...this.records.values()]
-      .map((record) => ({ ...record.snapshot }))
+      .map((record) => ({ ...record.snapshot, output: record.replay.text() }))
       .sort((left, right) => left.startedAt - right.startedAt);
   }
 
@@ -52,10 +53,9 @@ export class TerminalRuntimeManager {
     }
     const id = randomUUID();
     const { file: shell, args: shellArgs } = defaultShell();
-    const snapshot: TerminalSessionSnapshot = {
+    const snapshot: Omit<TerminalSessionSnapshot, "output"> = {
       id,
       cwd: resolvedCwd,
-      output: "",
       status: "running",
       startedAt: Date.now(),
     };
@@ -69,10 +69,10 @@ export class TerminalRuntimeManager {
       // the legacy console's escape sequences as garbage.
       useConpty: process.platform === "win32",
     });
-    const record: TerminalRecord = { pty, snapshot };
+    const record: TerminalRecord = { pty, snapshot, replay: new TerminalReplayBuffer() };
     this.records.set(id, record);
     pty.onData((data) => {
-      snapshot.output = `${snapshot.output}${data}`.slice(-MAX_TERMINAL_OUTPUT);
+      record.replay.push(data);
       this.onData(id, data);
     });
     pty.onExit(({ exitCode }) => {

@@ -6,21 +6,39 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerminalSessionSnapshot } from "../../../../shared/desktop-api";
 import { toastError } from "../../ui/toast";
 import { openTerminalSession } from "./terminalSessions";
+import { TerminalStream } from "./terminalStream";
 import "./terminal.css";
 
-const MAX_TERMINAL_OUTPUT = 500_000;
 const TERMINAL_BACKGROUND = "#2b2b29";
 
-function TerminalSurface({ session, active }: { session: TerminalSessionSnapshot; active: boolean }): React.JSX.Element {
+function TerminalSurface({ session, stream, active }: {
+  session: TerminalSessionSnapshot;
+  stream: TerminalStream;
+  active: boolean;
+}): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const renderedOutputRef = useRef("");
+  const sizeRef = useRef<{ cols: number; rows: number } | undefined>(undefined);
   const activeRef = useRef(active);
 
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  /**
+   * Tell the pty about a size xterm has actually taken.
+   *
+   * Every resize makes a full-screen TUI redraw, so sending one per animation
+   * frame while a pane is being dragged interleaves half-drawn frames at
+   * different widths. Only a size that really changed is worth a round trip.
+   */
+  const publishSize = useCallback((terminal: XTerm): void => {
+    const last = sizeRef.current;
+    if (last && last.cols === terminal.cols && last.rows === terminal.rows) return;
+    sizeRef.current = { cols: terminal.cols, rows: terminal.rows };
+    void window.coilcoil.resizeTerminal(session.id, terminal.cols, terminal.rows);
+  }, [session.id]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -51,17 +69,25 @@ function TerminalSurface({ session, active }: { session: TerminalSessionSnapshot
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container);
+    // The snapshot is the tail main kept for exactly this moment. Everything
+    // after it arrives as a data event and is written as it comes, so xterm
+    // owns the scrollback from here on and is never reset out from under a
+    // reader who has scrolled up.
     terminal.write(session.output);
-    renderedOutputRef.current = session.output;
+    const sink = { write: (data: string) => terminal.write(data) };
+    stream.attach(sink);
     terminalRef.current = terminal;
     fitRef.current = fit;
     const input = terminal.onData((data) => { void window.coilcoil.writeTerminal(session.id, data); });
+    let frame: number | undefined;
     const observer = new ResizeObserver(() => {
       if (!activeRef.current || container.clientWidth < 20 || container.clientHeight < 20) return;
-      window.requestAnimationFrame(() => {
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = undefined;
         try {
           fit.fit();
-          void window.coilcoil.resizeTerminal(session.id, terminal.cols, terminal.rows);
+          publishSize(terminal);
         } catch {
           // The inspector can become hidden before the queued frame runs.
         }
@@ -69,42 +95,36 @@ function TerminalSurface({ session, active }: { session: TerminalSessionSnapshot
     });
     observer.observe(container);
     return () => {
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
       observer.disconnect();
       input.dispose();
+      stream.detach(sink);
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
-      renderedOutputRef.current = "";
+      sizeRef.current = undefined;
     };
-  }, [session.id]);
-
-  useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal || session.output === renderedOutputRef.current) return;
-    const previous = renderedOutputRef.current;
-    if (session.output.startsWith(previous)) terminal.write(session.output.slice(previous.length));
-    else {
-      terminal.reset();
-      terminal.write(session.output);
-    }
-    renderedOutputRef.current = session.output;
-  }, [session.output]);
+  }, [session.id, stream, publishSize]);
 
   useEffect(() => {
     if (!active) return;
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
       try {
         fitRef.current?.fit();
         const terminal = terminalRef.current;
-        if (terminal) {
-          void window.coilcoil.resizeTerminal(session.id, terminal.cols, terminal.rows);
-          terminal.focus();
-        }
+        if (!terminal) return;
+        publishSize(terminal);
+        // A hidden tab is `display: none`, so the rows written while it was
+        // away were laid out against no geometry. Repaint the viewport once on
+        // the way back in rather than waiting for the next chunk of output.
+        terminal.refresh(0, terminal.rows - 1);
+        terminal.focus();
       } catch {
         // A just-hidden inspector has no measurable geometry.
       }
     });
-  }, [active, session.id]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, publishSize]);
 
   return <div className="terminal-surface" ref={containerRef} />;
 }
@@ -117,10 +137,18 @@ export function TerminalPanel({ sessionId, cwd, active, onSessionOpened }: {
 }): React.JSX.Element {
   const [session, setSession] = useState<TerminalSessionSnapshot>();
   const [loading, setLoading] = useState(true);
+  // One pump per shell: it holds whatever arrives between subscribing and the
+  // xterm being open, and hands every later chunk straight to it. A ref rather
+  // than a memo because dropping it would restart the terminal.
+  const streamRef = useRef<{ id: string; stream: TerminalStream } | undefined>(undefined);
+  if (streamRef.current?.id !== sessionId) streamRef.current = { id: sessionId, stream: new TerminalStream() };
+  const { stream } = streamRef.current;
 
   // Each panel tracks only its own shell. The store publishes every session on
   // every change, and a panel per tab that kept the whole list would hold one
-  // copy of every buffer and re-render on data meant for another tab.
+  // copy of every buffer and re-render on data meant for another tab. Output
+  // never becomes React state at all — it goes to xterm, which is the only
+  // thing that has to remember it.
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -129,10 +157,11 @@ export function TerminalPanel({ sessionId, cwd, active, onSessionOpened }: {
     });
     const unsubscribeData = window.coilcoil.onTerminalData(({ id, data }) => {
       if (!mounted || id !== sessionId) return;
-      setSession((current) => current && { ...current, output: `${current.output}${data}`.slice(-MAX_TERMINAL_OUTPUT) });
+      stream.push(data);
     });
     void window.coilcoil.getTerminalSessions().then((current) => {
       if (!mounted) return;
+      stream.discardPending();
       setSession(current.find((item) => item.id === sessionId));
       setLoading(false);
     }).catch((error: unknown) => {
@@ -145,7 +174,7 @@ export function TerminalPanel({ sessionId, cwd, active, onSessionOpened }: {
       unsubscribeState();
       unsubscribeData();
     };
-  }, [sessionId]);
+  }, [sessionId, stream]);
 
   const reopen = useCallback(async (): Promise<void> => {
     try {
@@ -170,7 +199,7 @@ export function TerminalPanel({ sessionId, cwd, active, onSessionOpened }: {
 
   return (
     <section className="terminal-panel">
-      <TerminalSurface session={session} active={active} />
+      <TerminalSurface session={session} stream={stream} active={active} />
       {session.status === "exited" ? (
         <footer className="terminal-exit-bar">
           <span>{`shell 已退出${session.exitCode === undefined ? "" : `（代码 ${session.exitCode}）`}`}</span>
