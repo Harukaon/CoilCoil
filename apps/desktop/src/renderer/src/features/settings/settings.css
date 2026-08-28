@@ -1,3 +1,14 @@
+/* 设置界面是工作区的另一块画布，不是另一套皮肤：两块底色一律走 theme-tokens.css
+ * 里那组表面令牌（`--pane-fill` / `--side-fill`），和主界面读同一个真相源。
+ *
+ * 以前这里各写死一档明度（正文 --l-976、侧栏 --l-933）。明度阶梯本身是跟着色调
+ * 走的，所以换色调不至于完全不变色，但表面令牌另有两件事它跟不上：
+ *   1. 每套色调的表面停在自己的档位上（纯白的正文区是 100%、雪白 99.2%、拿铁
+ *      95.7%），写死的 97.6% 只在纯白的外圈那一档上碰巧对得上；
+ *   2. 「界面层次」（齐平 / 分栏）只改表面令牌，写死的明度完全感觉不到，所以
+ *      设置侧栏在两种层次下长得一模一样。
+ * 结果就是同一套配色下设置界面和主界面对不上——尤其侧栏，纯白色调下主界面是
+ * 97.6%，设置侧栏却压到 93.3%，差了整整一档。 */
 .settings-screen {
   --settings-sidebar-width: 220px;
   display: grid;
@@ -7,7 +18,7 @@
   min-height: 0;
   grid-template-columns: var(--settings-sidebar-width) minmax(0, 1fr);
   color: hsl(var(--th) var(--ts) var(--l-198));
-  background: hsl(var(--th) var(--ts) var(--l-976));
+  background: var(--pane-fill);
   position: relative;
 }
 .settings-sidebar {
@@ -16,8 +27,10 @@
   min-height: 0;
   flex-direction: column;
   padding: 0 12px 14px;
-  border-right: 1px solid hsl(var(--th) var(--ts) var(--l-861));
-  background: hsl(var(--th) var(--ts) var(--l-933));
+  /* 和主界面左侧栏同一条分界线（styles.css 的 .sidebar），齐平层次下两块底色
+     一样，这条线就是唯一的分界。 */
+  border-right: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 45%);
+  background: var(--side-fill);
 }
 .settings-window-drag { height: 52px; flex: 0 0 52px; }
 .settings-sidebar-home { display: flex; width: 100%; height: 40px; align-items: center; gap: 9px; padding: 0 10px 6px; border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-306)); background: transparent; font-size: 12px; font-weight: 600; text-align: left; cursor: pointer; }
