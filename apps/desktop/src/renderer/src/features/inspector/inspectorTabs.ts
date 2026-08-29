@@ -51,3 +51,16 @@ export function activeBrowserPaneTabId(state: BrowserStateSnapshot): string {
   const active = state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0];
   return active ? browserPaneTabId(active.id) : BROWSER_PLACEHOLDER_TAB_ID;
 }
+
+/** 中键 = 关闭标签页。 */
+export const MIDDLE_MOUSE_BUTTON = 1;
+
+/**
+ * 这一下中键要不要关掉标签。
+ *
+ * 不能关的标签（没给 closable 的）不响应；调用方另外要在 mousedown 上
+ * `preventDefault()`，否则 Chromium 会先把中键当成自动滚动/中键粘贴。
+ */
+export function isMiddleClickClose(button: number, closable: boolean | undefined): boolean {
+  return button === MIDDLE_MOUSE_BUTTON && closable === true;
+}
