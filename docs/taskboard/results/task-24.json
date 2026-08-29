@@ -1,0 +1,28 @@
+{
+  "id": 24,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "管控（自建）",
+      "at": "2026-08-29T04:00:00.000Z",
+      "text": "先回答你的问题：是的，原来是自动发现的。设置 → MCP 里那条「检测到的兼容配置」会列出 Cursor、Claude、Codex、opencode、Windsurf、VS Code 的配置，旁边一个「导入检测到的配置」按钮——按下去是把这些来源整个挂上，而且是持续挂着：以后你在 Cursor 里新加一个 MCP，它也会自动出现在 CoilCoil 里。你事前看不见会导进来什么，事后也拆不开单个。\n\n现在改成什么样：那个按钮换成「发现并按需导入」，点了弹出一个窗口，把每一个服务器单独列成一行——名字、它实际会跑的命令或地址、来自哪个工具。你勾几个就导几个。默认一个都不勾（默认全选等于换个样子做同一件事）。已经装过的同名服务器照样列出来但是灰的、点不动，标着「已存在」——不列出来你会以为没发现，然后反复重扫。\n\n导进来的是什么：是那个服务器定义本身，原样抄一份到 CoilCoil 自己的配置里。抄过来的这一份归你，可以改参数、可以停用、可以删；Cursor 那边以后怎么改都不会再影响你这边。这和原来「把来源整个挂上」是两件事——原来那种你在 CoilCoil 里其实改不动，因为它只是个引用。\n\n技术上有一处我想说明，因为它决定了这个功能以后好不好维护：各家的配置格式都不一样（Codex 是 TOML、opencode 的字段叫 mcp、VS Code 又是另一套），而且还在各自演进。我没有自己去解析这些格式，而是让底层适配器解析两次再相减——一次不启用任何来源，一次只启用某一个来源，多出来的就正好是那个来源带来的。以后适配器支持了新的工具，这里不用改任何代码就能跟着支持。\n\n还有一处照顾到了：某个工具的配置文件坏了，只有那一个来源会被跳过并单独说明原因，不会让整次扫描失败。扫到了文件但没东西可导的，也会说清楚是「里面本来就是空的」还是「里面那些 CoilCoil 已经有了」——否则你只会看到一个空列表，不知道到底扫没扫。\n\n打包后怎么人工验一遍：（a）设置 → MCP，点「发现并按需导入」；（b）确认列出来的服务器名字和你在 Cursor / Claude 里配的对得上，命令那一行也对；（c）勾一个不重要的导进来，看它出现在左边列表里，并且能点进去改参数；（d）再点一次「发现」，确认刚导入的那个变成灰色的「已存在」，不会重复导入。"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "37848f3d5",
+      "at": "2026-08-29T04:02:00.000Z",
+      "message": "feat(mcp): 发现改成弹窗按需导入，不再整包接管来源 (#24)",
+      "files": [
+        "packages/runtime-core/src/mcp-discovery.ts",
+        "packages/runtime-core/src/runtime-mcp-config.ts",
+        "packages/runtime-protocol/src/index.ts",
+        "packages/runtime-server/src/index.ts",
+        "apps/desktop/src/renderer/src/features/settings/McpDiscoveryDialog.tsx",
+        "apps/desktop/src/renderer/src/features/settings/SettingsDialog.tsx",
+        "apps/desktop/src/renderer/src/features/settings/settings.css",
+        "packages/runtime-core/tests/mcp-discovery.test.ts"
+      ]
+    }
+  ]
+}

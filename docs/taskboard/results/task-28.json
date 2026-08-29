@@ -1,0 +1,29 @@
+{
+  "id": 28,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "管控（自建）",
+      "at": "2026-08-29T04:00:00.000Z",
+      "text": "现在会变成什么样，分三处：\n\n1. 左侧对话行。跑完了还没看的，那个点从绿色改成红色。正在跑的本来就是一个转圈（不是点），保持不变。\n\n2. 左侧工作区（文件夹）那一行。这里原来就是你说的「绿点扩散」——一个绿点在那儿一呼一吸，而且不管是「还在跑」还是「跑完了没看」都是同一个绿点，扫一眼分不出来。现在改成：还在跑是转圈，跑完没看是静止的红点。呼吸动画整个删掉了。\n\n3. Dock 图标。右上角会显示未读对话的个数（1、2、3…），全部看完就自动消失。\n\n为什么红色：红色在系统里就是「有东西等着你看」，绿色读起来像「一切正常」，正好是反的。\n\n角标数的是什么：只数「跑完了但你还没看」的对话，不数还在跑的。角标问的是「有几件事等着你处理」，还在跑的那些你不需要做任何事。三处显示的是同一件事，我加了测试盯着它们别走散：两处未读点必须都是红的、那个绿色呼吸动画不许再出现、角标不许把运行中的算进去。\n\n打包后怎么人工验一遍：（a）在一个工作区里发个问题，让它跑起来——对话行和文件夹行都应该是转圈，Dock 上没有数字；（b）它回完之后先别点进去，切到别的对话——那两处都应该变成红点，Dock 右上角出现「1」；（c）再开一个对话重复一次，Dock 应该变成「2」；（d）逐个点进去看完，Dock 上的数字应该逐个减少到消失。"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "a98481a1f",
+      "at": "2026-08-29T04:05:00.000Z",
+      "message": "feat(desktop): 未读改红点、运行中改转圈，Dock 显示未读数 (#28)",
+      "files": [
+        "apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx",
+        "apps/desktop/src/renderer/src/features/workspaces/sessionList.ts",
+        "apps/desktop/src/renderer/src/features/workspaces/useDockBadge.ts",
+        "apps/desktop/src/renderer/src/App.tsx",
+        "apps/desktop/src/renderer/src/styles.css",
+        "apps/desktop/src/main/index.ts",
+        "apps/desktop/src/preload/index.ts",
+        "apps/desktop/src/shared/desktop-api.ts",
+        "apps/desktop/tests/unread-badge.test.ts"
+      ]
+    }
+  ]
+}
