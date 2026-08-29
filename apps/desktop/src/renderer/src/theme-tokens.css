@@ -1964,8 +1964,12 @@
 
 :root[data-surface="layered"],
 :root:not([data-theme="dark"])[data-light-tone="paper"][data-surface="layered"] {
-  --shell-fill: hsl(var(--th) var(--ts) 95.3%);
-  --side-fill: hsl(var(--th) var(--ts) 95.3%);
+  /* 默认这一档（暖纸 + layered）是绝大多数人看到的样子，左侧栏原来压到 95.3%
+     （#F3F3F3），一眼过去是块灰。往白里提到 96.9%（#F7F7F7）：和正文区的纯白
+     还差 3.1 个点，分界看得出来，但不再是「一块灰」。
+     设置界面的侧栏读的是同一个 --side-fill，会跟着一起变白，这是有意的。 */
+  --shell-fill: hsl(var(--th) var(--ts) 96.9%);
+  --side-fill: hsl(var(--th) var(--ts) 96.9%);
   --pane-fill: hsl(var(--th) var(--ts) 100%);
   --composer-fill: hsl(var(--th) var(--ts) 100%);
 }
