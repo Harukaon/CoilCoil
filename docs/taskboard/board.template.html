@@ -96,6 +96,7 @@
   }
   .search-wrap input{padding-right:34px}
   .dirty{color:var(--mid);font-size:12.5px;display:none;align-items:center;gap:5px}
+  .dirty.bad{color:var(--hi)}
   .dirty.on{display:inline-flex}
 
   /* 列宽按内容分：空列收窄成一条（仍然能拖进去），把宽度让给真正有卡片的那一列。
@@ -403,6 +404,11 @@ const COLS = [
   {k:'reply',   name:'待回复',   c:'var(--reply)'},
   {k:'done',    name:'已完成',   c:'var(--done)'},
 ];
+/* 从 http:// 打开（docs/taskboard/serve.mjs 起的那个地址）就是「联机模式」：
+   改动直接写进 tasks.json，不需要导出。双击打开 index.html 走的是 file://，
+   网页在那种情况下没有写盘的权限，只能存在浏览器里等你导出。 */
+const ONLINE = location.protocol === 'http:' || location.protocol === 'https:';
+
 const STATUS_NAME = Object.fromEntries(COLS.map(c=>[c.k,c.name]));
 const PRIO_NAME = {high:'高',medium:'中',low:'低'};
 const PRIO_ORDER = {high:0,medium:1,low:2};
@@ -417,6 +423,9 @@ let editingComment = null;   // 正在改哪一条我的回复（下标），nul
 
 /* ---------- 存取 ---------- */
 function load(){
+  // 联机模式下 tasks.json 就是唯一真相，没有「本地一份、文件一份」这回事，
+  // 也就不需要合并。开机时由 boot() 把文件内容灌进来。
+  if(ONLINE) return structuredClone(SEED);
   try{
     const raw = localStorage.getItem(LS);
     if(raw){
@@ -461,7 +470,38 @@ function load(){
   }catch(e){ console.warn('本地数据读取失败，回退到内置数据', e); }
   return structuredClone(SEED);
 }
+let saveTimer = null, saving = false, saveAgain = false;
+function markSaved(text, bad){
+  const el = document.getElementById('dirty');
+  el.textContent = text;
+  el.classList.add('on');
+  el.classList.toggle('bad', !!bad);
+}
+/* 连续的改动合并成一次写盘：贴图、连点状态这类操作会一口气触发好几次 save()。 */
+async function pushToServer(){
+  if(saving){ saveAgain = true; return; }
+  saving = true;
+  try{
+    const r = await fetch('tasks.json', {
+      method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(state),
+    });
+    if(!r.ok) throw new Error((await r.json().catch(()=>({}))).error || r.status);
+    markSaved('● 已保存');
+  }catch(e){
+    markSaved('● 保存失败：' + e.message, true);
+    console.error('写盘失败', e);
+  }finally{
+    saving = false;
+    if(saveAgain){ saveAgain = false; pushToServer(); }
+  }
+}
 function save(){
+  if(ONLINE){
+    markSaved('● 保存中…');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(pushToServer, 250);
+    return;
+  }
   try{ localStorage.setItem(LS, JSON.stringify(state)); }
   catch(e){ toast('本地保存失败，可能是图片太多超出浏览器容量。请先导出。','err'); return; }
   document.getElementById('dirty').classList.add('on');
@@ -1168,9 +1208,30 @@ document.getElementById('qKey').textContent = /Mac|iPhone|iPad/.test(navigator.p
 refreshAreas();
 render();
 renderMgr();
-// 带 #issue-12 打开就直接展开那一条，方便从别处跳进来
-const fromHash = /^#issue-(\d+)$/.exec(location.hash);
-if(fromHash) openTask(+fromHash[1]);
+
+/* 联机模式下内置的那份 SEED 只是先把页面画出来，真正的数据从磁盘上读。
+   读到之前页面已经是可用的，读到之后原地换掉重画，不会白屏。 */
+async function boot(){
+  if(ONLINE){
+    try{
+      const r = await fetch('tasks.json', {cache:'no-store'});
+      if(!r.ok) throw new Error(r.status);
+      const data = await r.json();
+      if(Array.isArray(data.tasks) && data.tasks.length){
+        state = data;
+        refreshAreas(); render(); 
+        markSaved('● 改动会直接存进 tasks.json');
+      }
+    }catch(e){
+      markSaved('● 读不到 tasks.json：' + e.message, true);
+      console.error('读盘失败', e);
+    }
+  }
+  // 带 #issue-12 打开就直接展开那一条，方便从别处跳进来
+  const fromHash = /^#issue-(\d+)$/.exec(location.hash);
+  if(fromHash) openTask(+fromHash[1]);
+}
+boot();
 </script>
 </body>
 </html>

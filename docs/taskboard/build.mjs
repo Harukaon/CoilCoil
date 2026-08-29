@@ -42,10 +42,12 @@ if (existsSync(resultsDir)) {
     for (const c of r.commits ?? []) {
       if (!seenCommits.has(c.ref)) { (task.commits ??= []).push(c); seenCommits.add(c.ref); }
     }
-    // 状态归属：用户导出那一刻的判断是准的，比它旧的 agent 结果不许把它改回去。
-    // 不然用户在看板上点了「已完成」或「打回重做」，下一次 build 又被上一轮的
-    // results 文件刷成「待验收」，用户的验收结果就白点了。
-    if (r.status && (!exportedAt || resultTime(r) > exportedAt)) task.status = r.status;
+    // 状态归属：谁的动作更晚听谁的。用户在看板上点状态时会记下 statusAt，比它旧
+    // 的 agent 结果不许把它改回去——不然用户点的「已完成」「打回重做」下一次
+    // build 就被上一轮的 results 刷成「待验收」，等于白点。老数据没有 statusAt，
+    // 退回到「导出那一刻」作为分界。
+    const userAt = Date.parse(task.statusAt ?? '') || exportedAt;
+    if (r.status && (!userAt || resultTime(r) > userAt)) task.status = r.status;
     merged++;
   }
 }
