@@ -119,18 +119,17 @@ function readCheckScript() {
 
   // 打回：必须落到「打回重做」，不是「待回复」——这两件事方向相反
   check(COLS.some((c) => c.k === "rework"), "有独立的「打回重做」状态");
-  $("aReject").click(); await tick();
-  check($("textDlg").open, "打回会先问一句为什么");
-  $("tNo").click(); await tick();
-  check(made.status !== "rework", "取消之后没有真打回");
-  $("aReject").click(); await tick();
-  $("tInput").value = "这里不对，重做。";
-  $("tYes").click(); await tick(); await tick();
-  check(made.status === "rework", "打回落到 rework，而不是 reply");
+  // 打回不该再单独问一遍理由：理由就写在回复框里。
+  $("eNew").value = "这里不对，重做。";
+  $("aReject").click();
+  await until(() => made.status === "rework", "打回落到 rework 而不是 reply");
+  steps.push("· 打回一步到位，不再多弹一个框");
+  check(!$("dlg").open, "打回之后详情自动关掉");
   check((made.userComments || []).some((c) => c.kind === "rework" && c.text === "这里不对，重做。"),
-    "打回理由作为一条回复留给了 AI");
+    "回复框里没发出去的内容，打回时一并带给了 AI");
 
   openTask(made.id); await tick();
+  check($("eNew").value === "", "带走之后回复框清空，不会再发一遍");
 
   // 前后翻
   check(!!$("aPrev") && !!$("aNext"), "详情底部有前后翻按钮");

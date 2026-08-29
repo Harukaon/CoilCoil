@@ -363,19 +363,6 @@
   </div>
 </dialog>
 
-<!-- 输入一段话（打回理由等） -->
-<dialog id="textDlg" class="narrow">
-  <div class="d-h"><h2 id="tTitle"></h2><button class="x" type="button" id="tClose" aria-label="关闭">&times;</button></div>
-  <div class="d-b">
-    <p id="tHint" style="margin:0 0 10px;color:var(--ink-2);font-size:12.5px;line-height:1.6"></p>
-    <textarea id="tInput" placeholder="可以留空，但写清楚会省一轮来回"></textarea>
-  </div>
-  <div class="d-f"><span class="spacer"></span>
-    <button type="button" id="tNo">取消</button>
-    <button type="button" id="tYes" class="btn-danger">确认</button>
-  </div>
-</dialog>
-
 <!-- 快捷键 -->
 <dialog id="helpDlg" class="narrow">
   <div class="d-h"><h2>快捷键</h2><button class="x" type="button" id="hClose" aria-label="关闭">&times;</button></div>
@@ -389,6 +376,7 @@
       <kbd>]</kbd><span>看下一条 Issue</span>
       <kbd>1</kbd> … <kbd>6</kbd><span>打开 Issue 时，直接设成第 N 列的状态</span>
       <kbd>⌘/Ctrl + Enter</kbd><span>在回复框里发送</span>
+      <kbd>4</kbd><span>打回重做——回复框里没发的内容会一起带过去</span>
       <kbd>⌘/Ctrl + V</kbd><span>在回复框里粘贴截图</span>
     </div>
   </div>
@@ -525,34 +513,6 @@ document.getElementById('cNo').onclick  = () => settleConfirm(false);
    已经打开之后才到，那时候把它当成「取消」就会莫名其妙地取消掉第二次。派发的这一
    刻弹窗又开着，就说明这是上一次遗留下来的，丢掉。 */
 confirmDlg.addEventListener('close', () => { if(!confirmDlg.open) settleConfirm(false); });
-
-/* ---------- 让用户写一段话的弹窗（打回理由） ---------- */
-const textDlg = document.getElementById('textDlg');
-let textResolve = null;
-function askText(title, hint, okLabel='确认'){
-  document.getElementById('tTitle').textContent = title;
-  document.getElementById('tHint').textContent = hint || '';
-  document.getElementById('tInput').value = '';
-  document.getElementById('tYes').textContent = okLabel;
-  textDlg.showModal();
-  setTimeout(()=>document.getElementById('tInput').focus(), 30);
-  return new Promise(res => { textResolve = res; });
-}
-function settleText(value){
-  const res = textResolve;
-  if(!res) return;
-  textResolve = null;
-  textDlg.close();
-  res(value);
-}
-document.getElementById('tYes').onclick = () => settleText(document.getElementById('tInput').value);
-document.getElementById('tNo').onclick  = () => settleText(null);
-document.getElementById('tClose').onclick = () => settleText(null);
-// close 迟到一拍的处理，同 confirmDlg 那里的说明。
-textDlg.addEventListener('close', () => { if(!textDlg.open) settleText(null); });
-document.getElementById('tInput').addEventListener('keydown', e => {
-  if((e.metaKey || e.ctrlKey) && e.key === 'Enter') document.getElementById('tYes').click();
-});
 
 /* ---------- 新建 / 编辑 Issue 的表单弹窗 ---------- */
 const formDlg = document.getElementById('formDlg');
@@ -957,18 +917,18 @@ function wireDialog(t){
 
   $('aPrev').onclick = () => step(-1);
   $('aNext').onclick = () => step(1);
-  // 打回要说清楚哪里不对，否则 AI 拿到的只是一个「重做」，等于没说。
-  // 理由作为一条我的回复存下来，AI 下一轮读得到。
-  $('aReject').onclick = async () => {
-    const reason = await askText('打回重做',
-      '说一下哪里不对、期望是什么。会作为一条回复留给 AI，下一轮它先看这个。',
-      '打回');
-    if(reason === null) return;
-    if(reason.trim()){
-      (t.userComments ||= []).push({at:new Date().toISOString(), text:reason.trim(), images:[], kind:'rework'});
+  /* 打回不再单独问一遍理由——理由就写在上面那个回复框里，没道理写两遍。
+     只处理一种情况：回复框里写了字但还没点发送，打回时一并发出去，不然那段话
+     会跟着弹窗一起消失。 */
+  $('aReject').onclick = () => {
+    const pending = $('eNew').value.trim();
+    if(pending || pendingImgs.length){
+      (t.userComments ||= []).push({at:new Date().toISOString(), text:pending, images:[...pendingImgs], kind:'rework'});
+      pendingImgs = [];
+      delete ui.drafts[t.id]; saveUi();
     }
     t.status='rework'; save(); render(); dlg.close();
-    toast(`#${t.id} 已打回，等 AI 重做`,'ok');
+    toast(pending || t.userComments?.length ? `#${t.id} 已打回，等 AI 重做` : `#${t.id} 已打回（没写理由，AI 只知道要重做）`, 'ok');
   };
   $('aApprove').onclick = () => { t.status='done';  save(); render(); dlg.close(); toast(`#${t.id} 已通过`,'ok'); };
   $('aSave').onclick    = () => { save(); render(); dlg.close(); };
