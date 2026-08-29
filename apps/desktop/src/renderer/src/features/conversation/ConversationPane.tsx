@@ -27,6 +27,7 @@ import { WindowDragBar } from "../../ui/WindowDragBar";
 import { BlobsLoader, OrbitLoader } from "../../ui/loaders";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
+import { nextScrollDownVisible } from "./scrollDownVisibility";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
 import { SubagentCard, SubagentDetailDialog } from "../subagents/SubagentActivity";
 
@@ -200,7 +201,7 @@ export function ConversationPane({
       return;
     }
     const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    setShowScrollDown(distance > 48);
+    setShowScrollDown((visible) => nextScrollDownVisible(visible, distance));
   }, [timelineRef]);
 
   const updateLoadEarlierVisibility = useCallback((): void => {
