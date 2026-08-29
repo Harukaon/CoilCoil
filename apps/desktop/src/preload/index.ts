@@ -26,6 +26,8 @@ import type {
   RuntimeEventPayload,
   RuntimeRequestPayload,
   RuntimeRequestResult,
+  SaveProjectFileInput,
+  SaveProjectFileResult,
   SavedLoginSummary,
   CoilCoilDesktopApi,
   TerminalDataEvent,
@@ -63,6 +65,7 @@ const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_CLOSE_CHANNEL = "preview:close";
 const PREVIEW_UPDATED_CHANNEL = "preview:updated";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
+const PROJECT_FILE_SAVE_CHANNEL = "project-file:save";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
@@ -138,6 +141,8 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(PREVIEW_CLOSE_CHANNEL, id) as Promise<void>,
   performProjectFileAction: (input: ProjectFileActionInput) =>
     ipcRenderer.invoke(PROJECT_FILE_ACTION_CHANNEL, input) as Promise<ProjectFileActionResult>,
+  saveProjectFile: (input: SaveProjectFileInput) =>
+    ipcRenderer.invoke(PROJECT_FILE_SAVE_CHANNEL, input) as Promise<SaveProjectFileResult>,
   testMcpConnection: (input: McpConnectionTestInput) =>
     ipcRenderer.invoke(MCP_TEST_CHANNEL, input) as Promise<McpConnectionTest>,
   getBubbleShortcut: () => ipcRenderer.invoke(BUBBLE_GET_SHORTCUT_CHANNEL) as Promise<BubbleShortcutState>,

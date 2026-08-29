@@ -15,6 +15,18 @@ export function relativeProjectPath(root: string, value: string): string {
     : value;
 }
 
+/**
+ * Whether an absolute path sits inside the workspace root. Reads are allowed to
+ * reach outside it, writes are not, so this is what decides where a file can be
+ * edited rather than only viewed.
+ */
+export function insideProject(root: string, path: string): boolean {
+  const normalizedRoot = root.replaceAll("\\", "/").replace(/\/+$/, "");
+  const normalizedPath = path.replaceAll("\\", "/");
+  if (!normalizedRoot) return false;
+  return normalizedPath.startsWith(`${normalizedRoot}/`) && !normalizedPath.split("/").includes("..");
+}
+
 export function previewFileNode(path: string): FileNode {
   const name = path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? path;
   return { name, path, kind: "file" };

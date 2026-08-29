@@ -21,6 +21,12 @@ export interface FilePreviewDocument {
   content: string;
   truncated: boolean;
   updatedAt: number;
+  /** The file's modification time when this content was read, in milliseconds. */
+  mtimeMs: number;
+  /** Whether this document may be edited in place and written back. */
+  editable: boolean;
+  /** Why a text file that looks editable is not; shown instead of the edit button. */
+  readOnlyReason?: string;
 }
 
 /** The bubble's global shortcut: nothing is claimed until the user picks one. */
@@ -61,6 +67,18 @@ export interface OpenFilePreviewResult {
   document?: FilePreviewDocument;
   actions?: FileFallbackAction[];
 }
+
+export interface SaveProjectFileInput {
+  root: string;
+  path: string;
+  content: string;
+  /** The mtime the editor loaded; a mismatch means the file changed underneath it. */
+  expectedMtimeMs: number;
+}
+
+export type SaveProjectFileResult =
+  | { saved: true; mtimeMs: number }
+  | { saved: false; reason: "conflict" | "invalid" | "too-large"; message: string };
 
 export type ProjectFileAction = "reveal" | "trash";
 
@@ -278,6 +296,8 @@ export interface CoilCoilDesktopApi {
   copyText(text: string): Promise<void>;
   openFilePreview(input: OpenFilePreviewInput): Promise<OpenFilePreviewResult>;
   closeFilePreview(id: string): Promise<void>;
+  /** Write an edited text file back, inside the workspace only. */
+  saveProjectFile(input: SaveProjectFileInput): Promise<SaveProjectFileResult>;
   performProjectFileAction(input: ProjectFileActionInput): Promise<ProjectFileActionResult>;
   onFilePreviewUpdated(listener: (document: FilePreviewDocument) => void): () => void;
   /** Dismiss the floating bubble window; its conversation stays alive. */
