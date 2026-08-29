@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { WindowDragBar } from "../../ui/WindowDragBar";
+import { isMiddleClickClose, MIDDLE_MOUSE_BUTTON } from "./inspectorTabs";
 
 export interface InspectorTab<T extends string> {
   id: T;
@@ -11,6 +12,8 @@ export interface InspectorTab<T extends string> {
   icon: LucideIcon;
   closable?: boolean;
   disabled?: boolean;
+  /** 图标转起来表示还在加载（网页标签用）。 */
+  spinning?: boolean;
 }
 
 export function InspectorPane<T extends string>({
@@ -45,7 +48,18 @@ export function InspectorPane<T extends string>({
           {tabs.map((item) => {
             const Icon = item.icon;
             return (
-              <div className={`inspector-tab ${item.id === activeTab ? "active" : ""}`} key={item.id}>
+              <div
+                className={`inspector-tab ${item.id === activeTab ? "active" : ""}`}
+                key={item.id}
+                // 中键关闭。按下那一下就要拦掉，否则 Chromium 会先起自动滚动
+                // （Linux 上还有中键粘贴），松开时的 auxclick 就不一定还在这个标签上。
+                onMouseDown={(event) => { if (event.button === MIDDLE_MOUSE_BUTTON) event.preventDefault(); }}
+                onAuxClick={(event) => {
+                  if (!onCloseTab || !isMiddleClickClose(event.button, item.closable)) return;
+                  event.preventDefault();
+                  onCloseTab(item.id);
+                }}
+              >
                 <button
                   className="inspector-tab-select"
                   type="button"
@@ -54,7 +68,7 @@ export function InspectorPane<T extends string>({
                   aria-pressed={item.id === activeTab}
                   onClick={() => onSelectTab(item.id)}
                 >
-                  <Icon size={15} strokeWidth={1.7} />
+                  <Icon className={item.spinning ? "spin" : undefined} size={15} strokeWidth={1.7} />
                   <span>{item.label}</span>
                 </button>
                 {item.closable && onCloseTab ? (
