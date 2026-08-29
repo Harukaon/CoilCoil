@@ -6,27 +6,30 @@
 <title>SuoCode Issue 看板</title>
 <style>
   :root{
-    --bg:#f6f7f9; --panel:#fff; --panel-2:#fbfbfc;
+    --bg:#f6f7f9; --panel:#fff; --panel-2:#fbfbfc; --panel-3:#f2f4f7;
     --ink:#1c1f24; --ink-2:#5b6472; --ink-3:#8b95a3;
     --line:#e4e7ec; --line-2:#eef0f3;
-    --accent:#4f6bed;
+    --accent:#4f6bed; --accent-soft:rgba(79,107,237,.1);
     --todo:#9aa4b2; --doing:#3b82f6; --review:#8b5cf6; --reply:#ef4444; --done:#10b981;
     --hi:#e5484d; --mid:#f5a524; --lo:#94a3b8;
     --radius:14px; --shadow:0 1px 2px rgba(16,24,40,.05),0 6px 20px rgba(16,24,40,.06);
+    --shadow-lg:0 24px 60px rgba(16,24,40,.22),0 2px 8px rgba(16,24,40,.08);
   }
   @media (prefers-color-scheme:dark){
     :root:not([data-theme=light]){
-      --bg:#15171b; --panel:#1c1f24; --panel-2:#20242a;
+      --bg:#15171b; --panel:#1c1f24; --panel-2:#20242a; --panel-3:#262b32;
       --ink:#e8eaed; --ink-2:#a3adba; --ink-3:#6e7783;
-      --line:#2b3038; --line-2:#23272e;
+      --line:#2b3038; --line-2:#23272e; --accent-soft:rgba(79,107,237,.18);
       --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+      --shadow-lg:0 24px 60px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.3);
     }
   }
   :root[data-theme=dark]{
-    --bg:#15171b; --panel:#1c1f24; --panel-2:#20242a;
+    --bg:#15171b; --panel:#1c1f24; --panel-2:#20242a; --panel-3:#262b32;
     --ink:#e8eaed; --ink-2:#a3adba; --ink-3:#6e7783;
-    --line:#2b3038; --line-2:#23272e;
+    --line:#2b3038; --line-2:#23272e; --accent-soft:rgba(79,107,237,.18);
     --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+    --shadow-lg:0 24px 60px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.3);
   }
   *{box-sizing:border-box}
   body{
@@ -35,37 +38,71 @@
   }
   .wrap{max-width:1680px;margin:0 auto;padding:22px 24px 60px}
 
-  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
   h1{font-size:20px;margin:0;letter-spacing:-.01em}
   .sub{color:var(--ink-3);font-size:12.5px}
+  .spacer{flex:1}
+
+  /* ---- 进度条：一眼看出 29 条各卡在哪一列 ---- */
+  .stats{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:12px 14px;margin-bottom:14px;box-shadow:var(--shadow);
+  }
+  .stats-bar{display:flex;height:9px;border-radius:20px;overflow:hidden;background:var(--line-2)}
+  .stats-bar i{display:block;transition:flex-grow .3s ease}
+  .stats-legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;font-size:12px;color:var(--ink-2)}
+  .stats-legend span{display:inline-flex;align-items:center;gap:6px;cursor:pointer;border-radius:6px;padding:1px 4px}
+  .stats-legend span:hover{background:var(--line-2)}
+  .stats-legend span.muted{opacity:.4}
+  .stats-legend b{font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)}
 
   .bar{
     display:flex;gap:8px;align-items:center;flex-wrap:wrap;
     background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:10px 12px;margin-bottom:18px;box-shadow:var(--shadow);
+    padding:10px 12px;margin-bottom:16px;box-shadow:var(--shadow);
   }
   button,.btn{
     font:inherit;font-size:13px;padding:7px 13px;border-radius:10px;
     border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
     cursor:pointer;transition:background .15s,border-color .15s,transform .1s;
   }
-  button:hover{background:var(--line-2);border-color:var(--ink-3)}
-  button:active{transform:translateY(1px)}
-  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  .btn-primary:hover{background:#4459d8;border-color:#4459d8}
-  .btn-danger{background:transparent;border-color:var(--hi);color:var(--hi)}
-  .btn-danger:hover{background:var(--hi);color:#fff}
-  .btn-ok{background:var(--done);border-color:var(--done);color:#fff}
-  .btn-ok:hover{filter:brightness(.94)}
-  .spacer{flex:1}
-  input[type=search]{
-    font:inherit;font-size:13px;padding:7px 11px;border-radius:10px;
-    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);min-width:200px;
+  button:hover:not(:disabled){background:var(--line-2);border-color:var(--ink-3)}
+  button:active:not(:disabled){transform:translateY(1px)}
+  button:disabled{opacity:.45;cursor:default}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+    outline:2px solid var(--accent);outline-offset:1px;
   }
-  .dirty{color:var(--mid);font-size:12.5px;display:none}
-  .dirty.on{display:inline}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover:not(:disabled){background:#4459d8;border-color:#4459d8}
+  .btn-danger{background:transparent;border-color:var(--hi);color:var(--hi)}
+  .btn-danger:hover:not(:disabled){background:var(--hi);color:#fff;border-color:var(--hi)}
+  .btn-ok{background:var(--done);border-color:var(--done);color:#fff}
+  .btn-ok:hover:not(:disabled){filter:brightness(.94);background:var(--done);border-color:var(--done)}
+  .btn-quiet{border-color:transparent;background:transparent;color:var(--ink-2)}
+  .btn-sm{font-size:12px;padding:4px 9px;border-radius:8px}
 
-  .board{display:grid;grid-template-columns:repeat(5,minmax(240px,1fr));gap:14px;align-items:start}
+  input[type=search],input[type=text],select,textarea{
+    font:inherit;font-size:13px;padding:7px 10px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
+  }
+  .search-wrap{flex:1 1 260px;min-width:230px;max-width:420px}
+  input[type=search]{width:100%;min-width:0}
+  textarea{width:100%;min-height:86px;resize:vertical;line-height:1.6}
+  .field-err{border-color:var(--hi)!important}
+  .search-wrap{position:relative;display:flex;align-items:center}
+  .search-wrap kbd{
+    position:absolute;right:8px;pointer-events:none;color:var(--ink-3);
+    font:11px ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  .search-wrap input{padding-right:34px}
+  .dirty{color:var(--mid);font-size:12.5px;display:none;align-items:center;gap:5px}
+  .dirty.on{display:inline-flex}
+
+  /* 列宽按内容分：空列收窄成一条（仍然能拖进去），把宽度让给真正有卡片的那一列。
+     27 条挤在「待验收」而旁边三列全空的时候，等宽五列几乎没法读。 */
+  .board{display:grid;grid-template-columns:var(--cols,repeat(5,minmax(240px,1fr)));gap:14px;align-items:start}
+  .col.lean .col-b{padding:8px}
+  .col.lean .col-h{padding:12px 10px}
   @media (max-width:1200px){.board{grid-template-columns:repeat(2,1fr)}}
   @media (max-width:680px){.board{grid-template-columns:1fr}}
 
@@ -76,7 +113,7 @@
   .col-h .name{font-weight:600;font-size:13px}
   .col-h .n{margin-left:auto;color:var(--ink-3);font-size:12px;font-variant-numeric:tabular-nums}
   .col-b{padding:10px;display:flex;flex-direction:column;gap:9px;min-height:60px}
-  .col.over .col-b{background:var(--line-2);border-radius:0 0 var(--radius) var(--radius)}
+  .col.over .col-b{background:var(--accent-soft);border-radius:0 0 var(--radius) var(--radius)}
 
   .card{
     background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--lo);
@@ -84,63 +121,111 @@
     transition:border-color .15s,transform .1s,box-shadow .15s;
   }
   .card:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(16,24,40,.09);border-color:var(--ink-3)}
+  .card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .card.p-high{border-left-color:var(--hi)}
   .card.p-medium{border-left-color:var(--mid)}
   .card.dragging{opacity:.4}
-  .card .id{font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .card .id{font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:6px}
   .card .t{font-weight:600;font-size:13px;margin:3px 0 6px;line-height:1.45}
   .card .m{display:flex;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--ink-2)}
   .chip{background:var(--line-2);border-radius:20px;padding:2px 8px}
   .chip.warn{color:var(--mid)}
+  .new-tag{
+    background:var(--hi);color:#fff;border-radius:20px;padding:1px 7px;
+    font-size:10px;font-weight:600;letter-spacing:.02em;margin-left:auto;
+  }
 
+  /* ---- 弹窗 ---- */
   dialog{
     border:none;border-radius:16px;padding:0;background:var(--panel);color:var(--ink);
-    max-width:760px;width:calc(100vw - 40px);box-shadow:0 24px 60px rgba(0,0,0,.3);
+    max-width:860px;width:calc(100vw - 40px);box-shadow:var(--shadow-lg);
   }
   dialog::backdrop{background:rgba(10,12,16,.55)}
-  .d-h{display:flex;align-items:flex-start;gap:12px;padding:20px 22px 14px;border-bottom:1px solid var(--line-2)}
+  dialog.narrow{max-width:460px}
+  .d-h{display:flex;align-items:flex-start;gap:12px;padding:18px 22px 13px;border-bottom:1px solid var(--line-2)}
   .d-h h2{margin:0;font-size:17px;line-height:1.4;flex:1}
   .d-h .x{border:none;background:transparent;font-size:22px;line-height:1;color:var(--ink-3);padding:2px 6px}
-  .d-b{padding:18px 22px;max-height:min(62vh,600px);overflow:auto}
-  .d-f{display:flex;gap:8px;padding:14px 22px;border-top:1px solid var(--line-2);flex-wrap:wrap}
+  .d-h .x:hover{background:var(--line-2);color:var(--ink)}
+  .d-b{padding:18px 22px;max-height:min(64vh,640px);overflow:auto}
+  .d-f{display:flex;gap:8px;padding:13px 22px;border-top:1px solid var(--line-2);flex-wrap:wrap;align-items:center}
+  .d-nav{display:flex;gap:4px;align-items:center;margin-right:4px}
+  .d-nav button{padding:5px 9px;font-size:12px}
 
   .body-text{white-space:pre-wrap;color:var(--ink-2);background:var(--panel-2);
              border:1px solid var(--line-2);border-radius:11px;padding:12px 14px;font-size:13px}
+  .body-text.empty-body{color:var(--ink-3);font-style:italic}
   .sec{margin-top:20px}
-  .sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin:0 0 9px}
-  .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .sec h3{font-size:12px;letter-spacing:.03em;color:var(--ink-3);
+          margin:0 0 9px;display:flex;align-items:center;gap:8px}
+  .sec h3 .spacer{flex:1}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:flex-end}
   label.f{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--ink-2)}
-  select,textarea,input[type=text]{
-    font:inherit;font-size:13px;padding:7px 10px;border-radius:10px;
-    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
-  }
-  textarea{width:100%;min-height:82px;resize:vertical;line-height:1.6}
+  label.f.grow{flex:1;min-width:180px}
+  label.f input,label.f select{width:100%}
+  .err-line{color:var(--hi);font-size:12px;margin:-6px 0 10px;min-height:0}
 
   .note{border:1px solid var(--line-2);border-left:3px solid var(--accent);
         border-radius:10px;padding:10px 12px;margin-bottom:9px;background:var(--panel-2);font-size:13px}
   .note.mine{border-left-color:var(--done)}
-  .note .h{display:flex;gap:8px;font-size:11px;color:var(--ink-3);margin-bottom:5px}
+  .note.unseen{border-left-color:var(--hi);background:var(--accent-soft)}
+  .note .h{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--ink-3);margin-bottom:5px}
   .note .h b{color:var(--ink-2);font-weight:600}
-  .note .c{white-space:pre-wrap;color:var(--ink-2)}
+  .note .h .spacer{flex:1}
+  .note .c{white-space:pre-wrap;color:var(--ink-2);word-break:break-word}
+  .note .c.clipped{max-height:7.4em;overflow:hidden;
+                   -webkit-mask-image:linear-gradient(#000 78%,transparent);
+                   mask-image:linear-gradient(#000 78%,transparent)}
   .note img{max-width:100%;border-radius:9px;margin-top:9px;display:block;cursor:zoom-in;border:1px solid var(--line)}
-  .note .del{margin-left:auto;border:none;background:transparent;color:var(--ink-3);font-size:11px;padding:0 3px;cursor:pointer}
-  .note .del:hover{color:var(--hi)}
+  .note .act{border:none;background:transparent;color:var(--ink-3);font-size:11px;padding:1px 4px;
+             cursor:pointer;border-radius:5px}
+  .note .act:hover{color:var(--ink);background:var(--line-2)}
+  .note .act.danger:hover{color:#fff;background:var(--hi)}
+  .note .more{margin-top:6px;font-size:12px;color:var(--accent);background:transparent;border:none;
+              padding:2px 0;cursor:pointer}
+  .note .more:hover{text-decoration:underline;background:transparent}
+  .commit-ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
   .empty{color:var(--ink-3);font-size:12.5px;padding:2px 0}
   .drop{border:1px dashed var(--line);border-radius:10px;padding:9px 11px;font-size:12px;color:var(--ink-3);margin:9px 0}
-  .drop.over{border-color:var(--accent);color:var(--accent)}
+  .drop.over{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
   .thumbs{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}
   .thumb{position:relative}
-  .thumb img{height:52px;border-radius:8px;border:1px solid var(--line);display:block}
+  .thumb img{height:52px;border-radius:8px;border:1px solid var(--line);display:block;cursor:zoom-in}
   .thumb button{position:absolute;top:-6px;right:-6px;width:19px;height:19px;padding:0;border-radius:50%;
                 background:var(--hi);color:#fff;border:none;font-size:12px;line-height:1;cursor:pointer}
-  code{background:var(--line-2);padding:1px 5px;border-radius:5px;font-size:12px;
+  .thumb button:hover{background:var(--hi);filter:brightness(1.1)}
+  code,kbd{background:var(--line-2);padding:1px 5px;border-radius:5px;font-size:12px;
        font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  .hint{color:var(--ink-3);font-size:12px;margin-top:10px;line-height:1.65}
+  .hint{color:var(--ink-3);font-size:12px;margin-top:16px;line-height:1.7}
+  .send-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .send-row .tip{color:var(--ink-3);font-size:11.5px}
+
+  /* ---- 图片放大 ---- */
+  #lightbox{max-width:none;width:auto;background:transparent;box-shadow:none}
+  #lightbox::backdrop{background:rgba(8,10,14,.86)}
+  #lightbox img{max-width:92vw;max-height:88vh;border-radius:12px;display:block}
+
+  /* ---- Toast ---- */
+  #toasts{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:99;
+          display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+  .toast{
+    background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    padding:9px 15px;font-size:13px;box-shadow:var(--shadow-lg);
+    animation:toast-in .18s cubic-bezier(.16,1,.3,1);
+  }
+  .toast.ok{border-left:3px solid var(--done)}
+  .toast.err{border-left:3px solid var(--hi)}
+  @keyframes toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  /* ---- 快捷键表 ---- */
+  .keys{display:grid;grid-template-columns:auto 1fr;gap:9px 16px;align-items:center;font-size:13px}
+  .keys kbd{white-space:nowrap}
+  .keys span{color:var(--ink-2)}
 
   /* 管控日志：这一轮谁在做什么、我替用户做了哪些决定 */
   .mgr{
     background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:0 14px;margin-bottom:18px;box-shadow:var(--shadow);
+    padding:0 14px;margin-bottom:16px;box-shadow:var(--shadow);
   }
   .mgr>summary{
     cursor:pointer;list-style:none;padding:11px 0;font-size:13px;color:var(--ink-2);
@@ -168,14 +253,40 @@
     <span class="dirty" id="dirty">● 有未导出的改动</span>
   </header>
 
+  <div class="stats">
+    <div class="stats-bar" id="statsBar"></div>
+    <div class="stats-legend" id="statsLegend"></div>
+  </div>
+
   <div class="bar">
     <button class="btn-primary" id="new">＋ 新建 Issue</button>
-    <input type="search" id="q" placeholder="搜索标题 / 正文 / 模块…">
+    <span class="search-wrap">
+      <input type="search" id="q" placeholder="搜索标题 / 正文 / 进展 / 回复…"><kbd id="qKey">/</kbd>
+    </span>
     <select id="fArea"><option value="">全部模块</option></select>
+    <select id="fPrio">
+      <option value="">全部优先级</option>
+      <option value="high">高</option><option value="medium">中</option><option value="low">低</option>
+    </select>
+    <select id="fMine">
+      <option value="">不限回复</option>
+      <option value="yes">我回复过</option>
+      <option value="no">我还没回复</option>
+      <option value="unseen">有我没看过的进展</option>
+    </select>
+    <select id="sort">
+      <option value="id">按编号</option>
+      <option value="prio">按优先级</option>
+      <option value="recent">按最近活动</option>
+    </select>
+    <button class="btn-quiet btn-sm" id="clearF" hidden>清除筛选</button>
     <span class="spacer"></span>
+    <button id="import">⬆ 导入</button>
     <button id="export">⬇ 导出 tasks.json</button>
     <button id="reset">↺ 丢弃本地改动</button>
-    <button id="theme">◐ 主题</button>
+    <button id="theme" title="浅色 / 深色 / 跟随系统">◐</button>
+    <button id="help" title="快捷键">?</button>
+    <input type="file" id="file" accept="application/json,.json" hidden>
   </div>
 
   <details class="mgr" id="mgr" hidden>
@@ -186,11 +297,12 @@
   <div class="board" id="board"></div>
 
   <p class="hint">
-    卡片可直接拖到别的列改状态，点开可以改状态 / 打回 / 通过、回复文字和贴图（支持 <code>Ctrl/⌘+V</code> 粘贴截图）。<br>
-    你的改动实时存在浏览器 localStorage 里；点「导出 tasks.json」下载后覆盖 <code>docs/taskboard/tasks.json</code>，我这边就能读到你的回复。
+    卡片可以拖到别的列改状态，也可以点开逐条处理：改标题正文、改状态、打回、通过、回复文字和贴图（<kbd>Ctrl/⌘+V</kbd> 粘贴截图）。<br>
+    你的改动实时存在浏览器里；点「导出 tasks.json」下载后覆盖 <code>docs/taskboard/tasks.json</code>，我这边就能读到。按 <kbd>?</kbd> 看全部快捷键。
   </p>
 </div>
 
+<!-- 详情 -->
 <dialog id="dlg">
   <div class="d-h">
     <h2 id="dTitle"></h2>
@@ -199,6 +311,77 @@
   <div class="d-b" id="dBody"></div>
   <div class="d-f" id="dFoot"></div>
 </dialog>
+
+<!-- 新建 / 编辑 -->
+<dialog id="formDlg">
+  <form method="dialog">
+    <div class="d-h">
+      <h2 id="fTitle">新建 Issue</h2>
+      <button class="x" type="button" id="fClose" aria-label="关闭">&times;</button>
+    </div>
+    <div class="d-b">
+      <div class="row">
+        <label class="f grow">标题
+          <input type="text" id="fName" placeholder="一句话说清要改什么" autocomplete="off">
+        </label>
+      </div>
+      <div class="err-line" id="fErr"></div>
+      <div class="row">
+        <label class="f grow">模块
+          <input type="text" id="fArea2" placeholder="未分类" autocomplete="off" list="areaList">
+          <datalist id="areaList"></datalist>
+        </label>
+        <label class="f">优先级
+          <select id="fPrio2"><option value="high">高</option><option value="medium" selected>中</option><option value="low">低</option></select>
+        </label>
+        <label class="f">状态
+          <select id="fStatus2"></select>
+        </label>
+      </div>
+      <label class="f" style="width:100%">详细描述
+        <textarea id="fBody" placeholder="想怎么改、为什么、在哪能看到。可留空。"></textarea>
+      </label>
+    </div>
+    <div class="d-f">
+      <span class="spacer"></span>
+      <button type="button" id="fCancel">取消</button>
+      <button type="button" class="btn-primary" id="fOk">创建</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 确认 -->
+<dialog id="confirmDlg" class="narrow">
+  <div class="d-h"><h2 id="cTitle"></h2></div>
+  <div class="d-b"><div id="cText" style="color:var(--ink-2);font-size:13px;white-space:pre-wrap"></div></div>
+  <div class="d-f">
+    <span class="spacer"></span>
+    <button type="button" id="cNo">取消</button>
+    <button type="button" id="cYes" class="btn-danger">确认</button>
+  </div>
+</dialog>
+
+<!-- 快捷键 -->
+<dialog id="helpDlg" class="narrow">
+  <div class="d-h"><h2>快捷键</h2><button class="x" type="button" id="hClose" aria-label="关闭">&times;</button></div>
+  <div class="d-b">
+    <div class="keys">
+      <kbd>/</kbd><span>搜索</span>
+      <kbd>N</kbd><span>新建 Issue</span>
+      <kbd>?</kbd><span>这张表</span>
+      <kbd>Esc</kbd><span>关闭当前弹窗</span>
+      <kbd>[</kbd><span>看上一条 Issue</span>
+      <kbd>]</kbd><span>看下一条 Issue</span>
+      <kbd>1</kbd> … <kbd>5</kbd><span>打开 Issue 时，直接设成第 N 列的状态</span>
+      <kbd>⌘/Ctrl + Enter</kbd><span>在回复框里发送</span>
+      <kbd>⌘/Ctrl + V</kbd><span>在回复框里粘贴截图</span>
+    </div>
+  </div>
+  <div class="d-f"><span class="spacer"></span><button type="button" id="hOk" class="btn-primary">知道了</button></div>
+</dialog>
+
+<dialog id="lightbox"><img id="lightImg" alt="附图"></dialog>
+<div id="toasts"></div>
 
 <script>
 const SEED = {
@@ -1145,8 +1328,9 @@ const SEED = {
   ]
 }
 ;
-const BUILT_AT = "2026-08-29T09:49:05.491Z";
+const BUILT_AT = "2026-08-29T11:03:30.278Z";
 const LS = 'suocode-taskboard-v2';
+const LS_UI = 'suocode-taskboard-ui-v1';
 
 const COLS = [
   {k:'todo',    name:'待办',   c:'var(--todo)'},
@@ -1157,10 +1341,15 @@ const COLS = [
 ];
 const STATUS_NAME = Object.fromEntries(COLS.map(c=>[c.k,c.name]));
 const PRIO_NAME = {high:'高',medium:'中',low:'低'};
+const PRIO_ORDER = {high:0,medium:1,low:2};
 
 let state = load();
+/* ui：跟任务数据分开存。里面是「看过没有」「回复写了一半」「主题」这类
+   纯本地的东西，导出 tasks.json 时不该混进去。 */
+let ui = loadUi();
 let openId = null;
 let pendingImgs = [];
+let editingComment = null;   // 正在改哪一条我的回复（下标），null = 在写新的
 
 /* ---------- 存取 ---------- */
 function load(){
@@ -1175,8 +1364,14 @@ function load(){
         if(!mine) return structuredClone(seed);
         return {...structuredClone(seed),
           status: mine.status ?? seed.status,
+          priority: mine.priority ?? seed.priority,
+          area: mine.area ?? seed.area,
+          // 标题和正文你改过就以你的为准，没改过就跟着我这边更新
+          title: mine.titleEdited ? mine.title : seed.title,
+          body:  mine.bodyEdited  ? mine.body  : seed.body,
+          titleEdited: mine.titleEdited, bodyEdited: mine.bodyEdited,
           userComments: mine.userComments ?? [],
-          // agent 侧字段始终以 SEED 为准
+          // agent 侧字段（agentNotes / commits）始终以 SEED 为准
         };
       });
       // 你在看板上自己新建的 Issue（SEED 里没有的）保留
@@ -1187,43 +1382,208 @@ function load(){
   return structuredClone(SEED);
 }
 function save(){
-  localStorage.setItem(LS, JSON.stringify(state));
+  try{ localStorage.setItem(LS, JSON.stringify(state)); }
+  catch(e){ toast('本地保存失败，可能是图片太多超出浏览器容量。请先导出。','err'); return; }
   document.getElementById('dirty').classList.add('on');
 }
+function loadUi(){
+  try{ return {seen:{},drafts:{},theme:'', ...(JSON.parse(localStorage.getItem(LS_UI)||'{}'))}; }
+  catch{ return {seen:{},drafts:{},theme:''}; }
+}
+function saveUi(){
+  try{ localStorage.setItem(LS_UI, JSON.stringify(ui)); }catch{ /* 无关紧要，丢了就丢了 */ }
+}
+
 const nextId = () => Math.max(0, ...state.tasks.map(t=>t.id)) + 1;
 const esc = s => String(s??'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const when = iso => { try{ return new Date(iso).toLocaleString('zh-CN',{hour12:false}); }catch{ return iso||''; } };
+const byId = id => state.tasks.find(t=>t.id===id);
+
+/* 这条 Issue 上有没有我还没看过的 agent 进展 */
+function unseenCount(t){
+  const seen = ui.seen[t.id];
+  const items = [...(t.agentNotes||[]), ...(t.commits||[])];
+  if(!seen) return items.length;
+  return items.filter(n => n.at && Date.parse(n.at) > Date.parse(seen)).length;
+}
+/** 这条 Issue 最近一次有动静是什么时候，用来排序。 */
+function lastActivity(t){
+  const times = [...(t.agentNotes||[]),...(t.commits||[]),...(t.userComments||[])]
+    .map(x=>Date.parse(x.at)).filter(Number.isFinite);
+  return times.length ? Math.max(...times) : 0;
+}
+
+/* ---------- Toast ---------- */
+function toast(text, kind){
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' '+kind : '');
+  el.textContent = text;
+  document.getElementById('toasts').append(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .2s'; }, 2200);
+  setTimeout(()=> el.remove(), 2500);
+}
+
+/* ---------- 自己的确认弹窗，不用浏览器那个 ---------- */
+const confirmDlg = document.getElementById('confirmDlg');
+let confirmResolve = null;
+function ask(title, text, okLabel='确认', danger=true){
+  document.getElementById('cTitle').textContent = title;
+  document.getElementById('cText').textContent = text || '';
+  const yes = document.getElementById('cYes');
+  yes.textContent = okLabel;
+  yes.className = danger ? 'btn-danger' : 'btn-primary';
+  confirmDlg.showModal();
+  return new Promise(res => { confirmResolve = res; });
+}
+function settleConfirm(value){
+  const res = confirmResolve;
+  if(!res) return;
+  confirmResolve = null;
+  confirmDlg.close();
+  res(value);
+}
+document.getElementById('cYes').onclick = () => settleConfirm(true);
+document.getElementById('cNo').onclick  = () => settleConfirm(false);
+/* 按 Esc 或点遮罩关掉，也算「取消」。
+   但 close 事件是下一拍才派发的：连着弹两次确认框时，上一次的 close 可能在第二个
+   已经打开之后才到，那时候把它当成「取消」就会莫名其妙地取消掉第二次。派发的这一
+   刻弹窗又开着，就说明这是上一次遗留下来的，丢掉。 */
+confirmDlg.addEventListener('close', () => { if(!confirmDlg.open) settleConfirm(false); });
+
+/* ---------- 新建 / 编辑 Issue 的表单弹窗 ---------- */
+const formDlg = document.getElementById('formDlg');
+let formResolve = null;
+function issueForm(existing){
+  const $ = id => document.getElementById(id);
+  $('fTitle').textContent = existing ? `编辑 #${existing.id}` : '新建 Issue';
+  $('fOk').textContent    = existing ? '保存' : '创建';
+  $('fName').value   = existing?.title ?? '';
+  $('fBody').value   = existing?.body ?? '';
+  $('fArea2').value  = existing?.area ?? '';
+  $('fPrio2').value  = existing?.priority ?? 'medium';
+  $('fStatus2').innerHTML = COLS.map(c=>`<option value="${c.k}">${c.name}</option>`).join('');
+  $('fStatus2').value = existing?.status ?? 'todo';
+  $('fErr').textContent = '';
+  $('fName').classList.remove('field-err');
+  $('areaList').innerHTML = [...new Set(state.tasks.map(t=>t.area).filter(Boolean))]
+    .sort().map(a=>`<option value="${esc(a)}">`).join('');
+  formDlg.showModal();
+  setTimeout(()=>$('fName').focus(), 30);
+  return new Promise(res => { formResolve = res; });
+}
+function settleForm(value){
+  const res = formResolve;
+  if(!res) return;
+  formResolve = null;
+  formDlg.close();
+  res(value);
+}
+document.getElementById('fOk').onclick = () => {
+  const $ = id => document.getElementById(id);
+  const title = $('fName').value.trim();
+  if(!title){
+    // 不弹 alert：错误就写在字段下面，光标留在原地。
+    $('fErr').textContent = '标题不能为空——这是列表里唯一能认出它的东西。';
+    $('fName').classList.add('field-err');
+    $('fName').focus();
+    return;
+  }
+  settleForm({
+    title,
+    body: $('fBody').value.trim(),
+    area: $('fArea2').value.trim() || '未分类',
+    priority: $('fPrio2').value,
+    status: $('fStatus2').value,
+  });
+};
+document.getElementById('fCancel').onclick = () => settleForm(null);
+document.getElementById('fClose').onclick  = () => settleForm(null);
+formDlg.addEventListener('close', () => { if(!formDlg.open) settleForm(null); });
+document.getElementById('fName').addEventListener('input', () => {
+  document.getElementById('fErr').textContent = '';
+  document.getElementById('fName').classList.remove('field-err');
+});
+
+/* ---------- 筛选与排序 ---------- */
+function filters(){
+  return {
+    q: document.getElementById('q').value.trim().toLowerCase(),
+    area: document.getElementById('fArea').value,
+    prio: document.getElementById('fPrio').value,
+    mine: document.getElementById('fMine').value,
+    sort: document.getElementById('sort').value,
+    hidden: new Set(ui.hiddenCols || []),
+  };
+}
+function matches(t, f){
+  if(f.area && t.area !== f.area) return false;
+  if(f.prio && t.priority !== f.prio) return false;
+  if(f.mine === 'yes'    && !(t.userComments||[]).length) return false;
+  if(f.mine === 'no'     &&  (t.userComments||[]).length) return false;
+  if(f.mine === 'unseen' && !unseenCount(t)) return false;
+  if(f.q){
+    // 搜索连 agent 的进展和我自己的回复一起搜——很多话只写在那里面。
+    const hay = [t.title, t.body, t.area,
+      ...(t.agentNotes||[]).map(n=>n.text),
+      ...(t.userComments||[]).map(c=>c.text),
+      ...(t.commits||[]).map(c=>c.message)].join(' ').toLowerCase();
+    if(!hay.includes(f.q)) return false;
+  }
+  return true;
+}
+function sortTasks(list, how){
+  const copy = [...list];
+  if(how === 'prio')   copy.sort((a,b)=> (PRIO_ORDER[a.priority]??9)-(PRIO_ORDER[b.priority]??9) || a.id-b.id);
+  else if(how==='recent') copy.sort((a,b)=> lastActivity(b)-lastActivity(a) || a.id-b.id);
+  else copy.sort((a,b)=> a.id-b.id);
+  return copy;
+}
+/** 当前筛选下、按当前排序展开成一条平铺的列表，供 [ ] 前后翻用。 */
+function visibleOrder(){
+  const f = filters();
+  return COLS.filter(c=>!f.hidden.has(c.k))
+    .flatMap(c => sortTasks(state.tasks.filter(t=>t.status===c.k && matches(t,f)), f.sort))
+    .map(t=>t.id);
+}
 
 /* ---------- 渲染看板 ---------- */
 function render(){
-  const q = document.getElementById('q').value.trim().toLowerCase();
-  const area = document.getElementById('fArea').value;
-  const hit = t => (!q || (t.title+t.body+t.area).toLowerCase().includes(q)) && (!area || t.area===area);
+  const f = filters();
+  const anyFilter = f.q || f.area || f.prio || f.mine || f.hidden.size;
+  document.getElementById('clearF').hidden = !anyFilter;
 
-  document.getElementById('board').innerHTML = COLS.map(col=>{
+  const cols = COLS.filter(c=>!f.hidden.has(c.k));
+  const shownBy = new Map(cols.map(c=>[c.k, sortTasks(state.tasks.filter(t=>t.status===c.k && matches(t,f)), f.sort)]));
+  // 空列收窄，有内容的列平分剩下的宽度。
+  document.getElementById('board').style.setProperty('--cols',
+    cols.map(c=> shownBy.get(c.k).length ? 'minmax(240px,1fr)' : 'minmax(120px,.4fr)').join(' '));
+
+  document.getElementById('board').innerHTML = cols.map(col=>{
     const list = state.tasks.filter(t=>t.status===col.k);
-    const shown = list.filter(hit);
-    return `<section class="col" data-col="${col.k}">
+    const shown = shownBy.get(col.k);
+    return `<section class="col${shown.length?'':' lean'}" data-col="${col.k}">
       <div class="col-h">
         <span class="dot" style="background:${col.c}"></span>
         <span class="name">${col.name}</span>
         <span class="n">${shown.length}${shown.length!==list.length?` / ${list.length}`:''}</span>
       </div>
       <div class="col-b" data-drop="${col.k}">
-        ${shown.map(cardHTML).join('') || '<div class="empty">—</div>'}
+        ${shown.map(cardHTML).join('') || `<div class="empty">${anyFilter?'没有符合筛选的':'—'}</div>`}
       </div>
     </section>`;
   }).join('');
 
   bindDnd();
+  renderStats();
   const total = state.tasks.length, done = state.tasks.filter(t=>t.status==='done').length;
   document.getElementById('meta').textContent =
     `${total} 个 Issue · 已完成 ${done} · 数据构建于 ${BUILT_AT ? when(BUILT_AT) : '—'}`;
 }
 function cardHTML(t){
   const nBot = (t.agentNotes||[]).length, nMine = (t.userComments||[]).length, nC = (t.commits||[]).length;
-  return `<article class="card p-${t.priority}" draggable="true" data-id="${t.id}">
-    <div class="id">#${t.id} · ${esc(t.area)}</div>
+  const unseen = unseenCount(t);
+  return `<article class="card p-${t.priority}" draggable="true" data-id="${t.id}" tabindex="0">
+    <div class="id">#${t.id} · ${esc(t.area)}${unseen?`<span class="new-tag">${unseen} 条新</span>`:''}</div>
     <div class="t">${esc(t.title)}</div>
     <div class="m">
       <span class="chip">${PRIO_NAME[t.priority]||t.priority}</span>
@@ -1232,6 +1592,28 @@ function cardHTML(t){
       ${nC?`<span class="chip">📝 ${nC}</span>`:''}
     </div>
   </article>`;
+}
+function renderStats(){
+  const hidden = new Set(ui.hiddenCols||[]);
+  const counts = COLS.map(c=>({...c, n: state.tasks.filter(t=>t.status===c.k).length}));
+  const total = Math.max(1, state.tasks.length);
+  document.getElementById('statsBar').innerHTML = counts
+    .map(c=>`<i style="flex:${c.n} 0 0;background:${c.c}" title="${c.name} ${c.n}"></i>`).join('')
+    || '';
+  document.getElementById('statsLegend').innerHTML = counts.map(c=>
+    `<span data-col-toggle="${c.k}" class="${hidden.has(c.k)?'muted':''}" title="点一下只隐藏/显示这一列">
+       <i class="dot" style="background:${c.c}"></i>${c.name} <b>${c.n}</b>
+     </span>`).join('') +
+    `<span style="cursor:default" title="所有 Issue"><b>${state.tasks.length}</b> 总计</span>`;
+  document.querySelectorAll('[data-col-toggle]').forEach(el=>{
+    el.onclick = () => {
+      const k = el.dataset.colToggle;
+      const set = new Set(ui.hiddenCols||[]);
+      if(!set.delete(k)) set.add(k);
+      ui.hiddenCols = [...set]; saveUi(); render();
+    };
+  });
+  void total;
 }
 
 /* ---------- 拖拽 ---------- */
@@ -1244,6 +1626,9 @@ function bindDnd(){
     });
     el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); dragId=null; });
     el.addEventListener('click', ()=> openTask(+el.dataset.id));
+    el.addEventListener('keydown', e=>{
+      if(e.key==='Enter' || e.key===' '){ e.preventDefault(); openTask(+el.dataset.id); }
+    });
   });
   document.querySelectorAll('[data-drop]').forEach(zone=>{
     const col = zone.closest('.col');
@@ -1251,8 +1636,11 @@ function bindDnd(){
     zone.addEventListener('dragleave', ()=> col.classList.remove('over'));
     zone.addEventListener('drop', e=>{
       e.preventDefault(); col.classList.remove('over');
-      const t = state.tasks.find(x=>x.id===dragId);
-      if(t && t.status !== zone.dataset.drop){ t.status = zone.dataset.drop; save(); render(); }
+      const t = byId(dragId);
+      if(t && t.status !== zone.dataset.drop){
+        t.status = zone.dataset.drop; save(); render();
+        toast(`#${t.id} 移到「${STATUS_NAME[t.status]}」`, 'ok');
+      }
     });
   });
 }
@@ -1260,11 +1648,18 @@ function bindDnd(){
 /* ---------- 详情弹窗 ---------- */
 const dlg = document.getElementById('dlg');
 function openTask(id){
-  const t = state.tasks.find(x=>x.id===id);
+  const t = byId(id);
   if(!t) return;
-  openId = id; pendingImgs = [];
+  openId = id;
+  pendingImgs = [];
+  editingComment = null;
 
-  document.getElementById('dTitle').innerHTML = `<span style="color:var(--ink-3)">#${t.id}</span> ${esc(t.title)}`;
+  document.getElementById('dTitle').innerHTML =
+    `<span style="color:var(--ink-3)">#${t.id}</span> ${esc(t.title)}`;
+
+  const notes = (t.agentNotes||[]);
+  const seenAt = ui.seen[t.id];
+  const isNew = n => n.at && (!seenAt || Date.parse(n.at) > Date.parse(seenAt));
 
   document.getElementById('dBody').innerHTML = `
     <div class="row">
@@ -1275,60 +1670,128 @@ function openTask(id){
         <select id="ePrio">${Object.entries(PRIO_NAME).map(([k,v])=>`<option value="${k}"${t.priority===k?' selected':''}>${v}</option>`).join('')}</select>
       </label>
       <label class="f">模块
-        <input type="text" id="eArea" value="${esc(t.area)}" style="width:130px">
+        <input type="text" id="eArea" value="${esc(t.area)}" style="width:140px">
       </label>
+      <span class="spacer"></span>
+      <button class="btn-sm" id="eEdit">改标题 / 正文</button>
+      <button class="btn-sm" id="eCopy">复制全文</button>
     </div>
 
-    <div class="body-text">${esc(t.body)}</div>
+    <div class="body-text${t.body?'':' empty-body'}">${t.body ? esc(t.body) : '（没有写详细描述）'}</div>
 
     <div class="sec">
-      <h3>Agent 进展</h3>
-      ${(t.agentNotes||[]).length
-        ? t.agentNotes.map(n=>`<div class="note"><div class="h"><b>🤖 ${esc(n.by||'agent')}</b><span>${when(n.at)}</span></div><div class="c">${esc(n.text)}</div></div>`).join('')
+      <h3>Agent 进展 <span class="spacer"></span>${notes.length?`<span style="text-transform:none;letter-spacing:0">${notes.length} 条</span>`:''}</h3>
+      ${notes.length
+        ? notes.map((n,i)=>noteHTML({
+            cls:'note'+(isNew(n)?' unseen':''),
+            who:'🤖 '+esc(n.by||'agent'), at:n.at, text:n.text, key:'a'+i,
+            tag:isNew(n)?'<span class="new-tag" style="margin-left:0">新</span>':''
+          })).join('')
         : '<div class="empty">还没有 agent 记录。</div>'}
     </div>
 
     <div class="sec">
       <h3>改动记录</h3>
       ${(t.commits||[]).length
-        ? t.commits.map(c=>`<div class="note"><div class="h"><b>${esc(c.ref||'—')}</b><span>${when(c.at)}</span></div><div class="c">${esc(c.message)}${(c.files||[]).length?'\n\n'+c.files.map(f=>'· '+f).join('\n'):''}</div></div>`).join('')
+        ? t.commits.map((c,i)=>noteHTML({
+            cls:'note'+(isNew(c)?' unseen':''),
+            who:`<span class="commit-ref">${esc(c.ref||'—')}</span>`, at:c.at, key:'c'+i,
+            text:(c.message||'') + ((c.files||[]).length ? '\n\n'+c.files.map(f=>'· '+f).join('\n') : '')
+          })).join('')
         : '<div class="empty">还没有改动。</div>'}
     </div>
 
     <div class="sec">
       <h3>我的回复</h3>
       <div id="mine">${renderMine(t)}</div>
-      <textarea id="eNew" placeholder="写下你的反馈…（可直接 Ctrl/⌘+V 粘贴截图）"></textarea>
-      <div class="drop" id="eDrop">把图片拖到这里，或粘贴截图</div>
+      <textarea id="eNew" placeholder="写下你的反馈…（⌘/Ctrl+V 粘贴截图，⌘/Ctrl+Enter 发送）"></textarea>
+      <div class="drop" id="eDrop">把图片拖到这里，或直接粘贴截图</div>
       <div class="thumbs" id="eThumbs"></div>
-      <button class="btn-primary" id="eSend">发送回复</button>
+      <div class="send-row">
+        <button class="btn-primary" id="eSend">发送回复</button>
+        <button id="eCancelEdit" hidden>取消修改</button>
+        <span class="tip" id="eTip"></span>
+      </div>
     </div>`;
 
+  const order = visibleOrder();
+  const pos = order.indexOf(t.id);
   document.getElementById('dFoot').innerHTML = `
+    <span class="d-nav">
+      <button id="aPrev" ${pos<=0?'disabled':''} title="上一条 [">‹</button>
+      <button id="aNext" ${pos<0||pos>=order.length-1?'disabled':''} title="下一条 ]">›</button>
+      <span style="color:var(--ink-3);font-size:12px">${pos>=0?`${pos+1} / ${order.length}`:''}</span>
+    </span>
     <button class="btn-danger" id="aReject">打回（待回复）</button>
     <button class="btn-ok" id="aApprove">通过（已完成）</button>
     <span class="spacer"></span>
     <button id="aDel">删除</button>
-    <button id="aSave">保存并关闭</button>`;
+    <button id="aSave">关闭</button>`;
 
   wireDialog(t);
+  // 打开就算看过了。放在渲染之后，这样「新」的标记这一次还看得见。
+  ui.seen[t.id] = new Date().toISOString(); saveUi();
   if(!dlg.open) dlg.showModal();
+  if(location.hash !== '#issue-'+t.id) history.replaceState(null,'','#issue-'+t.id);
+}
+
+/** 一条记录。太长的默认折起来，避免一条几千字的说明把整个弹窗撑爆。 */
+function noteHTML({cls,who,at,text,key,tag,actions,extra}){
+  const long = String(text||'').length > 420;
+  return `<div class="${cls}" data-note="${key}">
+    <div class="h"><b>${who}</b><span>${when(at)}</span>${tag||''}<span class="spacer"></span>${actions||''}</div>
+    ${text ? `<div class="c${long?' clipped':''}" data-body>${esc(text)}</div>` : ''}
+    ${long?`<button class="more" data-more>展开全部</button>`:''}
+    ${extra||''}
+  </div>`;
 }
 function renderMine(t){
   if(!(t.userComments||[]).length) return '<div class="empty">还没有回复。</div>';
-  return t.userComments.map((c,i)=>`<div class="note mine">
-    <div class="h"><b>👤 我</b><span>${when(c.at)}</span><button class="del" data-del="${i}">删除</button></div>
-    ${c.text?`<div class="c">${esc(c.text)}</div>`:''}
-    ${(c.images||[]).map(src=>`<img src="${src}" alt="附图">`).join('')}
-  </div>`).join('');
+  return t.userComments.map((c,i)=>noteHTML({
+    cls:'note mine', who:'👤 我', at:c.at, key:'m'+i, text:c.text||'',
+    tag: c.editedAt ? '<span style="color:var(--ink-3)">已修改</span>' : '',
+    actions:`<button class="act" data-edit="${i}">修改</button><button class="act danger" data-del="${i}">删除</button>`,
+    extra:(c.images||[]).map(src=>`<img src="${src}" alt="附图">`).join(''),
+  })).join('');
+}
+
+/** 折叠的长文本展开。每次重画记录之后都要重新绑一次。 */
+function bindMore(){
+  document.querySelectorAll('[data-more]').forEach(b=>{
+    b.onclick = () => {
+      const body = b.closest('[data-note]').querySelector('[data-body]');
+      const clipped = body.classList.toggle('clipped');
+      b.textContent = clipped ? '展开全部' : '收起';
+    };
+  });
 }
 
 function wireDialog(t){
   const $ = id => document.getElementById(id);
 
-  $('eStatus').onchange = e => { t.status = e.target.value; save(); render(); };
+  $('eStatus').onchange = e => { t.status = e.target.value; save(); render(); toast(`已移到「${STATUS_NAME[t.status]}」`,'ok'); };
   $('ePrio').onchange   = e => { t.priority = e.target.value; save(); render(); };
   $('eArea').onchange   = e => { t.area = e.target.value.trim() || '未分类'; save(); refreshAreas(); render(); };
+
+  $('eEdit').onclick = async () => {
+    const next = await issueForm(t);
+    if(!next) return;
+    // 标记成「用户改过」，这样我这边重新构建看板时不会把它覆盖回去。
+    if(next.title !== t.title){ t.title = next.title; t.titleEdited = true; }
+    if(next.body  !== t.body ){ t.body  = next.body;  t.bodyEdited  = true; }
+    t.area = next.area; t.priority = next.priority; t.status = next.status;
+    save(); refreshAreas(); render(); openTask(t.id);
+    toast('已保存','ok');
+  };
+  $('eCopy').onclick = async () => {
+    const lines = [`#${t.id} ${t.title}`, `状态：${STATUS_NAME[t.status]} · 优先级：${PRIO_NAME[t.priority]} · 模块：${t.area}`, '', t.body||'（无描述）'];
+    for(const n of t.agentNotes||[]) lines.push('', `— ${n.by||'agent'} @ ${when(n.at)}`, n.text);
+    for(const c of t.userComments||[]) lines.push('', `— 我 @ ${when(c.at)}`, c.text||'（只有图片）');
+    try{ await navigator.clipboard.writeText(lines.join('\n')); toast('已复制这条 Issue 的全文','ok'); }
+    catch{ toast('浏览器拒绝了剪贴板访问','err'); }
+  };
+
+  bindMore();
 
   // 图片：拖入 / 粘贴
   const drop = $('eDrop');
@@ -1342,104 +1805,246 @@ function wireDialog(t){
     if(files.length){ e.preventDefault(); addFiles(files); }
   };
 
-  $('eSend').onclick = () => {
+  // 草稿：写了一半关掉弹窗，下次打开还在
+  const draft = ui.drafts[t.id];
+  if(draft){ $('eNew').value = draft; $('eTip').textContent = '（草稿已恢复）'; }
+  $('eNew').oninput = () => {
+    const v = $('eNew').value;
+    if(v.trim()) ui.drafts[t.id] = v; else delete ui.drafts[t.id];
+    saveUi();
+  };
+  $('eNew').onkeydown = e => {
+    if((e.metaKey || e.ctrlKey) && e.key === 'Enter'){ e.preventDefault(); send(); }
+  };
+
+  $('eSend').onclick = send;
+  $('eCancelEdit').onclick = () => {
+    editingComment = null; pendingImgs = [];
+    $('eNew').value = ''; $('eSend').textContent = '发送回复';
+    $('eCancelEdit').hidden = true; $('eTip').textContent = '';
+    drawThumbs();
+  };
+
+  function send(){
     const text = $('eNew').value.trim();
-    if(!text && !pendingImgs.length) return;
-    (t.userComments ||= []).push({at:new Date().toISOString(), text, images:[...pendingImgs]});
-    pendingImgs = []; save();
-    $('mine').innerHTML = renderMine(t); bindDel(t);
-    $('eNew').value = ''; drawThumbs(); render();
-  };
+    if(!text && !pendingImgs.length){
+      $('eTip').textContent = '写点什么，或者贴张图。';
+      return;
+    }
+    if(editingComment !== null){
+      const c = t.userComments[editingComment];
+      c.text = text; c.images = [...pendingImgs]; c.editedAt = new Date().toISOString();
+      editingComment = null;
+      $('eSend').textContent = '发送回复'; $('eCancelEdit').hidden = true;
+      toast('回复已修改','ok');
+    }else{
+      (t.userComments ||= []).push({at:new Date().toISOString(), text, images:[...pendingImgs]});
+      toast('回复已记下，记得导出 tasks.json','ok');
+    }
+    pendingImgs = [];
+    delete ui.drafts[t.id]; saveUi();
+    save();
+    $('mine').innerHTML = renderMine(t); bindMine(t);
+    $('eNew').value = ''; $('eTip').textContent = ''; drawThumbs(); render();
+  }
 
-  bindDel(t);
+  bindMine(t);
 
-  $('aReject').onclick  = () => { t.status='reply'; save(); render(); dlg.close(); };
-  $('aApprove').onclick = () => { t.status='done';  save(); render(); dlg.close(); };
+  $('aPrev').onclick = () => step(-1);
+  $('aNext').onclick = () => step(1);
+  $('aReject').onclick  = () => { t.status='reply'; save(); render(); dlg.close(); toast(`#${t.id} 已打回`,'ok'); };
+  $('aApprove').onclick = () => { t.status='done';  save(); render(); dlg.close(); toast(`#${t.id} 已通过`,'ok'); };
   $('aSave').onclick    = () => { save(); render(); dlg.close(); };
-  $('aDel').onclick     = () => {
-    if(!confirm(`删除 #${t.id}「${t.title}」？`)) return;
-    state.tasks = state.tasks.filter(x=>x.id!==t.id); save(); render(); dlg.close();
+  $('aDel').onclick     = async () => {
+    const ok = await ask(`删除 #${t.id}？`,
+      `「${t.title}」\n\n连同它下面的 agent 进展和你的回复一起删掉，这一步撤不回来。`, '删除');
+    if(!ok) return;
+    state.tasks = state.tasks.filter(x=>x.id!==t.id);
+    delete ui.drafts[t.id]; delete ui.seen[t.id]; saveUi();
+    save(); render(); dlg.close(); toast(`已删除 #${t.id}`);
   };
 
-  function bindDel(task){
+  function step(delta){
+    const order = visibleOrder();
+    const at = order.indexOf(t.id);
+    const next = order[at + delta];
+    if(next !== undefined) openTask(next);
+  }
+
+  function bindMine(task){
     document.querySelectorAll('[data-del]').forEach(b=>{
-      b.onclick = () => {
+      b.onclick = async () => {
+        const ok = await ask('删除这条回复？', '删掉之后没法恢复。', '删除');
+        if(!ok) return;
         task.userComments.splice(+b.dataset.del,1); save();
-        $('mine').innerHTML = renderMine(task); bindDel(task); render();
+        $('mine').innerHTML = renderMine(task); bindMine(task); render();
+        toast('已删除');
       };
     });
+    document.querySelectorAll('[data-edit]').forEach(b=>{
+      b.onclick = () => {
+        const i = +b.dataset.edit;
+        const c = task.userComments[i];
+        editingComment = i;
+        $('eNew').value = c.text || '';
+        pendingImgs = [...(c.images||[])];
+        drawThumbs();
+        $('eSend').textContent = '保存修改';
+        $('eCancelEdit').hidden = false;
+        $('eTip').textContent = `正在修改第 ${i+1} 条回复`;
+        $('eNew').focus();
+      };
+    });
+    bindMore();
   }
   function addFiles(files){
-    [...files].filter(f=>f.type.startsWith('image/')).forEach(f=>{
+    const images = [...files].filter(f=>f.type.startsWith('image/'));
+    if(!images.length){ toast('只能贴图片','err'); return; }
+    images.forEach(f=>{
       const r = new FileReader();
       r.onload = ev => { pendingImgs.push(ev.target.result); drawThumbs(); };
+      r.onerror = () => toast(`读不了「${f.name}」`,'err');
       r.readAsDataURL(f);
     });
   }
   function drawThumbs(){
     $('eThumbs').innerHTML = pendingImgs.map((src,i)=>
-      `<div class="thumb"><img src="${src}" alt=""><button data-rm="${i}">×</button></div>`).join('');
+      `<div class="thumb"><img src="${src}" alt="待发送的图片"><button data-rm="${i}" title="移除">×</button></div>`).join('');
     document.querySelectorAll('[data-rm]').forEach(b=>{
-      b.onclick = () => { pendingImgs.splice(+b.dataset.rm,1); drawThumbs(); };
+      b.onclick = e => { e.stopPropagation(); pendingImgs.splice(+b.dataset.rm,1); drawThumbs(); };
     });
   }
+  drawThumbs();
 }
 
 document.getElementById('dClose').onclick = () => dlg.close();
 dlg.addEventListener('click', e => { if(e.target===dlg) dlg.close(); });
-dlg.addEventListener('close', () => { openId=null; pendingImgs=[]; });
-
-/* 点开图片放大 */
-document.addEventListener('click', e => {
-  if(e.target.matches('.note img')) window.open(e.target.src,'_blank');
+dlg.addEventListener('close', () => {
+  openId=null; pendingImgs=[]; editingComment=null;
+  if(location.hash.startsWith('#issue-')) history.replaceState(null,'',location.pathname+location.search);
+  render();
 });
 
+/* ---------- 图片放大：自己的层，不再另开标签页 ---------- */
+const lightbox = document.getElementById('lightbox');
+document.addEventListener('click', e => {
+  const img = e.target.closest('.note img, .thumb img');
+  if(!img) return;
+  document.getElementById('lightImg').src = img.src;
+  lightbox.showModal();
+});
+lightbox.addEventListener('click', () => lightbox.close());
+
 /* ---------- 新建 ---------- */
-document.getElementById('new').onclick = () => {
-  const title = prompt('Issue 标题');
-  if(!title?.trim()) return;
-  const body = prompt('详细描述（可留空）') || '';
+document.getElementById('new').onclick = async () => {
+  const data = await issueForm(null);
+  if(!data) return;
+  const id = nextId();
   state.tasks.push({
-    id: nextId(), title: title.trim(), body,
-    area:'未分类', priority:'medium', status:'todo',
+    id, ...data,
     agentNotes:[], userComments:[], commits:[],
     createdBy:'user', createdAt:new Date().toISOString(),
   });
   save(); refreshAreas(); render();
+  toast(`已新建 #${id}`,'ok');
+  openTask(id);
 };
 
-/* ---------- 导出 / 重置 / 主题 ---------- */
+/* ---------- 导入 / 导出 / 重置 / 主题 ---------- */
 document.getElementById('export').onclick = () => {
   const out = JSON.stringify({...state, meta:{...state.meta, exportedAt:new Date().toISOString()}}, null, 2);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([out],{type:'application/json'}));
   a.download = 'tasks.json'; a.click(); URL.revokeObjectURL(a.href);
   document.getElementById('dirty').classList.remove('on');
+  toast('已下载 tasks.json，覆盖到 docs/taskboard/ 下即可','ok');
 };
-document.getElementById('reset').onclick = () => {
-  if(!confirm('丢弃所有本地改动，回到内置数据？')) return;
+document.getElementById('import').onclick = () => document.getElementById('file').click();
+document.getElementById('file').onchange = async e => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if(!file) return;
+  let parsed;
+  try{ parsed = JSON.parse(await file.text()); }
+  catch{ toast('这个文件不是合法的 JSON','err'); return; }
+  if(!parsed || !Array.isArray(parsed.tasks)){
+    toast('看起来不是看板的 tasks.json（缺 tasks 数组）','err'); return;
+  }
+  const ok = await ask('用这个文件替换当前看板？',
+    `文件里有 ${parsed.tasks.length} 个 Issue。当前浏览器里的改动会被覆盖——如果还没导出过，先取消再导出一次。`,
+    '替换');
+  if(!ok) return;
+  state = {meta: parsed.meta || state.meta, tasks: parsed.tasks};
+  save(); refreshAreas(); render();
+  toast(`已导入 ${parsed.tasks.length} 个 Issue`,'ok');
+};
+document.getElementById('reset').onclick = async () => {
+  const ok = await ask('丢弃所有本地改动？',
+    '你在这个看板上改的状态、写的回复、贴的图都会没有，回到我最后一次构建时的样子。', '丢弃');
+  if(!ok) return;
   localStorage.removeItem(LS);
   state = structuredClone(SEED);
   document.getElementById('dirty').classList.remove('on');
   refreshAreas(); render();
+  toast('已回到内置数据');
 };
 document.getElementById('theme').onclick = () => {
-  const cur = document.documentElement.dataset.theme;
+  const cur = ui.theme || '';
   const next = cur === 'dark' ? 'light' : cur === 'light' ? '' : 'dark';
-  if(next) document.documentElement.dataset.theme = next;
-  else delete document.documentElement.dataset.theme;
+  ui.theme = next; saveUi(); applyTheme();
+  toast(next === 'dark' ? '深色' : next === 'light' ? '浅色' : '跟随系统');
 };
+function applyTheme(){
+  if(ui.theme) document.documentElement.dataset.theme = ui.theme;
+  else delete document.documentElement.dataset.theme;
+}
 
-/* ---------- 筛选 ---------- */
+/* ---------- 快捷键 ---------- */
+const helpDlg = document.getElementById('helpDlg');
+document.getElementById('help').onclick = () => helpDlg.showModal();
+document.getElementById('hClose').onclick = () => helpDlg.close();
+document.getElementById('hOk').onclick = () => helpDlg.close();
+
+document.addEventListener('keydown', e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+  if(dlg.open){
+    if(typing) return;
+    if(e.key === '[') { e.preventDefault(); document.getElementById('aPrev')?.click(); return; }
+    if(e.key === ']') { e.preventDefault(); document.getElementById('aNext')?.click(); return; }
+    const n = Number(e.key);
+    if(n >= 1 && n <= COLS.length){
+      e.preventDefault();
+      const t = byId(openId);
+      if(t){ t.status = COLS[n-1].k; save(); render(); openTask(t.id); toast(`已移到「${COLS[n-1].name}」`,'ok'); }
+    }
+    return;
+  }
+  if(typing || formDlg.open || confirmDlg.open || helpDlg.open) return;
+  if(e.key === '/' || ((e.metaKey||e.ctrlKey) && e.key.toLowerCase() === 'k')){
+    e.preventDefault(); document.getElementById('q').focus(); document.getElementById('q').select();
+  }
+  else if(e.key.toLowerCase() === 'n'){ e.preventDefault(); document.getElementById('new').click(); }
+  else if(e.key === '?'){ e.preventDefault(); helpDlg.showModal(); }
+});
+
+/* ---------- 筛选控件 ---------- */
 function refreshAreas(){
   const sel = document.getElementById('fArea');
   const keep = sel.value;
-  const areas = [...new Set(state.tasks.map(t=>t.area))].sort();
+  const areas = [...new Set(state.tasks.map(t=>t.area).filter(Boolean))].sort();
   sel.innerHTML = '<option value="">全部模块</option>' + areas.map(a=>`<option>${esc(a)}</option>`).join('');
   sel.value = areas.includes(keep) ? keep : '';
 }
-document.getElementById('q').oninput = render;
-document.getElementById('fArea').onchange = render;
+['q','fArea','fPrio','fMine','sort'].forEach(id=>{
+  const el = document.getElementById(id);
+  el.addEventListener(id==='q' ? 'input' : 'change', render);
+});
+document.getElementById('clearF').onclick = () => {
+  document.getElementById('q').value = '';
+  ['fArea','fPrio','fMine'].forEach(id=> document.getElementById(id).value = '');
+  ui.hiddenCols = []; saveUi();
+  render();
+};
 
 /* ---------- 管控日志 ----------
    这一节的数据只来自内置的 SEED.meta.decisions（管控方写的），不进 localStorage，
@@ -1455,9 +2060,15 @@ function renderMgr(){
     `<div class="c">${esc(d.text)}</div></div>`).join('');
 }
 
+/* ---------- 启动 ---------- */
+applyTheme();
+document.getElementById('qKey').textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? '/' : '/';
 refreshAreas();
 render();
 renderMgr();
+// 带 #issue-12 打开就直接展开那一条，方便从别处跳进来
+const fromHash = /^#issue-(\d+)$/.exec(location.hash);
+if(fromHash) openTask(+fromHash[1]);
 </script>
 </body>
 </html>
