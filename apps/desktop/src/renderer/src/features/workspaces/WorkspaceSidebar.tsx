@@ -30,7 +30,7 @@ import { WindowDragBar } from "../../ui/WindowDragBar";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
 import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, visibleRecentSessions } from "./recentSessions";
-import { loadSidebarSectionOrder, moveSidebarSection, saveSidebarSectionOrder, SIDEBAR_SECTION_LABELS, type SidebarSection } from "./sidebarSections";
+import { dropSidebarSection, loadSidebarSectionOrder, saveSidebarSectionOrder, SIDEBAR_SECTION_LABELS, type SidebarSection } from "./sidebarSections";
 import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
@@ -211,6 +211,8 @@ export function WorkspaceSidebar({
   const renameRef = useRef<HTMLInputElement>(null);
   const [recentCollapsed, setRecentCollapsed] = useState(loadRecentSectionCollapsed);
   const [sectionOrder, setSectionOrder] = useState(loadSidebarSectionOrder);
+  const [draggingSection, setDraggingSection] = useState<SidebarSection>();
+  const [sectionDropTarget, setSectionDropTarget] = useState<SidebarSection>();
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_ROWS);
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
   const recentSessions = collectRecentSessions(projects, sessionsByProject);
@@ -228,31 +230,53 @@ export function WorkspaceSidebar({
     });
   }, [renamingPath]);
 
-  const moveSection = (section: SidebarSection, direction: "up" | "down"): void => {
-    setSectionOrder((current) => {
-      const next = moveSidebarSection(current, section, direction);
-      saveSidebarSectionOrder(next);
-      return next;
-    });
+  /**
+   * Drag one section heading onto the other to swap the two blocks.
+   *
+   * Same mechanism the project rows already use (HTML5 drag with a text/plain
+   * payload), so there is one way to reorder things in this sidebar rather than
+   * two. Dragging is off while the recent section is not on screen: with a
+   * single heading there is nowhere to drop it, and a drag that goes nowhere
+   * reads as broken.
+   */
+  const sectionDragProps = (section: SidebarSection): React.HTMLAttributes<HTMLDivElement> & { draggable?: boolean } => {
+    if (!recentSessions.length) return {};
+    return {
+      draggable: true,
+      title: `拖动可以调整「${SIDEBAR_SECTION_LABELS[section]}」和另一栏的上下顺序`,
+      onDragStart: (event) => {
+        event.dataTransfer.effectAllowed = "move";
+        // Firefox refuses to start a drag without a payload; this also keeps the
+        // project rows' own drop handler from mistaking it for a folder.
+        event.dataTransfer.setData("text/plain", `section:${section}`);
+        setDraggingSection(section);
+      },
+      onDragOver: (event) => {
+        if (!draggingSection || draggingSection === section) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setSectionDropTarget(section);
+      },
+      onDragLeave: () => setSectionDropTarget((current) => current === section ? undefined : current),
+      onDrop: (event) => {
+        event.preventDefault();
+        const dragged = draggingSection;
+        setDraggingSection(undefined);
+        setSectionDropTarget(undefined);
+        if (!dragged || dragged === section) return;
+        setSectionOrder((current) => {
+          const next = dropSidebarSection(current, dragged, section);
+          saveSidebarSectionOrder(next);
+          return next;
+        });
+      },
+      onDragEnd: () => { setDraggingSection(undefined); setSectionDropTarget(undefined); },
+    };
   };
 
-  /**
-   * The control that swaps a section with the other one.
-   *
-   * With exactly two movable sections there is only ever one sensible direction
-   * per heading, so the button says which way this section goes rather than
-   * offering a pair of arrows where one is always dead. It is hidden while the
-   * recent section has nothing to show, because then there is nothing to swap
-   * with and the click would look broken.
-   */
-  const sectionMoveButton = (section: SidebarSection): React.JSX.Element | null => {
-    if (!recentSessions.length) return null;
-    const direction = sectionOrder.indexOf(section) === 0 ? "down" : "up";
-    const label = `把「${SIDEBAR_SECTION_LABELS[section]}」${direction === "up" ? "上移" : "下移"}`;
-    return <button className="icon-button" type="button" aria-label={label} title={label} onClick={() => moveSection(section, direction)}>
-      {direction === "up" ? <ChevronUp size={15} strokeWidth={1.7} /> : <ChevronDown size={15} strokeWidth={1.7} />}
-    </button>;
-  };
+  /** The heading's own drag state, as class names. */
+  const sectionDragClass = (section: SidebarSection): string =>
+    `${draggingSection === section ? " dragging" : ""}${sectionDropTarget === section ? " drop-target" : ""}`;
 
   const commitRename = async (project: ProjectSelection, session: SessionSummary): Promise<void> => {
     const next = renameDraft.trim();
@@ -269,7 +293,7 @@ export function WorkspaceSidebar({
   // 换的是真实的 DOM 顺序（不是 CSS 的 order），键盘 Tab 和读屏读到的顺序跟看到的一致。
   const recentSection = recentSessions.length ? (
     <section className="recent-sessions-section">
-      <div className="section-heading">
+      <div className={`section-heading${sectionDragClass("recent")}`} {...sectionDragProps("recent")}>
         <button
           className="section-heading-toggle"
           type="button"
@@ -279,7 +303,6 @@ export function WorkspaceSidebar({
           <span>最近</span>
           <ChevronRight className={`section-heading-chevron ${recentCollapsed ? "" : "expanded"}`} size={13} strokeWidth={2} />
         </button>
-        <span className="section-heading-actions">{sectionMoveButton("recent")}</span>
       </div>
       {recentCollapsed ? null : <div className="conversation-list recent-conversation-list">
         {recentView.rows.map((entry) => <CrossProjectSessionRow
@@ -313,7 +336,7 @@ export function WorkspaceSidebar({
   ) : null;
 
   const projectsSection = (<>
-    <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsDialog projects={projects} activeProject={activeProject} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button>{sectionMoveButton("projects")}</span></div>
+    <div className={`section-heading${sectionDragClass("projects")}`} {...sectionDragProps("projects")}><span>项目</span><span className="section-heading-actions"><ArchivedSessionsDialog projects={projects} activeProject={activeProject} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></span></div>
     {projects.length ? projects.map((project) => {
       const expanded = expandedProjects.has(project.path);
       const allSessions = sessionsByProject[project.path] ?? [];

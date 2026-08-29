@@ -41,18 +41,25 @@ export function serializeSidebarSectionOrder(order: readonly SidebarSection[]): 
   return order.join(",");
 }
 
-/** Swap a section with its neighbour; at either end the order is unchanged. */
-export function moveSidebarSection(
+/**
+ * Drop one section onto another: the dragged one lands where the target was and
+ * everything else closes up behind it.
+ *
+ * With today's two sections that is simply a swap, but this is written as a real
+ * move so a third section later cannot silently get the wrong behaviour. A drop
+ * on itself, or on anything not in the order, leaves the order untouched.
+ */
+export function dropSidebarSection(
   order: readonly SidebarSection[],
-  section: SidebarSection,
-  direction: "up" | "down",
+  dragged: SidebarSection,
+  target: SidebarSection,
 ): SidebarSection[] {
-  const index = order.indexOf(section);
-  const target = index + (direction === "up" ? -1 : 1);
-  if (index < 0 || target < 0 || target >= order.length) return [...order];
+  const from = order.indexOf(dragged);
+  const to = order.indexOf(target);
+  if (from < 0 || to < 0 || from === to) return [...order];
   const next = [...order];
-  next[index] = order[target] as SidebarSection;
-  next[target] = section;
+  next.splice(from, 1);
+  next.splice(to, 0, dragged);
   return next;
 }
 
