@@ -11,6 +11,8 @@ export interface InspectorTab<T extends string> {
   icon: LucideIcon;
   closable?: boolean;
   disabled?: boolean;
+  /** 图标转起来表示还在加载（网页标签用）。 */
+  spinning?: boolean;
 }
 
 export function InspectorPane<T extends string>({
@@ -54,7 +56,7 @@ export function InspectorPane<T extends string>({
                   aria-pressed={item.id === activeTab}
                   onClick={() => onSelectTab(item.id)}
                 >
-                  <Icon size={15} strokeWidth={1.7} />
+                  <Icon className={item.spinning ? "spin" : undefined} size={15} strokeWidth={1.7} />
                   <span>{item.label}</span>
                 </button>
                 {item.closable && onCloseTab ? (

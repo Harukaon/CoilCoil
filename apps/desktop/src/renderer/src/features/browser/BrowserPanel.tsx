@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Plus, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, RotateCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
@@ -8,33 +8,27 @@ import { setGuestPlacement } from "./guestLayer";
 /** Fast enough to follow the agent clicking through a page, cheap enough to stream. */
 const REMOTE_FRAME_INTERVAL_MS = 1_200;
 
-const EMPTY_STATE = (scopeId: string): BrowserStateSnapshot => ({ scopeId, tabs: [] });
-
-export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: string }): React.JSX.Element {
-  const [state, setState] = useState<BrowserStateSnapshot>(() => EMPTY_STATE(scopeId));
+/**
+ * 内置浏览器的页面区：地址栏 + 网页。
+ *
+ * 标签条不在这里——每个网页标签都是右侧栏顶部那一排里的一个标签，和终端一样，
+ * 由 WorkspaceInspector 画（见 features/inspector/inspectorTabs.ts）。所以这里
+ * 永远只显示当前标签页，标签集合和当前标签由主进程说了算。
+ */
+export function BrowserPanel({ active, scopeId, state, onState }: {
+  active: boolean;
+  scopeId: string;
+  state: BrowserStateSnapshot;
+  onState(next: BrowserStateSnapshot): void;
+}): React.JSX.Element {
   const [address, setAddress] = useState("");
   const hostRef = useRef<HTMLDivElement>(null);
   const mobile = useMobileRemote();
   const [frame, setFrame] = useState<string>();
-  const activeTab = useMemo(() => state.tabs.find((tab) => tab.id === state.activeTabId), [state]);
+  const activeTab = useMemo(() => state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0], [state]);
 
   const scopeRef = useRef(scopeId);
   scopeRef.current = scopeId;
-
-  useEffect(() => window.coilcoil.onBrowserStateUpdated((next) => {
-    if (next.scopeId === scopeRef.current) setState(next);
-  }), []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setState(EMPTY_STATE(scopeId));
-    void window.coilcoil.setBrowserScope(scopeId).then(async (current) => {
-      if (cancelled) return;
-      const next = active && current.tabs.length === 0 ? await window.coilcoil.createBrowserTab(scopeId) : current;
-      if (!cancelled) setState(next);
-    });
-    return () => { cancelled = true; };
-  }, [active, scopeId]);
 
   useEffect(() => setAddress(activeTab?.url === "about:blank" ? "" : activeTab?.url ?? ""), [activeTab?.id, activeTab?.url]);
 
@@ -107,35 +101,21 @@ export function BrowserPanel({ active, scopeId }: { active: boolean; scopeId: st
 
   const submitAddress = (event: React.FormEvent): void => {
     event.preventDefault();
-    void window.coilcoil.navigateBrowser(scopeId, address).then(setState);
+    void window.coilcoil.navigateBrowser(scopeId, address).then(onState);
   };
 
   return (
     <section className="browser-panel">
-      <div className="browser-tab-strip no-drag" aria-label="浏览器标签页">
-        <div className="browser-tabs">
-          {state.tabs.map((tab) => (
-            <div className={`browser-tab ${tab.id === state.activeTabId ? "active" : ""}`} key={tab.id}>
-              <button className="browser-tab-select" type="button" onClick={() => void window.coilcoil.selectBrowserTab(scopeId, tab.id).then(setState)}>
-                {tab.loading ? <LoaderCircle className="spin" size={11} /> : <Globe2 size={11} />}
-                <span>{tab.title}</span>
-              </button>
-              <button className="browser-tab-close" type="button" aria-label={`关闭 ${tab.title}`} onClick={() => void window.coilcoil.closeBrowserTab(scopeId, tab.id).then(setState)}><X size={10} /></button>
-            </div>
-          ))}
-          <button className="browser-new-tab" type="button" aria-label="新建浏览器标签页" onClick={() => void window.coilcoil.createBrowserTab(scopeId).then(setState)}><Plus size={13} /></button>
-        </div>
+      <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
+        <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => void window.coilcoil.browserBack(scopeId).then(onState)}><ArrowLeft size={13} /></button>
+        <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => void window.coilcoil.browserForward(scopeId).then(onState)}><ArrowRight size={13} /></button>
+        <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => void window.coilcoil.reloadBrowser(scopeId).then(onState)}><RotateCw size={12} /></button>
+        <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} onChange={(event) => setAddress(event.target.value)} />
         {/* Importing reads this Mac's keychain, so it stays on the Mac's own window. */}
         {mobile ? null : <BrowserDataMenu />}
-      </div>
-      <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
-        <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => void window.coilcoil.browserBack(scopeId).then(setState)}><ArrowLeft size={13} /></button>
-        <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => void window.coilcoil.browserForward(scopeId).then(setState)}><ArrowRight size={13} /></button>
-        <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => void window.coilcoil.reloadBrowser(scopeId).then(setState)}><RotateCw size={12} /></button>
-        <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} onChange={(event) => setAddress(event.target.value)} />
       </form>
       <div className={`browser-native-host ${mobile ? "browser-remote-host" : ""}`} ref={hostRef}>
-        {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => void window.coilcoil.createBrowserTab(scopeId).then(setState)}>新建标签页</button></div> : null}
+        {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => void window.coilcoil.createBrowserTab(scopeId).then(onState)}>新建标签页</button></div> : null}
         {mobile && activeTab ? (
           frame
             ? <img className="browser-remote-frame" src={frame} alt={activeTab.title} />

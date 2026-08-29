@@ -1,13 +1,19 @@
-import { BrainCircuit, Files, Globe2, Terminal } from "lucide-react";
+import { BrainCircuit, Files, Globe2, LoaderCircle, Terminal } from "lucide-react";
 import { useCallback } from "react";
 import type { ProjectSnapshot, RuntimeConfiguration, SessionSnapshot } from "@coilcoil/runtime-protocol";
 import { BrowserPanel } from "../browser/BrowserPanel";
+import { useBrowserTabs } from "../browser/useBrowserTabs";
 import { FilesPanel } from "../files/FilesPanel";
 import { RuntimePanel } from "../runtime/RuntimePanel";
 import { TerminalPanel } from "../terminal/TerminalPanel";
 import { openTerminalSession } from "../terminal/terminalSessions";
 import { toastError } from "../../ui/toast";
-import { InspectorPane } from "./InspectorPane";
+import { InspectorPane, type InspectorTab } from "./InspectorPane";
+import {
+  activeBrowserPaneTabId,
+  browserPaneTabs,
+  browserTabIdFromPaneId,
+} from "./inspectorTabs";
 import {
   fileInspectorTabId,
   type InspectorTabDefinition,
@@ -76,6 +82,10 @@ export function WorkspaceInspector({
   const hasRuntime = tabs.some((item) => item.kind === "runtime");
   const hasBrowser = tabs.some((item) => item.kind === "browser");
   const terminalTabs = tabs.filter((item) => item.kind === "terminal");
+  // 浏览器的网页标签由主进程按 scope 拥有，agent 也会开关它们，所以这份列表订阅
+  // 主进程而不是存在右侧栏状态里；tabs 里那条 browser 记录只表示「开着浏览器」。
+  const scopeId = snapshot?.runtimeId ?? projectPath ?? "default";
+  const browser = useBrowserTabs({ scopeId, open: hasBrowser });
   const openTerminal = useCallback(async (): Promise<void> => {
     try {
       const opened = await openTerminalSession(projectState.cwd);
@@ -96,26 +106,79 @@ export function WorkspaceInspector({
     }
     onCloseTab(id);
   }, [onCloseTab, tabs]);
+  /** 新开一个网页标签；浏览器还没开的时候先把它放进右侧栏，第一个标签由 hook 补建。 */
+  const openBrowserPage = useCallback((): void => {
+    if (!hasBrowser) {
+      onOpenBrowser();
+      return;
+    }
+    onSelectTab("browser");
+    void window.coilcoil.createBrowserTab(scopeId).then(browser.setState).catch((error: unknown) => {
+      toastError(error instanceof Error ? error.message : String(error));
+    });
+  }, [browser.setState, hasBrowser, onOpenBrowser, onSelectTab, scopeId]);
+  // 标签条上的 id 不等于右侧栏状态里的 id：网页标签是 `browser:<主进程 tab id>`。
+  const selectPaneTab = useCallback((id: string): void => {
+    const pageId = browserTabIdFromPaneId(id);
+    if (!pageId) {
+      onSelectTab(id);
+      return;
+    }
+    onSelectTab("browser");
+    void window.coilcoil.selectBrowserTab(scopeId, pageId).then(browser.setState).catch((error: unknown) => {
+      toastError(error instanceof Error ? error.message : String(error));
+    });
+  }, [browser.setState, onSelectTab, scopeId]);
+  // 关掉最后一个网页标签，浏览器这一项也就从右侧栏消失——和关掉最后一个终端一样。
+  const closePaneTab = useCallback((id: string): void => {
+    const pageId = browserTabIdFromPaneId(id);
+    if (!pageId) {
+      closeTab(id);
+      return;
+    }
+    void window.coilcoil.closeBrowserTab(scopeId, pageId).then((next) => {
+      browser.setState(next);
+      if (next.tabs.length === 0) onCloseTab("browser");
+    }).catch((error: unknown) => {
+      toastError(error instanceof Error ? error.message : String(error));
+    });
+  }, [browser.setState, closeTab, onCloseTab, scopeId]);
+  // 标签条上真正画出来的那一排：浏览器那一条摊成每个网页一个标签，其余原样。
+  const paneTabs: InspectorTab<InspectorTabId>[] = tabs.flatMap((item) => item.kind === "browser"
+    ? browserPaneTabs(browser.state).map((page) => ({
+      id: page.id,
+      label: page.label,
+      icon: page.loading ? LoaderCircle : Globe2,
+      spinning: page.loading,
+      closable: true,
+    }))
+    : [{
+      id: item.id,
+      label: item.kind === "terminal" ? terminalTabLabel(terminalTabs.indexOf(item)) : item.label,
+      icon: item.icon,
+      closable: true,
+    }]);
   const addOptions = [
     { id: "files", label: "文件", icon: Files, disabled: tabs.some((item) => item.kind === "files") },
-    { id: "browser", label: "浏览器", icon: Globe2, disabled: hasBrowser },
+    // 浏览器和终端一样不置灰：再点一次就是多开一个网页标签。
+    { id: "browser", label: "浏览器", icon: Globe2 },
     { id: "runtime", label: "运行时", icon: BrainCircuit, disabled: hasRuntime },
     // Never disabled: picking it again is how a second shell is opened.
     { id: "terminal", label: "终端", icon: Terminal },
   ];
   return (
     <InspectorPane
-      tabs={tabs.map((item) => ({
-        ...item,
-        label: item.kind === "terminal" ? terminalTabLabel(terminalTabs.indexOf(item)) : item.label,
-        closable: true,
-      }))}
-      activeTab={activeTabId ?? ""}
-      onSelectTab={onSelectTab}
-      onCloseTab={closeTab}
+      tabs={paneTabs}
+      activeTab={activeTab?.kind === "browser" ? activeBrowserPaneTabId(browser.state) : activeTabId ?? ""}
+      onSelectTab={selectPaneTab}
+      onCloseTab={closePaneTab}
       onClose={onClose}
       addOptions={addOptions}
-      onAddTab={(id) => { if (id === "terminal") void openTerminal(); else onOpenOption(id); }}
+      onAddTab={(id) => {
+        if (id === "terminal") void openTerminal();
+        else if (id === "browser") openBrowserPage();
+        else onOpenOption(id);
+      }}
       emptyState={(
         <>
           <div className="inspector-empty-icon"><Files size={18} strokeWidth={1.7} /></div>
@@ -123,7 +186,7 @@ export function WorkspaceInspector({
           <p>选择文件、浏览器、运行时或终端，内容会按工作区独立保留。</p>
           <div className="inspector-empty-actions">
             <button type="button" onClick={onOpenFiles}><Files size={14} />文件</button>
-            <button type="button" onClick={onOpenBrowser}><Globe2 size={14} />浏览器</button>
+            <button type="button" onClick={openBrowserPage}><Globe2 size={14} />浏览器</button>
             <button type="button" onClick={onOpenRuntime}><BrainCircuit size={14} />运行时</button>
             <button type="button" onClick={() => void openTerminal()}><Terminal size={14} />终端</button>
           </div>
@@ -159,7 +222,9 @@ export function WorkspaceInspector({
         <div className={`inspector-tab-panel browser-tab-panel ${activeTab?.kind === "browser" ? "active" : ""}`}>
           <BrowserPanel
             active={rightOpen && activeTab?.kind === "browser"}
-            scopeId={snapshot?.runtimeId ?? projectPath ?? "default"}
+            scopeId={scopeId}
+            state={browser.state}
+            onState={browser.setState}
           />
         </div>
       ) : null}
