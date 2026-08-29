@@ -153,6 +153,15 @@ function readCheckScript() {
       check(load().tasks.find((t) => t.id === untouched.id).status === "done",
         "没有新结果的 Issue，状态还是听我本地的");
     }
+    // 但只要我自己动过状态，就轮不到它自动跳回去——这是最要紧的一条：
+    // 在看板上点了「打回重做」，刷新之后必须还是「打回重做」。
+    localStorage.setItem(LS, JSON.stringify(stale));
+    state = load();
+    const mine = state.tasks.find((t) => t.id === fixed.id);
+    setStatus(mine, "rework"); save();
+    check(load().tasks.find((t) => t.id === fixed.id).status === "rework",
+      "我点了打回之后刷新，还是「打回重做」，不会被旧结果顶回去");
+
     // 还原，后面的用例还要用自检建的那条 Issue。
     if (before === null) localStorage.removeItem(LS); else localStorage.setItem(LS, before);
     state = load(); ui = loadUi(); render();

@@ -1480,7 +1480,7 @@ const SEED = {
   ]
 }
 ;
-const BUILT_AT = "2026-08-29T15:48:53.489Z";
+const BUILT_AT = "2026-08-29T15:53:36.509Z";
 const LS = 'suocode-taskboard-v2';
 const LS_UI = 'suocode-taskboard-ui-v1';
 
@@ -1515,18 +1515,27 @@ function load(){
       const saved = JSON.parse(raw);
       // 以 SEED 为骨架合并，这样我新增/改写任务后你的回复不会丢
       const byId = new Map((saved.tasks||[]).map(t=>[t.id,t]));
-      /* 状态归谁：默认听你本地的（你在看板上点的才算数），只有一种情况例外——
-         你导出之后 agent 又交了新东西。那说明你打回的这条已经返工完了，状态该
-         跟着新结果走，否则你这边永远停在「打回重做」，看不出它已经改完了。
-         判断依据是这条 Issue 最新的 agent 记录晚于你上次导出的时间。 */
+      /* 状态归谁，按时间先后判断，谁的动作更晚就听谁的：
+         · 你在看板上点过状态之后，agent 没再交东西 —— 听你的（最常见）；
+         · 你打回之后 agent 又交了新东西 —— 听新结果的，这条自己回到「待验收」，
+           否则你永远看不出它已经返工完了。
+         老数据里没有「你什么时候点的」这个时间，那就退回到「导出之后交的新东西
+         才算数」，免得把你上次导出时的验收结果冲掉。 */
       const exportedAt = Date.parse(SEED.meta?.exportedAt || '') || 0;
       const agentTime = t => Math.max(0, ...[...(t.agentNotes||[]), ...(t.commits||[])]
         .map(x => Date.parse(x.at) || 0));
+      const pickStatus = (seed, mine) => {
+        const agentAt = agentTime(seed);
+        const localAt = Date.parse(mine.statusAt || '') || 0;
+        if(localAt >= agentAt) return mine.status ?? seed.status;
+        return agentAt > exportedAt ? seed.status : (mine.status ?? seed.status);
+      };
       const merged = SEED.tasks.map(seed=>{
         const mine = byId.get(seed.id);
         if(!mine) return structuredClone(seed);
         return {...structuredClone(seed),
-          status: agentTime(seed) > exportedAt ? seed.status : (mine.status ?? seed.status),
+          status: pickStatus(seed, mine),
+          statusAt: mine.statusAt,
           priority: mine.priority ?? seed.priority,
           area: mine.area ?? seed.area,
           // 标题和正文你改过就以你的为准，没改过就跟着我这边更新
@@ -1555,6 +1564,13 @@ function loadUi(){
 }
 function saveUi(){
   try{ localStorage.setItem(LS_UI, JSON.stringify(ui)); }catch{ /* 无关紧要，丢了就丢了 */ }
+}
+
+/* 改状态一律走这里：除了写值，还要记下「你是什么时候点的」。
+   下次打开看板要靠这个时间和 agent 记录的时间比大小，才知道该听谁的。 */
+function setStatus(t, status){
+  t.status = status;
+  t.statusAt = new Date().toISOString();
 }
 
 const nextId = () => Math.max(0, ...state.tasks.map(t=>t.id)) + 1;
@@ -1801,7 +1817,7 @@ function bindDnd(){
       e.preventDefault(); col.classList.remove('over');
       const t = byId(dragId);
       if(t && t.status !== zone.dataset.drop){
-        t.status = zone.dataset.drop; save(); render();
+        setStatus(t, zone.dataset.drop); save(); render();
         toast(`#${t.id} 移到「${STATUS_NAME[t.status]}」`, 'ok');
       }
     });
@@ -1935,7 +1951,7 @@ function bindMore(){
 function wireDialog(t){
   const $ = id => document.getElementById(id);
 
-  $('eStatus').onchange = e => { t.status = e.target.value; save(); render(); toast(`已移到「${STATUS_NAME[t.status]}」`,'ok'); };
+  $('eStatus').onchange = e => { setStatus(t, e.target.value); save(); render(); toast(`已移到「${STATUS_NAME[t.status]}」`,'ok'); };
   $('ePrio').onchange   = e => { t.priority = e.target.value; save(); render(); };
   $('eArea').onchange   = e => { t.area = e.target.value.trim() || '未分类'; save(); refreshAreas(); render(); };
 
@@ -1945,7 +1961,7 @@ function wireDialog(t){
     // 标记成「用户改过」，这样我这边重新构建看板时不会把它覆盖回去。
     if(next.title !== t.title){ t.title = next.title; t.titleEdited = true; }
     if(next.body  !== t.body ){ t.body  = next.body;  t.bodyEdited  = true; }
-    t.area = next.area; t.priority = next.priority; t.status = next.status;
+    t.area = next.area; t.priority = next.priority; if(next.status !== t.status) setStatus(t, next.status);
     save(); refreshAreas(); render(); openTask(t.id);
     toast('已保存','ok');
   };
@@ -2028,10 +2044,10 @@ function wireDialog(t){
       pendingImgs = [];
       delete ui.drafts[t.id]; saveUi();
     }
-    t.status='rework'; save(); render(); dlg.close();
+    setStatus(t, 'rework'); save(); render(); dlg.close();
     toast(pending || t.userComments?.length ? `#${t.id} 已打回，等 AI 重做` : `#${t.id} 已打回（没写理由，AI 只知道要重做）`, 'ok');
   };
-  $('aApprove').onclick = () => { t.status='done';  save(); render(); dlg.close(); toast(`#${t.id} 已通过`,'ok'); };
+  $('aApprove').onclick = () => { setStatus(t, 'done'); save(); render(); dlg.close(); toast(`#${t.id} 已通过`,'ok'); };
   $('aSave').onclick    = () => { save(); render(); dlg.close(); };
   $('aDel').onclick     = async () => {
     const ok = await ask(`删除 #${t.id}？`,
