@@ -23,11 +23,12 @@ import { ActivityPanel } from "../activity/ActivityPanel";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
-import { CoilLoader } from "../../ui/CoilLoader";
+import { CoilLogo } from "../../ui/CoilLogo";
 import { WindowDragBar } from "../../ui/WindowDragBar";
-import { BlobsLoader } from "../../ui/loaders";
+import { BlobsLoader, OrbitLoader } from "../../ui/loaders";
 import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
+import { nextScrollDownVisible } from "./scrollDownVisibility";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
 import { SubagentCard, SubagentDetailDialog } from "../subagents/SubagentActivity";
 
@@ -201,7 +202,7 @@ export function ConversationPane({
       return;
     }
     const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    setShowScrollDown(distance > 48);
+    setShowScrollDown((visible) => nextScrollDownVisible(visible, distance));
   }, [timelineRef]);
 
   const updateLoadEarlierVisibility = useCallback((): void => {
@@ -336,10 +337,10 @@ export function ConversationPane({
                   renderPlan={(plan) => <PlanApprovalCard plan={plan} onApprove={onApprovePlan} onReject={onRejectPlan} />}
                 />
               ))}
-              {running ? <div className="agent-activity"><CoilLoader size={6} /><span className="agent-activity-line">{activityLine}</span></div> : null}
+              {running ? <div className="agent-activity"><OrbitLoader size={13} /><span className="agent-activity-line">{activityLine}</span></div> : null}
             </div>
           ) : (
-            <div className="empty-chat"><div className="empty-chat-mark"><BlobsLoader size={40} /></div><h1>你想构建什么？</h1><p>{project ? `CoilCoil 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
+            <div className="empty-chat"><div className="empty-chat-mark"><CoilLogo size={64} /></div><h1>你想构建什么？</h1><p>{project ? `CoilCoil 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>
           )}
         </div>
         {showScrollDown ? (
