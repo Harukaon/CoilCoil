@@ -5,8 +5,6 @@ import {
   collectPinnedSessions,
   collapsedSessionLimit,
   conversationStatusKind,
-  NAV_COMPACT_WORKSPACES,
-  shouldCompactNav,
   nextExpandedSessionLimit,
   summarizeWorkspaceActivity,
   titleFromPrompt,
@@ -132,23 +130,4 @@ test("the pin only speaks when the conversation is quiet", () => {
   assert.equal(conversationStatusKind({ running: false, unread: false }, true), "pinned");
   assert.equal(conversationStatusKind(undefined, true), "pinned");
   assert.equal(conversationStatusKind(undefined, false), "none");
-});
-
-test("the nav keeps its labels while few workspaces are mounted", () => {
-  const projects = Array.from({ length: NAV_COMPACT_WORKSPACES - 1 }, (_, index) => project(`w${index}`));
-  assert.equal(shouldCompactNav(projects), false);
-});
-
-test("enough mounted workspaces collapse the nav into one row", () => {
-  const projects = Array.from({ length: NAV_COMPACT_WORKSPACES }, (_, index) => project(`w${index}`));
-  assert.equal(shouldCompactNav(projects), true);
-});
-
-test("the home project does not count towards the crowding", () => {
-  // It is always present, so counting it would compact one workspace early.
-  const projects = [
-    { kind: "home" as const, name: "主目录", path: "/Users/hao" },
-    ...Array.from({ length: NAV_COMPACT_WORKSPACES - 1 }, (_, index) => project(`w${index}`)),
-  ];
-  assert.equal(shouldCompactNav(projects), false);
 });

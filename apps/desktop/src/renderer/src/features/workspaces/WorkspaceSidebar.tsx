@@ -30,7 +30,7 @@ import { WindowDragBar } from "../../ui/WindowDragBar";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
 import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed } from "./recentSessions";
-import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, shouldCompactNav, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
+import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
   runtimeId?: string;
@@ -206,9 +206,6 @@ export function WorkspaceSidebar({
   const [draggingPath, setDraggingPath] = useState<string>();
   const [dropTargetPath, setDropTargetPath] = useState<string>();
   const renameRef = useRef<HTMLInputElement>(null);
-  // Past a handful of mounted workspaces the three tall buttons are three rows
-  // of conversations to scroll past on every visit.
-  const compactNav = shouldCompactNav(projects);
   const [recentCollapsed, setRecentCollapsed] = useState(loadRecentSectionCollapsed);
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_ROWS);
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
@@ -240,9 +237,10 @@ export function WorkspaceSidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-drag"><WindowDragBar className="sidebar-drag-region" /></div>
-      {/* Compact keeps the same DOM so focus order and shortcuts are unchanged;
-          the row's left-to-right order is CSS. */}
-      <nav className={`primary-nav ${compactNav ? "compact" : ""}`}>
+      {/* 三个主按钮永远是竖着一列、带文字标签的样子。工作区一多就折成一排图标的
+          做法已经去掉：省下的那点高度换来的是「同一个按钮换了位置、也没了名字」，
+          左上角看着像换了个界面。 */}
+      <nav className="primary-nav">
         <button className="nav-button nav-new" type="button" title="新建对话" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>{primaryModifierLabel(window.coilcoil.platform)}N</kbd></button>
         <button className={`nav-button nav-skills ${skillsOpen ? "active" : ""}`} type="button" title="技能" onClick={onOpenSkills}><Sparkles size={16} strokeWidth={1.7} /><span>技能</span></button>
         <button className={`nav-button nav-memory ${memoryOpen ? "active" : ""}`} type="button" title="记忆" onClick={onOpenMemory}><BookOpen size={16} strokeWidth={1.7} /><span>记忆</span></button>
