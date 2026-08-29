@@ -13,7 +13,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell } from "electron";
 import { createRequire } from "node:module";
 import type { DiagnosticLogBatch } from "@coilcoil/runtime-protocol";
-import type { BrowserUiViewport, ImportBrowserCookiesInput, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RemoteAccessInput, RuntimeRequestPayload, RuntimeRequestResult } from "../shared/desktop-api";
+import type { BrowserUiViewport, ImportBrowserCookiesInput, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RemoteAccessInput, RuntimeRequestPayload, RuntimeRequestResult, SaveProjectFileInput } from "../shared/desktop-api";
 import { appIconPath } from "./app-icon";
 import { BUBBLE_OPEN_SESSION_CHANNEL, setupBubbleWindow } from "./bubble-window.js";
 import { testMcpConnection } from "./mcp-connection-test.js";
@@ -26,6 +26,7 @@ import {
 import { hardenGuestPreferences } from "./browser-webview-policy";
 import { proxyEnvironment, refreshProxyEnvironment } from "./system-proxy";
 import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
+import { saveProjectFile } from "./file-edit";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
@@ -92,6 +93,7 @@ const DIAGNOSTIC_REVEAL_CHANNEL = "diagnostics:reveal";
 const PREVIEW_OPEN_CHANNEL = "preview:open";
 const PREVIEW_CLOSE_CHANNEL = "preview:close";
 const PROJECT_FILE_ACTION_CHANNEL = "project-file:action";
+const PROJECT_FILE_SAVE_CHANNEL = "project-file:save";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
@@ -915,6 +917,7 @@ app.whenReady().then(async () => {
     closeFilePreview(event.sender.id, id);
   });
   ipcMain.handle(PROJECT_FILE_ACTION_CHANNEL, (event, input: ProjectFileActionInput) => performProjectFileAction(event, input));
+  ipcMain.handle(PROJECT_FILE_SAVE_CHANNEL, (_event, input: SaveProjectFileInput) => saveProjectFile(input, safeProjectPath));
   ipcMain.handle(PROJECT_DIRECTORY_LIST_CHANNEL, (_event, root: string, path?: string) => listProjectDirectory(root, path));
   const browserFor = (event: Electron.IpcMainInvokeEvent): BrowserRuntimeManager => {
     const value = browserRuntimes.get(event.sender.id);

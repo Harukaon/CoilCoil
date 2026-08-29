@@ -22,11 +22,27 @@
 .preview-mode button, .inline-preview-close, .inline-preview-reveal { display: grid; width: 25px; height: 25px; padding: 0; place-items: center; border-radius: 6px; color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; cursor: pointer; }
 .preview-mode button:hover, .inline-preview-close:hover, .inline-preview-reveal:hover { color: hsl(var(--th) var(--ts) var(--l-192)); background: hsl(var(--th) var(--ts) var(--l-890)); }
 .preview-mode button.active { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 1px 2px rgb(20 20 18 / 8%); }
+.inline-preview-edit, .inline-preview-save, .inline-preview-discard { display: inline-flex; height: 25px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 8px; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-375)); background: hsl(var(--th) var(--ts) var(--l-918)); font-size: 9px; cursor: pointer; }
+.inline-preview-edit:hover, .inline-preview-discard:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-890)); }
+.inline-preview-save { color: hsl(var(--th) var(--ts) var(--l-1000)); background: var(--c-green-solid); }
+.inline-preview-save:hover:not(:disabled) { background: var(--c-green-text); }
+.inline-preview-save:disabled, .inline-preview-discard:disabled { cursor: default; opacity: .45; }
+.inline-preview-discard.armed { color: hsl(var(--th) var(--ts) var(--l-1000)); background: var(--c-red-muted); }
 .preview-warning { padding: 6px 9px; border-bottom: 1px solid var(--c-amber-border); color: var(--c-amber-text); background: var(--c-amber-subtle); font-size: 9px; }
+/* The conflict bar is the same warning strip, but it carries the two answers to
+   "someone else wrote this file", so it lays its buttons out on one line. */
+.preview-conflict { display: flex; align-items: center; gap: 8px; }
+.preview-conflict span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-conflict button { flex: 0 0 auto; padding: 2px 7px; border-radius: 6px; color: var(--c-amber-text); background: hsl(var(--th) var(--ts) var(--l-1000) / 55%); font-size: 9px; cursor: pointer; }
+.preview-conflict button:hover { background: hsl(var(--th) var(--ts) var(--l-1000)); }
 .inline-preview-content { min-width: 0; min-height: 0; overflow: auto; }
 .inline-preview-content.embedded { overflow: hidden; }
 .preview-placeholder { display: flex; height: 100%; min-height: 180px; align-items: center; justify-content: center; flex-direction: column; gap: 8px; padding: 16px; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 10px; line-height: 1.5; text-align: center; }
 .preview-placeholder.error { color: var(--c-red-muted); }
+/* Editing is a plain textarea by design: a real code editor would be a megabyte
+   of dependency for files this panel only ever edits a few lines of. The white
+   ground is what separates it from the grey read-only preview. */
+.text-editor { display: block; width: 100%; height: 100%; min-height: 0; padding: 14px 16px; border: 0; outline: none; resize: none; color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-1000)); font: 10px/1.65 "SFMono-Regular", Consolas, monospace; tab-size: 2; white-space: pre; overflow-wrap: normal; }
 .text-preview { min-width: max-content; min-height: 100%; margin: 0; padding: 14px 16px; color: hsl(var(--th) var(--ts) var(--l-202)); background: hsl(var(--th) var(--ts) var(--l-969)); font: 10px/1.65 "SFMono-Regular", Consolas, monospace; tab-size: 2; white-space: pre; }
 .preview-markdown { width: min(760px, calc(100% - 28px)); margin: 0 auto; padding: 18px 0 44px; font-size: 11px; }
 .preview-markdown table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
@@ -35,4 +51,6 @@
 .pdf-preview { display: block; width: 100%; height: 100%; min-height: 0; border: 0; background: hsl(var(--th) var(--ts) var(--l-1000)); }
 .image-preview-shell { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: auto; place-items: center; padding: 16px; background: hsl(var(--th) var(--ts) var(--l-939)); }
 .image-preview { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 2px 8px rgb(30 30 27 / 8%); }
+.inline-preview-editing { margin-right: auto; color: var(--c-green-text); }
+.inline-preview-readonly { min-width: 0; margin-right: auto; overflow: hidden; text-overflow: ellipsis; }
 .inline-preview-status { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 8px; border-top: 1px solid hsl(var(--th) var(--ts) var(--l-892)); color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 8px; white-space: nowrap; }

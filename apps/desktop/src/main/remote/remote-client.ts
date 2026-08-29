@@ -179,6 +179,7 @@ export function bridgeScript(platform: DesktopPlatform): string {
     selectProject: resolves(null),
     pickDirectory: resolves(null),
     performProjectFileAction: rejects("远程会话暂不支持修改项目文件。"),
+    saveProjectFile: rejects("远程会话暂不支持编辑文件。"),
     testMcpConnection: rejects("远程会话暂不支持测试 MCP 连接。"),
     openFilePreview: rejects("远程会话暂不支持文件预览。"),
     closeFilePreview: resolves(undefined),

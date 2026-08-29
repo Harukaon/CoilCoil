@@ -45,7 +45,19 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
   const previewIdRef = useRef<string | undefined>(undefined);
   const requestIdRef = useRef(0);
   const selectedNodeRef = useRef<FileNode | undefined>(undefined);
+  const dirtyRef = useRef(false);
   const { previewShare, beginResize, handleResizeKeyDown } = useFilePanelSplit();
+
+  /**
+   * Switching files while an edit is unsaved would throw the typing away without
+   * a word, so the switch is refused and the editor stays put: the user saves or
+   * cancels first, both of which are one click away in the preview header.
+   */
+  const blockedByUnsavedEdit = useCallback((): boolean => {
+    if (!dirtyRef.current) return false;
+    toastError("当前文件有未保存的修改，请先保存或取消编辑。");
+    return true;
+  }, []);
 
   const releasePreview = useCallback((id?: string): void => {
     if (!id) return;
@@ -103,6 +115,7 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
 
   const openPreview = useCallback(async (node: FileNode, forceText = false): Promise<void> => {
     if (!project.cwd || node.kind !== "file") return;
+    if (node.path !== selectedNodeRef.current?.path && blockedByUnsavedEdit()) return;
     const requestId = ++requestIdRef.current;
     selectedNodeRef.current = node;
     const previousId = previewIdRef.current;
@@ -125,7 +138,7 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
       if (requestId !== requestIdRef.current) return;
       setSelection({ node, loading: false, error: caught instanceof Error ? caught.message : String(caught) });
     }
-  }, [project.cwd, releasePreview]);
+  }, [blockedByUnsavedEdit, project.cwd, releasePreview]);
 
   useEffect(() => {
     if (!activeFilePath) {
@@ -156,9 +169,12 @@ export function FilesPanel({ project, runtimeId, activeFilePath, onOpenFile, onC
       {selection ? (
         <FilePreviewPane
           preview={selection.document}
+          root={project.cwd}
           loading={selection.loading}
           error={selection.error}
+          onDirtyChange={(dirty) => { dirtyRef.current = dirty; }}
           onClose={() => {
+            if (blockedByUnsavedEdit()) return;
             const path = selectedNodeRef.current?.path;
             closePreview();
             if (path) onCloseFile?.(path);

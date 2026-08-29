@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, extname } from "node:path";
 import type { FilePreviewDocument, OpenFilePreviewInput, OpenFilePreviewResult } from "../shared/desktop-api";
+import { editableState } from "./file-edit";
 
 const TEXT_EXTENSIONS = new Set([
-  "", ".txt", ".log", ".md", ".mdx", ".markdown", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv",
+  "", ".txt", ".log", ".md", ".mdx", ".markdown", ".json", ".jsonc", ".jsonl", ".ndjson", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv",
   ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".svelte", ".css", ".scss", ".sass", ".less",
   ".py", ".pyi", ".rb", ".php", ".java", ".kt", ".kts", ".go", ".rs", ".swift", ".c", ".h", ".cc", ".cpp", ".hpp",
-  ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1", ".sql", ".graphql", ".gql", ".env", ".ini", ".conf",
+  ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1", ".sql", ".graphql", ".gql", ".env", ".ini", ".cfg", ".conf", ".properties",
   ".dockerfile", ".gitignore", ".gitattributes", ".editorconfig", ".html", ".htm", ".svg",
 ]);
 
@@ -65,7 +66,7 @@ export function previewKind(path: string, forceText: boolean): FilePreviewDocume
 async function readPreview(record: PreviewRecord): Promise<FilePreviewDocument> {
   const kind = previewKind(record.path, record.forceText);
   if (!kind) throw new Error("此文件类型暂不支持预览。");
-  const buffer = await readFile(record.path);
+  const [buffer, stats] = await Promise.all([readFile(record.path), stat(record.path)]);
   const limit = kind === "text" || kind === "markdown" || kind === "html" ? TEXT_PREVIEW_LIMIT : EMBEDDED_PREVIEW_LIMIT;
   if (kind === "image" && buffer.byteLength > limit) {
     throw new Error("图片超过 20 MB，暂不支持预览。");
@@ -78,7 +79,17 @@ async function readPreview(record: PreviewRecord): Promise<FilePreviewDocument> 
     : kind === "image"
       ? `data:${mimeType};base64,${buffer.toString("base64")}`
       : buffer.subarray(0, limit).toString("utf8");
-  return { id: record.id, path: record.path, name: basename(record.path), kind, content, truncated, updatedAt: Date.now() };
+  return {
+    id: record.id,
+    path: record.path,
+    name: basename(record.path),
+    kind,
+    content,
+    truncated,
+    updatedAt: Date.now(),
+    mtimeMs: stats.mtimeMs,
+    ...editableState(kind, buffer, truncated),
+  };
 }
 
 function closePreviewRecord(id: string): void {
