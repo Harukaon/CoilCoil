@@ -749,7 +749,9 @@ function openTask(id){
         ? notes.map((n,i)=>noteHTML({
             cls:'note'+(isNew(n)?' unseen':''),
             who:'🤖 '+esc(n.by||'agent'), at:n.at, text:n.text, key:'a'+i,
-            tag:isNew(n)?'<span class="new-tag" style="margin-left:0">新</span>':''
+            tag:isNew(n)?'<span class="new-tag" style="margin-left:0">新</span>':'',
+            // agent 也可以贴图（改动前后对比这种，文字讲不清楚）。和我的回复走同一套渲染。
+            extra:(n.images||[]).map(src=>`<img src="${src}" alt="附图">`).join(''),
           })).join('')
         : '<div class="empty">还没有 agent 记录。</div>'}
     </div>

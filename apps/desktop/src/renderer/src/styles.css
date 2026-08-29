@@ -526,26 +526,28 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .subagent-mini-chat .agent-turn-content { width: 100%; }
 .subagent-dialog-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 160px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 12px; }
 .subagent-dialog-error { margin-top: 16px; padding: 10px 12px; border: 1px solid var(--c-red-border); border-radius: var(--radius-2xl); color: var(--c-red-muted); background: hsl(var(--th) var(--ts) var(--l-984)); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* CoilCoil 的墨团标志：几何、模糊、对比度脉冲与每个三角形的旋转时序均照抄设计源
-   `apps/desktop/build/logo.svg`，仅把选择器从 id 换成 class（同屏会渲染多个实例），
-   并给 keyframes 加上本文件惯用的前缀。深色主题下把墨色换成纸色，否则黑墨看不见。 */
+/* CoilCoil 的墨团标志：几何和每个三角形的旋转时序照抄设计源
+   `apps/desktop/build/logo.svg`。糊成一团那一步在组件里用 SVG 的 filter 基元做
+   （见 CoilLogo.tsx）——设计源原来是给 <mask> 加 CSS 的 filter: contrast()，而
+   mask 本身不参与绘制，那条声明在任何浏览器里都被丢掉，所以标志一直是一团雾而不
+   是一团墨。这里只留旋转，好让 prefers-reduced-motion 能停掉它。
+   下面的序号对应七个三角形本身：设计源写的是 nth-child(n)，而 mask 的第一个子元
+   素是黑色底板，每条规则实际都落在了下一个三角形上，最后一个不动。现在三角形单
+   独放在一个 <g> 里，序号按实际生效的那一份对齐，动起来和以前一样。
+   深色主题下把墨色换成纸色，否则黑墨看不见。 */
 .coil-logo { display: block; flex: 0 0 auto; }
-.coil-logo-mask { filter: contrast(15); animation: coil-logo-roundness 1s linear infinite; }
-.coil-logo-mask polygon { filter: blur(12px); }
-.coil-logo-mask polygon:nth-child(1) { transform-origin: 75% 25%; transform: rotate(90deg); }
-.coil-logo-mask polygon:nth-child(2) { transform-origin: 50% 50%; animation: coil-logo-rotation 2s linear infinite reverse; }
-.coil-logo-mask polygon:nth-child(3) { transform-origin: 50% 60%; animation: coil-logo-rotation 2s linear -0.6667s infinite; }
-.coil-logo-mask polygon:nth-child(4) { transform-origin: 40% 40%; animation: coil-logo-rotation 2s linear infinite reverse; }
-.coil-logo-mask polygon:nth-child(5) { transform-origin: 40% 40%; animation: coil-logo-rotation 2s linear -1s infinite reverse; }
-.coil-logo-mask polygon:nth-child(6) { transform-origin: 60% 40%; animation: coil-logo-rotation 2s linear infinite; }
-.coil-logo-mask polygon:nth-child(7) { transform-origin: 60% 40%; animation: coil-logo-rotation 2s linear -1.3333s infinite; }
+.coil-logo-shapes polygon:nth-child(1) { transform-origin: 50% 50%; animation: coil-logo-rotation 2s linear infinite reverse; }
+.coil-logo-shapes polygon:nth-child(2) { transform-origin: 50% 60%; animation: coil-logo-rotation 2s linear -0.6667s infinite; }
+.coil-logo-shapes polygon:nth-child(3) { transform-origin: 40% 40%; animation: coil-logo-rotation 2s linear infinite reverse; }
+.coil-logo-shapes polygon:nth-child(4) { transform-origin: 40% 40%; animation: coil-logo-rotation 2s linear -1s infinite reverse; }
+.coil-logo-shapes polygon:nth-child(5) { transform-origin: 60% 40%; animation: coil-logo-rotation 2s linear infinite; }
+.coil-logo-shapes polygon:nth-child(6) { transform-origin: 60% 40%; animation: coil-logo-rotation 2s linear -1.3333s infinite; }
 @keyframes coil-logo-rotation { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes coil-logo-roundness { 0%, 60%, 100% { filter: contrast(15); } 20%, 40% { filter: contrast(3); } }
 :root[data-theme="dark"] .coil-logo-ink-1 { stop-color: #ffffff; }
 :root[data-theme="dark"] .coil-logo-ink-2 { stop-color: #d8d8d4; }
 :root[data-theme="dark"] .coil-logo-ink-3 { stop-color: #e8e8e4; }
 @media (prefers-reduced-motion: reduce) {
-  .coil-logo-mask, .coil-logo-mask polygon { animation: none; }
+  .coil-logo-shapes polygon { animation: none; }
 }
 /* 加载指示：两团墨沿同一条基线滚过，经 #coil-goo-ink 的模糊 + alpha 陡增合成一团
    会融合又分裂的墨迹。几何与动画照抄给定实现（12em×3em、22em/16em 两个圆、
