@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protocol";
-import { collectRecentSessions, DEFAULT_RECENT_ROWS } from "../src/renderer/src/features/workspaces/recentSessions";
+import { collectRecentSessions, DEFAULT_RECENT_ROWS, visibleRecentSessions } from "../src/renderer/src/features/workspaces/recentSessions";
 import { nextExpandedSessionLimit } from "../src/renderer/src/features/workspaces/sessionList";
 
 const project = (name: string): ProjectSelection => ({ kind: "workspace", name, path: `/projects/${name}` });
@@ -45,7 +45,9 @@ test("opening a conversation does not reorder the list", () => {
   assert.deepEqual(collectRecentSessions([one], sessions).map((entry) => entry.session.id), ["written", "read"]);
 });
 
-test("pinned and archived conversations stay out of recent", () => {
+test("a pinned conversation is listed in recent too, archived ones are not", () => {
+  // Pinning used to remove the conversation from recent, which reads as losing
+  // it: the list you look at to find what you were just doing no longer has it.
   const one = project("one");
   const recent = collectRecentSessions([one], {
     [one.path]: [
@@ -55,7 +57,65 @@ test("pinned and archived conversations stay out of recent", () => {
     ],
   });
 
-  assert.deepEqual(recent.map((entry) => entry.session.id), ["plain"]);
+  assert.deepEqual(recent.map((entry) => entry.session.id), ["pinned", "plain"]);
+});
+
+test("pinned rows ride along without taking a slot in recent", () => {
+  // Otherwise a few pinned conversations - which are usually the ones being
+  // worked in, so the newest - fill the whole section with a second copy of the
+  // pinned block above it.
+  const one = project("one");
+  const entries = collectRecentSessions([one], {
+    [one.path]: [
+      session({ id: "pin-a", pinned: true, updatedAt: "2026-08-28T00:00:00.000Z" }),
+      session({ id: "pin-b", pinned: true, updatedAt: "2026-08-27T00:00:00.000Z" }),
+      ...Array.from({ length: 6 }, (_, index) => session({
+        id: `plain-${index}`,
+        updatedAt: new Date(Date.UTC(2026, 7, 20 - index)).toISOString(),
+      })),
+    ],
+  });
+  const view = visibleRecentSessions(entries, DEFAULT_RECENT_ROWS);
+
+  assert.deepEqual(view.rows.map((entry) => entry.session.id), [
+    "pin-a", "pin-b", "plain-0", "plain-1", "plain-2", "plain-3",
+  ]);
+  // Only the unpinned leftovers are worth a "more" press.
+  assert.equal(view.hiddenCount, 2);
+});
+
+test("recent stops at the last unpinned row that fits", () => {
+  // A pinned conversation further down the ordering must not trail in behind the
+  // cut - it is one glance away in the pinned section above.
+  const one = project("one");
+  const entries = collectRecentSessions([one], {
+    [one.path]: [
+      session({ id: "plain-new", updatedAt: "2026-08-28T00:00:00.000Z" }),
+      session({ id: "plain-old", updatedAt: "2026-08-27T00:00:00.000Z" }),
+      session({ id: "pin-old", pinned: true, updatedAt: "2026-08-26T00:00:00.000Z" }),
+    ],
+  });
+  const view = visibleRecentSessions(entries, 1);
+
+  assert.deepEqual(view.rows.map((entry) => entry.session.id), ["plain-new"]);
+  assert.equal(view.hiddenCount, 1);
+});
+
+test("expanding recent eventually shows every unpinned conversation", () => {
+  const one = project("one");
+  const entries = collectRecentSessions([one], {
+    [one.path]: [
+      session({ id: "pin", pinned: true, updatedAt: "2026-08-28T00:00:00.000Z" }),
+      ...Array.from({ length: 5 }, (_, index) => session({
+        id: `plain-${index}`,
+        updatedAt: new Date(Date.UTC(2026, 7, 20 - index)).toISOString(),
+      })),
+    ],
+  });
+  const view = visibleRecentSessions(entries, 99);
+
+  assert.equal(view.hiddenCount, 0);
+  assert.equal(view.rows.length, 6);
 });
 
 test("the whole ordering is returned so the section can be expanded", () => {

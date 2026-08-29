@@ -29,7 +29,7 @@ import { CoilLogo } from "../../ui/CoilLogo";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
-import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed } from "./recentSessions";
+import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, visibleRecentSessions } from "./recentSessions";
 import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
@@ -101,13 +101,16 @@ function ConversationCopyItems({ session }: { session: SessionSummary }): React.
  *
  * The pinned and recent sections both list conversations from every workspace at
  * once, so unlike the rows nested under a project these have to say where they
- * come from. Only the context menu differs between the two.
+ * come from. A pinned conversation is listed in both sections, so which one is
+ * rendering the row is passed in rather than inferred from the pin.
  */
-function CrossProjectSessionRow({ project, session, activity, pinned, active, timestamp, onOpen, onArchive, menu }: {
+function CrossProjectSessionRow({ project, session, activity, pinned, variant, active, timestamp, onOpen, onArchive, menu }: {
   project: ProjectSelection;
   session: SessionSummary;
   activity?: SessionActivityState;
   pinned: boolean;
+  /** Which section is listing the row; a pinned conversation appears in both. */
+  variant: "pinned" | "recent";
   active: boolean;
   timestamp: string;
   onOpen: () => void;
@@ -118,7 +121,6 @@ function CrossProjectSessionRow({ project, session, activity, pinned, active, ti
   // ones that most need to say whether the agent is still working and whether
   // what it finished has been read.
   const status = conversationStatusMarker(conversationStatusKind(activity, pinned));
-  const variant = pinned ? "pinned" : "recent";
   // No marker means no slot: a quiet recent row starts its title at the same
   // place a quiet row under a project does, and a spinner or unread dot pushes
   // the title along only while there is something to say.
@@ -210,7 +212,8 @@ export function WorkspaceSidebar({
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_ROWS);
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
   const recentSessions = collectRecentSessions(projects, sessionsByProject);
-  const visibleRecent = recentSessions.slice(0, recentLimit);
+  // The limit counts unpinned rows only; see visibleRecentSessions.
+  const recentView = visibleRecentSessions(recentSessions, recentLimit);
   // The home project is recomputed as the first entry on every launch, so only
   // the mounted workspaces have an order worth persisting.
   const reorderable = (target: ProjectSelection): boolean => target.kind === "workspace";
@@ -256,6 +259,7 @@ export function WorkspaceSidebar({
               session={entry.session}
               activity={sessionActivity[entry.session.path]}
               pinned
+              variant="pinned"
               active={entry.project.path === activeProject?.path && entry.session.id === activeSessionId}
               timestamp={entry.session.updatedAt}
               onOpen={() => onOpenConversation(entry.project, entry.session)}
@@ -280,27 +284,30 @@ export function WorkspaceSidebar({
             <ChevronRight className={`section-heading-chevron ${recentCollapsed ? "" : "expanded"}`} size={13} strokeWidth={2} />
           </button>
           {recentCollapsed ? null : <div className="conversation-list recent-conversation-list">
-            {visibleRecent.map((entry) => <CrossProjectSessionRow
+            {recentView.rows.map((entry) => <CrossProjectSessionRow
               key={entry.session.path}
               project={entry.project}
               session={entry.session}
               activity={sessionActivity[entry.session.path]}
-              pinned={false}
+              pinned={Boolean(entry.session.pinned)}
+              variant="recent"
               active={entry.project.path === activeProject?.path && entry.session.id === activeSessionId}
               timestamp={new Date(entry.at).toISOString()}
               onOpen={() => onOpenConversation(entry.project, entry.session)}
               onArchive={() => onArchiveConversation(entry.project, entry.session)}
               menu={<>
-                <ContextMenu.Item className="conversation-context-item" onSelect={() => onPinConversation(entry.project, entry.session, true)}><Pin size={13} /><span>置顶</span></ContextMenu.Item>
+                <ContextMenu.Item className="conversation-context-item" onSelect={() => onPinConversation(entry.project, entry.session, !entry.session.pinned)}>
+                  {entry.session.pinned ? <PinOff size={13} /> : <Pin size={13} />}<span>{entry.session.pinned ? "取消置顶" : "置顶"}</span>
+                </ContextMenu.Item>
                 <ConversationCopyItems session={entry.session} />
                 <ContextMenu.Separator className="conversation-context-separator" />
                 <ContextMenu.Item className="conversation-context-item" onSelect={() => onArchiveConversation(entry.project, entry.session)}>归档对话</ContextMenu.Item>
               </>}
             />)}
             <ConversationListControls
-              hiddenCount={recentSessions.length - visibleRecent.length}
-              expandedBy={visibleRecent.length - DEFAULT_RECENT_ROWS}
-              onShowMore={() => setRecentLimit(nextExpandedSessionLimit(visibleRecent.length, recentSessions.length))}
+              hiddenCount={recentView.hiddenCount}
+              expandedBy={recentLimit - DEFAULT_RECENT_ROWS}
+              onShowMore={() => setRecentLimit(nextExpandedSessionLimit(recentLimit, recentLimit + recentView.hiddenCount))}
               onCollapse={() => setRecentLimit(DEFAULT_RECENT_ROWS)}
             />
           </div>}
