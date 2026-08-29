@@ -17,7 +17,7 @@
   overflow: auto;
   padding: 20px 20px 16px;
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--radius-8xl);
   color: hsl(var(--th) var(--ts) var(--l-178));
   background: hsl(var(--th) var(--ts) var(--l-976));
   box-shadow: var(--shadow-xl);
@@ -54,7 +54,7 @@
   min-width: 68px;
   height: 32px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   color: hsl(var(--th) var(--ts) var(--l-178));
   background: hsl(var(--th) var(--ts) var(--l-925));
   font-size: 11px;

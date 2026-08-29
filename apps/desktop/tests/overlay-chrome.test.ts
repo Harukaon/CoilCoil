@@ -89,3 +89,53 @@ test("--shadow-* 这一档阶梯是从浅到深、都很克制的一层投影", 
   }
   assert.ok(blurs[blurs.length - 1] <= 48, "最深的一档也别超过 48px 模糊，否则整屏发脏");
 });
+
+/* 圆角同理：一处一个数字，用户说一句「再圆一点」就得满仓库改。
+   所以除了几个不参与阶梯的特例，圆角一律引用 --radius-* 令牌。 */
+
+const RADIUS_SHEETS = [
+  "styles.css",
+  "bubble.css",
+  "mobile.css",
+  "ui/dialog/dialog.css",
+  "ui/toast/toast.css",
+  "features/settings/settings.css",
+  "features/composer/mobile-model-picker.css",
+  "features/memory/memory.css",
+  "features/files/preview.css",
+  "features/terminal/terminal.css",
+];
+
+// 不参与阶梯的写法：正圆、跟随父级、直角，以及 2~3px 这种「几乎是直角」的小色块。
+const RADIUS_EXEMPT = /^(0|50%|100%|inherit|2px|3px|2px 2px 0 0)$/;
+
+test("圆角一律走 --radius-* 令牌，不散落具体数值", () => {
+  for (const sheet of RADIUS_SHEETS) {
+    for (const [, value] of read(sheet).matchAll(/border-radius:\s*([^;}]+)/g)) {
+      const trimmed = value.trim();
+      if (RADIUS_EXEMPT.test(trimmed)) continue;
+      for (const part of trimmed.split(/\s+/)) {
+        assert.ok(
+          part === "0" || part.startsWith("var(--radius-"),
+          `${sheet} 里还有写死的圆角：border-radius: ${trimmed}`,
+        );
+      }
+    }
+  }
+});
+
+test("--radius-* 是一条从小到大的阶梯，档与档之间没有拉平", () => {
+  const root = declarations(styles, ":root", "styles.css");
+  const steps = ["xs", "sm", "md", "lg", "xl", "2xl", "3xl", "4xl", "5xl", "6xl", "7xl", "8xl", "9xl"];
+  const values = steps.map((step) => {
+    const match = new RegExp(`--radius-${step}:\\s*(\\d+)px`).exec(root);
+    assert.ok(match, `styles.css 的 :root 里没有 --radius-${step}`);
+    return Number.parseInt(match[1], 10);
+  });
+  for (let i = 1; i < values.length; i += 1) {
+    assert.ok(values[i] > values[i - 1], `--radius-${steps[i]} 没有比 --radius-${steps[i - 1]} 大，阶梯被拉平了`);
+  }
+  // 最小的一档仍然是「圆角」而不是胶囊，最大的一档也还看得出是个矩形。
+  assert.ok(values[0] >= 4 && values[values.length - 1] <= 24);
+  assert.match(root, /--radius-pill:\s*999px/);
+});

@@ -15,7 +15,7 @@
   gap: 8px;
   padding: 10px 10px 10px 11px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-3xl);
   background: hsl(var(--th) var(--ts) var(--l-984));
   box-shadow: var(--shadow-md);
   pointer-events: auto;
@@ -62,7 +62,7 @@
   margin: -2px -2px 0 0;
   place-items: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: inherit;
   background: transparent;
   opacity: .72;

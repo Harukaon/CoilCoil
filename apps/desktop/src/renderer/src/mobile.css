@@ -97,7 +97,7 @@
     max-height: 78vh;
     overflow-y: auto;
     overscroll-behavior: contain;
-    border-radius: 16px 16px 0 0;
+    border-radius: var(--radius-8xl) var(--radius-8xl) 0 0;
     box-shadow: 0 -12px 40px rgb(0 0 0 / 28%);
     padding-bottom: env(safe-area-inset-bottom);
   }

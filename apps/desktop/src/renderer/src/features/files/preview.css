@@ -13,16 +13,16 @@
 .inline-preview-path svg { flex: 0 0 auto; opacity: 0; transition: opacity 120ms ease; }
 .inline-preview-path:hover svg { opacity: 1; }
 .inline-preview-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
-.preview-zoom { display: flex; flex: 0 0 auto; align-items: center; gap: 1px; padding: 2px; border-radius: 7px; background: hsl(var(--th) var(--ts) var(--l-918)); }
-.preview-zoom button { display: grid; height: 25px; min-width: 24px; padding: 0 5px; place-items: center; border-radius: 6px; color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; font-size: 8px; cursor: pointer; }
+.preview-zoom { display: flex; flex: 0 0 auto; align-items: center; gap: 1px; padding: 2px; border-radius: var(--radius-lg); background: hsl(var(--th) var(--ts) var(--l-918)); }
+.preview-zoom button { display: grid; height: 25px; min-width: 24px; padding: 0 5px; place-items: center; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; font-size: 8px; cursor: pointer; }
 .preview-zoom button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-192)); background: hsl(var(--th) var(--ts) var(--l-890)); }
 .preview-zoom button:disabled { cursor: default; opacity: .35; }
 .preview-zoom .preview-zoom-value { min-width: 34px; color: hsl(var(--th) var(--ts) var(--l-324)); font-variant-numeric: tabular-nums; }
-.preview-mode { display: flex; flex: 0 0 auto; gap: 2px; padding: 2px; border-radius: 7px; background: hsl(var(--th) var(--ts) var(--l-918)); }
-.preview-mode button, .inline-preview-close, .inline-preview-reveal { display: grid; width: 25px; height: 25px; padding: 0; place-items: center; border-radius: 6px; color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; cursor: pointer; }
+.preview-mode { display: flex; flex: 0 0 auto; gap: 2px; padding: 2px; border-radius: var(--radius-lg); background: hsl(var(--th) var(--ts) var(--l-918)); }
+.preview-mode button, .inline-preview-close, .inline-preview-reveal { display: grid; width: 25px; height: 25px; padding: 0; place-items: center; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; cursor: pointer; }
 .preview-mode button:hover, .inline-preview-close:hover, .inline-preview-reveal:hover { color: hsl(var(--th) var(--ts) var(--l-192)); background: hsl(var(--th) var(--ts) var(--l-890)); }
 .preview-mode button.active { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 1px 2px rgb(20 20 18 / 8%); }
-.inline-preview-edit, .inline-preview-save, .inline-preview-discard { display: inline-flex; height: 25px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 8px; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-375)); background: hsl(var(--th) var(--ts) var(--l-918)); font-size: 9px; cursor: pointer; }
+.inline-preview-edit, .inline-preview-save, .inline-preview-discard { display: inline-flex; height: 25px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 8px; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-375)); background: hsl(var(--th) var(--ts) var(--l-918)); font-size: 9px; cursor: pointer; }
 .inline-preview-edit:hover, .inline-preview-discard:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-890)); }
 .inline-preview-save { color: hsl(var(--th) var(--ts) var(--l-1000)); background: var(--c-green-solid); }
 .inline-preview-save:hover:not(:disabled) { background: var(--c-green-text); }
@@ -33,7 +33,7 @@
    "someone else wrote this file", so it lays its buttons out on one line. */
 .preview-conflict { display: flex; align-items: center; gap: 8px; }
 .preview-conflict span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.preview-conflict button { flex: 0 0 auto; padding: 2px 7px; border-radius: 6px; color: var(--c-amber-text); background: hsl(var(--th) var(--ts) var(--l-1000) / 55%); font-size: 9px; cursor: pointer; }
+.preview-conflict button { flex: 0 0 auto; padding: 2px 7px; border-radius: var(--radius-md); color: var(--c-amber-text); background: hsl(var(--th) var(--ts) var(--l-1000) / 55%); font-size: 9px; cursor: pointer; }
 .preview-conflict button:hover { background: hsl(var(--th) var(--ts) var(--l-1000)); }
 .inline-preview-content { min-width: 0; min-height: 0; overflow: auto; }
 .inline-preview-content.embedded { overflow: hidden; }

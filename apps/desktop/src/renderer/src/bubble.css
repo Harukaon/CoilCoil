@@ -7,7 +7,7 @@ html.bubble, html.bubble body, html.bubble #root { height: 100%; background: tra
   grid-template-rows: 38px minmax(0, 1fr) auto;
   overflow: hidden;
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--radius-8xl);
   background: hsl(var(--th) var(--ts) var(--l-988));
   /* 这一层浮在桌面壁纸上而不是应用内，所以比应用内的浮层留得重一点，
      否则浅色壁纸上会看不出边界。 */
@@ -53,7 +53,7 @@ html.bubble, html.bubble body, html.bubble #root { height: 100%; background: tra
   flex: 0 0 auto;
   padding: 0;
   place-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: hsl(var(--th) var(--ts) var(--l-457));
   background: transparent;
   cursor: pointer;
@@ -66,7 +66,7 @@ html.bubble, html.bubble body, html.bubble #root { height: 100%; background: tra
 .bubble-hint { display: flex; align-items: center; gap: 6px; margin: 0; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 11px; }
 
 .bubble-message { max-width: 100%; font-size: 13px; line-height: 1.6; }
-.bubble-message.user { justify-self: end; max-width: 82%; padding: 7px 11px; border-radius: 12px; color: hsl(var(--th) var(--ts) var(--l-171)); background: hsl(var(--th) var(--ts) var(--l-918)); white-space: pre-wrap; }
+.bubble-message.user { justify-self: end; max-width: 82%; padding: 7px 11px; border-radius: var(--radius-5xl); color: hsl(var(--th) var(--ts) var(--l-171)); background: hsl(var(--th) var(--ts) var(--l-918)); white-space: pre-wrap; }
 .bubble-message.assistant { color: hsl(var(--th) var(--ts) var(--l-208)); }
 .bubble-message.assistant > :last-child { margin-bottom: 0; }
 
@@ -78,7 +78,7 @@ html.bubble, html.bubble body, html.bubble #root { height: 100%; background: tra
   flex: 1;
   padding: 8px 10px;
   border: 1px solid hsl(var(--th) var(--ts) var(--l-861));
-  border-radius: 10px;
+  border-radius: var(--radius-3xl);
   outline: 0;
   color: hsl(var(--th) var(--ts) var(--l-171));
   background: hsl(var(--th) var(--ts) var(--l-1000));
@@ -96,7 +96,7 @@ html.bubble, html.bubble body, html.bubble #root { height: 100%; background: tra
   flex: 0 0 auto;
   padding: 0;
   place-items: center;
-  border-radius: 10px;
+  border-radius: var(--radius-3xl);
   color: hsl(var(--th) var(--ts) var(--l-171));
   background: hsl(var(--th) var(--ts) var(--l-918));
   cursor: pointer;
