@@ -517,8 +517,14 @@ const SEED = {
         "at": "2026-08-29T13:20:00Z",
         "title": "看板加了「打回重做」这一列",
         "text": "你说得对，原来「打回」和「待回复」共用一个状态，方向是反的：打回是退回去让 AI 重做（该 AI 动），待回复是 AI 在等你拍板（该你动）。合在一起，你打回之后看板上却显示「等你回复」，谁都不知道该谁动了。\n\n现在是独立的一列，橙色，排在「待办」右边——打回的时候卡片会明显往左退一格，看得出是退回去了。\n\n打回是一步到位的，不会再多问你一句「哪里不对」——理由你本来就写在上面那个回复框里了，没道理写两遍。唯一多做的一件事：如果回复框里写了字还没点发送，打回时会一并发出去，那段话不会跟着弹窗一起消失。"
+      },
+      {
+        "at": "2026-08-29T15:28:29.121Z",
+        "title": "你打回的 5 条已经全部返工完了",
+        "text": "#3 浏览器验证页、#6 拖动换顺序、#10 返回按钮、#14 标志、#15 空态标志大小，五条都改完了，回到「待验收」。\\n\\n其中 #3 和 #14 不是简单照做，是查出了别的东西：#3 的人机验证不是标签页那次改动引起的，是内置浏览器一直在对外报「我是 Electron」这个自动化标记；#14 的标志从来没画对过，糊成墨团那一步的写法所有浏览器都会忽略，你看到的一直是一团雾。两条的详细说明都写在各自下面，#14 还附了改动前后的对比图。\\n\\n另外补了看板本身的两处：agent 的记录现在也能贴图（#14 那张对比图就是这么放进来的）；合并脚本以前会拿旧的 agent 结果把你刚点的「已完成」「打回重做」刷回「待验收」，现在按导出时间判断，你的验收结果不会再被覆盖掉。"
       }
-    ]
+    ],
+    "exportedAt": "2026-08-29T14:38:47.939Z"
   },
   "tasks": [
     {
@@ -535,7 +541,13 @@ const SEED = {
           "text": "根因（第一个问题：强制贴底）\n终端面板过去把 shell 的全部输出攒成一个长字符串放在界面状态里，最多留 50 万字符；每来一段新输出，就拿新字符串和已经画在屏幕上的比一下，只补画多出来的那一截。问题出在超过 50 万字符之后：前面的内容会被砍掉，\"新的以旧的开头\"这个判断就再也不成立了，于是程序改走另一条路——把整个终端清空、把 50 万字符从头重画一遍，而且是每来一小段输出就干一次。清空终端会顺手把 xterm 自己记着的\"用户正在往上翻\"这个状态抹掉，画面因此被拽回底部。claude code 这种全屏界面刷新极频繁，几分钟就能把缓冲撑满，之后就变成你看到的\"每次刷新都强制滚到底\"。\n\n现在的行为\n输出不再进界面状态，直接交给终端本体，滚动完全由终端自己管：你本来停在底部就继续跟着新内容走，你往上翻了就待在原地不动，新输出照常进历史但不动画面——和 VSCode 终端一致。你自己敲键盘时仍然会跳回底部（这也是标准行为）。\n\n第二个问题：跑久了渲染错乱\n同一个根因大概率就是主凶。清空重画是立刻生效的，但排队等着解析的那段数据还在继续往里灌，解析很容易停在半个转义序列上，画面就花了；而且被砍掉 50 万字符之后剩下的开头，经常正好落在某个颜色或光标转义序列的中间，重画时这半截序列会污染后面所有内容。这次顺带把几处相关隐患一并处理了：\n1. 彻底去掉\"清空重画\"这条路；\n2. 主进程留给面板重放的那份历史，现在保证从完整的一行开始，不会从半个转义序列开始；\n3. 主进程原来每收到一段输出都要重建一遍 50 万字符的字符串（全屏界面下一秒几十次），长时间运行会明显拖慢主进程、拖慢输出到达界面的速度，现在改成按块保存、需要时才拼一次；\n4. 拖动分割条改终端大小时，原来每一帧都通知一次 shell 改尺寸，全屏界面会被迫一帧一个宽度地重画，很容易画花；现在同一帧只发一次，尺寸没真变就不发；\n5. 切走的终端标签页是隐藏状态，切回来时多补一次重绘，避免看到上一次残留的画面。\n\n排除掉的嫌疑（有代码依据，不是猜的）\n- 不是显卡渲染插件的问题：这个终端根本没装 WebGL/Canvas 渲染插件，只装了自适应大小的插件，所以\"纹理图集失效\"这条不成立。\n- 不是历史行数上限的问题：上限是 1 万行，是正常值。\n- 不是多处并发写入打架：写入本来就只有一个入口，终端内部还有自己的写入队列。\n\n没搞定 / 需要你配合的\n这一轮不允许打包和启动应用，所以我没法真的把 app 开着跑几小时看结果。第一个问题（强制贴底）的成因是确定的、也被单测锁住了；第二个问题（渲染错乱）我有很强的证据认为是同一个根因，但不能 100% 保证根除。请你实际用一段时间；如果还会花屏，麻烦告诉我三件事：出问题前是不是刚拖过窗口或分割条、是不是刚从别的标签页切回终端、以及花的是整屏还是只有某几行错位——这三条能直接把剩下的嫌疑分开。\n\n验证\ndesktop 包类型检查通过；desktop 包 272 个单测全部通过，其中新增 7 个专门盯这件事的测试，包括\"用户往上翻之后再来两万行输出，画面必须待在原地不动\"。没有改到其它包，所以没有跑其它包的测试。"
         }
       ],
-      "userComments": [],
+      "userComments": [
+        {
+          "at": "2026-08-29T14:38:42.450Z",
+          "text": "遗留等我有时间测试",
+          "images": []
+        }
+      ],
       "commits": [
         {
           "ref": "42bab64ec",
@@ -585,9 +597,25 @@ const SEED = {
           "by": "r2a",
           "at": "2026-08-29T00:00:00.000Z",
           "text": "【现在会变成什么样】以前开浏览器是「右侧栏出现一个『浏览器』标签，点进去里面还有一条自己的标签条」，两层标签叠在一起。现在改成和终端一模一样：每个网页就是右侧栏最上面那一排里的一个标签，标签上是网页标题，正在加载时图标转圈。原来面板里那条标签条整条没了，面板里只剩地址栏和网页。\n\n具体的操作变化：\n1. 右上角「+」菜单里的「浏览器」不再置灰，点一次就多开一个网页标签（和「终端」一样）。\n2. 关掉某个网页标签，就只关那一个网页；关掉最后一个，浏览器整个从右侧栏消失（以前是关了『浏览器』标签，但网页其实还在后台留着）。\n3. 「导入登录状态」那个小人图标，从原来的标签条挪到了地址栏右边。\n\n【agent 那条链路怎么保证没被破坏】agent 用 MCP 控制浏览器走的是主进程里的 BrowserRuntimeManager + BrowserCdpBridge（一条 CDP 的 WebSocket），和界面完全是两条路，只共用同一份标签数据。这次一个字都没动主进程、preload、MCP 工具定义；界面这边调的还是原来那三个接口（新建/切换/关闭标签页）。更关键的是这次特意**没有**把网页标签存进右侧栏自己的状态里，而是每次直接照主进程发来的列表画——所以 agent 开一个标签，上面那一排立刻就多一个；agent 关一个，上面那一排立刻就少一个，两边不可能对不上。补了 6 条自动化断言，其中一条专门盯着「界面还是走原来那三个接口」和「网页标签没有被存进本地状态」，以后谁改回去会当场报错。\n\n【拖动窗口的约定】这次没有新加标题栏——浏览器标签并进的是右侧栏原来那条标题栏，那里已经铺了 #5 引进的拖动层，所以不会出现新的「拖不动」的死区。window-drag 那几条测试原样通过。\n\n【测试】npm run check 通过；npm test 从 278 条涨到 284 条，全绿。\n\n【打包后请点这几步验收】\n1. 右侧栏点「+ → 浏览器」，应该直接出现一个网页标签并打开新标签页；再点一次「+ → 浏览器」，上面那一排应该多一个标签，两个标签可以来回切，各自记住自己的网页。\n2. 在网页里按住 ⌘ 点一个链接（或页面自己弹新窗口），新网页应该出现在上面那一排，而不是别的地方。\n3. 让 agent 用浏览器工具开两三个标签页、再关掉一个，上面那一排要跟着变，数量和顺序都对得上。\n4. 一个一个关掉网页标签，关到最后一个时，浏览器应该整个从右侧栏消失（右侧栏若没有别的标签就自动收起）。\n5. 同时开着终端和浏览器标签，来回切，终端内容不能丢、网页也不能白屏。\n6. 切到另一个会话再切回来，浏览器标签应该还在，网页没被重开。\n7. 右侧栏标签条上留出的那段空白仍然能拖动窗口（多开几个标签也要能拖）。\n\n【已知取舍】把最后一个网页标签关掉就等于关掉浏览器，这是我自己定的（和终端保持一致）。如果你更希望「浏览器还留在那儿、只是没有网页」，说一声改回来很快。"
+        },
+        {
+          "by": "管控（返工）",
+          "at": "2026-08-29T15:28:16.709Z",
+          "text": "这条不是标签页那次改动弄出来的，是内置浏览器一直在把自己的身份报错了。\n\n【为什么每次都要过人机验证】Electron 应用默认对外报的身份里，除了 Chrome 的版本，还多带着一段 Electron/43.3.0。这一段在网上是公开的「自动化程序」标记，Google 这类站点看到它、再配上你走代理出去的那个出口 IP，基本必然弹「检测到异常流量」。你自己的 Chrome 报的是干净的 Chrome，所以同一台机器同一条网络下它没事。你的判断是对的：确实是我们这边多打了一个标记。\n\n【改成什么样】现在内置浏览器报的身份里那一段没有了，其余全部是真实值（Chromium 版本、系统、架构都没动，也没有假装成别的机器）。另外一处更隐蔽的地方也一起对齐了：网页除了看那串身份字符串，还会单独问一次「你是什么牌子的浏览器」，只改前面不改后面，两边对不上本身又是一个可疑信号，所以两边一起改。\n\n【验过了】在你的 Mac 上起了一个本地网页，把改之前和改之后各跑一遍：改之前请求头和网页里读到的身份都带着 Electron，改之后两边都干净，网页问「是不是自动化程序」得到的回答仍然是「不是」。\n\n【还有一件事你要知道】身份这一层修好了，但你那个出口 IP（38.244.4.82）是机房 IP，Google 对机房 IP 本来就更容易查。如果换回来还偶尔弹验证页，那就是线路的问题不是 app 的问题了，换个节点试试。"
         }
       ],
-      "userComments": [],
+      "userComments": [
+        {
+          "at": "2026-08-29T13:00:46.225Z",
+          "text": "你是不是修改了某些浏览器的标记？\n为啥，每次都会触发\n关于此网页\n\n我们的系统检测到您的计算机网络中存在异常流量。此网页用于确认这些请求是由您而不是自动程序发出的。为什么会这样？\n\n\nIP 地址：38.244.4.82\n时间：2026-08-29T12:57:03Z\n网址：https://www.google.com/search?q=%E4%BD%A0%E5%A5%BD&sei=HteSasnuG6HIkPIP-pP5mAE\n\n可是我自己的谷歌浏览器打开就没有问题，你加了某些标记吗？这不对呀",
+          "images": []
+        },
+        {
+          "at": "2026-08-29T13:00:55.075Z",
+          "text": "之前是没有这个问题的",
+          "images": []
+        }
+      ],
       "commits": [
         {
           "ref": "e41c22263",
@@ -602,6 +630,17 @@ const SEED = {
             "apps/desktop/src/renderer/src/styles.css",
             "apps/desktop/tests/browser-tab-strip.test.ts"
           ]
+        },
+        {
+          "ref": "fbd8db67f",
+          "at": "2026-08-29T15:28:16.709Z",
+          "message": "fix(desktop): 内置浏览器不再把 Electron 报进 UA (#3)",
+          "files": [
+            "apps/desktop/src/main/browser-user-agent.ts",
+            "apps/desktop/src/main/browser-runtime.ts",
+            "apps/desktop/src/main/index.ts",
+            "apps/desktop/tests/browser-user-agent.test.ts"
+          ]
         }
       ]
     },
@@ -611,7 +650,7 @@ const SEED = {
       "body": "文件面板需要支持编辑基本文本文件：md、txt、json、jsonl 等。预览状态下不可编辑。",
       "area": "文件面板",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r2b",
@@ -656,7 +695,13 @@ const SEED = {
           "text": "先回答三个「为什么」。\n\n【为什么左上角 100% 有效】那一块是一整块空的拖动带：`.sidebar-drag` 里只放了一个什么都没有的方块，宽度还特意躲开了右边 50px（收起侧栏那个按钮就在那 50px 里）。也就是说，那块拖动区上面永远不会压着任何按钮，尺寸也只在拉侧栏宽度时才变。chat 和右侧栏不一样：那两处是「把标题栏本身设成可拖动」，标题栏里同时还塞着标题、按钮、标签条，谁长大一点就吃掉一块拖动区。\n\n【为什么右侧栏多开几个标签就拖不动】这条是纯几何、和玄学无关，看 CSS 就能算出来：标签条最多允许占到「整条标题栏减 80px」，可是右边那两个按钮 + 左右内边距 + 间距本身就要 92px。标签一多，标签条顶到上限，中间那条真正能按住拖窗的空带被压到只剩 12px（CSS 里写死的最小值），再多还会把右上角按钮顶出可视区。12px 那么细，人是按不中的，看起来就是「拖动效果没了」。\n\n【为什么 chat 上方会丢、随便 resize 一下又好了】这条是 Electron/Chromium 的老毛病：可拖动区域不是实时算的，Chromium 只在「某个元素的 app-region 属性值发生变化」时才重新收集一遍矩形清单，然后交给 macOS。矩形只是移动、变大变小（面板拉宽、标题多一行、窗口变高），或者一个曾经在标题栏上「挖过洞」的浮层（弹出菜单、右键菜单、提示气泡）被关掉，都不会触发重算——旧清单就一直用着，那块区域按下去当然没反应。resize 窗口会顺带触发一次重算，所以「随便调一下窗口大小就好了」。这也说明它不是 CSS 写漏了，之前几次修复给某个元素补 CSS 之所以治不干净，就是因为漏的是「什么时候重算」，不是「哪里少写了一条」。\n\n【这次改成什么结构】不再逐个元素打补丁，改成一条统一约定：\n1. 每条标题栏都由同一个组件（WindowDragBar）铺一层「空的拖动层」，铺满整条标题栏、里面什么都不放，而且必须放在标题栏的第一个位置——这样后面的按钮会自动在它上面挖出自己的洞，新加的 UI 也不会再把整条拖动带盖掉。左上角那块之所以一直好用就是这个形状，现在 chat、右侧栏、技能页、记忆页全部统一成它。\n2. 右侧栏给拖动带留了一段永远不会被标签占掉的空位（48px），标签条超出就横向滚动，右上角按钮也不会再被顶出去。这笔账（48+62+14+16=140）写进了测试，以后谁改其中一个数字，测试会当场报错。\n3. 最关键的一条：鼠标一移进任何一条标题栏，就主动让系统重算一次可拖动区域。系统是在你按下鼠标那一刻才去查的，而按下之前鼠标一定先移进来，所以这一下永远赶得上；鼠标不在标题栏时完全没有开销。重算用的是一个 0×0 的隐形哨兵元素，不会有哪怕一帧让真正的拖动带失效（旧写法是把标题栏自己临时关掉再打开，那一帧里按下去反而拖不动）。\n\n【怎么验】打包后的 app 里：\n1. chat 界面上方空白处按住拖窗口，来回拖十几次；中途开关左右侧栏、切几个会话、让标题变长/变短、随便右键点几下侧栏的会话（弹出菜单开了再关），再回去拖——应该每次都能拖动。\n2. 右侧栏连开 4~6 个标签页（终端、浏览器、文件等），看标签条右边是否始终留着一小段空白，在那段空白上按住拖窗口应该有效；同时右上角的「+」和「收起右侧栏」两个按钮不能被挤出去。\n3. 左上角那块照旧应该 100% 有效（这次也换成了同一个组件，要确认没有退化）。\n4. 技能页、记忆页的标题栏也顺手拖一下。\n5. 顺便确认标题栏里的按钮还都点得动（展开侧栏、展开作业栏、标签页的关闭叉、右侧栏的 + 和收起）——拖动层是铺在它们下面的，这一条是防止盖住点击。\n\n【留的口子】窗口里那两条拉宽面板的竖条（panel-resizer）在标题栏高度范围内本来就按不动（会变成拖窗口），这是改动之前就有的，和本次问题无关，没顺手动它以免影响别的行为。"
         }
       ],
-      "userComments": [],
+      "userComments": [
+        {
+          "at": "2026-08-29T13:06:40.796Z",
+          "text": "等待我长期测试在选择是否打回或者通过吧",
+          "images": []
+        }
+      ],
       "commits": [
         {
           "ref": "7f5b7203c",
@@ -690,9 +735,20 @@ const SEED = {
           "by": "r3a",
           "at": "2026-08-29T05:00:00.000Z",
           "text": "【现在会变成什么样】「最近」和「项目」这两条栏目标题的最右边，各多了一个箭头按钮。在上面的那一栏显示「下移」（向下箭头），在下面的那一栏显示「上移」（向上箭头），点哪一个都是这两栏对调位置，一下就到位。换完的顺序会记住，关掉 app 再打开还是你换过的样子。\n\n【我替你定的几件事】\n· 用一个箭头按钮而不是拖拽。只有两栏，拖来拖去反而不好点，而且拖拽要么引入一个库、要么自己写一套，都不划算——你说了不要引入拖拽库。\n· 每栏只显示一个方向的箭头（在上的只能下移、在下的只能上移），不摆两个箭头让其中一个永远是灰的。\n· 「最近」里一条对话都没有的时候，那一栏本来就不显示，这时候「项目」上的箭头也跟着藏起来——没有东西可换，按了会像是坏的。\n· 最上面那一小条置顶对话不参与换位，永远在最顶上。\n· 顺序存在浏览器本地存储里，和「最近是否折叠」用的是同一套界面偏好，没有新开存储。\n\n【稳妥性】读回这个顺序的时候做了修复：认不出来的值、重复的、少写的，都会补回默认位置，一份坏掉的偏好不可能让某一栏整个消失。这条有单测盯着。\n另外换位换的是真实的排列顺序而不是只挪了视觉位置，所以用键盘 Tab 走一遍的顺序和眼睛看到的顺序是一致的。\n\n【验证】编译通过；桌面端单元测试 320 条全绿，其中新加了 5 条测这个顺序规则的。\n\n【打包后请这样人工验一遍】\n1. 鼠标移到「最近」那条标题上，最右边应该有一个向下的箭头；点它，「项目」跑到上面、「最近」到下面。\n2. 这时「最近」标题右边的箭头应该变成向上，「项目」标题右边变成向下；点任意一个都能换回来。\n3. 换成「项目」在上面之后，完全退出 CoilCoil 再打开，顺序应该还是「项目」在上面。\n4. 点「最近」标题（文字那一片）仍然是折叠/展开这一栏，不能变成换位置。\n5. 「项目」标题右边原有的两个图标（归档、打开项目文件夹）都还在，功能正常，新箭头在它们的右边。\n6. 把所有对话归档掉、让「最近」这一栏消失，两条箭头都应该消失且不报错。"
+        },
+        {
+          "by": "管控（返工）",
+          "at": "2026-08-29T15:28:16.709Z",
+          "text": "按你说的改成拖动了，那个箭头按钮删掉了。\n\n现在把「最近」或者「项目」这两条标题本身按住往另一条上拖，两栏就换位置。拖起来标题会变半透明，落点那一条上面会出现一条蓝线，和你拖工作区排序时看到的完全一样——这个侧栏里只保留一种拖法，不再是一处拖、一处点按钮。\n\n换过的顺序照样记住，关掉再开还是你摆的样子。\n\n一个边界情况：「最近」一条对话都没有的时候那一栏本来就不显示，这时候标题拖不动——没有地方可以放，能拖但拖不动反而像是坏的。\n\n加了一条测试盯着这里，以后谁再把它改回按钮会当场报错。"
         }
       ],
-      "userComments": [],
+      "userComments": [
+        {
+          "at": "2026-08-29T13:07:10.994Z",
+          "text": "不行，我要的是拖动换顺序，不是有一个按钮",
+          "images": []
+        }
+      ],
       "commits": [
         {
           "ref": "dfe886cdf",
@@ -701,6 +757,17 @@ const SEED = {
           "files": [
             "apps/desktop/src/renderer/src/features/workspaces/sidebarSections.ts",
             "apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx",
+            "apps/desktop/src/renderer/src/styles.css",
+            "apps/desktop/tests/sidebar-sections.test.ts"
+          ]
+        },
+        {
+          "ref": "55157580e",
+          "at": "2026-08-29T15:28:16.709Z",
+          "message": "feat(desktop): 「最近」和「项目」改成拖标题换顺序 (#6)",
+          "files": [
+            "apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx",
+            "apps/desktop/src/renderer/src/features/workspaces/sidebarSections.ts",
             "apps/desktop/src/renderer/src/styles.css",
             "apps/desktop/tests/sidebar-sections.test.ts"
           ]
@@ -713,7 +780,7 @@ const SEED = {
       "body": "多个工作区时左上角会变成三个并排的模式，取消掉，恢复原来的样子。",
       "area": "窗口",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r3a",
@@ -742,7 +809,7 @@ const SEED = {
       "body": "回答：目前的记忆整理 /memory 是默认设置了多少轮自动整理吗？这是一个问题，不是改动需求——查代码给出确切答案。",
       "area": "问答",
       "priority": "low",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r1c",
@@ -750,7 +817,13 @@ const SEED = {
           "text": "结论：没有「多少轮自动整理」这个设置。记忆整理不是按轮数攒够了才跑，而是**每次回答彻底结束就跑一次**，并且默认是开着的。\n\n具体是这样：\n1. 触发点：主 Agent 一轮跑完、并且确定不会再自动重试 / 自动压缩 / 继续跑排队消息之后，会发一个「已收尾」的信号，记忆整理就挂在这个信号上。代码在 packages/workflow/extensions/project-memory.ts 第 407-411 行（监听 agent_settled）。所以口语说就是「你每问一次、它答完一次，就整理一次」，没有 3 轮 / 5 轮这种阈值，也没有 token 阈值或上下文占比阈值。\n2. 默认值：开启。配置文件里没写这一项时按开启算，代码在 packages/workflow/extensions/memory-settings.ts 第 62 行（autoSummarize），运行时另有一份同样默认值在 packages/runtime-core/src/runtime-resources.ts 第 107 行。\n3. 你可以改：设置里的「记忆」页有一个勾选框「回复后自动整理」（apps/desktop/src/renderer/src/features/memory/MemoryWorkspace.tsx 第 242 行）。取消勾选后就完全不自动跑，只能手动敲 /memory。\n4. 实际不会疯狂重复跑，有三道闸：\n   - 同一个项目同一时刻只允许有一个整理进程，靠一个锁文件挡住（packages/workflow/extensions/memory-worker.ts 第 54 行起；锁超过 15 分钟没人释放才算失效）。上一次还没整理完就又答完一轮的话，这一次直接跳过，界面上显示「当前项目已有记忆整理正在运行」。\n   - 单次整理最多跑 5 分钟，超时被杀（memory-worker.ts 第 9 行）。\n   - 工作目录如果在 .pi 里面，直接禁用整理，防止自己整理自己。\n5. /memory 这个命令本身做的事：立刻在后台启动一次同样的整理（project-memory.ts 第 314-323 行），跟自动触发走的是同一套流程，只是会给你一条「记忆整理已在后台启动」的提示。\n6. 设置文件真实位置：~/Library/Application Support/@coilcoil/desktop/agent/memory-settings.json。里面 autoSummarize 为 false 就是关，缺省或 true 就是开。\n\n一句话：默认「每答完一次就整理一次」，不是按轮数，且可以在设置里一键关掉。"
         }
       ],
-      "userComments": [],
+      "userComments": [
+        {
+          "at": "2026-08-29T13:08:30.703Z",
+          "text": "这个任务算完成，但是呢，记忆模块整理是需要新逻辑的",
+          "images": []
+        }
+      ],
       "commits": []
     },
     {
@@ -759,7 +832,7 @@ const SEED = {
       "body": "系统提示词里面的子 agent 提示词删除。",
       "area": "提示词",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r1c",
@@ -791,14 +864,34 @@ const SEED = {
           "by": "r2c",
           "at": "2026-08-29T01:10:00.000Z",
           "text": "【文字为什么没居中】不是图标把它挤歪的，是按钮底下多了一小段内边距。这个按钮高 40px，写的时候在下边留了 6px，本意是跟下面的栏目列表拉开距离；但这 6px 是「内」边距，占的是按钮自己肚子里的位置——图标和文字实际是在上面那34px 里居中的，于是整行比按钮的正中间高了 3px。\n\n改法是把这段距离挪到按钮外面去（改成外边距），按钮肚子恢复完整的 40px，内容自然就落在正中线上，和它下面那排栏目按钮也对齐了。没有靠再加一段 padding 往回怼。\n\n【悬浮阴影】鼠标移上去时加一层很浅的投影（往下 1px、模糊 3px、透明度 9%），没有加描边，也没有把底色压得更深，颜色和阴影都带了一点过渡，不会硬跳。测试里把这几个数字卡住了：只允许一层、偏移和模糊都是个位数 px、透明度不超过 15%、不许用阴影画描边、悬浮态不许多出边框——以后谁想把阴影加重，测试会当场拦下来。\n\n【打包后怎么人工验】\n1. 打开设置，看左上角「← 返回工作区」这一行：图标和文字应该在那块区域正中间，和下面「模型与服务商」那排文字的上下节奏一致，不再偏上。\n2. 鼠标移上去：出现一层很淡的浮起感，不应该看到边框或者明显的灰块；移开要平滑退掉。\n3. 浅色和暗色各看一遍，浅色下不应该发灰发脏。\n4. 点一下确认还能正常退回工作区（这条只是防止误伤）。"
+        },
+        {
+          "by": "管控（返工）",
+          "at": "2026-08-29T15:28:16.709Z",
+          "text": "那层悬浮阴影整个去掉了。\n\n现在鼠标移到「返回工作区」上面，就只是底色变一下，和它下面「模型与服务商」那排按钮一模一样，没有投影、没有描边、也不会浮起来。文字居中那一半是这条 Issue 本来要修的，保留着。\n\n原来那条测试是卡阴影数值的（不许太重），现在换成了更直接的一条：这个按钮悬浮时不许有投影、描边或者位移。以后谁想再加，测试会拦下来。"
         }
       ],
-      "userComments": [],
+      "userComments": [
+        {
+          "at": "2026-08-29T13:09:07.024Z",
+          "text": "我不希望有一个 奇奇怪怪 的样式，居中就好了啊",
+          "images": []
+        }
+      ],
       "commits": [
         {
           "ref": "42422aad5",
           "at": "2026-08-29T09:07:07+08:00",
           "message": "fix(desktop): 「返回工作区」文字真正居中，悬浮加一层浅投影 (#10)",
+          "files": [
+            "apps/desktop/src/renderer/src/features/settings/settings.css",
+            "apps/desktop/tests/settings-chrome.test.ts"
+          ]
+        },
+        {
+          "ref": "fbd8db67f",
+          "at": "2026-08-29T15:28:16.709Z",
+          "message": "（和 #3 同一个提交，改的是 settings.css）",
           "files": [
             "apps/desktop/src/renderer/src/features/settings/settings.css",
             "apps/desktop/tests/settings-chrome.test.ts"
@@ -812,7 +905,7 @@ const SEED = {
       "body": "为什么置顶的对话不在最近里面显示？希望置顶对话同样出现在最近列表中。",
       "area": "侧边栏",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r3a",
@@ -840,7 +933,7 @@ const SEED = {
       "body": "skill 界面的启用和停用标志不明显，需要更清晰的视觉区分。",
       "area": "Skill",
       "priority": "low",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r2b",
@@ -869,7 +962,7 @@ const SEED = {
       "body": "chat 界面等待 AI 回复的加载状态换一个。项目里应该已经准备了多个加载图标，找一下换一个。",
       "area": "Chat",
       "priority": "low",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r3b",
@@ -901,10 +994,41 @@ const SEED = {
           "by": "r1c",
           "at": "2026-08-29T05:00:00.000Z",
           "text": "结论：是的，左下角那个 logo 用的就是 apps/desktop/build/logo.svg 这个设计稿，画面完全一致，不需要改，我也没有改任何代码。\n\n它是怎么被引用的：不是用 <img src=\"build/logo.svg\"> 这种方式加载文件，而是把那个 svg 的内容原样搬进了一个 React 组件 apps/desktop/src/renderer/src/ui/CoilLogo.tsx，动画样式放在 apps/desktop/src/renderer/src/styles.css 第 480-501 行。左下角的调用点在 apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx 第 508 行（侧边栏底部那一条，logo + CoilCoil + 当前模型 + 设置按钮）。\n\n我逐项比对过：7 个多边形的坐标、黑白遮罩、渐变的三个色标、blur(12px)、contrast 脉冲、每个三角形的旋转时长和错开时间，和 build/logo.svg 一模一样，只有两处刻意的差别，且都是必要的：\n1. 样式钩子从 id 换成了 class，遮罩和渐变的 id 改成每个实例唯一——因为同一屏可能同时渲染好几个 logo，id 重复会互相串味。\n2. 深色主题下把墨色换成纸色（否则黑色墨团在深色背景上看不见）。\n\n为什么不改成直接引用 build/logo.svg 文件：build/ 是打包用的资源目录，不在界面代码的打包范围内，运行时引不到；而且就算复制一份过去用 <img> 加载，外部样式表也管不到图片内部，深色主题下 logo 会变成一团看不见的黑。现在这种内联写法是唯一能同时保住动画和深色适配的做法。所以这一条我判定为「已经是对的」，保持现状。"
+        },
+        {
+          "by": "管控（返工）",
+          "at": "2026-08-29T15:28:16.709Z",
+          "text": "你说得对，而且比你想的还严重一点：这个标志从来就没画对过。\n\n【查到了什么】设计稿里「把几个三角形糊成一团墨」这一步，是给遮罩加了一句 CSS 的对比度。但遮罩本身是不显示的东西，浏览器不会对它执行这句话——所有浏览器都一样，不只是别的浏览器。所以你现在在应用左下角看到的其实是一团雾，不是一团墨。换到别的地方渲染就更散，你遇到的「丢样式」就是这件事的放大版。\n\n【改成什么样】看第一张图：左边是你现在看到的，右边是改完的。糊成一团这一步改用 SVG 自己的做法（不依赖任何外部样式），所以：\n· 边缘终于是实的，是一团会慢慢蠕动的墨；\n· 形状和现在是同一路的，不是换了个标志；\n· 深色主题下自动变成纸白（第三张图）；\n· 最后一张是把它当成一个普通图片文件引进来的样子——和在应用里一模一样。\n\n【关于你想要的「svg 的形式」】现在 apps/desktop/build/logo.svg 这个文件就是完全自带样式的了：双击打开、当图片引、拖进任何浏览器、给别的项目用，都是同一团墨，不再依赖应用的样式表。应用里用的还是内联的那份，因为深浅主题要跟着应用的开关走（当图片引就只能跟系统的开关），但两边现在是同一套画法，看起来完全一致。\n\n【要是你不喜欢新的样子】说一声，换回原来那团雾很快——这不是不可逆的改动。",
+          "images": [
+            "data:image/png;base64,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R3379jV5efXVV+VohpDi+fTTT7dt2xat79Sp0y677CJlXFdqa2vr6+tNAeBomzdv3uKx2QMF9MXoqZctW4YOdNWqVQ0NDfolEBaDBg0yJDlAcyxZsiT2KVyPu3fvLvvgHglDZB07djQFHFBajm0ztrx27Vo0GzQeNEL9Etx9HXzwwZ07dzatBl30LbfcgjdCU//GN76RyWRQiZO/9957C3n5d7/73Vw3gY899hguASgcddRRhjRHytqVBep855133mmnnXQlNCU+7BFHHBHq/d5//310mMccc4y0Q+Ghhx6aPn26KR4Mfdx4441RjY7Pftttt+Er/eUvfxl6Ct8S5DV67DyHfeCBB9555508O+CwXbt2tQ/xiXBMWCemWqGAbgm//e1vJcoiBNo0GmjsU5ZYZaPBj3/lypUoHHfccYaQ4oFEWL58ebR+9913lxEnXIE+/vhjFAYMGNDs0WBd/PnPfzYFgA4dbwGnB7eIffr0MSRRoOP63//939inTjvttAsvvBCFxYsXS/+2xx57mOYYMWLEe++91+xuruvivu4zHjhsW8VFQKngnKEJ3n77bZz29ddfD2GBO8bQnV4uoMZi61977bUXX3xRTvvpp5+O3efSSy/t0aOHIR4pa1fCP/7xj7Fjx6L//O///u9mj7xmzRqcMz4gbupOOukkW7969WooftMioDTa3OTOc/eSX9VULRTQLQH3kdLucdOMbf/+/bt06YKCvRn93ve+99nPfjb0qh/84Af4IekaeNUvv/xyaDcIaCk88cQTJi/oHS644AJDSBA4ZzU1gZ821AA6a/sQHol0iGhsul7Ydddd9957b/tQwj1xNerduzd62B122AEmBKwjtPauPpDL6M0ZEppo8CdGVxYalMCdmFacs2bNwhZtYPLkydEjwHXTF3VpOdgZTQWjHzt5oOXYZoOHaGza02pbjjzyyH79+t19991o5//3//5faGiph0F41VVX5XrVyJEjYz+d8Xrsv/zlL1LGL0j6/yhw+wzxSV+7AgcddBAENGwIbM8999z8Oz/44INoLeg/TzjhhOiz3/nOd3A0+xD3ey+99BL2zBXAefPNN8f6I63n/3jEPnXttdfCbDYkCAV0S/iP//gPKVx33XWQJl/96lf32muv0D4QE0uXLn3++eehZo4++ujY43z00UcY2cn1LnmeEjB+RAFNolxy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"
+          ]
         }
       ],
-      "userComments": [],
-      "commits": []
+      "userComments": [
+        {
+          "at": "2026-08-29T13:10:05.729Z",
+          "text": "no，我在其他浏览器中渲染会丢失样式，所以我才打算考虑svg的形式",
+          "images": []
+        },
+        {
+          "at": "2026-08-29T13:10:11.063Z",
+          "text": "你有什么别的想法吗",
+          "images": []
+        }
+      ],
+      "commits": [
+        {
+          "ref": "5dbbde9fd",
+          "at": "2026-08-29T15:28:16.709Z",
+          "message": "fix(desktop): 标志改成自带样式的画法，换到哪儿都是同一团墨 (#14)",
+          "files": [
+            "apps/desktop/build/logo.svg",
+            "apps/desktop/src/renderer/src/ui/CoilLogo.tsx",
+            "apps/desktop/src/renderer/src/styles.css",
+            "docs/taskboard/board.template.html"
+          ]
+        }
+      ]
     },
     {
       "id": 15,
@@ -918,9 +1042,20 @@ const SEED = {
           "by": "r3b",
           "at": "2026-08-29T02:55:57.000Z",
           "text": "现在会变成什么样：「你想构建什么？」上面那个转圈的加载图标没有了，换成了 CoilCoil 的墨团标志——就是左下角那个标志，同一个图形，放大版。空态本来什么都没在加载，摆个转圈的东西容易让人以为卡住了。\n\n实现上说明一句：没有去引 apps/desktop/build/logo.svg 这个文件。那个目录不在界面的打包范围里，直接当图片引会加载不到；而且用 <img> 引进来的话，深色主题下它会是纯黑的、在深色背景上根本看不见。项目里已经有一个和那个 svg 一模一样的内联组件（左下角标志用的就是它，深色主题下会自动换成纸白色），这次直接复用它，两处永远一致。\n\n尺寸：标志放到 64 像素，比原来的图标大一圈，跟下面那行大标题的分量配得上。标志的墨迹只占方框中间约六成，四周是透明的，所以我把它和标题之间的间距从 18 收到 6，看起来的实际间隔和原来差不多。\n\n加了一条测试盯着这里，防止以后又被换回加载动画。\n\n打包后怎么人工验一遍：打开一个还没有任何对话的项目（或者新建一个会话），看「你想构建什么？」上面——应该是那个会缓慢蠕动的墨团标志，和左下角的一模一样，只是更大。切到深色主题再看一眼，标志应该是浅色的、清楚可见，不是一团黑。"
+        },
+        {
+          "by": "管控（返工）",
+          "at": "2026-08-29T15:28:16.709Z",
+          "text": "改小了：从 64 像素收到 40 像素。\n\n标志的墨迹只占方框中间六成左右，四周是透明的，所以下边的间距同时从 6 调到 8，看起来标志和「你想构建什么？」之间的距离和原来差不多，只是标志本身小了一圈。\n\n另外这次连着 #14 一起，标志的画法换了（见 #14 里的对比图）——现在它是一团边缘清楚的墨，不再是一团雾。空态这里看到的也会跟着变。"
         }
       ],
-      "userComments": [],
+      "userComments": [
+        {
+          "at": "2026-08-29T13:12:13.965Z",
+          "text": "太大了 小一点",
+          "images": []
+        }
+      ],
       "commits": [
         {
           "ref": "63722d7ca",
@@ -931,6 +1066,15 @@ const SEED = {
             "apps/desktop/src/renderer/src/styles.css",
             "apps/desktop/tests/empty-chat-mark.test.ts"
           ]
+        },
+        {
+          "ref": "fbd8db67f",
+          "at": "2026-08-29T15:28:16.709Z",
+          "message": "（和 #3 同一个提交，改的是空态标志尺寸）",
+          "files": [
+            "apps/desktop/src/renderer/src/features/conversation/ConversationPane.tsx",
+            "apps/desktop/src/renderer/src/styles.css"
+          ]
         }
       ]
     },
@@ -940,7 +1084,7 @@ const SEED = {
       "body": "chat 界面的代码块渲染，右下角需要显示一个复制按钮——位置必须是右下角。",
       "area": "Chat",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r3b",
@@ -968,7 +1112,7 @@ const SEED = {
       "body": "chat 界面的下箭头可以快速回到底部，但需要一个触发阈值——往上滚一点点不应该就触发显示。",
       "area": "Chat",
       "priority": "low",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r3b",
@@ -1077,7 +1221,7 @@ const SEED = {
       "body": "默认色调的左侧栏色调，稍微偏白一点点。",
       "area": "视觉",
       "priority": "low",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r3c",
@@ -1136,7 +1280,7 @@ const SEED = {
       "body": "设置界面的色调没有和主界面同步，明明选的是同一套配色，结果设置界面和主界面不一致。",
       "area": "设置",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r2c",
@@ -1163,7 +1307,7 @@ const SEED = {
       "body": "去 mcp 看看我们是不是自动发现 mcp 的？能不能让我们手动控制：可以选择「发现所有 mcp」，然后出现一个弹窗，按需勾选导入。",
       "area": "MCP",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "管控（自建）",
@@ -1196,7 +1340,7 @@ const SEED = {
       "body": "整体按钮、悬浮的一些东西，圆角都稍微大一点点。",
       "area": "视觉",
       "priority": "low",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r3c",
@@ -1232,7 +1376,7 @@ const SEED = {
       "body": "滚动条需要淡一点，现在颜色有点深了，包括悬浮和点击状态。",
       "area": "视觉",
       "priority": "low",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r3c",
@@ -1277,7 +1421,7 @@ const SEED = {
       "body": "Mac 上会话的 agent 完成任务会显示小绿点，改成红点表示未读；正在处理的状态用加载状态（例如圆圈），不要绿点扩散的效果；完成后显示红点。另外 Mac 扩展坞图标右上角需要显示 1、2 这种数字小红点。",
       "area": "通知",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "管控（自建）",
@@ -1311,7 +1455,7 @@ const SEED = {
       "body": "右侧目录上方的 tab 需要支持鼠标中键关闭。",
       "area": "文件面板",
       "priority": "low",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r2a",
@@ -1336,7 +1480,7 @@ const SEED = {
   ]
 }
 ;
-const BUILT_AT = "2026-08-29T13:18:26.553Z";
+const BUILT_AT = "2026-08-29T15:28:29.187Z";
 const LS = 'suocode-taskboard-v2';
 const LS_UI = 'suocode-taskboard-ui-v1';
 
@@ -1697,7 +1841,9 @@ function openTask(id){
         ? notes.map((n,i)=>noteHTML({
             cls:'note'+(isNew(n)?' unseen':''),
             who:'🤖 '+esc(n.by||'agent'), at:n.at, text:n.text, key:'a'+i,
-            tag:isNew(n)?'<span class="new-tag" style="margin-left:0">新</span>':''
+            tag:isNew(n)?'<span class="new-tag" style="margin-left:0">新</span>':'',
+            // agent 也可以贴图（改动前后对比这种，文字讲不清楚）。和我的回复走同一套渲染。
+            extra:(n.images||[]).map(src=>`<img src="${src}" alt="附图">`).join(''),
           })).join('')
         : '<div class="empty">还没有 agent 记录。</div>'}
     </div>

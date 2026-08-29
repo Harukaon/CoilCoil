@@ -20,6 +20,11 @@ const byId = new Map(data.tasks.map((t) => [t.id, t]));
 const resultsDir = join(here, 'results');
 let merged = 0;
 
+// 用户最后一次从看板导出的时间。晚于它的 agent 结果才是「这一轮新交的东西」。
+const exportedAt = data.meta?.exportedAt ? Date.parse(data.meta.exportedAt) : 0;
+const resultTime = (r) =>
+  Math.max(0, ...[...(r.agentNotes ?? []), ...(r.commits ?? [])].map((x) => Date.parse(x.at) || 0));
+
 if (existsSync(resultsDir)) {
   for (const file of readdirSync(resultsDir).filter((f) => f.endsWith('.json')).sort()) {
     const r = JSON.parse(readFileSync(join(resultsDir, file), 'utf8'));
@@ -37,7 +42,10 @@ if (existsSync(resultsDir)) {
     for (const c of r.commits ?? []) {
       if (!seenCommits.has(c.ref)) { (task.commits ??= []).push(c); seenCommits.add(c.ref); }
     }
-    if (r.status) task.status = r.status;
+    // 状态归属：用户导出那一刻的判断是准的，比它旧的 agent 结果不许把它改回去。
+    // 不然用户在看板上点了「已完成」或「打回重做」，下一次 build 又被上一轮的
+    // results 文件刷成「待验收」，用户的验收结果就白点了。
+    if (r.status && (!exportedAt || resultTime(r) > exportedAt)) task.status = r.status;
     merged++;
   }
 }
