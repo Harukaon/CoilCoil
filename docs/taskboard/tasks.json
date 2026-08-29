@@ -130,10 +130,36 @@
       "body": "文件面板需要支持编辑基本文本文件：md、txt、json、jsonl 等。预览状态下不可编辑。",
       "area": "文件面板",
       "priority": "medium",
-      "status": "todo",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r2b",
+          "at": "2026-08-29T00:00:00.000Z",
+          "text": "【现在怎么用】右侧文件面板打开一个文本文件（md、txt、json、jsonl、yaml、toml、ini、csv、log、没有扩展名的纯文本都行），预览区右上角会多一个「编辑」按钮。点它才进入编辑态；不点就还是老样子的只读预览——你说的「预览状态下不可编辑」是按这条做的，预览里永远打不了字。\n\n进入编辑态后中间变成一块可以直接打字的白色区域。改完有两个出口：「保存」（也可以按 ⌘S）写回磁盘并退回预览；「取消」退出编辑。如果已经改过东西还点取消，按钮会先变成红色的「确认放弃」，再点一次才真丢弃——不会一下手滑就没了。\n\n【哪些文件不给编辑，为什么】\n1. 图片、PDF：根本不出现「编辑」按钮。\n2. 超过 2 MB 的文件：只读，底部会写明原因。因为预览本来就只读了前 2 MB，如果允许保存，等于把文件后半截删掉。\n3. 看着像文本、其实是二进制的文件（比如后缀是 .log 但内容是压缩包）：只读，底部写明原因。\n4. 不在当前项目文件夹里的文件（Agent 回复里引用的外部路径也能打开预览）：只读。查看可以到处看，写只允许写在工作区里面，这是防止界面被拿去改任意路径的文件。\n\n【不会弄坏文件的几道保险】\n1. 写盘是「原子写」：先写一个同目录下的隐藏临时文件，再整体替换过去。中途断电或出错，原文件保持原样，不会出现写了一半的残缺文件。文件权限也照抄原文件。\n2. 保存 json / jsonl 之前先做语法检查，写错了会提示（jsonl 还会告诉你是第几行坏了），并且不写盘。允许带注释的 .jsonc 不做严格检查。\n3. 编辑期间如果这个文件在磁盘上被别人改了（最常见的是 Agent 自己在改），顶部会跳出一条黄色提示，让你选「用磁盘上的版本」还是「保留我的修改」，绝不会闷头覆盖。就算提示没来得及显示，保存时后台还会再比对一次文件时间戳，对不上就直接拒绝保存并提示。\n4. 有未保存的修改时去点别的文件、或者关掉预览，会被拦下并提示「请先保存或取消编辑」，不会静默丢弃。\n\n【顺带修好的】.jsonl / .ndjson / .properties / .cfg 以前在文件面板里压根打不开（提示不支持预览），现在能预览也能编辑了。\n\n【做了什么取舍】没有装 Monaco / CodeMirror 这类编辑器，就是一块普通文本框，所以没有语法高亮、没有自动缩进、Tab 键仍然是切换焦点而不是插入缩进。理由是这个面板的定位是改几行配置和笔记，为此多背一个几 MB 的依赖不划算，也和项目现有的轻量风格不符。如果以后想要高亮，可以再单独提一个 Issue。\n\n【自动化验证】新增 20 条单测（可编辑类型判定、2 MB 上限、二进制识别、JSON/JSONL 语法检查、原子写落地后目录里不留临时文件、时间戳冲突时拒绝覆盖、工作区外拒写、外部改动的两种处理）。desktop 包 tsc 与全部单测通过：299 passed / 0 failed（基线 278，本次 +20，#12 再 +1）。\n\n【打包后请这样人工验一遍】\n1. 打开一个项目，在右侧文件面板点开一个 .md：确认右上角有「编辑」，点进去能打字，改一句，按 ⌘S，提示「已保存 xxx.md」，用别的编辑器打开确认内容真的变了。\n2. 打开一个 .json：故意删掉一个大括号再保存，应当报「JSON 语法有误」且文件没被改坏；补回去再保存应当成功。\n3. 打开一个 .jsonl：把某一行改成非法 JSON 保存，提示里应当带行号。\n4. 外部改动：进入编辑态后不要保存，让 Agent（或在终端里用命令）改同一个文件，等一两秒，顶部应当出现黄条；分别试「用磁盘上的版本」（内容被换成磁盘版本）和「保留我的修改」（内容保留、再保存能成功）。\n5. 未保存拦截：改了字不保存，去点文件树里另一个文件，应当被拦住并提示；点「取消」→「确认放弃」后再点，就能正常切走。\n6. 只读场景：打开一张图片（无编辑按钮）、打开一个超过 2 MB 的日志（无编辑按钮，底部说明超过 2 MB）。\n7. 从对话里点一个项目外的绝对路径（比如 /etc/hosts）打开预览：能看，但不给编辑按钮，底部写「文件不在当前项目内」。"
+        }
+      ],
       "userComments": [],
-      "commits": []
+      "commits": [
+        {
+          "ref": "b41df926e",
+          "at": "2026-08-29T00:00:00.000Z",
+          "message": "feat(desktop): edit text files in the file panel, preview stays read-only (#4)",
+          "files": [
+            "apps/desktop/src/main/file-edit.ts",
+            "apps/desktop/src/main/file-preview.ts",
+            "apps/desktop/src/main/index.ts",
+            "apps/desktop/src/main/remote/remote-client.ts",
+            "apps/desktop/src/preload/index.ts",
+            "apps/desktop/src/shared/desktop-api.ts",
+            "apps/desktop/src/renderer/src/features/files/FilePreviewPane.tsx",
+            "apps/desktop/src/renderer/src/features/files/FilesPanel.tsx",
+            "apps/desktop/src/renderer/src/features/files/fileEditing.ts",
+            "apps/desktop/src/renderer/src/features/files/filePaths.ts",
+            "apps/desktop/src/renderer/src/features/files/preview.css",
+            "apps/desktop/tests/file-edit.test.ts"
+          ]
+        }
+      ]
     },
     {
       "id": 5,
@@ -280,10 +306,28 @@
       "body": "skill 界面的启用和停用标志不明显，需要更清晰的视觉区分。",
       "area": "Skill",
       "priority": "low",
-      "status": "todo",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r2b",
+          "at": "2026-08-29T00:00:00.000Z",
+          "text": "【为什么之前分不清】技能那一行右边的按钮，写的是「点下去会发生什么」——已经启用的技能上面写着「停用」。可是人扫一眼读到的是状态，所以一个绿色的「停用」看起来就像在说「这条是停用的」，正好读反。除此之外两种状态的差别只有整张卡片淡了一点（灰度差很小），隔一行就比不出来。\n\n【现在长什么样】\n1. 每行最右边换成一个开关（就是设置里远程控制那种圆头开关）。开着=绿色、滑块在右；关着=中性灰、滑块在左。一列扫下去就知道哪些开着。\n2. 开关左边直接写状态词「已启用 / 已停用」，启用时是绿色的。\n3. 左边那个小图标也跟着走：启用是绿色，停用是弱灰色。\n4. 卡片本身两种状态都保持白底，没有再整块打灰，也没有加任何描边——按你之前说的，不靠边框和灰块区分。\n5. 删除 / 移除导入按钮挪到了开关左边，这样所有行的开关对齐成一列。\n\n点开关就是启用/停用，和以前的按钮行为完全一样，toast 提示也没变。读屏软件那边用的是标准开关语义（on/off 由系统播报）。\n\n【自动化验证】skillPolicy 的文案函数改成「说状态」并补了单测，另加一条防回归测试：如果以后有人把状态又改回靠描边或整卡片打灰来区分，测试会失败。desktop 包 tsc 与全部单测通过：299 passed / 0 failed。\n\n【打包后请这样人工验一遍】\n1. 打开技能页（侧栏「技能」），至少让列表里同时有启用和停用的技能：隔着一米看屏幕，应当一眼能分出哪些开着。\n2. 点一下开关：滑块滑过去、颜色变绿、左边的字变成「已启用」，同时右上角计数「x/y 已启用」跟着加一。再点一下能关回去。\n3. 切到深色主题再看一遍，绿色和灰色都要能分辨。\n4. 确认删除 / 移除导入按钮还在、还能点（它现在在开关左边）。"
+        }
+      ],
       "userComments": [],
-      "commits": []
+      "commits": [
+        {
+          "ref": "4d3fea7ec",
+          "at": "2026-08-29T00:00:00.000Z",
+          "message": "fix(desktop): make a skill's on/off state readable at a glance (#12)",
+          "files": [
+            "apps/desktop/src/renderer/src/features/settings/SkillSettings.tsx",
+            "apps/desktop/src/renderer/src/features/settings/skillPolicy.ts",
+            "apps/desktop/src/renderer/src/features/settings/settings.css",
+            "apps/desktop/tests/skill-policy.test.ts"
+          ]
+        }
+      ]
     },
     {
       "id": 13,
