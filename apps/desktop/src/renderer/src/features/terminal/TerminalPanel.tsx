@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { LoaderCircle, Play, Terminal as TerminalIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerminalSessionSnapshot } from "../../../../shared/desktop-api";
+import { storedMonoFontStack } from "../../theme";
 import { toastError } from "../../ui/toast";
 import { openTerminalSession } from "./terminalSessions";
 import { TerminalStream } from "./terminalStream";
@@ -47,7 +48,9 @@ function TerminalSurface({ session, stream, active }: {
       convertEol: false,
       cursorBlink: true,
       cursorStyle: "bar",
-      fontFamily: '"SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace',
+      // 外观设置里选的等宽字体。xterm 不继承 CSS，字体栈只能直接交给它；
+      // 已经开着的终端要重新打开才会换过来。
+      fontFamily: storedMonoFontStack(),
       fontSize: 12,
       lineHeight: 1.28,
       scrollback: 10_000,

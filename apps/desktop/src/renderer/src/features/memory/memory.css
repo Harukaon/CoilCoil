@@ -18,7 +18,7 @@
 .memory-status.running { color: var(--c-amber-text); background: var(--c-amber-subtle); }.memory-status.failed { color: var(--c-red-muted); background: var(--c-red-subtle); }.memory-status.disabled { color: hsl(var(--th) var(--ts) var(--l-510)); background: hsl(var(--th) var(--ts) var(--l-925)); }
 .memory-overview-card dl { display: grid; grid-column: 1 / -1; gap: 5px; margin: 0; padding-top: 8px; border-top: 1px solid hsl(var(--th) var(--ts) var(--l-922)); }
 .memory-overview-card dl div { display: grid; grid-template-columns: 55px minmax(0, 1fr); gap: 7px; min-width: 0; }
-.memory-overview-card dt { color: hsl(var(--th) var(--ts) var(--l-592)); font-size: 9px; }.memory-overview-card dd { min-width: 0; margin: 0; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-412)); font: 9px "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.memory-overview-card dt { color: hsl(var(--th) var(--ts) var(--l-592)); font-size: 9px; }.memory-overview-card dd { min-width: 0; margin: 0; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-412)); font: 9px var(--font-mono, "SFMono-Regular", Consolas, monospace); text-overflow: ellipsis; white-space: nowrap; }
 .memory-section-heading { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .memory-section-heading > div:first-child { display: grid; min-width: 0; gap: 4px; }
 .memory-scope-tabs { display: flex; flex: 0 0 auto; gap: 4px; }
@@ -31,7 +31,7 @@
 .memory-editor-meta small { color: #788574; font-size: 9px; white-space: nowrap; }.memory-editor-meta small.over { color: var(--c-red-muted); font-weight: 650; }
 .memory-editor-meta.project-toggle { width: 100%; padding: 6px 7px; border-radius: 7px; text-align: left; cursor: pointer; }
 .memory-editor-meta.project-toggle:hover { background: hsl(var(--th) var(--ts) var(--l-945)); }
-.memory-content-editor, .memory-rules-field textarea { box-sizing: border-box; width: 100%; min-height: 230px; resize: vertical; padding: 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-841)); border-radius: 8px; outline: 0; color: hsl(var(--th) var(--ts) var(--l-280)); background: hsl(var(--th) var(--ts) var(--l-980)); font: 11px/1.55 "SFMono-Regular", Consolas, monospace; }
+.memory-content-editor, .memory-rules-field textarea { box-sizing: border-box; width: 100%; min-height: 230px; resize: vertical; padding: 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-841)); border-radius: 8px; outline: 0; color: hsl(var(--th) var(--ts) var(--l-280)); background: hsl(var(--th) var(--ts) var(--l-980)); font: 11px/1.55 var(--font-mono, "SFMono-Regular", Consolas, monospace); }
 .memory-content-editor:focus, .memory-rules-field textarea:focus, .memory-limit-grid input:focus { border-color: hsl(var(--th) var(--ts) var(--l-629)); box-shadow: 0 0 0 2px rgb(120 140 117 / 12%); }
 .memory-editor-hint { margin: 0; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; line-height: 1.45; }
 .memory-editor-hint.collapsed { padding-left: 7px; }
