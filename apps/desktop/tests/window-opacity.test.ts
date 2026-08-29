@@ -19,12 +19,14 @@ import {
 const scratch = (): string => join(mkdtempSync(join(tmpdir(), "coilcoil-opacity-")), "window.json");
 
 test("透明度收敛在可用范围内，最低也还看得见", () => {
-  assert.equal(resolveWindowOpacity(0.9), 0.9);
+  assert.equal(resolveWindowOpacity(0.97), 0.97);
+  // 用户实测 96% 就是极限，比它更透的一律夹回来。
+  assert.equal(resolveWindowOpacity(0.9), WINDOW_OPACITY_MIN);
   // 0 会让窗口彻底消失，而且没有界面能再把它调回来。
   assert.equal(resolveWindowOpacity(0), WINDOW_OPACITY_MIN);
   assert.equal(resolveWindowOpacity(-4), WINDOW_OPACITY_MIN);
   assert.equal(resolveWindowOpacity(2), WINDOW_OPACITY_MAX);
-  assert.ok(WINDOW_OPACITY_MIN >= 0.7, "下限再低正文就发虚了");
+  assert.ok(WINDOW_OPACITY_MIN >= 0.96, "下限再低正文就发虚了，用户实测过");
 });
 
 test("读不懂的值一律当作不透明", () => {
@@ -45,8 +47,8 @@ test("存档缺失或损坏时按不透明启动，而不是让启动失败", ()
 
 test("写进去的值下次启动读得回来，并且返回真正生效的那个值", () => {
   const file = scratch();
-  assert.equal(writeStoredWindowOpacity(file, 0.88), 0.88);
-  assert.equal(readStoredWindowOpacity(file), 0.88);
+  assert.equal(writeStoredWindowOpacity(file, 0.98), 0.98);
+  assert.equal(readStoredWindowOpacity(file), 0.98);
   // 越界的输入落盘前就被收敛，存档里不会留下一个能把窗口弄没的值。
   assert.equal(writeStoredWindowOpacity(file, 0.1), WINDOW_OPACITY_MIN);
   assert.equal(readStoredWindowOpacity(file), WINDOW_OPACITY_MIN);
@@ -55,5 +57,5 @@ test("写进去的值下次启动读得回来，并且返回真正生效的那�
 test("磁盘写不进去也不抛，本次仍然按收敛后的值生效", () => {
   // 目录不存在 → writeFileSync 必然失败；调用方只关心返回值。
   const unwritable = join(tmpdir(), "coilcoil-no-such-dir", "window.json");
-  assert.equal(writeStoredWindowOpacity(unwritable, 0.92), 0.92);
+  assert.equal(writeStoredWindowOpacity(unwritable, 0.98), 0.98);
 });

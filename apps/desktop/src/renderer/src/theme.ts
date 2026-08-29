@@ -300,7 +300,9 @@ export function monoFontStack(id: MonoFont): string {
  * 档位是离散的，不做无级滑块：外观那一页整页都是「几张卡片里挑一张」，而且透明
  * 度差 1% 肉眼分不出来，给无级滑块只会让人反复微调。
  */
-export const WINDOW_OPACITY_LEVELS = [1, 0.96, 0.92, 0.88] as const;
+/* 用户实测下来 96% 就是能接受的极限，再透正文会发虚，所以四档全部落在 96~100
+   之间，最透的一档就是 96%。原来的 92%/88% 两档删掉了。 */
+export const WINDOW_OPACITY_LEVELS = [1, 0.99, 0.98, 0.96] as const;
 export const DEFAULT_WINDOW_OPACITY = WINDOW_OPACITY_LEVELS[0];
 
 /** 收敛到最近的一档；读不懂或超出范围都回落到不透明。 */

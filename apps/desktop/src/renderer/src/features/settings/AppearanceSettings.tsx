@@ -138,9 +138,9 @@ function FontGrid<Id extends string>({ label, fonts, active, onPick }: {
 /** 每一档的说法。数值本身看不出差别，得说清楚它换来了什么。 */
 const OPACITY_HINTS: Record<number, string> = {
   1: "完全挡住后面的窗口，默认。",
-  0.96: "只是隐约透出一点底，几乎不影响读字。",
-  0.92: "能看清后面窗口的轮廓。",
-  0.88: "透得最明显，浅色背景下正文会略微发虚。",
+  0.99: "几乎看不出来，只是不再是一块死板的实心。",
+  0.98: "隐约透出一点底色。",
+  0.96: "透得最明显，再往下正文就该发虚了，所以到此为止。",
 };
 
 export function AppearanceSettings(): React.JSX.Element {

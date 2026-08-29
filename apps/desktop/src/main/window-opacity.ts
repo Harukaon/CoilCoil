@@ -17,7 +17,9 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
-export const WINDOW_OPACITY_MIN = 0.7;
+/* 下限跟着界面上最透的那一档走：用户实测再透就看不清字了，所以这里不给出比
+   96% 更透的余地，即使 window.json 被手改成更小的值也会被夹回来。 */
+export const WINDOW_OPACITY_MIN = 0.96;
 export const WINDOW_OPACITY_MAX = 1;
 
 /** 把任意输入收敛成一个能直接交给 setOpacity 的值；读不懂就当「不透明」。 */
