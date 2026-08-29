@@ -1,0 +1,27 @@
+{
+  "id": 19,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r3c",
+      "at": "2026-08-29T02:56:23.000Z",
+      "text": "现在会变成什么样：下拉、右键菜单、tooltip、toast、对话框、模型选择、chat 输入框、聊天气泡——所有「浮起来的那一层」，外面那圈细线全没了，改成只靠一层投影和背景撑出层次。同时投影整体调小了一档（原来最重的对话框是 24px 扩散 22% 不透明，现在是 18px / 18%）。\n\n为什么不是把边框留着只调阴影：一条线画上去，浮层就又变回「一个有框的盒子」，这正是你说的那种多余的线。去掉线之后就只剩投影能分层，所以投影只能调小、不能一起去掉——去掉了浮层会糊在背景上。\n\n顺手做的一件更要紧的事：原来每个浮层各写各的阴影数值，散在五六个 CSS 文件里，你说一句「阴影再小一点」就得满仓库找。现在收成了 --shadow-xs/sm/md/lg/xl 五档，从「贴边小按钮」到「对话框」由浅到深，全部浮层都引用这五档。以后要整体调深浅，只改那五行。\n\n加了三条测试盯着这件事：浮层清单里的每一个都不许再出现 border 声明（写 border: 0 可以）；每个浮层的投影必须写成 var(--shadow-*) 而不是具体数值；五档阴影必须一档比一档明显、且最深的一档也不许超过 48px 模糊（否则整屏发脏）。以后谁再往浮层上补一条线或者写死一个阴影，测试直接报错。\n\n一处例外，说明一下：手机端那个浮在桌面壁纸上（而不是应用内）的窗口，阴影留得比应用内的浮层重一点点，因为浅色壁纸上不留重一点就看不出边界了。\n\n打包后怎么人工验一遍：（a）点模型选择、点右键菜单、划出一条 toast、打开一个对话框，逐个看边缘——应该看不到那圈细线，但仍然能看出它浮在上面；（b）chat 输入框同理；（c）切到深色主题再看一遍，深色下投影最容易失效；（d）浅色壁纸上开一下手机端的浮窗，确认边界还在。"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "a0151fe04",
+      "at": "2026-08-29T02:56:23.000Z",
+      "message": "fix(desktop): 浮层与输入框去掉描边，投影收进 --shadow-* 令牌 (#19)",
+      "files": [
+        "apps/desktop/src/renderer/src/styles.css",
+        "apps/desktop/src/renderer/src/bubble.css",
+        "apps/desktop/src/renderer/src/mobile.css",
+        "apps/desktop/src/renderer/src/ui/dialog/dialog.css",
+        "apps/desktop/src/renderer/src/ui/toast/toast.css",
+        "apps/desktop/src/renderer/src/features/settings/settings.css",
+        "apps/desktop/tests/overlay-chrome.test.ts"
+      ]
+    }
+  ]
+}

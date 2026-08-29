@@ -1,0 +1,31 @@
+{
+  "id": 25,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r3c",
+      "at": "2026-08-29T02:58:06.000Z",
+      "text": "现在会变成什么样：全界面的圆角整体大了一档——按钮、菜单项、列表行、卡片、输入框、代码块、对话框、气泡都跟着圆了 1~2 像素。最圆的是 chat 输入框（原来 18px，现在 20px），最方的是缩略图上的小删除按钮（原来 4px，现在 5px）。\n\n为什么是「整体大一档」而不是「都改成同一个值」：如果所有元素都用同一个圆角，小按钮会显得像药丸、大卡片会显得像没圆。原来各档之间本来就有梯度（4/5/6/7/8/9/10…），我把每一档往上推了一格，梯度保留着，所以小元素还是比大元素方一些，只是整体柔了一点。\n\n和 #19 一样，顺手把散落的数值收敛了：原来十个 CSS 文件里写了一百多处具体的 border-radius，改一次「再圆一点」要翻遍全仓库。现在收成 --radius-xs 到 --radius-9xl 十三档加一个 --radius-pill（胶囊，给标签、开关、滚动条用），每一档旁边都注了改之前的值和典型用途。以后你再说「还要圆一点」，只改这十三行。\n\n加了两条测试：十个样式表里不许再出现写死的 border-radius（正圆 50%、直角 0、以及 2~3px 那种「几乎是直角」的小色块除外）；十三档必须严格递增，不许被拉平成同一个值，而且最小的一档得还算圆角、最大的一档得还看得出是矩形。\n\n打包后怎么人工验一遍：（a）看 chat 输入框和聊天气泡，这两处最明显；（b）打开设置界面翻几页，那里按钮和卡片最密集；（c）拉一个右键菜单和一个下拉，看菜单项本身的圆角；（d）如果觉得还不够圆或者过头了，直接告诉我幅度，我改那十三行就行，不用再逐处调。"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "21580c6d7",
+      "at": "2026-08-29T02:58:06.000Z",
+      "message": "fix(desktop): 圆角整体大一档，收敛成 --radius-* 令牌 (#25)",
+      "files": [
+        "apps/desktop/src/renderer/src/styles.css",
+        "apps/desktop/src/renderer/src/bubble.css",
+        "apps/desktop/src/renderer/src/mobile.css",
+        "apps/desktop/src/renderer/src/ui/dialog/dialog.css",
+        "apps/desktop/src/renderer/src/ui/toast/toast.css",
+        "apps/desktop/src/renderer/src/features/settings/settings.css",
+        "apps/desktop/src/renderer/src/features/composer/mobile-model-picker.css",
+        "apps/desktop/src/renderer/src/features/memory/memory.css",
+        "apps/desktop/src/renderer/src/features/files/preview.css",
+        "apps/desktop/src/renderer/src/features/terminal/terminal.css",
+        "apps/desktop/tests/overlay-chrome.test.ts"
+      ]
+    }
+  ]
+}

@@ -589,10 +589,31 @@
       "body": "chat 的输入框 + 所有悬浮气泡，全都取消边框；并且气泡的阴影调小一点点即可。",
       "area": "视觉",
       "priority": "low",
-      "status": "todo",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r3c",
+          "at": "2026-08-29T02:56:23.000Z",
+          "text": "现在会变成什么样：下拉、右键菜单、tooltip、toast、对话框、模型选择、chat 输入框、聊天气泡——所有「浮起来的那一层」，外面那圈细线全没了，改成只靠一层投影和背景撑出层次。同时投影整体调小了一档（原来最重的对话框是 24px 扩散 22% 不透明，现在是 18px / 18%）。\n\n为什么不是把边框留着只调阴影：一条线画上去，浮层就又变回「一个有框的盒子」，这正是你说的那种多余的线。去掉线之后就只剩投影能分层，所以投影只能调小、不能一起去掉——去掉了浮层会糊在背景上。\n\n顺手做的一件更要紧的事：原来每个浮层各写各的阴影数值，散在五六个 CSS 文件里，你说一句「阴影再小一点」就得满仓库找。现在收成了 --shadow-xs/sm/md/lg/xl 五档，从「贴边小按钮」到「对话框」由浅到深，全部浮层都引用这五档。以后要整体调深浅，只改那五行。\n\n加了三条测试盯着这件事：浮层清单里的每一个都不许再出现 border 声明（写 border: 0 可以）；每个浮层的投影必须写成 var(--shadow-*) 而不是具体数值；五档阴影必须一档比一档明显、且最深的一档也不许超过 48px 模糊（否则整屏发脏）。以后谁再往浮层上补一条线或者写死一个阴影，测试直接报错。\n\n一处例外，说明一下：手机端那个浮在桌面壁纸上（而不是应用内）的窗口，阴影留得比应用内的浮层重一点点，因为浅色壁纸上不留重一点就看不出边界了。\n\n打包后怎么人工验一遍：（a）点模型选择、点右键菜单、划出一条 toast、打开一个对话框，逐个看边缘——应该看不到那圈细线，但仍然能看出它浮在上面；（b）chat 输入框同理；（c）切到深色主题再看一遍，深色下投影最容易失效；（d）浅色壁纸上开一下手机端的浮窗，确认边界还在。"
+        }
+      ],
       "userComments": [],
-      "commits": []
+      "commits": [
+        {
+          "ref": "a0151fe04",
+          "at": "2026-08-29T02:56:23.000Z",
+          "message": "fix(desktop): 浮层与输入框去掉描边，投影收进 --shadow-* 令牌 (#19)",
+          "files": [
+            "apps/desktop/src/renderer/src/styles.css",
+            "apps/desktop/src/renderer/src/bubble.css",
+            "apps/desktop/src/renderer/src/mobile.css",
+            "apps/desktop/src/renderer/src/ui/dialog/dialog.css",
+            "apps/desktop/src/renderer/src/ui/toast/toast.css",
+            "apps/desktop/src/renderer/src/features/settings/settings.css",
+            "apps/desktop/tests/overlay-chrome.test.ts"
+          ]
+        }
+      ]
     },
     {
       "id": 20,
@@ -632,10 +653,25 @@
       "body": "默认色调的左侧栏色调，稍微偏白一点点。",
       "area": "视觉",
       "priority": "low",
-      "status": "todo",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r3c",
+          "at": "2026-08-29T02:59:51.000Z",
+          "text": "现在会变成什么样：默认配色（暖纸 + 分层）下的左侧栏往白里提了——原来是 #F3F3F3，现在是 #F7F7F7。正文区仍然是纯白，两者还差一点点，分界看得出来，但左侧栏不再是「一块灰」。\n\n为什么只提到 #F7F7F7 而不是干脆做成纯白：做成纯白就和正文区完全连在一起了，左右两栏没有任何分界，反而更乱。留 3 个点的差是「看得出是两块、但不显灰」的位置。\n\n有一点要提醒你：设置界面的侧栏读的是同一个颜色变量，会跟着一起变白，这是有意的——否则就又出现你在 #23 里说过的「设置界面和主界面不一致」。\n\n这一条只动了一个数值（一个颜色变量的两处引用），改动很小，所以也最容易按你的感觉再调：如果还是嫌灰，告诉我，我继续往上提；如果提过头看不出分界了，我往回压。\n\n打包后怎么人工验一遍：确认设置里的配色是默认那一档（暖纸 + 分层），然后看主界面左侧栏和中间正文区的分界；再进设置界面，确认它的侧栏和主界面左侧栏是同一个白度。"
+        }
+      ],
       "userComments": [],
-      "commits": []
+      "commits": [
+        {
+          "ref": "abbe59d61",
+          "at": "2026-08-29T02:59:51.000Z",
+          "message": "fix(desktop): 默认色调的左侧栏往白里提一点 (#21)",
+          "files": [
+            "apps/desktop/src/renderer/src/theme-tokens.css"
+          ]
+        }
+      ]
     },
     {
       "id": 22,
@@ -692,10 +728,35 @@
       "body": "整体按钮、悬浮的一些东西，圆角都稍微大一点点。",
       "area": "视觉",
       "priority": "low",
-      "status": "todo",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r3c",
+          "at": "2026-08-29T02:58:06.000Z",
+          "text": "现在会变成什么样：全界面的圆角整体大了一档——按钮、菜单项、列表行、卡片、输入框、代码块、对话框、气泡都跟着圆了 1~2 像素。最圆的是 chat 输入框（原来 18px，现在 20px），最方的是缩略图上的小删除按钮（原来 4px，现在 5px）。\n\n为什么是「整体大一档」而不是「都改成同一个值」：如果所有元素都用同一个圆角，小按钮会显得像药丸、大卡片会显得像没圆。原来各档之间本来就有梯度（4/5/6/7/8/9/10…），我把每一档往上推了一格，梯度保留着，所以小元素还是比大元素方一些，只是整体柔了一点。\n\n和 #19 一样，顺手把散落的数值收敛了：原来十个 CSS 文件里写了一百多处具体的 border-radius，改一次「再圆一点」要翻遍全仓库。现在收成 --radius-xs 到 --radius-9xl 十三档加一个 --radius-pill（胶囊，给标签、开关、滚动条用），每一档旁边都注了改之前的值和典型用途。以后你再说「还要圆一点」，只改这十三行。\n\n加了两条测试：十个样式表里不许再出现写死的 border-radius（正圆 50%、直角 0、以及 2~3px 那种「几乎是直角」的小色块除外）；十三档必须严格递增，不许被拉平成同一个值，而且最小的一档得还算圆角、最大的一档得还看得出是矩形。\n\n打包后怎么人工验一遍：（a）看 chat 输入框和聊天气泡，这两处最明显；（b）打开设置界面翻几页，那里按钮和卡片最密集；（c）拉一个右键菜单和一个下拉，看菜单项本身的圆角；（d）如果觉得还不够圆或者过头了，直接告诉我幅度，我改那十三行就行，不用再逐处调。"
+        }
+      ],
       "userComments": [],
-      "commits": []
+      "commits": [
+        {
+          "ref": "21580c6d7",
+          "at": "2026-08-29T02:58:06.000Z",
+          "message": "fix(desktop): 圆角整体大一档，收敛成 --radius-* 令牌 (#25)",
+          "files": [
+            "apps/desktop/src/renderer/src/styles.css",
+            "apps/desktop/src/renderer/src/bubble.css",
+            "apps/desktop/src/renderer/src/mobile.css",
+            "apps/desktop/src/renderer/src/ui/dialog/dialog.css",
+            "apps/desktop/src/renderer/src/ui/toast/toast.css",
+            "apps/desktop/src/renderer/src/features/settings/settings.css",
+            "apps/desktop/src/renderer/src/features/composer/mobile-model-picker.css",
+            "apps/desktop/src/renderer/src/features/memory/memory.css",
+            "apps/desktop/src/renderer/src/features/files/preview.css",
+            "apps/desktop/src/renderer/src/features/terminal/terminal.css",
+            "apps/desktop/tests/overlay-chrome.test.ts"
+          ]
+        }
+      ]
     },
     {
       "id": 26,
@@ -703,10 +764,27 @@
       "body": "滚动条需要淡一点，现在颜色有点深了，包括悬浮和点击状态。",
       "area": "视觉",
       "priority": "low",
-      "status": "todo",
-      "agentNotes": [],
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "r3c",
+          "at": "2026-08-29T02:59:24.000Z",
+          "text": "现在会变成什么样：滚动条滑块三个状态整体淡了一档。静止的时候几乎只是个影子（原来 30% 不透明，现在 20%，颜色本身也提亮了）；鼠标移上去才看得清（原来 48%，现在 32%）；按住拖的时候最实（44%）。\n\n补了一个原来没有的状态：以前「悬浮」和「按下」是同一个样子，按下去没有任何反馈。现在按下比悬浮再实一档，拖动的时候能确认自己抓住了。\n\n为什么三档要留出差：全都调到一样淡，拖到一半会「丢」了滑块——尤其是长文档快速拖动时。所以是整体下移一档、保留次序，不是压平。\n\n终端那边是自己一套固定的深色（不跟主题走），单独也调淡了一档，并且同样补上了悬浮和按下两态。\n\n加了一条测试：静止 < 悬浮 < 按下这个次序不能乱，静止那一档不许超过 22% 不透明，最实的一档不许超过 48%——你已经嫌深过一次，这条测试就是防止以后有人手滑又调回去。\n\n打包后怎么人工验一遍：（a）在 chat 里滚一段长对话，看静止时的滑块是不是淡到几乎看不见；（b）鼠标移到滚动条上，应该明显浮现；（c）按住拖动，应该再实一点；（d）终端里跑个 ls -la 之类刷屏的命令，同样看三态；（e）深浅主题各看一遍。如果觉得静止那档淡过头了看不见，告诉我，我把 20% 往回提两个点就行。"
+        }
+      ],
       "userComments": [],
-      "commits": []
+      "commits": [
+        {
+          "ref": "3c6273415",
+          "at": "2026-08-29T02:59:24.000Z",
+          "message": "fix(desktop): 滚动条三态整体调淡，补上按下态 (#26)",
+          "files": [
+            "apps/desktop/src/renderer/src/styles.css",
+            "apps/desktop/src/renderer/src/features/terminal/terminal.css",
+            "apps/desktop/tests/overlay-chrome.test.ts"
+          ]
+        }
+      ]
     },
     {
       "id": 27,
