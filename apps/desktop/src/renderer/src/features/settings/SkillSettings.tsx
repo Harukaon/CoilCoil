@@ -1,8 +1,8 @@
-import { FolderPlus, LoaderCircle, Power, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { FolderPlus, LoaderCircle, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { SkillConfigurationSnapshot, SkillEntry, SkillSource } from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
-import { canDeleteSkill, canRemoveSkill, managedSkills, skillCountLabel, skillToggleActionLabel, skillToggleLabel, skillToggleTarget } from "./skillPolicy";
+import { canDeleteSkill, canRemoveSkill, managedSkills, skillCountLabel, skillStateLabel, skillSwitchLabel, skillToggleTarget } from "./skillPolicy";
 
 const sourceLabel: Record<SkillSource, string> = {
   user: "用户",
@@ -171,17 +171,6 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
               <p>{skill.description}</p>
             </div>
             <div className="skills-list-actions">
-              <button
-                type="button"
-                className={skill.enabled ? "active" : ""}
-                disabled={busy}
-                aria-pressed={skill.enabled}
-                aria-label={skillToggleActionLabel(skill)}
-                onClick={() => toggleSkill(skill)}
-              >
-                <Power size={13} />
-                {skillToggleLabel(skill)}
-              </button>
               {canRemoveSkill(skill) ? (() => {
                 const deletesSource = canDeleteSkill(skill, configuration?.userSkillsDir);
                 const armed = deleteArmed === skill.filePath;
@@ -199,6 +188,24 @@ export function SkillSettings({ runtimeId, cwd }: { runtimeId?: string; cwd?: st
                   </button>
                 );
               })() : null}
+              {/* The state is said twice — in words and in the switch's shape —
+                  and the switch ends every row, so one column down the list
+                  answers "which of these are on?" at a glance. A button labelled
+                  with the action ("停用" on an enabled skill) is what read
+                  backwards before. */}
+              <span className="skills-state">{skillStateLabel(skill)}</span>
+              <button
+                type="button"
+                className={`skills-switch${skill.enabled ? " on" : ""}`}
+                role="switch"
+                disabled={busy}
+                aria-checked={skill.enabled}
+                aria-label={skillSwitchLabel(skill)}
+                title={skill.enabled ? `停用 ${skill.name}` : `启用 ${skill.name}`}
+                onClick={() => toggleSkill(skill)}
+              >
+                <span />
+              </button>
             </div>
           </article>
         ))}

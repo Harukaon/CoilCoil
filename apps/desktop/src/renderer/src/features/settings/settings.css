@@ -621,11 +621,17 @@
   opacity: .5;
   cursor: default;
 }
-.skills-list-actions button.active {
-  color: var(--c-green-text);
-  background: hsl(var(--th) var(--ts) var(--l-908));
-}
-.skills-list-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.skills-list-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+/* 启用状态靠三处一起说：状态文字、开关形态、图标颜色。不靠描边或整块灰底区分。 */
+.skills-state { flex: 0 0 auto; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 10px; font-variant-numeric: tabular-nums; }
+.skills-list article.enabled .skills-state { color: var(--c-green-text); font-weight: 500; }
+.skills-list-actions .skills-switch { display: block; position: relative; width: 36px; height: 21px; flex: none; padding: 0; border: 0; border-radius: 100px; background: hsl(var(--th) var(--ts) var(--l-837)); cursor: pointer; transition: background 140ms ease; }
+.skills-list-actions .skills-switch > span { position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 1px 3px rgb(0 0 0 / 22%); transition: transform 140ms ease; }
+.skills-list-actions .skills-switch.on { background: var(--c-green-solid); }
+.skills-list-actions .skills-switch.on > span { transform: translateX(15px); }
+.skills-list-actions .skills-switch:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-780)); }
+.skills-list-actions .skills-switch.on:hover:not(:disabled) { background: var(--c-green-text); }
+.skills-list-actions .skills-switch:disabled { cursor: default; opacity: .5; }
 .skills-list-actions .skill-delete { color: var(--c-red-muted); background: var(--c-red-subtle); }
 .skills-list-actions .skill-delete:hover:not(:disabled) { color: var(--c-red-text); background: var(--c-red-subtle); }
 .skills-list-actions .skill-delete.armed { color: hsl(var(--th) var(--ts) var(--l-1000)); background: var(--c-red-muted); }
@@ -675,7 +681,10 @@
   border-radius: 10px;
   background: hsl(var(--th) var(--ts) var(--l-1000));
 }
-.skills-list article.disabled { opacity: .72; }
+/* 停用的技能不整块打灰——卡片保持白底，只让图标和名字退到弱色。 */
+.skills-list article.disabled .skills-list-icon { color: hsl(var(--th) var(--ts) var(--l-653)); }
+.skills-list article.disabled strong { color: hsl(var(--th) var(--ts) var(--l-524)); }
+.skills-list article.enabled .skills-list-icon { border-color: var(--c-green-border); color: var(--c-green-text); }
 .skills-list-icon {
   display: grid;
   width: 28px;

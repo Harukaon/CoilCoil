@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import type { SkillEntry } from "@coilcoil/runtime-protocol";
 import {
@@ -7,8 +9,8 @@ import {
   managedSkills,
   skillCountLabel,
   skillEnabledCount,
-  skillToggleActionLabel,
-  skillToggleLabel,
+  skillStateLabel,
+  skillSwitchLabel,
   skillToggleTarget,
 } from "../src/renderer/src/features/settings/skillPolicy.ts";
 
@@ -58,18 +60,16 @@ test("a bundled skill never inflates the total", () => {
   assert.equal(skillCountLabel(onlyBundled), "0/0 已启用");
 });
 
-test("the toggle names the action it performs, not the state it is in", () => {
-  assert.equal(skillToggleLabel({ enabled: true }), "停用");
-  assert.equal(skillToggleLabel({ enabled: false }), "启用");
+test("the row states the skill's condition, so it cannot be read as the opposite instruction", () => {
+  assert.equal(skillStateLabel({ enabled: true }), "已启用");
+  assert.equal(skillStateLabel({ enabled: false }), "已停用");
 });
 
-test("the accessible label matches the visible label", () => {
-  const enabled = skill({ name: "pdf", enabled: true });
-  const disabled = skill({ name: "pdf", enabled: false });
-  assert.ok(skillToggleActionLabel(enabled).startsWith(skillToggleLabel(enabled)));
-  assert.ok(skillToggleActionLabel(disabled).startsWith(skillToggleLabel(disabled)));
-  assert.equal(skillToggleActionLabel(enabled), "停用 pdf");
-  assert.equal(skillToggleActionLabel(disabled), "启用 pdf");
+test("the switch is named by what it controls, never by the state it is in", () => {
+  // aria-checked already announces on/off; a label that flipped with the state
+  // would contradict it, so both states get the same name.
+  assert.equal(skillSwitchLabel(skill({ name: "pdf", enabled: true })), "启用 pdf");
+  assert.equal(skillSwitchLabel(skill({ name: "pdf", enabled: false })), "启用 pdf");
 });
 
 test("clicking the toggle requests the opposite of the current state", () => {
@@ -77,11 +77,11 @@ test("clicking the toggle requests the opposite of the current state", () => {
   assert.equal(skillToggleTarget({ enabled: false }), true);
 });
 
-test("the label and the requested change always agree", () => {
+test("the state shown and the change a click requests are always opposites", () => {
   for (const enabled of [true, false]) {
     const entry = skill({ enabled });
     const wantsOn = skillToggleTarget(entry);
-    assert.equal(skillToggleLabel(entry), wantsOn ? "启用" : "停用");
+    assert.equal(skillStateLabel(entry), wantsOn ? "已停用" : "已启用");
   }
 });
 
@@ -97,4 +97,17 @@ test("external skill imports can be removed without being deletable", () => {
   assert.equal(canRemoveSkill(skill({ source: "project" })), true);
   assert.equal(canRemoveSkill(skill({ source: "user" })), true);
   assert.equal(canRemoveSkill(skill({ source: "bundled" })), false);
+});
+
+test("the skills list says on/off with a switch and colour, not with an outline", () => {
+  // The complaint was that enabled and disabled looked alike. The state has to
+  // be carried by the switch's shape and the state word — never by an added
+  // border, and never by washing the whole card grey.
+  const markup = readFileSync(resolve(import.meta.dirname, "../src/renderer/src/features/settings/SkillSettings.tsx"), "utf8");
+  const styles = readFileSync(resolve(import.meta.dirname, "../src/renderer/src/features/settings/settings.css"), "utf8");
+
+  assert.match(markup, /role="switch"/);
+  assert.match(markup, /aria-checked=\{skill\.enabled\}/);
+  assert.match(styles, /\.skills-switch\.on \{[^}]*var\(--c-green-solid\)/);
+  assert.doesNotMatch(styles, /\.skills-list article\.disabled \{/);
 });

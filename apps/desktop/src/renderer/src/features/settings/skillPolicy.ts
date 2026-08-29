@@ -19,16 +19,24 @@ export function skillCountLabel(skills: SkillEntry[] | undefined): string {
 }
 
 /**
- * A toggle button names the action it performs, not the state it is in — an
- * enabled skill offers "停用". Labelling it with its current state reads as the
- * opposite instruction and makes the highlight look like a status badge.
+ * What the row says about itself.
+ *
+ * This used to be a button labelled with the action it performs — an enabled
+ * skill offering "停用" — which is the one label that reads as the opposite of
+ * the truth at a glance. The control is a switch now, so the words state the
+ * skill's condition and the switch carries the action.
  */
-export function skillToggleLabel(skill: Pick<SkillEntry, "enabled">): string {
-  return skill.enabled ? "停用" : "启用";
+export function skillStateLabel(skill: Pick<SkillEntry, "enabled">): string {
+  return skill.enabled ? "已启用" : "已停用";
 }
 
-export function skillToggleActionLabel(skill: Pick<SkillEntry, "enabled" | "name">): string {
-  return `${skill.enabled ? "停用" : "启用"} ${skill.name}`;
+/**
+ * A switch is named by what it controls, never by the state it is in: screen
+ * readers announce "on"/"off" from aria-checked, and a label that flips with the
+ * state would contradict it.
+ */
+export function skillSwitchLabel(skill: Pick<SkillEntry, "name">): string {
+  return `启用 ${skill.name}`;
 }
 
 /** Clicking a skill's toggle always requests the opposite of its current state. */
