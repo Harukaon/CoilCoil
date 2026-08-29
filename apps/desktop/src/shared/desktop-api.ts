@@ -286,6 +286,8 @@ export interface CoilCoilDesktopApi {
   growWindowWidth(byPixels: number): Promise<void>;
   /** 同步窗口底色（CSS 颜色字面量），避免暗色主题下窗口画布仍是浅色。 */
   setWindowBackground(color: string): Promise<void>;
+  /** 整窗透明度（0.7~1）。返回真正生效的值——超出范围会被收敛。 */
+  setWindowOpacity(opacity: number): Promise<number>;
   /** 从系统拖入的文件解析出绝对路径；渲染进程自己拿不到。 */
   filePath(file: File): string;
   openExternal(url: string): Promise<void>;

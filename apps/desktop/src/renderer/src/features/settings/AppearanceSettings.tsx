@@ -8,6 +8,7 @@ import {
   applySurfaceStyle,
   applyTheme,
   applyUiFont,
+  applyWindowOpacity,
   DARK_TONES,
   LIGHT_TONES,
   MONO_FONTS,
@@ -18,9 +19,11 @@ import {
   storedSurfaceStyle,
   storedThemeMode,
   storedUiFont,
+  storedWindowOpacity,
   SURFACE_STYLES,
   THEME_MODES,
   UI_FONTS,
+  WINDOW_OPACITY_LEVELS,
   type DarkTone,
   type FontDefinition,
   type LightTone,
@@ -132,6 +135,14 @@ function FontGrid<Id extends string>({ label, fonts, active, onPick }: {
   );
 }
 
+/** 每一档的说法。数值本身看不出差别，得说清楚它换来了什么。 */
+const OPACITY_HINTS: Record<number, string> = {
+  1: "完全挡住后面的窗口，默认。",
+  0.96: "只是隐约透出一点底，几乎不影响读字。",
+  0.92: "能看清后面窗口的轮廓。",
+  0.88: "透得最明显，浅色背景下正文会略微发虚。",
+};
+
 export function AppearanceSettings(): React.JSX.Element {
   const [mode, setMode] = useState<ThemeMode>(storedThemeMode);
   const [surface, setSurface] = useState<SurfaceStyle>(storedSurfaceStyle);
@@ -139,6 +150,7 @@ export function AppearanceSettings(): React.JSX.Element {
   const [darkToneId, setDarkToneId] = useState<DarkTone>(storedDarkTone);
   const [uiFontId, setUiFontId] = useState<UiFont>(storedUiFont);
   const [monoFontId, setMonoFontId] = useState<MonoFont>(storedMonoFont);
+  const [opacity, setOpacity] = useState<number>(storedWindowOpacity);
 
   const lightTone = LIGHT_TONES.find((tone) => tone.id === lightToneId) ?? LIGHT_TONES[0];
   const darkTone = DARK_TONES.find((tone) => tone.id === darkToneId) ?? DARK_TONES[0];
@@ -214,6 +226,33 @@ export function AppearanceSettings(): React.JSX.Element {
         <p className="appearance-hint">只用系统自带的字体，不下载也不打包字体文件。中文始终落在苹方（衬线那一档落在宋体）。</p>
         <FontGrid label="界面字体" fonts={UI_FONTS} active={uiFontId}
           onPick={(id) => { applyUiFont(id); setUiFontId(id); }} />
+      </section>
+
+      <section className="appearance-section">
+        <h3>窗口透明度</h3>
+        <p className="appearance-hint">整扇窗一起变透，文字也会跟着淡一点，所以最多只到 88%。改完立刻生效，不用重启。Linux 上是否有效取决于桌面的合成器。</p>
+        <div className="theme-grid" role="radiogroup" aria-label="窗口透明度">
+          {WINDOW_OPACITY_LEVELS.map((level) => (
+            <button
+              key={level}
+              className={`theme-card${level === opacity ? " active" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={level === opacity}
+              onClick={() => { setOpacity(applyWindowOpacity(level)); }}
+            >
+              {/* 预览：底衬是「后面的桌面」，上面那块是按该档不透明度画的窗口，
+                  透得越多，底下的斜纹露得越多。 */}
+              <span aria-hidden className="opacity-preview">
+                <span className="opacity-preview-window" style={{ opacity: level }} />
+              </span>
+              <span className="theme-card-copy">
+                <strong>{level === 1 ? "不透明" : `${Math.round(level * 100)}%`}{level === opacity ? <Check size={12} /> : null}</strong>
+                <small>{OPACITY_HINTS[level] ?? ""}</small>
+              </span>
+            </button>
+          ))}
+        </div>
       </section>
 
       <section className="appearance-section">

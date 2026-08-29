@@ -89,6 +89,7 @@ export const DARK_TONE_STORAGE_KEY = "coilcoil.dark-tone";
 export const LIGHT_TONE_STORAGE_KEY = "coilcoil.light-tone";
 export const UI_FONT_STORAGE_KEY = "coilcoil.font-ui";
 export const MONO_FONT_STORAGE_KEY = "coilcoil.font-mono";
+export const WINDOW_OPACITY_STORAGE_KEY = "coilcoil.window-opacity";
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
 export const DEFAULT_SURFACE_STYLE: SurfaceStyle = "layered";
 export const DEFAULT_DARK_TONE: DarkTone = "graphite";
@@ -287,6 +288,51 @@ export function uiFontStack(id: UiFont): string {
 
 export function monoFontStack(id: MonoFont): string {
   return (MONO_FONTS.find((font) => font.id === id) ?? MONO_FONTS[0]).stack;
+}
+
+/**
+ * 整窗透明度。
+ *
+ * 真正的存档在主进程那边（userData/window.json）——只有它能在窗口 show() 之前
+ * 就把值应用上，不然启动时会先不透明地画一帧再跳一下。这里再存一份到
+ * localStorage，纯粹是为了设置界面打开时知道当前停在哪一档，不参与实际生效。
+ *
+ * 档位是离散的，不做无级滑块：外观那一页整页都是「几张卡片里挑一张」，而且透明
+ * 度差 1% 肉眼分不出来，给无级滑块只会让人反复微调。
+ */
+export const WINDOW_OPACITY_LEVELS = [1, 0.96, 0.92, 0.88] as const;
+export const DEFAULT_WINDOW_OPACITY = WINDOW_OPACITY_LEVELS[0];
+
+/** 收敛到最近的一档；读不懂或超出范围都回落到不透明。 */
+export function resolveWindowOpacity(value: unknown): number {
+  const numeric = typeof value === "string" ? Number.parseFloat(value) : typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(numeric)) return DEFAULT_WINDOW_OPACITY;
+  let closest: number = DEFAULT_WINDOW_OPACITY;
+  for (const level of WINDOW_OPACITY_LEVELS) {
+    if (Math.abs(level - numeric) < Math.abs(closest - numeric)) closest = level;
+  }
+  return closest;
+}
+
+export function storedWindowOpacity(): number {
+  try {
+    return resolveWindowOpacity(window.localStorage.getItem(WINDOW_OPACITY_STORAGE_KEY));
+  } catch {
+    // localStorage 不可用时回落到不透明。
+    return DEFAULT_WINDOW_OPACITY;
+  }
+}
+
+/** 立刻改变窗口透明度并记住这一档。远程网页端没有窗口可调，那里是空操作。 */
+export function applyWindowOpacity(opacity: number): number {
+  const level = resolveWindowOpacity(opacity);
+  try {
+    window.localStorage.setItem(WINDOW_OPACITY_STORAGE_KEY, String(level));
+  } catch {
+    // 存不下也要让这一次生效。
+  }
+  void window.coilcoil?.setWindowOpacity?.(level);
+  return level;
 }
 
 export function storedUiFont(): UiFont {

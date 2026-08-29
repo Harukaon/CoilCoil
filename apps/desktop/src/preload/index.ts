@@ -50,6 +50,7 @@ const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const WINDOW_GROW_WIDTH_CHANNEL = "window:grow-width";
 const WINDOW_BACKGROUND_CHANNEL = "window:background";
+const WINDOW_OPACITY_CHANNEL = "window:opacity";
 const EXTERNAL_OPEN_CHANNEL = "external:open";
 const CLIPBOARD_WRITE_CHANNEL = "clipboard:write";
 const RUNTIME_REQUEST_CHANNEL = "runtime:request";
@@ -125,6 +126,8 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(WINDOW_GROW_WIDTH_CHANNEL, byPixels) as Promise<void>,
   setWindowBackground: (color: string) =>
     ipcRenderer.invoke(WINDOW_BACKGROUND_CHANNEL, color) as Promise<void>,
+  setWindowOpacity: (opacity: number) =>
+    ipcRenderer.invoke(WINDOW_OPACITY_CHANNEL, opacity) as Promise<number>,
   // Electron 32 起渲染进程拿不到 File.path，外部拖入文件的真实路径只能在这里解析。
   filePath: (file: File) => webUtils.getPathForFile(file),
   openExternal: (url: string) =>

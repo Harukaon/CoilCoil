@@ -31,6 +31,7 @@ import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
 import { applicationMenuTemplate, windowChromeOptions } from "./window-chrome";
+import { readStoredWindowOpacity, writeStoredWindowOpacity } from "./window-opacity";
 import { migrateLegacyUserData } from "./data-migration";
 import {
   DIAGNOSTIC_LEVEL_ENV,
@@ -66,6 +67,12 @@ const PICK_DIRECTORY_CHANNEL = "dialog:pick-directory";
 const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const WINDOW_GROW_WIDTH_CHANNEL = "window:grow-width";
 const WINDOW_BACKGROUND_CHANNEL = "window:background";
+const WINDOW_OPACITY_CHANNEL = "window:opacity";
+
+/** 透明度存在 userData 下的单独一个小文件里，和 remote.json 一样。 */
+function windowOpacityFile(): string {
+  return join(app.getPath("userData"), "window.json");
+}
 /** 首帧用的底色；窗口半透明时露出的就是这一层，之后由渲染进程按主题同步。 */
 const WINDOW_BACKGROUND = { light: "#f8f8f7", dark: "#1f1f1f" } as const;
 /** 只接受 CSS 颜色字面量，不接受任意字符串。 */
@@ -732,6 +739,8 @@ async function createWindow(): Promise<void> {
   // built-in browser creates is one — so an Agent opening a page in the
   // background made the app show itself, raising it over whatever the user was
   // doing. Showing the window is a startup step; it happens exactly once.
+  // 透明度在 show() 之前落下去，否则窗口会先按不透明画出来再跳一下。
+  mainWindow.setOpacity(readStoredWindowOpacity(windowOpacityFile()));
   mainWindow.once("ready-to-show", () => mainWindow.show());
   loadRendererInto(mainWindow);
   primaryWindow = mainWindow;
@@ -872,6 +881,15 @@ app.whenReady().then(async () => {
     if (!window || window.isDestroyed()) return;
     if (typeof color !== "string" || !CSS_COLOR.test(color.trim())) return;
     window.setBackgroundColor(color.trim());
+  });
+  // 整窗透明度，见 window-opacity.ts 里为什么不用 vibrancy。
+  // 只作用在发起设置的那扇窗（也就是主窗）：气泡窗是本来就以 transparent 创建
+  // 的浮层，再叠一层整窗透明会把它自己的投影一起透掉。
+  ipcMain.handle(WINDOW_OPACITY_CHANNEL, (event, opacity: number): number => {
+    const applied = writeStoredWindowOpacity(windowOpacityFile(), opacity);
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window && !window.isDestroyed()) window.setOpacity(applied);
+    return applied;
   });
   ipcMain.handle(WINDOW_GROW_WIDTH_CHANNEL, (event, byPixels: number): void => {
     const window = BrowserWindow.fromWebContents(event.sender);
