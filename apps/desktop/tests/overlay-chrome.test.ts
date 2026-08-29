@@ -139,3 +139,16 @@ test("--radius-* 是一条从小到大的阶梯，档与档之间没有拉平", 
   assert.ok(values[0] >= 4 && values[values.length - 1] <= 24);
   assert.match(root, /--radius-pill:\s*999px/);
 });
+
+test("滚动条滑块三态是一档比一档实，但都很淡", () => {
+  const root = declarations(styles, ":root", "styles.css");
+  const alphas = ["", "-hover", "-active"].map((state) => {
+    const match = new RegExp(`--scrollbar-thumb${state}:[^;]*\\/\\s*(\\d+)%\\)`).exec(root);
+    assert.ok(match, `styles.css 的 :root 里没有 --scrollbar-thumb${state}`);
+    return Number.parseInt(match[1], 10);
+  });
+  assert.ok(alphas[0] < alphas[1] && alphas[1] < alphas[2], "静止 < 悬浮 < 按下，这个次序不能乱");
+  // 用户嫌深过一次：静止那一档只能是个影子，最实的一档也不许压过正文。
+  assert.ok(alphas[0] <= 22, `静止态 ${alphas[0]}% 太深`);
+  assert.ok(alphas[2] <= 48, `按下态 ${alphas[2]}% 太深`);
+});

@@ -5,8 +5,11 @@
 :root {
   color: hsl(var(--th) var(--ts) var(--l-137));
   background: var(--shell-fill);
-  --scrollbar-thumb: hsl(var(--th) var(--ts) var(--l-429) / 30%);
-  --scrollbar-thumb-hover: hsl(var(--th) var(--ts) var(--l-367) / 48%);
+  /* 滚动条滑块三态。整体调淡了一档：静止几乎只是个影子，悬浮才看得清，
+     按住拖的时候最实。三档之间的差要留着，不然拖到一半会「丢」了滑块。 */
+  --scrollbar-thumb: hsl(var(--th) var(--ts) var(--l-560) / 20%);        /* 旧 --l-429 / 30% */
+  --scrollbar-thumb-hover: hsl(var(--th) var(--ts) var(--l-504) / 32%);  /* 旧 --l-367 / 48% */
+  --scrollbar-thumb-active: hsl(var(--th) var(--ts) var(--l-429) / 44%); /* 原来没有，按下时沿用悬浮那一档 */
   /* 圆角阶梯。整体比原来大一档（注释里是改之前的值），但各档之间的差没有拉平：
      小元素还是比大元素方一些。要整体再圆一点/方一点只改这一段，不要回到具体
      规则里各改各的。 */
@@ -46,6 +49,7 @@
 *::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
 *::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--scrollbar-thumb); background-clip: padding-box; }
 *::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:active { background: var(--scrollbar-thumb-active); background-clip: padding-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--shell-fill); }
 button, textarea, input, select { color: inherit; font: inherit; }
 button { border: 0; }
