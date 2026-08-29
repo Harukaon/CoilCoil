@@ -1480,7 +1480,7 @@ const SEED = {
   ]
 }
 ;
-const BUILT_AT = "2026-08-29T15:28:29.187Z";
+const BUILT_AT = "2026-08-29T15:48:53.489Z";
 const LS = 'suocode-taskboard-v2';
 const LS_UI = 'suocode-taskboard-ui-v1';
 
@@ -1515,11 +1515,18 @@ function load(){
       const saved = JSON.parse(raw);
       // 以 SEED 为骨架合并，这样我新增/改写任务后你的回复不会丢
       const byId = new Map((saved.tasks||[]).map(t=>[t.id,t]));
+      /* 状态归谁：默认听你本地的（你在看板上点的才算数），只有一种情况例外——
+         你导出之后 agent 又交了新东西。那说明你打回的这条已经返工完了，状态该
+         跟着新结果走，否则你这边永远停在「打回重做」，看不出它已经改完了。
+         判断依据是这条 Issue 最新的 agent 记录晚于你上次导出的时间。 */
+      const exportedAt = Date.parse(SEED.meta?.exportedAt || '') || 0;
+      const agentTime = t => Math.max(0, ...[...(t.agentNotes||[]), ...(t.commits||[])]
+        .map(x => Date.parse(x.at) || 0));
       const merged = SEED.tasks.map(seed=>{
         const mine = byId.get(seed.id);
         if(!mine) return structuredClone(seed);
         return {...structuredClone(seed),
-          status: mine.status ?? seed.status,
+          status: agentTime(seed) > exportedAt ? seed.status : (mine.status ?? seed.status),
           priority: mine.priority ?? seed.priority,
           area: mine.area ?? seed.area,
           // 标题和正文你改过就以你的为准，没改过就跟着我这边更新

@@ -131,6 +131,33 @@ function readCheckScript() {
   openTask(made.id); await tick();
   check($("eNew").value === "", "带走之后回复框清空，不会再发一遍");
 
+  // 返工回来的 Issue 要自己回到「待验收」，不能停在我这边的「打回重做」上
+  {
+    const fixed = state.tasks.find((t) => (t.agentNotes || []).some(
+      (n) => Date.parse(n.at) > Date.parse(SEED.meta.exportedAt || 0)));
+    check(!!fixed, "内置数据里有一条『导出之后又交了新东西』的 Issue");
+    // 装成「我上次把它打回了、还没导出」的样子，再重新加载一次。
+    const before = localStorage.getItem(LS);
+    const stale = structuredClone(state);
+    stale.tasks.find((t) => t.id === fixed.id).status = "rework";
+    localStorage.setItem(LS, JSON.stringify(stale));
+    const reloaded = load();
+    check(reloaded.tasks.find((t) => t.id === fixed.id).status === fixed.status,
+      "返工完的 Issue 重新打开看板时回到了「待验收」");
+    // 没有新结果的那些，状态仍然听我本地的。
+    const untouched = state.tasks.find((t) => !(t.agentNotes || []).some(
+      (n) => Date.parse(n.at) > Date.parse(SEED.meta.exportedAt || 0)));
+    if (untouched) {
+      stale.tasks.find((t) => t.id === untouched.id).status = "done";
+      localStorage.setItem(LS, JSON.stringify(stale));
+      check(load().tasks.find((t) => t.id === untouched.id).status === "done",
+        "没有新结果的 Issue，状态还是听我本地的");
+    }
+    // 还原，后面的用例还要用自检建的那条 Issue。
+    if (before === null) localStorage.removeItem(LS); else localStorage.setItem(LS, before);
+    state = load(); ui = loadUi(); render();
+  }
+
   // 前后翻
   check(!!$("aPrev") && !!$("aNext"), "详情底部有前后翻按钮");
 
