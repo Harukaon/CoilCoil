@@ -167,6 +167,7 @@
   .note{border:1px solid var(--line-2);border-left:3px solid var(--accent);
         border-radius:10px;padding:10px 12px;margin-bottom:9px;background:var(--panel-2);font-size:13px}
   .note.mine{border-left-color:var(--done)}
+  .note.mine.rework{border-left-color:var(--mid)}
   .note.unseen{border-left-color:var(--hi);background:var(--accent-soft)}
   .note .h{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--ink-3);margin-bottom:5px}
   .note .h b{color:var(--ink-2);font-weight:600}
@@ -298,6 +299,7 @@
 
   <p class="hint">
     卡片可以拖到别的列改状态，也可以点开逐条处理：改标题正文、改状态、打回、通过、回复文字和贴图（<kbd>Ctrl/⌘+V</kbd> 粘贴截图）。<br>
+    <b>打回重做</b>＝退回去让 AI 再改一遍（该 AI 动）；<b>待回复</b>＝AI 在等你拍板才能往下走（该你动）。两者方向相反，别混。<br>
     你的改动实时存在浏览器里；点「导出 tasks.json」下载后覆盖 <code>docs/taskboard/tasks.json</code>，我这边就能读到。按 <kbd>?</kbd> 看全部快捷键。
   </p>
 </div>
@@ -361,6 +363,19 @@
   </div>
 </dialog>
 
+<!-- 输入一段话（打回理由等） -->
+<dialog id="textDlg" class="narrow">
+  <div class="d-h"><h2 id="tTitle"></h2><button class="x" type="button" id="tClose" aria-label="关闭">&times;</button></div>
+  <div class="d-b">
+    <p id="tHint" style="margin:0 0 10px;color:var(--ink-2);font-size:12.5px;line-height:1.6"></p>
+    <textarea id="tInput" placeholder="可以留空，但写清楚会省一轮来回"></textarea>
+  </div>
+  <div class="d-f"><span class="spacer"></span>
+    <button type="button" id="tNo">取消</button>
+    <button type="button" id="tYes" class="btn-danger">确认</button>
+  </div>
+</dialog>
+
 <!-- 快捷键 -->
 <dialog id="helpDlg" class="narrow">
   <div class="d-h"><h2>快捷键</h2><button class="x" type="button" id="hClose" aria-label="关闭">&times;</button></div>
@@ -372,7 +387,7 @@
       <kbd>Esc</kbd><span>关闭当前弹窗</span>
       <kbd>[</kbd><span>看上一条 Issue</span>
       <kbd>]</kbd><span>看下一条 Issue</span>
-      <kbd>1</kbd> … <kbd>5</kbd><span>打开 Issue 时，直接设成第 N 列的状态</span>
+      <kbd>1</kbd> … <kbd>6</kbd><span>打开 Issue 时，直接设成第 N 列的状态</span>
       <kbd>⌘/Ctrl + Enter</kbd><span>在回复框里发送</span>
       <kbd>⌘/Ctrl + V</kbd><span>在回复框里粘贴截图</span>
     </div>
@@ -388,7 +403,7 @@ const SEED = {
   "meta": {
     "source": "docs/requirements-2026-08-29.md",
     "createdAt": "2026-08-29",
-    "note": "agent 只写 agentNotes / commits / status；userComments 由看板导出写回，agent 不覆盖。",
+    "note": "agent 只写 agentNotes / commits / status；userComments 由看板导出写回，agent 不覆盖。 status 里的 rework（打回重做）只有用户能设：表示用户看过后退回来重做，和 reply（AI 在等用户拍板）方向相反。",
     "decisions": [
       {
         "at": "2026-08-28T20:32:20.902405Z",
@@ -509,6 +524,11 @@ const SEED = {
         "at": "2026-08-29T04:50:00Z",
         "title": "有一条测试是红的，但和今晚无关",
         "text": "终端那边有一条测试（「长命令自动交给终端管理器」）在失败。我把它放到今晚所有改动之前的那份代码上跑，一样失败，所以是本来就有的老问题，不是这一夜改出来的。其余 850 多条测试全绿，打包和界面布局的冒烟检查也都过了。\n\n这条我没有顺手去修：它属于终端那一块，和今晚这 29 条需求都不搭界，改它需要单独查。要不要修，你说。"
+      },
+      {
+        "at": "2026-08-29T13:20:00Z",
+        "title": "看板加了「打回重做」这一列",
+        "text": "你说得对，原来「打回」和「待回复」共用一个状态，方向是反的：打回是退回去让 AI 重做（该 AI 动），待回复是 AI 在等你拍板（该你动）。合在一起，你打回之后看板上却显示「等你回复」，谁都不知道该谁动了。\n\n现在是独立的一列，橙色，排在「待办」右边——打回的时候卡片会明显往左退一格，看得出是退回去了。\n\n另外打回时会先问你一句「哪里不对」，你写的这段会作为一条回复留在那条 Issue 下面（橙色标着「我（打回）」），下一轮 agent 拿到这条 Issue 时先读它。不写理由也能打回，但 agent 就只能收到一个「重做」，等于没说。"
       }
     ]
   },
@@ -1328,16 +1348,20 @@ const SEED = {
   ]
 }
 ;
-const BUILT_AT = "2026-08-29T11:03:30.278Z";
+const BUILT_AT = "2026-08-29T13:16:11.665Z";
 const LS = 'suocode-taskboard-v2';
 const LS_UI = 'suocode-taskboard-ui-v1';
 
+/* 五列变六列。原来「打回」和「等你回答」共用 reply 一个状态，方向正好反了：
+   打回是「退回去让 AI 重做」，待回复是「AI 在等你拍板」。合成一个，打回之后
+   看板上显示的却是「等你回复」，谁都不知道该谁动了。 */
 const COLS = [
-  {k:'todo',    name:'待办',   c:'var(--todo)'},
-  {k:'doing',   name:'进行中', c:'var(--doing)'},
-  {k:'review',  name:'待验收', c:'var(--review)'},
-  {k:'reply',   name:'待回复', c:'var(--reply)'},
-  {k:'done',    name:'已完成', c:'var(--done)'},
+  {k:'todo',    name:'待办',     c:'var(--todo)'},
+  {k:'rework',  name:'打回重做', c:'var(--mid)'},
+  {k:'doing',   name:'进行中',   c:'var(--doing)'},
+  {k:'review',  name:'待验收',   c:'var(--review)'},
+  {k:'reply',   name:'待回复',   c:'var(--reply)'},
+  {k:'done',    name:'已完成',   c:'var(--done)'},
 ];
 const STATUS_NAME = Object.fromEntries(COLS.map(c=>[c.k,c.name]));
 const PRIO_NAME = {high:'高',medium:'中',low:'低'};
@@ -1449,6 +1473,34 @@ document.getElementById('cNo').onclick  = () => settleConfirm(false);
    已经打开之后才到，那时候把它当成「取消」就会莫名其妙地取消掉第二次。派发的这一
    刻弹窗又开着，就说明这是上一次遗留下来的，丢掉。 */
 confirmDlg.addEventListener('close', () => { if(!confirmDlg.open) settleConfirm(false); });
+
+/* ---------- 让用户写一段话的弹窗（打回理由） ---------- */
+const textDlg = document.getElementById('textDlg');
+let textResolve = null;
+function askText(title, hint, okLabel='确认'){
+  document.getElementById('tTitle').textContent = title;
+  document.getElementById('tHint').textContent = hint || '';
+  document.getElementById('tInput').value = '';
+  document.getElementById('tYes').textContent = okLabel;
+  textDlg.showModal();
+  setTimeout(()=>document.getElementById('tInput').focus(), 30);
+  return new Promise(res => { textResolve = res; });
+}
+function settleText(value){
+  const res = textResolve;
+  if(!res) return;
+  textResolve = null;
+  textDlg.close();
+  res(value);
+}
+document.getElementById('tYes').onclick = () => settleText(document.getElementById('tInput').value);
+document.getElementById('tNo').onclick  = () => settleText(null);
+document.getElementById('tClose').onclick = () => settleText(null);
+// close 迟到一拍的处理，同 confirmDlg 那里的说明。
+textDlg.addEventListener('close', () => { if(!textDlg.open) settleText(null); });
+document.getElementById('tInput').addEventListener('keydown', e => {
+  if((e.metaKey || e.ctrlKey) && e.key === 'Enter') document.getElementById('tYes').click();
+});
 
 /* ---------- 新建 / 编辑 Issue 的表单弹窗 ---------- */
 const formDlg = document.getElementById('formDlg');
@@ -1722,7 +1774,7 @@ function openTask(id){
       <button id="aNext" ${pos<0||pos>=order.length-1?'disabled':''} title="下一条 ]">›</button>
       <span style="color:var(--ink-3);font-size:12px">${pos>=0?`${pos+1} / ${order.length}`:''}</span>
     </span>
-    <button class="btn-danger" id="aReject">打回（待回复）</button>
+    <button class="btn-danger" id="aReject">打回重做</button>
     <button class="btn-ok" id="aApprove">通过（已完成）</button>
     <span class="spacer"></span>
     <button id="aDel">删除</button>
@@ -1748,7 +1800,8 @@ function noteHTML({cls,who,at,text,key,tag,actions,extra}){
 function renderMine(t){
   if(!(t.userComments||[]).length) return '<div class="empty">还没有回复。</div>';
   return t.userComments.map((c,i)=>noteHTML({
-    cls:'note mine', who:'👤 我', at:c.at, key:'m'+i, text:c.text||'',
+    cls:'note mine' + (c.kind==='rework' ? ' rework' : ''),
+    who: c.kind==='rework' ? '👤 我（打回）' : '👤 我', at:c.at, key:'m'+i, text:c.text||'',
     tag: c.editedAt ? '<span style="color:var(--ink-3)">已修改</span>' : '',
     actions:`<button class="act" data-edit="${i}">修改</button><button class="act danger" data-del="${i}">删除</button>`,
     extra:(c.images||[]).map(src=>`<img src="${src}" alt="附图">`).join(''),
@@ -1852,7 +1905,19 @@ function wireDialog(t){
 
   $('aPrev').onclick = () => step(-1);
   $('aNext').onclick = () => step(1);
-  $('aReject').onclick  = () => { t.status='reply'; save(); render(); dlg.close(); toast(`#${t.id} 已打回`,'ok'); };
+  // 打回要说清楚哪里不对，否则 AI 拿到的只是一个「重做」，等于没说。
+  // 理由作为一条我的回复存下来，AI 下一轮读得到。
+  $('aReject').onclick = async () => {
+    const reason = await askText('打回重做',
+      '说一下哪里不对、期望是什么。会作为一条回复留给 AI，下一轮它先看这个。',
+      '打回');
+    if(reason === null) return;
+    if(reason.trim()){
+      (t.userComments ||= []).push({at:new Date().toISOString(), text:reason.trim(), images:[], kind:'rework'});
+    }
+    t.status='rework'; save(); render(); dlg.close();
+    toast(`#${t.id} 已打回，等 AI 重做`,'ok');
+  };
   $('aApprove').onclick = () => { t.status='done';  save(); render(); dlg.close(); toast(`#${t.id} 已通过`,'ok'); };
   $('aSave').onclick    = () => { save(); render(); dlg.close(); };
   $('aDel').onclick     = async () => {

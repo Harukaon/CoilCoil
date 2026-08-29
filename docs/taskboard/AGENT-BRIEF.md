@@ -105,6 +105,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
   这时 `agentNotes` 里必须写清楚卡在哪、你需要什么信息、你倾向哪个方案。
 - `doing` —— 你只做了一半（比如时间不够），写清楚做到哪了、下一步是什么。
 
+`rework` 这个状态**只有用户能设**，你永远不要往 results 里写它。它的意思是
+「用户看过你交的东西，不满意，退回来重做」——和 `reply` 方向正好相反：`reply`
+是你在等用户，`rework` 是用户在等你。
+
+接到一条 `rework` 的 Issue 时：先读 `userComments` 里最后一条 `kind` 为
+`"rework"` 的记录，那是用户说的哪里不对，**先满足它再谈别的**；不要把上一轮的
+做法原样再交一遍。改完照常填 `review`。
+
 **不要**直接改 `tasks.json`，那是管控方和用户共用的文件。
 **不要**改 `index.html`，它是生成物。
 

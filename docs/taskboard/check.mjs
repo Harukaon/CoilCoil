@@ -45,6 +45,12 @@ function readCheckScript() {
   const check = (ok, what) => { steps.push((ok ? "· " : "✗ ") + what); if (!ok) throw new Error(what); };
   // 弹窗的 close 事件是下一拍才派发的，页面重画又在它里面，所以每次等两拍。
   const tick = () => new Promise((r) => setTimeout(() => setTimeout(r, 0), 0));
+  /* 等某个条件成立，最多等 40 拍。数拍子是靠不住的——close 事件、重画、
+     FileReader 各有各的时机，写死几拍就会时灵时不灵。 */
+  const until = async (fn, what) => {
+    for (let i = 0; i < 40; i += 1) { if (fn()) return; await tick(); }
+    throw new Error("等不到：" + what);
+  };
 
   // 起手式：内置数据渲染出来了
   localStorage.clear();
@@ -52,7 +58,7 @@ function readCheckScript() {
   const seeded = state.tasks.length;
   check(seeded > 0, "内置数据里有 " + seeded + " 个 Issue");
   check(document.querySelectorAll(".card").length > 0, "卡片渲染出来了");
-  check(document.querySelectorAll(".stats-legend span").length === 6, "进度条图例有五列加一个总计");
+  check(document.querySelectorAll(".stats-legend span").length === 7, "进度条图例有六列加一个总计");
 
   // 新建：走的是自己的表单弹窗，不是浏览器 prompt
   check(typeof window.prompt === "function", "环境里确实有 prompt（下面要确认我们没用它）");
@@ -111,6 +117,21 @@ function readCheckScript() {
   $("fOk").click(); await tick(); await tick();
   check(made.title === "改过标题的自检 Issue" && made.titleEdited === true, "标题改得动并标记为用户改过");
 
+  // 打回：必须落到「打回重做」，不是「待回复」——这两件事方向相反
+  check(COLS.some((c) => c.k === "rework"), "有独立的「打回重做」状态");
+  $("aReject").click(); await tick();
+  check($("textDlg").open, "打回会先问一句为什么");
+  $("tNo").click(); await tick();
+  check(made.status !== "rework", "取消之后没有真打回");
+  $("aReject").click(); await tick();
+  $("tInput").value = "这里不对，重做。";
+  $("tYes").click(); await tick(); await tick();
+  check(made.status === "rework", "打回落到 rework，而不是 reply");
+  check((made.userComments || []).some((c) => c.kind === "rework" && c.text === "这里不对，重做。"),
+    "打回理由作为一条回复留给了 AI");
+
+  openTask(made.id); await tick();
+
   // 前后翻
   check(!!$("aPrev") && !!$("aNext"), "详情底部有前后翻按钮");
 
@@ -147,12 +168,12 @@ function readCheckScript() {
     delete ui.seen[withNotes.id]; saveUi(); render();
     check(!!document.querySelector(".card .new-tag"), "没看过的 Issue 有「新」标记");
     openTask(withNotes.id); await tick();
-    $("dlg").close(); await tick();
-    const card = document.querySelector("[data-id='" + withNotes.id + "']");
-    check(!!card, "看过的那条卡片还在（id " + withNotes.id + "）");
-    check(!card.querySelector(".new-tag"),
-      "看过之后标记消失（unseen=" + unseenCount(withNotes) + " seen=" + ui.seen[withNotes.id] +
-      " 最新一条=" + (withNotes.agentNotes[withNotes.agentNotes.length-1] || {}).at + "）");
+    $("dlg").close();
+    await until(() => {
+      const card = document.querySelector("[data-id='" + withNotes.id + "']");
+      return card && !card.querySelector(".new-tag");
+    }, "看过之后卡片上的「新」标记消失");
+    steps.push("· 看过之后标记消失");
   }
 
   // 草稿
