@@ -1,5 +1,7 @@
 import {
+  type ImportMcpServersInput,
   type McpConfigurationSnapshot,
+  type McpDiscoveryResult,
   type McpImportConfiguration,
   type McpJsonDocument,
   type McpServerConfiguration,
@@ -25,6 +27,7 @@ import {
   mcpImportKind,
   mcpServerDefinitions,
 } from "./browser-mcp.js";
+import { discoverImportableMcpServers } from "./mcp-discovery.js";
 import { RuntimeInspectionMcp } from "./runtime-inspection-mcp.js";
 import {
   isRecord,
@@ -440,6 +443,47 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     if (enabled) this.clearProjectDisabledTombstone(adapter, cwd, normalizedName);
     await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(resolvedCwd);
+  }
+
+  /**
+   * 扫一遍机器上别的工具的 MCP 配置，列出可以导入的服务器。
+   *
+   * 只是「看看有什么」，不改任何配置——用户在弹窗里勾完再调 importMcpServers。
+   * 具体怎么问出每个来源都带哪些服务器，见 mcp-discovery.ts。
+   */
+  async discoverMcpServers(cwd?: string): Promise<McpDiscoveryResult> {
+    const adapter = await loadMcpAdapterConfigModule();
+    const existing = await this.getMcpConfiguration(cwd);
+    return discoverImportableMcpServers(adapter, {
+      cwd: this.mcpCwd(cwd),
+      existingNames: new Set(existing.servers.map((server) => server.name)),
+    });
+  }
+
+  /**
+   * 把选中的那几个服务器抄进 CoilCoil 自己的全局 mcp.json。
+   *
+   * 抄的是定义本身，不是把来源挂上：来源那边以后新增或改动都不会再影响这里，
+   * 抄过来的这一份和用户自己手写的服务器没有区别，可以改可以删。同名的跳过而不
+   * 是覆盖——覆盖会把用户导入后改过的参数抹掉，而重复导入是很容易发生的操作。
+   */
+  async importMcpServers(input: ImportMcpServersInput): Promise<McpConfigurationSnapshot> {
+    const wanted = new Set(input.servers.map((server) => `${server.origin}\u0000${server.name}`));
+    if (!wanted.size) return this.getMcpConfiguration(input.cwd);
+    const adapter = await loadMcpAdapterConfigModule();
+    const discovery = await this.discoverMcpServers(input.cwd);
+    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    let wrote = 0;
+    for (const server of discovery.servers) {
+      if (!wanted.has(`${server.origin}\u0000${server.name}`) || server.alreadyPresent) continue;
+      adapter.writeSharedServerEntry(globalConfigPath, server.name, server.definition);
+      // 之前被删过的同名服务器留着墓碑，不清掉的话刚导入就是隐身的。
+      this.clearMcpServerRemovedLocally(server.name);
+      this.setMcpServerOptOut(server.name, false);
+      wrote += 1;
+    }
+    if (wrote) await this.reloadMcpExtensionNow();
+    return this.getMcpConfiguration(input.cwd);
   }
 
   async enableMcpImports(imports: McpImportConfiguration["kind"][], cwd?: string): Promise<McpConfigurationSnapshot> {

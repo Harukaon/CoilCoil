@@ -15,6 +15,7 @@ import { toastError, toastSuccess } from "../../ui/toast";
 import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
 import { ModelSettings } from "./ModelSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { McpDiscoveryDialog } from "./McpDiscoveryDialog";
 import { McpJsonEditor } from "./McpJsonEditor";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
 import { RemoteSettings } from "./RemoteSettings";
@@ -141,6 +142,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   const [envText, setEnvText] = useState("{}");
   const [headersText, setHeadersText] = useState("{}");
   const [snippetOpen, setSnippetOpen] = useState(false);
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [snippetText, setSnippetText] = useState("");
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState<string>();
@@ -310,20 +312,6 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
       selectServer(next.servers.find((item) => item.name === server.name));
       void loadStatus();
       toastSuccess("已保存 MCP 服务器。");
-    } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const enableDetectedImports = async (): Promise<void> => {
-    const imports = configuration?.imports.filter((item) => !item.enabled).map((item) => item.kind) ?? [];
-    if (!imports.length) return;
-    setSaving(true);
-    try {
-      setConfiguration(await window.coilcoil.request<McpConfigurationSnapshot>({ type: "enable_mcp_imports", imports, cwd }, runtimeId));
-      toastSuccess("已导入检测到的兼容配置。");
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -521,7 +509,8 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
             </div>
           </footer>
         </form>
-        {configuration?.imports.length ? <div className="mcp-imports"><div><strong>检测到的兼容配置</strong><small>由 pi-mcp-adapter 负责解析 Cursor、Claude、Codex 等现有配置。</small></div><div className="mcp-import-list">{configuration.imports.map((item) => <span className={item.enabled ? "enabled" : ""} key={`${item.kind}-${item.path}`}><b>{item.kind}</b><small>{item.serverCount} 个服务器</small></span>)}</div>{configuration.imports.some((item) => !item.enabled) ? <button type="button" disabled={saving} onClick={() => void enableDetectedImports()}>导入检测到的配置</button> : null}</div> : null}
+        {configuration?.imports.length ? <div className="mcp-imports"><div><strong>检测到的兼容配置</strong><small>Cursor、Claude、Codex 等工具已有的 MCP。点右边逐个挑，选中的会抄一份到 CoilCoil，不会整包接管。</small></div><div className="mcp-import-list">{configuration.imports.map((item) => <span className={item.enabled ? "enabled" : ""} key={`${item.kind}-${item.path}`}><b>{item.kind}</b><small>{item.serverCount} 个服务器</small></span>)}</div><button type="button" disabled={saving} onClick={() => setDiscoveryOpen(true)}>发现并按需导入</button></div> : null}
+        <McpDiscoveryDialog open={discoveryOpen} cwd={cwd} runtimeId={runtimeId} onClose={() => setDiscoveryOpen(false)} onImported={(snapshot) => { setConfiguration(snapshot); void loadStatus(); }} />
       </section>
     </div>
   );

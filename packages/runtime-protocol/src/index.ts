@@ -288,6 +288,41 @@ export interface McpImportConfiguration {
   enabled: boolean;
 }
 
+/**
+ * 一台机器上「别的工具里已经配好」的一个 MCP 服务器。
+ *
+ * 只是发现结果，不代表已经生效：用户在弹窗里勾了哪几个，才有哪几个被抄进
+ * CoilCoil 自己的配置。`alreadyPresent` 用来把已经装过的那几个标灰，避免重复导入
+ * 覆盖掉用户后来改过的参数。
+ */
+export interface DiscoveredMcpServer {
+  /** 来源工具。 */
+  origin: McpImportConfiguration["kind"];
+  /** 来源配置文件的绝对路径，弹窗里要显示出来。 */
+  originPath: string;
+  name: string;
+  transport: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  url?: string;
+  /** 原样的定义，导入时整块抄过去。 */
+  definition: Record<string, unknown>;
+  /** CoilCoil 里已经有同名服务器。 */
+  alreadyPresent: boolean;
+}
+
+export interface McpDiscoveryResult {
+  servers: DiscoveredMcpServer[];
+  /** 扫过但一个服务器也没读出来的来源，用来解释「为什么这里是空的」。 */
+  emptyOrigins: Array<{ kind: McpImportConfiguration["kind"]; path: string; reason: string }>;
+}
+
+export interface ImportMcpServersInput {
+  /** 要导入的服务器，按 origin + name 定位。 */
+  servers: Array<{ origin: McpImportConfiguration["kind"]; name: string }>;
+  cwd?: string;
+}
+
 export interface McpConfigurationSnapshot {
   configPath: string;
   projectConfigPath?: string;
@@ -1147,6 +1182,8 @@ export type RuntimeCommand =
   | { type: "remove_mcp_server"; name: string; scope?: "global" | "project"; cwd?: string }
   | { type: "set_mcp_server_enabled"; name: string; enabled: boolean; cwd: string }
   | { type: "enable_mcp_imports"; imports: McpImportConfiguration["kind"][]; cwd?: string }
+  | { type: "discover_mcp_servers"; cwd?: string }
+  | { type: "import_mcp_servers"; input: ImportMcpServersInput }
   | { type: "connect_mcp_server"; name: string }
   | { type: "start_mcp_auth"; name: string }
   | { type: "complete_mcp_auth"; name: string; input: string }

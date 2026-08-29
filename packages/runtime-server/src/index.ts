@@ -463,6 +463,10 @@ export class RuntimeServer {
         return runtime.setMcpServerEnabled(command.name, command.enabled, command.cwd);
       case "enable_mcp_imports":
         return runtime.enableMcpImports(command.imports, command.cwd);
+      case "discover_mcp_servers":
+        return runtime.discoverMcpServers(command.cwd);
+      case "import_mcp_servers":
+        return runtime.importMcpServers(command.input);
       case "connect_mcp_server":
         return runtime.connectMcpServer(command.name);
       case "start_mcp_auth":
