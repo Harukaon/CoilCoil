@@ -288,6 +288,8 @@ export interface CoilCoilDesktopApi {
   setWindowBackground(color: string): Promise<void>;
   /** 整窗透明度（0.7~1）。返回真正生效的值——超出范围会被收敛。 */
   setWindowOpacity(opacity: number): Promise<number>;
+  /** Dock/任务栏角标上的未读数；0 表示清掉角标。 */
+  setBadgeCount(count: number): Promise<void>;
   /** 从系统拖入的文件解析出绝对路径；渲染进程自己拿不到。 */
   filePath(file: File): string;
   openExternal(url: string): Promise<void>;

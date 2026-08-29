@@ -29,6 +29,7 @@ import {
 import { useBubbleHandoff } from "./hooks/useBubbleHandoff";
 import type { SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
 import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
+import { useDockBadge } from "./features/workspaces/useDockBadge";
 import { useSessionControls } from "./hooks/useSessionControls";
 import { useConversationActions } from "./features/workspaces/useConversationActions";
 import { useWorkspaceInspector } from "./features/inspector/useWorkspaceInspector";
@@ -325,6 +326,8 @@ export default function App(): React.JSX.Element {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   });
+
+  useDockBadge(sessionActivity);
 
   const activeConversation = snapshot?.session;
   const running = snapshot?.running ?? false;

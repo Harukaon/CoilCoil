@@ -68,6 +68,7 @@ const WINDOW_MINIMUM_WIDTH_CHANNEL = "window:minimum-width";
 const WINDOW_GROW_WIDTH_CHANNEL = "window:grow-width";
 const WINDOW_BACKGROUND_CHANNEL = "window:background";
 const WINDOW_OPACITY_CHANNEL = "window:opacity";
+const BADGE_COUNT_CHANNEL = "app:badge-count";
 
 /** 透明度存在 userData 下的单独一个小文件里，和 remote.json 一样。 */
 function windowOpacityFile(): string {
@@ -881,6 +882,17 @@ app.whenReady().then(async () => {
     if (!window || window.isDestroyed()) return;
     if (typeof color !== "string" || !CSS_COLOR.test(color.trim())) return;
     window.setBackgroundColor(color.trim());
+  });
+  /**
+   * Dock 角标：有几个对话回复完了还没看。
+   *
+   * 只有未读会计数，运行中的不算——角标问的是「有几件事等着你」，还在跑的那些
+   * 不需要你做任何事。0 要显式清掉，否则上一次的数字会一直挂在图标上。
+   */
+  ipcMain.handle(BADGE_COUNT_CHANNEL, (_event, count: number): void => {
+    const unread = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+    // Linux 上只有部分桌面环境实现得了，setBadgeCount 会返回 false，不是错误。
+    app.setBadgeCount(unread);
   });
   // 整窗透明度，见 window-opacity.ts 里为什么不用 vibrancy。
   // 只作用在发起设置的那扇窗（也就是主窗）：气泡窗是本来就以 transparent 创建

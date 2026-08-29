@@ -76,6 +76,20 @@ export function workspaceActivityLabel(summary: WorkspaceActivitySummary): strin
   return undefined;
 }
 
+/**
+ * 有多少个对话「回复完了但还没看」——Dock 角标上的那个数字。
+ *
+ * 只数未读，不数运行中：角标是「有几件事等着你处理」，还在跑的那些不需要你做
+ * 任何事。跨所有工作区累计，因为 Dock 图标只有一个，看的人也不在某个工作区里。
+ */
+export function unreadConversationCount(activity: Record<string, { running: boolean; unread: boolean }>): number {
+  let unread = 0;
+  for (const state of Object.values(activity)) {
+    if (state && !state.running && state.unread) unread += 1;
+  }
+  return unread;
+}
+
 export type ConversationStatusKind = "running" | "unread" | "pinned" | "none";
 
 /**

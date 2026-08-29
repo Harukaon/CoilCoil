@@ -201,13 +201,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .project-toggle:hover .project-folder-icon { opacity: 0; }
 .project-toggle:hover .project-hover-icon { opacity: 1; }
 .project-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-activity { display: block; width: 7px; height: 7px; flex: 0 0 auto; margin-right: 2px; border-radius: 50%; background: var(--c-green-muted); box-shadow: 0 0 0 2px rgb(61 154 88 / 12%); }
-.project-activity.running { animation: project-activity-pulse 1.6s ease-in-out infinite; }
-@keyframes project-activity-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgb(61 154 88 / 12%); opacity: 1; }
-  50% { box-shadow: 0 0 0 4px rgb(61 154 88 / 20%); opacity: .6; }
-}
-@media (prefers-reduced-motion: reduce) { .project-activity.running { animation: none; } }
+/* 未读一律是红点，运行中一律是转圈（见 WorkspaceSidebar 里的说明）。红色是
+   系统里「有东西等着你看」的通用语义，绿色读起来像「一切正常」，正好相反。 */
+.project-activity-slot { display: grid; width: 11px; height: 11px; flex: 0 0 auto; margin-right: 2px; place-items: center; }
+.project-activity { display: block; width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--c-red-solid); box-shadow: 0 0 0 2px rgb(199 70 62 / 14%); }
 .project-row-actions { display: flex; flex: 0 0 auto; align-items: center; }
 .project-action { display: grid; width: 27px; height: 27px; flex: 0 0 auto; padding: 0; place-items: center; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; cursor: pointer; opacity: .64; }
 .project-action:hover { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-843)); opacity: 1; }
@@ -225,7 +222,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .conversation-row .conversation-status { display: grid; width: 11px; height: 11px; min-width: 11px; flex: 0 0 11px; place-items: center; overflow: visible; }
 .conversation-row .conversation-title-text { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-row time { flex: 0 0 auto; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 10px; white-space: nowrap; }
-.conversation-unread { display: block; width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--c-green-muted); box-shadow: 0 0 0 2px rgb(61 154 88 / 12%); }
+.conversation-unread { display: block; width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--c-red-solid); box-shadow: 0 0 0 2px rgb(199 70 62 / 14%); }
 .conversation-context-menu { z-index: 100; min-width: 146px; padding: 5px; border: 0; border-radius: var(--radius-3xl); background: hsl(var(--th) var(--ts) var(--l-980)); box-shadow: var(--shadow-md); animation: context-menu-in 110ms cubic-bezier(.16, 1, .3, 1); }
 .conversation-context-item { display: flex; height: 30px; align-items: center; gap: 8px; padding: 0 9px; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-239)); font-size: 12px; outline: none; cursor: default; user-select: none; }
 .conversation-context-item[data-highlighted] { color: hsl(var(--th) var(--ts) var(--l-122)); background: hsl(var(--th) var(--ts) var(--l-906)); }
