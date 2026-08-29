@@ -21,7 +21,7 @@ import {
   Settings,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protocol";
 import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { OrbitLoader } from "../../ui/loaders";
@@ -29,8 +29,9 @@ import { CoilLogo } from "../../ui/CoilLogo";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
-import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed } from "./recentSessions";
-import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, shouldCompactNav, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
+import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, visibleRecentSessions } from "./recentSessions";
+import { loadSidebarSectionOrder, moveSidebarSection, saveSidebarSectionOrder, SIDEBAR_SECTION_LABELS, type SidebarSection } from "./sidebarSections";
+import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
   runtimeId?: string;
@@ -101,13 +102,16 @@ function ConversationCopyItems({ session }: { session: SessionSummary }): React.
  *
  * The pinned and recent sections both list conversations from every workspace at
  * once, so unlike the rows nested under a project these have to say where they
- * come from. Only the context menu differs between the two.
+ * come from. A pinned conversation is listed in both sections, so which one is
+ * rendering the row is passed in rather than inferred from the pin.
  */
-function CrossProjectSessionRow({ project, session, activity, pinned, active, timestamp, onOpen, onArchive, menu }: {
+function CrossProjectSessionRow({ project, session, activity, pinned, variant, active, timestamp, onOpen, onArchive, menu }: {
   project: ProjectSelection;
   session: SessionSummary;
   activity?: SessionActivityState;
   pinned: boolean;
+  /** Which section is listing the row; a pinned conversation appears in both. */
+  variant: "pinned" | "recent";
   active: boolean;
   timestamp: string;
   onOpen: () => void;
@@ -118,7 +122,6 @@ function CrossProjectSessionRow({ project, session, activity, pinned, active, ti
   // ones that most need to say whether the agent is still working and whether
   // what it finished has been read.
   const status = conversationStatusMarker(conversationStatusKind(activity, pinned));
-  const variant = pinned ? "pinned" : "recent";
   // No marker means no slot: a quiet recent row starts its title at the same
   // place a quiet row under a project does, and a spinner or unread dot pushes
   // the title along only while there is something to say.
@@ -206,14 +209,13 @@ export function WorkspaceSidebar({
   const [draggingPath, setDraggingPath] = useState<string>();
   const [dropTargetPath, setDropTargetPath] = useState<string>();
   const renameRef = useRef<HTMLInputElement>(null);
-  // Past a handful of mounted workspaces the three tall buttons are three rows
-  // of conversations to scroll past on every visit.
-  const compactNav = shouldCompactNav(projects);
   const [recentCollapsed, setRecentCollapsed] = useState(loadRecentSectionCollapsed);
+  const [sectionOrder, setSectionOrder] = useState(loadSidebarSectionOrder);
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_ROWS);
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
   const recentSessions = collectRecentSessions(projects, sessionsByProject);
-  const visibleRecent = recentSessions.slice(0, recentLimit);
+  // The limit counts unpinned rows only; see visibleRecentSessions.
+  const recentView = visibleRecentSessions(recentSessions, recentLimit);
   // The home project is recomputed as the first entry on every launch, so only
   // the mounted workspaces have an order worth persisting.
   const reorderable = (target: ProjectSelection): boolean => target.kind === "workspace";
@@ -226,6 +228,32 @@ export function WorkspaceSidebar({
     });
   }, [renamingPath]);
 
+  const moveSection = (section: SidebarSection, direction: "up" | "down"): void => {
+    setSectionOrder((current) => {
+      const next = moveSidebarSection(current, section, direction);
+      saveSidebarSectionOrder(next);
+      return next;
+    });
+  };
+
+  /**
+   * The control that swaps a section with the other one.
+   *
+   * With exactly two movable sections there is only ever one sensible direction
+   * per heading, so the button says which way this section goes rather than
+   * offering a pair of arrows where one is always dead. It is hidden while the
+   * recent section has nothing to show, because then there is nothing to swap
+   * with and the click would look broken.
+   */
+  const sectionMoveButton = (section: SidebarSection): React.JSX.Element | null => {
+    if (!recentSessions.length) return null;
+    const direction = sectionOrder.indexOf(section) === 0 ? "down" : "up";
+    const label = `把「${SIDEBAR_SECTION_LABELS[section]}」${direction === "up" ? "上移" : "下移"}`;
+    return <button className="icon-button" type="button" aria-label={label} title={label} onClick={() => moveSection(section, direction)}>
+      {direction === "up" ? <ChevronUp size={15} strokeWidth={1.7} /> : <ChevronDown size={15} strokeWidth={1.7} />}
+    </button>;
+  };
+
   const commitRename = async (project: ProjectSelection, session: SessionSummary): Promise<void> => {
     const next = renameDraft.trim();
     setRenamingPath(undefined);
@@ -237,12 +265,261 @@ export function WorkspaceSidebar({
     }
   };
 
+  // 「最近」和「项目」两栏的上下顺序由用户定，所以两块各自先拼好，最后按顺序渲染：
+  // 换的是真实的 DOM 顺序（不是 CSS 的 order），键盘 Tab 和读屏读到的顺序跟看到的一致。
+  const recentSection = recentSessions.length ? (
+    <section className="recent-sessions-section">
+      <div className="section-heading">
+        <button
+          className="section-heading-toggle"
+          type="button"
+          aria-expanded={!recentCollapsed}
+          onClick={() => setRecentCollapsed((current) => { saveRecentSectionCollapsed(!current); return !current; })}
+        >
+          <span>最近</span>
+          <ChevronRight className={`section-heading-chevron ${recentCollapsed ? "" : "expanded"}`} size={13} strokeWidth={2} />
+        </button>
+        <span className="section-heading-actions">{sectionMoveButton("recent")}</span>
+      </div>
+      {recentCollapsed ? null : <div className="conversation-list recent-conversation-list">
+        {recentView.rows.map((entry) => <CrossProjectSessionRow
+          key={entry.session.path}
+          project={entry.project}
+          session={entry.session}
+          activity={sessionActivity[entry.session.path]}
+          pinned={Boolean(entry.session.pinned)}
+          variant="recent"
+          active={entry.project.path === activeProject?.path && entry.session.id === activeSessionId}
+          timestamp={new Date(entry.at).toISOString()}
+          onOpen={() => onOpenConversation(entry.project, entry.session)}
+          onArchive={() => onArchiveConversation(entry.project, entry.session)}
+          menu={<>
+            <ContextMenu.Item className="conversation-context-item" onSelect={() => onPinConversation(entry.project, entry.session, !entry.session.pinned)}>
+              {entry.session.pinned ? <PinOff size={13} /> : <Pin size={13} />}<span>{entry.session.pinned ? "取消置顶" : "置顶"}</span>
+            </ContextMenu.Item>
+            <ConversationCopyItems session={entry.session} />
+            <ContextMenu.Separator className="conversation-context-separator" />
+            <ContextMenu.Item className="conversation-context-item" onSelect={() => onArchiveConversation(entry.project, entry.session)}>归档对话</ContextMenu.Item>
+          </>}
+        />)}
+        <ConversationListControls
+          hiddenCount={recentView.hiddenCount}
+          expandedBy={recentLimit - DEFAULT_RECENT_ROWS}
+          onShowMore={() => setRecentLimit(nextExpandedSessionLimit(recentLimit, recentLimit + recentView.hiddenCount))}
+          onCollapse={() => setRecentLimit(DEFAULT_RECENT_ROWS)}
+        />
+      </div>}
+    </section>
+  ) : null;
+
+  const projectsSection = (<>
+    <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsDialog projects={projects} activeProject={activeProject} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button>{sectionMoveButton("projects")}</span></div>
+    {projects.length ? projects.map((project) => {
+      const expanded = expandedProjects.has(project.path);
+      const allSessions = sessionsByProject[project.path] ?? [];
+      const sessions = allSessions.filter((session) => !session.pinned);
+      const hasPending = pendingProjectPath === project.path;
+      // Collapsed workspaces hide their running conversations; the folder
+      // row carries their state so nothing is forgotten in there.
+      const workspaceActivity = summarizeWorkspaceActivity(allSessions, sessionActivity);
+      const workspaceActivityText = workspaceActivityLabel(workspaceActivity);
+      const collapsedLimit = collapsedSessionLimit(hasPending);
+      const visibleLimit = Math.max(collapsedLimit, expandedSessionLimits[project.path] ?? collapsedLimit);
+      const visibleSessions = sessions.slice(0, visibleLimit);
+      const hiddenCount = sessions.length - visibleSessions.length;
+      return (
+        <div className={`project-tree ${project.path === activeProject?.path ? "active" : ""}`} key={project.path}>
+          <ContextMenu.Root>
+            <ContextMenu.Trigger asChild>
+              <div
+                className={`project-row ${draggingPath === project.path ? "dragging" : ""} ${dropTargetPath === project.path ? "drop-target" : ""}`}
+                draggable={reorderable(project)}
+                onDragStart={(event) => {
+                  if (!reorderable(project)) return;
+                  event.dataTransfer.effectAllowed = "move";
+                  // Firefox refuses to start a drag without payload, and a
+                  // plain-text path is also what an external drop expects.
+                  event.dataTransfer.setData("text/plain", project.path);
+                  setDraggingPath(project.path);
+                }}
+                onDragOver={(event) => {
+                  if (!draggingPath || draggingPath === project.path || !reorderable(project)) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setDropTargetPath(project.path);
+                }}
+                onDragLeave={() => setDropTargetPath((current) => current === project.path ? undefined : current)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const from = draggingPath;
+                  setDraggingPath(undefined);
+                  setDropTargetPath(undefined);
+                  if (from && from !== project.path && reorderable(project)) onReorderProjects(from, project.path);
+                }}
+                onDragEnd={() => { setDraggingPath(undefined); setDropTargetPath(undefined); }}
+              >
+                <button className="project-toggle" type="button" aria-expanded={expanded} onClick={() => onToggleProject(project.path)}>
+                  <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
+                  <span className="project-name">{project.name}</span>
+                  {workspaceActivityText ? (
+                    <i
+                      className={`project-activity ${workspaceActivity.running ? "running" : "unread"}`}
+                      role="img"
+                      aria-label={workspaceActivityText}
+                      title={workspaceActivityText}
+                    />
+                  ) : null}
+                </button>
+                <span className="project-row-actions">
+                  <button className="project-action" type="button" aria-label={`在 ${project.name} 中新建对话`} onClick={() => onNewConversation(project)}><Plus size={14} /></button>
+                </span>
+              </div>
+            </ContextMenu.Trigger>
+            <ContextMenu.Portal>
+              <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
+                <ContextMenu.Item
+                  className="conversation-context-item"
+                  disabled={project.kind === "home"}
+                  onSelect={() => onRemoveProject(project)}
+                >
+                  <span>卸载工作区</span>
+                </ContextMenu.Item>
+              </ContextMenu.Content>
+            </ContextMenu.Portal>
+          </ContextMenu.Root>
+          <div className={`conversation-list-shell ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
+            <div className="conversation-list">
+              {hasPending ? <button className="conversation-row active pending" type="button" onClick={onFocusPending}><span className="conversation-status"><Circle size={11} strokeWidth={1.7} /></span><span className="conversation-title-text">新对话</span><time>刚刚</time></button> : null}
+              {visibleSessions.map((session) => {
+                const activity = sessionActivity[session.path];
+                const renaming = renamingPath === session.path;
+                const status = conversationStatusMarker(conversationStatusKind(activity, Boolean(session.pinned)));
+                return <ContextMenu.Root key={session.id}>
+                  <ContextMenu.Trigger asChild>
+                    <div className="conversation-row-wrap">
+                      {renaming ? (
+                        <div className={`conversation-row renaming ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}>
+                          {session.pinned ? <span className="conversation-status"><Pin size={11} strokeWidth={2} /></span> : null}
+                          <input
+                            ref={renameRef}
+                            className="conversation-rename-input"
+                            value={renameDraft}
+                            aria-label="重命名对话"
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            onBlur={() => { void commitRename(project, session); }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                setRenamingPath(undefined);
+                              } else if (event.key === "Enter") {
+                                event.preventDefault();
+                                void commitRename(project, session);
+                              }
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          className={`conversation-row ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}
+                          type="button"
+                          onClick={() => onOpenConversation(project, session)}
+                        >
+                          {status ? <span className="conversation-status">{status}</span> : null}
+                          <span className="conversation-title-text">{session.title}</span>
+                          <time>{relativeTime(session.updatedAt)}</time>
+                        </button>
+                      )}
+                      {!renaming ? (
+                        <button
+                          className="conversation-archive-btn"
+                          type="button"
+                          title="归档"
+                          onClick={(e) => { e.stopPropagation(); onArchiveConversation(project, session); }}
+                        >
+                          <Archive size={12} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </ContextMenu.Trigger>
+                  <ContextMenu.Portal>
+                    <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
+                      <ContextMenu.Item
+                        className="conversation-context-item"
+                        disabled={activity?.running}
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          setRenameDraft(session.title);
+                          setRenamingPath(session.path);
+                        }}
+                      >
+                        <Pencil size={13} /><span>重命名</span>
+                      </ContextMenu.Item>
+                      <ContextMenu.Item
+                        className="conversation-context-item"
+                        disabled={activity?.running}
+                        onSelect={() => onPinConversation(project, session, !session.pinned)}
+                      >
+                        {session.pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                        <span>{session.pinned ? "取消置顶" : "置顶"}</span>
+                      </ContextMenu.Item>
+                      <ContextMenu.Item
+                        className="conversation-context-item"
+                        disabled={activity?.running}
+                        onSelect={() => onForkConversation(project, session)}
+                      >
+                        <GitFork size={13} /><span>复制对话</span>
+                      </ContextMenu.Item>
+                      <ContextMenu.Sub>
+                        <ContextMenu.SubTrigger
+                          className="conversation-context-item"
+                          disabled={activity?.running || projects.length < 2}
+                        >
+                          <FolderInput size={13} /><span>移动到工作区</span><ChevronRight className="conversation-context-more" size={13} />
+                        </ContextMenu.SubTrigger>
+                        <ContextMenu.Portal>
+                          <ContextMenu.SubContent className="conversation-context-menu" sideOffset={2} collisionPadding={8}>
+                            {projects.filter((target) => target.path !== project.path).map((target) => (
+                              <ContextMenu.Item
+                                className="conversation-context-item"
+                                key={target.path}
+                                onSelect={() => onMoveConversation(project, session, target)}
+                              >
+                                <Folder size={13} /><span className="conversation-context-label" title={target.path}>{target.name}</span>
+                              </ContextMenu.Item>
+                            ))}
+                          </ContextMenu.SubContent>
+                        </ContextMenu.Portal>
+                      </ContextMenu.Sub>
+                      <ConversationCopyItems session={session} />
+                      <ContextMenu.Separator className="conversation-context-separator" />
+                      <ContextMenu.Item className="conversation-context-item" disabled={activity?.running} onSelect={() => onArchiveConversation(project, session)}>归档对话</ContextMenu.Item>
+                    </ContextMenu.Content>
+                  </ContextMenu.Portal>
+                </ContextMenu.Root>;
+              })}
+              <ConversationListControls
+                hiddenCount={hiddenCount}
+                expandedBy={visibleSessions.length - collapsedLimit}
+                onShowMore={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleSessions.length, sessions.length))}
+                onCollapse={() => onShowMoreSessions(project.path, collapsedLimit)}
+              />
+              {!allSessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
+            </div>
+          </div>
+        </div>
+      );
+    }) : (
+      <button className="open-project-card" type="button" onClick={onOpenProject}><span className="open-project-icon"><Plus size={14} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
+    )}
+  </>);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-drag"><WindowDragBar className="sidebar-drag-region" /></div>
-      {/* Compact keeps the same DOM so focus order and shortcuts are unchanged;
-          the row's left-to-right order is CSS. */}
-      <nav className={`primary-nav ${compactNav ? "compact" : ""}`}>
+      {/* 三个主按钮永远是竖着一列、带文字标签的样子。工作区一多就折成一排图标的
+          做法已经去掉：省下的那点高度换来的是「同一个按钮换了位置、也没了名字」，
+          左上角看着像换了个界面。 */}
+      <nav className="primary-nav">
         <button className="nav-button nav-new" type="button" title="新建对话" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>{primaryModifierLabel(window.coilcoil.platform)}N</kbd></button>
         <button className={`nav-button nav-skills ${skillsOpen ? "active" : ""}`} type="button" title="技能" onClick={onOpenSkills}><Sparkles size={16} strokeWidth={1.7} /><span>技能</span></button>
         <button className={`nav-button nav-memory ${memoryOpen ? "active" : ""}`} type="button" title="记忆" onClick={onOpenMemory}><BookOpen size={16} strokeWidth={1.7} /><span>记忆</span></button>
@@ -258,6 +535,7 @@ export function WorkspaceSidebar({
               session={entry.session}
               activity={sessionActivity[entry.session.path]}
               pinned
+              variant="pinned"
               active={entry.project.path === activeProject?.path && entry.session.id === activeSessionId}
               timestamp={entry.session.updatedAt}
               onOpen={() => onOpenConversation(entry.project, entry.session)}
@@ -271,240 +549,7 @@ export function WorkspaceSidebar({
             />)}
           </div>
         </section> : null}
-        {recentSessions.length ? <section className="recent-sessions-section">
-          <button
-            className="section-heading section-heading-toggle"
-            type="button"
-            aria-expanded={!recentCollapsed}
-            onClick={() => setRecentCollapsed((current) => { saveRecentSectionCollapsed(!current); return !current; })}
-          >
-            <span>最近</span>
-            <ChevronRight className={`section-heading-chevron ${recentCollapsed ? "" : "expanded"}`} size={13} strokeWidth={2} />
-          </button>
-          {recentCollapsed ? null : <div className="conversation-list recent-conversation-list">
-            {visibleRecent.map((entry) => <CrossProjectSessionRow
-              key={entry.session.path}
-              project={entry.project}
-              session={entry.session}
-              activity={sessionActivity[entry.session.path]}
-              pinned={false}
-              active={entry.project.path === activeProject?.path && entry.session.id === activeSessionId}
-              timestamp={new Date(entry.at).toISOString()}
-              onOpen={() => onOpenConversation(entry.project, entry.session)}
-              onArchive={() => onArchiveConversation(entry.project, entry.session)}
-              menu={<>
-                <ContextMenu.Item className="conversation-context-item" onSelect={() => onPinConversation(entry.project, entry.session, true)}><Pin size={13} /><span>置顶</span></ContextMenu.Item>
-                <ConversationCopyItems session={entry.session} />
-                <ContextMenu.Separator className="conversation-context-separator" />
-                <ContextMenu.Item className="conversation-context-item" onSelect={() => onArchiveConversation(entry.project, entry.session)}>归档对话</ContextMenu.Item>
-              </>}
-            />)}
-            <ConversationListControls
-              hiddenCount={recentSessions.length - visibleRecent.length}
-              expandedBy={visibleRecent.length - DEFAULT_RECENT_ROWS}
-              onShowMore={() => setRecentLimit(nextExpandedSessionLimit(visibleRecent.length, recentSessions.length))}
-              onCollapse={() => setRecentLimit(DEFAULT_RECENT_ROWS)}
-            />
-          </div>}
-        </section> : null}
-        <div className="section-heading"><span>项目</span><span className="section-heading-actions"><ArchivedSessionsDialog projects={projects} activeProject={activeProject} onRestored={onRestoreSessions} onError={onError} /><button className="icon-button" type="button" aria-label="打开项目" onClick={onOpenProject}><FolderOpen size={15} strokeWidth={1.7} /></button></span></div>
-        {projects.length ? projects.map((project) => {
-          const expanded = expandedProjects.has(project.path);
-          const allSessions = sessionsByProject[project.path] ?? [];
-          const sessions = allSessions.filter((session) => !session.pinned);
-          const hasPending = pendingProjectPath === project.path;
-          // Collapsed workspaces hide their running conversations; the folder
-          // row carries their state so nothing is forgotten in there.
-          const workspaceActivity = summarizeWorkspaceActivity(allSessions, sessionActivity);
-          const workspaceActivityText = workspaceActivityLabel(workspaceActivity);
-          const collapsedLimit = collapsedSessionLimit(hasPending);
-          const visibleLimit = Math.max(collapsedLimit, expandedSessionLimits[project.path] ?? collapsedLimit);
-          const visibleSessions = sessions.slice(0, visibleLimit);
-          const hiddenCount = sessions.length - visibleSessions.length;
-          return (
-            <div className={`project-tree ${project.path === activeProject?.path ? "active" : ""}`} key={project.path}>
-              <ContextMenu.Root>
-                <ContextMenu.Trigger asChild>
-                  <div
-                    className={`project-row ${draggingPath === project.path ? "dragging" : ""} ${dropTargetPath === project.path ? "drop-target" : ""}`}
-                    draggable={reorderable(project)}
-                    onDragStart={(event) => {
-                      if (!reorderable(project)) return;
-                      event.dataTransfer.effectAllowed = "move";
-                      // Firefox refuses to start a drag without payload, and a
-                      // plain-text path is also what an external drop expects.
-                      event.dataTransfer.setData("text/plain", project.path);
-                      setDraggingPath(project.path);
-                    }}
-                    onDragOver={(event) => {
-                      if (!draggingPath || draggingPath === project.path || !reorderable(project)) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      setDropTargetPath(project.path);
-                    }}
-                    onDragLeave={() => setDropTargetPath((current) => current === project.path ? undefined : current)}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const from = draggingPath;
-                      setDraggingPath(undefined);
-                      setDropTargetPath(undefined);
-                      if (from && from !== project.path && reorderable(project)) onReorderProjects(from, project.path);
-                    }}
-                    onDragEnd={() => { setDraggingPath(undefined); setDropTargetPath(undefined); }}
-                  >
-                    <button className="project-toggle" type="button" aria-expanded={expanded} onClick={() => onToggleProject(project.path)}>
-                      <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
-                      <span className="project-name">{project.name}</span>
-                      {workspaceActivityText ? (
-                        <i
-                          className={`project-activity ${workspaceActivity.running ? "running" : "unread"}`}
-                          role="img"
-                          aria-label={workspaceActivityText}
-                          title={workspaceActivityText}
-                        />
-                      ) : null}
-                    </button>
-                    <span className="project-row-actions">
-                      <button className="project-action" type="button" aria-label={`在 ${project.name} 中新建对话`} onClick={() => onNewConversation(project)}><Plus size={14} /></button>
-                    </span>
-                  </div>
-                </ContextMenu.Trigger>
-                <ContextMenu.Portal>
-                  <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
-                    <ContextMenu.Item
-                      className="conversation-context-item"
-                      disabled={project.kind === "home"}
-                      onSelect={() => onRemoveProject(project)}
-                    >
-                      <span>卸载工作区</span>
-                    </ContextMenu.Item>
-                  </ContextMenu.Content>
-                </ContextMenu.Portal>
-              </ContextMenu.Root>
-              <div className={`conversation-list-shell ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
-                <div className="conversation-list">
-                  {hasPending ? <button className="conversation-row active pending" type="button" onClick={onFocusPending}><span className="conversation-status"><Circle size={11} strokeWidth={1.7} /></span><span className="conversation-title-text">新对话</span><time>刚刚</time></button> : null}
-                  {visibleSessions.map((session) => {
-                    const activity = sessionActivity[session.path];
-                    const renaming = renamingPath === session.path;
-                    const status = conversationStatusMarker(conversationStatusKind(activity, Boolean(session.pinned)));
-                    return <ContextMenu.Root key={session.id}>
-                      <ContextMenu.Trigger asChild>
-                        <div className="conversation-row-wrap">
-                          {renaming ? (
-                            <div className={`conversation-row renaming ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}>
-                              {session.pinned ? <span className="conversation-status"><Pin size={11} strokeWidth={2} /></span> : null}
-                              <input
-                                ref={renameRef}
-                                className="conversation-rename-input"
-                                value={renameDraft}
-                                aria-label="重命名对话"
-                                onChange={(event) => setRenameDraft(event.target.value)}
-                                onBlur={() => { void commitRename(project, session); }}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    setRenamingPath(undefined);
-                                  } else if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    void commitRename(project, session);
-                                  }
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            <button
-                              className={`conversation-row ${project.path === activeProject?.path && session.id === activeSessionId ? "active" : ""}`}
-                              type="button"
-                              onClick={() => onOpenConversation(project, session)}
-                            >
-                              {status ? <span className="conversation-status">{status}</span> : null}
-                              <span className="conversation-title-text">{session.title}</span>
-                              <time>{relativeTime(session.updatedAt)}</time>
-                            </button>
-                          )}
-                          {!renaming ? (
-                            <button
-                              className="conversation-archive-btn"
-                              type="button"
-                              title="归档"
-                              onClick={(e) => { e.stopPropagation(); onArchiveConversation(project, session); }}
-                            >
-                              <Archive size={12} />
-                            </button>
-                          ) : null}
-                        </div>
-                      </ContextMenu.Trigger>
-                      <ContextMenu.Portal>
-                        <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
-                          <ContextMenu.Item
-                            className="conversation-context-item"
-                            disabled={activity?.running}
-                            onSelect={(event) => {
-                              event.preventDefault();
-                              setRenameDraft(session.title);
-                              setRenamingPath(session.path);
-                            }}
-                          >
-                            <Pencil size={13} /><span>重命名</span>
-                          </ContextMenu.Item>
-                          <ContextMenu.Item
-                            className="conversation-context-item"
-                            disabled={activity?.running}
-                            onSelect={() => onPinConversation(project, session, !session.pinned)}
-                          >
-                            {session.pinned ? <PinOff size={13} /> : <Pin size={13} />}
-                            <span>{session.pinned ? "取消置顶" : "置顶"}</span>
-                          </ContextMenu.Item>
-                          <ContextMenu.Item
-                            className="conversation-context-item"
-                            disabled={activity?.running}
-                            onSelect={() => onForkConversation(project, session)}
-                          >
-                            <GitFork size={13} /><span>复制对话</span>
-                          </ContextMenu.Item>
-                          <ContextMenu.Sub>
-                            <ContextMenu.SubTrigger
-                              className="conversation-context-item"
-                              disabled={activity?.running || projects.length < 2}
-                            >
-                              <FolderInput size={13} /><span>移动到工作区</span><ChevronRight className="conversation-context-more" size={13} />
-                            </ContextMenu.SubTrigger>
-                            <ContextMenu.Portal>
-                              <ContextMenu.SubContent className="conversation-context-menu" sideOffset={2} collisionPadding={8}>
-                                {projects.filter((target) => target.path !== project.path).map((target) => (
-                                  <ContextMenu.Item
-                                    className="conversation-context-item"
-                                    key={target.path}
-                                    onSelect={() => onMoveConversation(project, session, target)}
-                                  >
-                                    <Folder size={13} /><span className="conversation-context-label" title={target.path}>{target.name}</span>
-                                  </ContextMenu.Item>
-                                ))}
-                              </ContextMenu.SubContent>
-                            </ContextMenu.Portal>
-                          </ContextMenu.Sub>
-                          <ConversationCopyItems session={session} />
-                          <ContextMenu.Separator className="conversation-context-separator" />
-                          <ContextMenu.Item className="conversation-context-item" disabled={activity?.running} onSelect={() => onArchiveConversation(project, session)}>归档对话</ContextMenu.Item>
-                        </ContextMenu.Content>
-                      </ContextMenu.Portal>
-                    </ContextMenu.Root>;
-                  })}
-                  <ConversationListControls
-                    hiddenCount={hiddenCount}
-                    expandedBy={visibleSessions.length - collapsedLimit}
-                    onShowMore={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleSessions.length, sessions.length))}
-                    onCollapse={() => onShowMoreSessions(project.path, collapsedLimit)}
-                  />
-                  {!allSessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
-                </div>
-              </div>
-            </div>
-          );
-        }) : (
-          <button className="open-project-card" type="button" onClick={onOpenProject}><span className="open-project-icon"><Plus size={14} /></span><span><strong>打开项目</strong><small>选择本地文件夹</small></span></button>
-        )}
+        {sectionOrder.map((name) => <Fragment key={name}>{name === "recent" ? recentSection : projectsSection}</Fragment>)}
       </section>
       <div className="sidebar-footer"><div className="brand-mark"><CoilLogo size={26} /></div><div className="brand-copy"><strong>CoilCoil</strong><span>{modelLabel}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={onOpenSettings}><Settings size={17} strokeWidth={1.7} /></button></div>
     </aside>

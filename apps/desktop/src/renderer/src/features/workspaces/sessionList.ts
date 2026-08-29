@@ -94,23 +94,3 @@ export function conversationStatusKind(
   if (activity?.unread) return "unread";
   return pinned ? "pinned" : "none";
 }
-
-/** How many mounted workspaces make the sidebar crowded enough to compact its nav. */
-export const NAV_COMPACT_WORKSPACES = 6;
-
-/**
- * Whether the sidebar's three primary buttons should collapse into one row.
- *
- * They are worth their height while there is little below them. Past a handful
- * of mounted workspaces the list is long enough that the stack is three rows of
- * conversations to scroll past on every visit, so the buttons give up their
- * labels instead.
- *
- * The rule is a count rather than a measurement of the rendered list: compacting
- * frees the very space that a measurement would test, so an overflow-driven
- * version restores itself and then compacts again. The home project is not
- * counted - it is always there and says nothing about how much has accumulated.
- */
-export function shouldCompactNav(projects: readonly ProjectSelection[]): boolean {
-  return projects.filter((project) => project.kind === "workspace").length >= NAV_COMPACT_WORKSPACES;
-}

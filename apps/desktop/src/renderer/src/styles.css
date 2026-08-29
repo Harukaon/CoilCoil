@@ -132,15 +132,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .icon-button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-145)); background: hsl(var(--th) var(--ts) var(--l-880)); }
 .icon-button:disabled { opacity: .42; cursor: default; }
 .primary-nav { display: grid; gap: 2px; padding: 2px 12px 8px; }
-/* One row, reordered: skills, memory, then new conversation on the right. */
-.primary-nav.compact { display: flex; gap: 4px; }
-.primary-nav.compact .nav-button { flex: 1 1 0; min-width: 0; justify-content: center; padding: 0; }
-.primary-nav.compact .nav-button span, .primary-nav.compact .nav-button kbd { display: none; }
-.primary-nav.compact .nav-skills { order: 1; }
-.primary-nav.compact .nav-memory { order: 2; }
-/* The three read as one control strip, so none of them carries a resting fill;
-   hover and the active state are what distinguish them, as everywhere else. */
-.primary-nav.compact .nav-new { order: 3; }
 .nav-button, .conversation-row, .inspector-nav button { display: flex; align-items: center; width: 100%; background: transparent; cursor: pointer; }
 .nav-button { gap: 9px; min-height: 34px; padding: 0 8px; border-radius: 7px; font-size: 13px; font-weight: 500; }
 .nav-button kbd { margin-left: auto; color: hsl(var(--th) var(--ts) var(--l-598)); font-size: 10px; font-family: inherit; }
@@ -157,9 +148,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .recent-conversation-list { padding-left: 5px; }
 .recent-conversation-row-wrap { min-width: 0; }
 .recent-conversation-row { min-width: 0; }
-/* The heading doubles as the section's collapse control, so it has to shed the
-   button chrome and take the padding the plain headings get from the layout. */
-.section-heading-toggle { width: 100%; padding-right: 6px; border: 0; background: none; text-align: left; cursor: pointer; }
+/* 「最近」那条标题里除了折叠还多了一个换位按钮，所以折叠不再是标题本身，而是标题
+   里占满剩余宽度的一个按钮：点标题文字那一整条仍然是折叠，右边留给按钮。 */
+.section-heading-toggle { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; justify-content: space-between; padding: 0 6px 0 0; border: 0; background: none; text-align: left; cursor: pointer; }
 .section-heading-toggle:hover { color: hsl(var(--th) var(--ts) var(--l-286)); }
 .section-heading-chevron { flex: 0 0 auto; transition: transform 120ms ease; }
 .section-heading-chevron.expanded { transform: rotate(90deg); }
