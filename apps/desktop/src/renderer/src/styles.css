@@ -401,9 +401,19 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 /* The wrapper owns the block's spacing so the fold button sits inside it. */
 .markdown .markdown-code-block { position: relative; margin: 0 0 12px; }
 .markdown .markdown-code-block pre { margin: 0; }
+/* 只包住 <pre> 的定位层：复制按钮和渐隐都以它为参照，才不会算上下面折叠按钮的
+   高度。<pre> 自己是横向滚动的那一层，按钮放在它外面就不会被滚走。 */
+.markdown-code-surface { position: relative; min-width: 0; }
 .markdown-code-block.collapsed pre { overflow: hidden; }
 /* Fade the cut so a folded block reads as continuing, not as ending mid-line. */
-.markdown-code-block.collapsed::after { position: absolute; right: 1px; bottom: 0; left: 1px; height: 64px; border-radius: 0 0 10px 10px; background: linear-gradient(hsl(var(--th) var(--ts) var(--l-935) / 0%), hsl(var(--th) var(--ts) var(--l-935))); content: ""; pointer-events: none; }
+.markdown-code-block.collapsed .markdown-code-surface::after { position: absolute; right: 1px; bottom: 0; left: 1px; height: 64px; border-radius: 0 0 10px 10px; background: linear-gradient(hsl(var(--th) var(--ts) var(--l-935) / 0%), hsl(var(--th) var(--ts) var(--l-935))); content: ""; pointer-events: none; }
+/* 复制按钮固定在代码块的右下角（不是右上角：右上角会盖住第一行代码）。平时透明，
+   悬浮代码块才浮现；键盘聚焦和刚复制完也保持可见。z-index 让它压在折叠渐隐之上。 */
+.markdown-code-copy { position: absolute; z-index: 1; right: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-457)); background: hsl(var(--th) var(--ts) var(--l-980)); font-size: 10px; opacity: 0; transition: opacity 120ms ease, color 120ms ease, background 120ms ease; cursor: pointer; }
+.markdown-code-surface:hover .markdown-code-copy, .markdown-code-copy:focus-visible, .markdown-code-copy.copied { opacity: 1; }
+.markdown-code-copy:hover { border-color: hsl(var(--th) var(--ts) var(--l-769)); color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-1000)); }
+.markdown-code-copy.copied { color: hsl(var(--th) var(--ts) var(--l-263)); }
+.markdown-code-copy > svg { flex: 0 0 auto; }
 .markdown-code-toggle { display: flex; width: 100%; align-items: center; justify-content: center; gap: 5px; height: 26px; margin-top: 4px; border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-512)); background: transparent; font-size: 11px; cursor: pointer; }
 .markdown-code-toggle:hover { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-888)); }
 .markdown blockquote { padding-left: 12px; border-left: 2px solid hsl(var(--th) var(--ts) var(--l-814)); color: hsl(var(--th) var(--ts) var(--l-402)); }
