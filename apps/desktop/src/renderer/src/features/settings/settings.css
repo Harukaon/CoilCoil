@@ -1,3 +1,14 @@
+/* 设置界面是工作区的另一块画布，不是另一套皮肤：两块底色一律走 theme-tokens.css
+ * 里那组表面令牌（`--pane-fill` / `--side-fill`），和主界面读同一个真相源。
+ *
+ * 以前这里各写死一档明度（正文 --l-976、侧栏 --l-933）。明度阶梯本身是跟着色调
+ * 走的，所以换色调不至于完全不变色，但表面令牌另有两件事它跟不上：
+ *   1. 每套色调的表面停在自己的档位上（纯白的正文区是 100%、雪白 99.2%、拿铁
+ *      95.7%），写死的 97.6% 只在纯白的外圈那一档上碰巧对得上；
+ *   2. 「界面层次」（齐平 / 分栏）只改表面令牌，写死的明度完全感觉不到，所以
+ *      设置侧栏在两种层次下长得一模一样。
+ * 结果就是同一套配色下设置界面和主界面对不上——尤其侧栏，纯白色调下主界面是
+ * 97.6%，设置侧栏却压到 93.3%，差了整整一档。 */
 .settings-screen {
   --settings-sidebar-width: 220px;
   display: grid;
@@ -7,7 +18,7 @@
   min-height: 0;
   grid-template-columns: var(--settings-sidebar-width) minmax(0, 1fr);
   color: hsl(var(--th) var(--ts) var(--l-198));
-  background: hsl(var(--th) var(--ts) var(--l-976));
+  background: var(--pane-fill);
   position: relative;
 }
 .settings-sidebar {
@@ -16,12 +27,19 @@
   min-height: 0;
   flex-direction: column;
   padding: 0 12px 14px;
-  border-right: 1px solid hsl(var(--th) var(--ts) var(--l-861));
-  background: hsl(var(--th) var(--ts) var(--l-933));
+  /* 和主界面左侧栏同一条分界线（styles.css 的 .sidebar），齐平层次下两块底色
+     一样，这条线就是唯一的分界。 */
+  border-right: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 45%);
+  background: var(--side-fill);
 }
 .settings-window-drag { height: 52px; flex: 0 0 52px; }
-.settings-sidebar-home { display: flex; width: 100%; height: 40px; align-items: center; gap: 9px; padding: 0 10px 6px; border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-306)); background: transparent; font-size: 12px; font-weight: 600; text-align: left; cursor: pointer; }
-.settings-sidebar-home:hover { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-888)); }
+/* 图标和文字在 40px 里居中。以前这里写的是 `padding: 0 10px 6px` —— 那 6px 是
+   想跟下面的栏目列表拉开距离，但它是内边距，撑的是按钮自己的内容盒：内容被挤
+   到上面 34px 里居中，看上去就是整行往上偏了 3px。距离改用 margin 让出来，内容
+   盒才是完整的 40px，真正居中。
+   悬浮时只加一层很浅的投影，不加描边也不加更深的底色。 */
+.settings-sidebar-home { display: flex; width: 100%; height: 40px; align-items: center; gap: 9px; margin-bottom: 6px; padding: 0 10px; border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-306)); background: transparent; font-size: 12px; font-weight: 600; text-align: left; cursor: pointer; transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease; }
+.settings-sidebar-home:hover { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-888)); box-shadow: 0 1px 3px rgb(0 0 0 / 9%); }
 .settings-page { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
 .settings-page-header { display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
 .settings-page-header > div { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -109,7 +127,7 @@
   padding: 1px 4px;
   border-radius: 4px;
   background: hsl(var(--th) var(--ts) var(--l-914));
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
   font-size: .92em;
 }
 .mcp-json-editor {
@@ -121,7 +139,7 @@
   border-radius: 10px;
   color: hsl(var(--th) var(--ts) var(--l-178));
   background: hsl(var(--th) var(--ts) var(--l-1000));
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
   font-size: 12px;
   line-height: 1.5;
   resize: none;
@@ -165,7 +183,7 @@
 .settings-screen label { display: grid; gap: 7px; color: hsl(var(--th) var(--ts) var(--l-357)); font-size: 11px; font-weight: 550; }
 .settings-screen input, .settings-screen textarea { width: 100%; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: 8px; color: hsl(var(--th) var(--ts) var(--l-198)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px; }
 .settings-screen input { height: 34px; padding: 0 9px; }
-.settings-screen textarea { min-height: 72px; resize: vertical; padding: 8px 9px; font: 10px/1.5 "SFMono-Regular", Consolas, monospace; }
+.settings-screen textarea { min-height: 72px; resize: vertical; padding: 8px 9px; font: 10px/1.5 var(--font-mono, "SFMono-Regular", Consolas, monospace); }
 .settings-screen footer { display: flex; align-items: center; gap: 12px; padding-top: 3px; }
 .settings-screen footer > span { min-width: 0; flex: 1; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 10px; }
 .mcp-editor-footer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
@@ -222,7 +240,7 @@
 .provider-editor-heading > div:first-child { display: grid; gap: 4px; }
 .provider-editor-heading strong { color: hsl(var(--th) var(--ts) var(--l-182)); font-size: 14px; }
 .provider-editor-heading small { color: hsl(var(--th) var(--ts) var(--l-543)); font-size: 9px; font-weight: 400; line-height: 1.5; }
-.provider-editor-heading code, .provider-advanced code, .provider-editor-empty code, .provider-help code, .provider-builtins-summary code { padding: 1px 3px; border-radius: 4px; background: hsl(var(--th) var(--ts) var(--l-914)); font-family: "SFMono-Regular", Consolas, monospace; }
+.provider-editor-heading code, .provider-advanced code, .provider-editor-empty code, .provider-help code, .provider-builtins-summary code { padding: 1px 3px; border-radius: 4px; background: hsl(var(--th) var(--ts) var(--l-914)); font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace); }
 .danger-text-button { display: inline-flex; height: 34px; align-items: center; gap: 6px; padding: 0 10px; border-radius: 8px; color: var(--c-red-muted); background: var(--c-red-subtle); font-size: 10px; cursor: pointer; }
 .danger-text-button.armed { color: hsl(var(--th) var(--ts) var(--l-1000)); background: var(--c-red-muted); }
 .provider-heading-tags { display: flex; align-items: center; gap: 5px; }
@@ -294,12 +312,12 @@
 .provider-oauth-progress { display: flex; min-height: 72px; align-items: center; justify-content: center; gap: 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-873)); border-radius: 11px; color: hsl(var(--th) var(--ts) var(--l-455)); background: hsl(var(--th) var(--ts) var(--l-959)); font-size: 11px; }
 .provider-oauth-callback { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 9px; padding: 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-847)); border-radius: 10px; background: hsl(var(--th) var(--ts) var(--l-957)); }
 .provider-oauth-callback > span { grid-column: 1 / -1; color: hsl(var(--th) var(--ts) var(--l-465)); font-size: 9px; font-weight: 600; }
-.provider-oauth-callback > code { min-width: 0; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-278)); font: 9px/1.45 "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.provider-oauth-callback > code { min-width: 0; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-278)); font: 9px/1.45 var(--font-mono, "SFMono-Regular", Consolas, monospace); text-overflow: ellipsis; white-space: nowrap; }
 .provider-oauth-callback > button { display: inline-flex; height: 28px; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid hsl(var(--th) var(--ts) var(--l-812)); border-radius: 7px; color: hsl(var(--th) var(--ts) var(--l-353)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 9px; cursor: pointer; }
 .provider-oauth-callback > button:hover { border-color: hsl(var(--th) var(--ts) var(--l-686)); background: hsl(var(--th) var(--ts) var(--l-975)); }
 .provider-oauth-device-code { display: grid; justify-items: center; gap: 8px; padding: 17px; border: 1px solid hsl(var(--th) var(--ts) var(--l-847)); border-radius: 12px; background: hsl(var(--th) var(--ts) var(--l-957)); }
 .provider-oauth-device-code > span, .provider-oauth-device-code > small { color: hsl(var(--th) var(--ts) var(--l-514)); font-size: 9px; }
-.provider-oauth-device-code > strong { color: hsl(var(--th) var(--ts) var(--l-210)); font: 700 24px/1.1 "SFMono-Regular", Consolas, monospace; letter-spacing: .12em; }
+.provider-oauth-device-code > strong { color: hsl(var(--th) var(--ts) var(--l-210)); font: 700 24px/1.1 var(--font-mono, "SFMono-Regular", Consolas, monospace); letter-spacing: .12em; }
 .provider-oauth-instructions { margin: 0; padding: 9px 10px; border-radius: 8px; color: var(--c-amber-text); background: hsl(var(--th) var(--ts) var(--l-941)); font-size: 10px; line-height: 1.55; }
 .provider-oauth-prompt { display: grid; gap: 9px; }
 .provider-oauth-prompt > strong, .provider-oauth-prompt > label { color: hsl(var(--th) var(--ts) var(--l-324)); font-size: 11px; font-weight: 600; line-height: 1.5; }
@@ -588,7 +606,7 @@
   padding: 1px 4px;
   border-radius: 4px;
   background: hsl(var(--th) var(--ts) var(--l-914));
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
   font-size: .92em;
 }
 .skills-toolbar {
@@ -776,6 +794,11 @@
 .theme-preview-line { height: 5px; width: 62%; border-radius: 99px; background: var(--preview-muted); opacity: .55; }
 .theme-preview-line.wide { width: 86%; background: var(--preview-text); opacity: .8; }
 .theme-preview-bubble { height: 18px; width: 74%; border: 1px solid var(--preview-border); border-radius: 6px; background: var(--preview-card); }
+/* 字体卡片的示例。字号比正文大一点，不然中英文的差别根本看不出来；高度和
+   .theme-preview 对齐，两种卡片混在一页里不会高低不齐。 */
+.font-preview { display: grid; height: 72px; align-content: center; justify-items: start; gap: 4px; overflow: hidden; padding: 7px 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: 8px; background: hsl(var(--th) var(--ts) var(--l-1000)); }
+.font-preview-latin { color: hsl(var(--th) var(--ts) var(--l-210)); font-size: 17px; line-height: 1.25; white-space: nowrap; }
+.font-preview-cjk { color: hsl(var(--th) var(--ts) var(--l-420)); font-size: 14px; line-height: 1.3; white-space: nowrap; }
 .theme-card-copy { display: grid; gap: 2px; }
 .theme-card-copy strong { display: flex; align-items: center; gap: 5px; color: hsl(var(--th) var(--ts) var(--l-210)); font-size: 12px; font-weight: 600; }
 .theme-card-copy small { color: hsl(var(--th) var(--ts) var(--l-560)); font-size: 10px; }
@@ -857,7 +880,7 @@
 .remote-steps { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid hsl(var(--th) var(--ts) var(--l-882)); border-radius: 10px; background: hsl(var(--th) var(--ts) var(--l-955)); }
 .remote-steps ol { display: grid; gap: 7px; margin: 0; padding-left: 1.2em; }
 .remote-steps li { color: hsl(var(--th) var(--ts) var(--l-406)); font-size: 10.5px; line-height: 1.75; }
-.remote-steps code, .remote-hint code { padding: 1px 5px; border-radius: 4px; background: hsl(var(--th) var(--ts) var(--l-888)); font-family: "SFMono-Regular", Consolas, monospace; font-size: .92em; }
+.remote-steps code, .remote-hint code { padding: 1px 5px; border-radius: 4px; background: hsl(var(--th) var(--ts) var(--l-888)); font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace); font-size: .92em; }
 .remote-form { display: grid !important; gap: 12px !important; padding: 0 !important; grid-template-columns: 160px minmax(0, 1fr); }
 .remote-form footer { grid-column: 1 / -1; }
 .remote-check { display: flex !important; align-items: flex-start; gap: 10px; }
@@ -871,5 +894,5 @@
 .remote-device-when { flex: none; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; font-variant-numeric: tabular-nums; }
 .remote-field-hint { color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; font-weight: 400; line-height: 1.6; }
 
-.remote-notes { min-height: 96px; padding: 9px 11px; border: 1px solid hsl(var(--th) var(--ts) var(--l-859)); border-radius: 9px; outline: 0; color: hsl(var(--th) var(--ts) var(--l-262)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; line-height: 1.7; resize: vertical; }
+.remote-notes { min-height: 96px; padding: 9px 11px; border: 1px solid hsl(var(--th) var(--ts) var(--l-859)); border-radius: 9px; outline: 0; color: hsl(var(--th) var(--ts) var(--l-262)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace); font-size: 11px; line-height: 1.7; resize: vertical; }
 .remote-notes:focus { border-color: hsl(var(--th) var(--ts) var(--l-735)); box-shadow: 0 0 0 2px rgb(110 130 106 / 10%); }

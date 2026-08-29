@@ -29,6 +29,36 @@ export type DarkTone = "graphite" | "midnight" | "mauve" | "ember";
 export type LightTone = "paper" | "snow" | "slate" | "latte";
 export type Tone = LightTone | DarkTone;
 
+/**
+ * 字体。界面字体和代码/终端的等宽字体分开选，因为它们要解决的问题不一样：
+ * 一个是正文读起来舒不舒服，一个是对不对得齐。
+ *
+ * 只用系统自带的字体，不打包也不下载任何字体文件——体积和授权都不值当。每一档
+ * 都写完整的兜底链，并且中文一律兜到 PingFang SC（衬线那一档兜到宋体），不然选
+ * 了一个只有西文的字体，中文会掉到系统随便挑的一个字形上，中英混排会很难看。
+ */
+export type UiFont = "system" | "helvetica" | "serif" | "mono";
+export type MonoFont = "sf-mono" | "menlo" | "monaco" | "pt-mono";
+
+export interface FontDefinition<Id extends string> {
+  id: Id;
+  /** 设置界面展示名 */
+  name: string;
+  description: string;
+  /**
+   * 完整的 font-family 栈。
+   *
+   * 字体栈只在这里存一份：主题令牌可以全放 CSS，是因为 CSS 自己就能按
+   * `data-*` 选择器切换；字体不行——设置界面的每张卡片都要用「那一档」的字体
+   * 画出示例文字，那是行内样式，只能从 JS 拿。所以由 theme.ts 把选中的那一档
+   * 写进 `--font-ui` / `--font-mono`，CSS 一侧只引用变量。
+   */
+  stack: string;
+}
+
+export type UiFontDefinition = FontDefinition<UiFont>;
+export type MonoFontDefinition = FontDefinition<MonoFont>;
+
 export interface ThemeModeDefinition {
   id: ThemeMode;
   /** 设置界面展示名 */
@@ -57,10 +87,14 @@ export const THEME_STORAGE_KEY = "coilcoil.theme";
 export const SURFACE_STORAGE_KEY = "coilcoil.surface";
 export const DARK_TONE_STORAGE_KEY = "coilcoil.dark-tone";
 export const LIGHT_TONE_STORAGE_KEY = "coilcoil.light-tone";
+export const UI_FONT_STORAGE_KEY = "coilcoil.font-ui";
+export const MONO_FONT_STORAGE_KEY = "coilcoil.font-mono";
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
 export const DEFAULT_SURFACE_STYLE: SurfaceStyle = "layered";
 export const DEFAULT_DARK_TONE: DarkTone = "graphite";
 export const DEFAULT_LIGHT_TONE: LightTone = "paper";
+export const DEFAULT_UI_FONT: UiFont = "system";
+export const DEFAULT_MONO_FONT: MonoFont = "sf-mono";
 
 export const THEME_MODES: ThemeModeDefinition[] = [
   { id: "light", name: "浅色", description: "暖纸色调的明亮界面。" },
@@ -122,6 +156,66 @@ export const DARK_TONES: DarkToneDefinition[] = [
   },
 ];
 
+/** 中文兜底：无衬线一律 PingFang SC，Windows 上退到微软雅黑。 */
+const CJK_SANS = '"PingFang SC", "Microsoft YaHei"';
+/** 衬线那一档的中文兜底：宋体，兜到思源宋体，再到系统衬线。 */
+const CJK_SERIF = '"Songti SC", "Noto Serif CJK SC", "Source Han Serif SC"';
+
+export const UI_FONTS: UiFontDefinition[] = [
+  {
+    id: "system",
+    name: "系统默认",
+    // 和这一档的取值必须与 styles.css 里 var(--font-ui, …) 的兜底一致。
+    description: "跟随系统的界面字体，macOS 上是 SF Pro 配苹方。",
+    stack: `Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", ${CJK_SANS}, sans-serif`,
+  },
+  {
+    id: "helvetica",
+    name: "无衬线",
+    description: "Helvetica Neue，字形比系统默认更窄一点。",
+    stack: `"Helvetica Neue", Helvetica, Arial, ${CJK_SANS}, sans-serif`,
+  },
+  {
+    id: "serif",
+    name: "衬线",
+    description: "西文用 Iowan Old Style，中文用宋体，长文读起来更书面。",
+    stack: `"Iowan Old Style", "Times New Roman", Georgia, ${CJK_SERIF}, ${CJK_SANS}, serif`,
+  },
+  {
+    id: "mono",
+    name: "等宽",
+    description: "整个界面都用等宽字体，中文仍然是苹方。",
+    stack: `ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, ${CJK_SANS}, monospace`,
+  },
+];
+
+export const MONO_FONTS: MonoFontDefinition[] = [
+  {
+    id: "sf-mono",
+    name: "SF Mono",
+    description: "macOS 自带的等宽字体，CoilCoil 一直用的这一档。",
+    stack: `ui-monospace, "SF Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, ${CJK_SANS}, monospace`,
+  },
+  {
+    id: "menlo",
+    name: "Menlo",
+    description: "字腔更开，小字号下更容易分清 0 和 O。",
+    stack: `Menlo, "SFMono-Regular", Consolas, ${CJK_SANS}, monospace`,
+  },
+  {
+    id: "monaco",
+    name: "Monaco",
+    description: "macOS 的老牌等宽字体，笔画偏粗。",
+    stack: `Monaco, Menlo, Consolas, ${CJK_SANS}, monospace`,
+  },
+  {
+    id: "pt-mono",
+    name: "PT Mono",
+    description: "字形偏窄，同样宽度能多放几个字符。",
+    stack: `"PT Mono", Menlo, Consolas, ${CJK_SANS}, monospace`,
+  },
+];
+
 export const SURFACE_STYLES: SurfaceStyleDefinition[] = [
   { id: "flat", name: "齐平", description: "侧栏与会话区同一个底色，界面连成一片。" },
   { id: "layered", name: "分栏", description: "左侧栏压深，会话区与右栏提亮。" },
@@ -173,6 +267,51 @@ export function storedDarkTone(): DarkTone {
   return DEFAULT_DARK_TONE;
 }
 
+/**
+ * 把存下来的字符串解成一档字体。
+ *
+ * 单独抽出来是为了能直接测：`storedUiFont` 要读 window.localStorage，测试里没
+ * 有 window；解析规则本身是纯函数，认不出来就回落到默认那一档。
+ */
+export function resolveUiFont(value: string | null | undefined): UiFont {
+  return UI_FONTS.some((font) => font.id === value) ? value as UiFont : DEFAULT_UI_FONT;
+}
+
+export function resolveMonoFont(value: string | null | undefined): MonoFont {
+  return MONO_FONTS.some((font) => font.id === value) ? value as MonoFont : DEFAULT_MONO_FONT;
+}
+
+export function uiFontStack(id: UiFont): string {
+  return (UI_FONTS.find((font) => font.id === id) ?? UI_FONTS[0]).stack;
+}
+
+export function monoFontStack(id: MonoFont): string {
+  return (MONO_FONTS.find((font) => font.id === id) ?? MONO_FONTS[0]).stack;
+}
+
+export function storedUiFont(): UiFont {
+  try {
+    return resolveUiFont(window.localStorage.getItem(UI_FONT_STORAGE_KEY));
+  } catch {
+    // localStorage 不可用时回落到默认。
+    return DEFAULT_UI_FONT;
+  }
+}
+
+export function storedMonoFont(): MonoFont {
+  try {
+    return resolveMonoFont(window.localStorage.getItem(MONO_FONT_STORAGE_KEY));
+  } catch {
+    // localStorage 不可用时回落到默认。
+    return DEFAULT_MONO_FONT;
+  }
+}
+
+/** 此刻生效的等宽字体栈。xterm 不继承 CSS，只能把字体栈直接交给它。 */
+export function storedMonoFontStack(): string {
+  return monoFontStack(storedMonoFont());
+}
+
 export function resolveThemeMode(mode: ThemeMode): ResolvedTheme {
   if (mode !== "system") return mode;
   return darkMedia()?.matches ? "dark" : "light";
@@ -211,7 +350,6 @@ export function applySurfaceStyle(surface: SurfaceStyle): void {
   }
 }
 
-/** 启动时在 React 渲染前应用持久化主题，避免闪烁。 */
 export function applyLightTone(tone: LightTone): void {
   paint(storedThemeMode(), storedSurfaceStyle(), tone, storedDarkTone());
   try {
@@ -230,8 +368,37 @@ export function applyDarkTone(tone: DarkTone): void {
   }
 }
 
+/**
+ * 字体不参与 paint()：它和明暗、色调、层次没有任何耦合，也不需要同步窗口底色。
+ */
+function paintFonts(ui: UiFont, mono: MonoFont): void {
+  const root = document.documentElement;
+  root.style.setProperty("--font-ui", uiFontStack(ui));
+  root.style.setProperty("--font-mono", monoFontStack(mono));
+}
+
+export function applyUiFont(font: UiFont): void {
+  paintFonts(font, storedMonoFont());
+  try {
+    window.localStorage.setItem(UI_FONT_STORAGE_KEY, font);
+  } catch {
+    // 持久化失败不影响本次会话生效。
+  }
+}
+
+export function applyMonoFont(font: MonoFont): void {
+  paintFonts(storedUiFont(), font);
+  try {
+    window.localStorage.setItem(MONO_FONT_STORAGE_KEY, font);
+  } catch {
+    // 持久化失败不影响本次会话生效。
+  }
+}
+
+/** 启动时在 React 渲染前应用持久化主题与字体，避免闪烁。 */
 export function initTheme(): void {
   paint(storedThemeMode(), storedSurfaceStyle(), storedLightTone(), storedDarkTone());
+  paintFonts(storedUiFont(), storedMonoFont());
   // 跟随系统时，系统切换要立刻反映出来。
   darkMedia()?.addEventListener("change", () => {
     if (storedThemeMode() === "system") paint("system", storedSurfaceStyle(), storedLightTone(), storedDarkTone());

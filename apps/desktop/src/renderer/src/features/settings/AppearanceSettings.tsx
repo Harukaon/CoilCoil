@@ -4,23 +4,32 @@ import type { CSSProperties } from "react";
 import {
   applyDarkTone,
   applyLightTone,
+  applyMonoFont,
   applySurfaceStyle,
   applyTheme,
+  applyUiFont,
   DARK_TONES,
   LIGHT_TONES,
+  MONO_FONTS,
   resolveThemeMode,
   storedDarkTone,
   storedLightTone,
+  storedMonoFont,
   storedSurfaceStyle,
   storedThemeMode,
+  storedUiFont,
   SURFACE_STYLES,
   THEME_MODES,
+  UI_FONTS,
   type DarkTone,
+  type FontDefinition,
   type LightTone,
+  type MonoFont,
   type ResolvedTheme,
   type SurfaceStyle,
   type ThemeMode,
   type ToneDefinition,
+  type UiFont,
 } from "../../theme";
 
 type AnyTone = ToneDefinition<LightTone | DarkTone>;
@@ -87,11 +96,49 @@ function ToneGrid<Id extends string>({ label, tones, active, surface, onPick }: 
   );
 }
 
+/**
+ * 字体卡片。示例文字直接用那一档的字体栈画，所以没被选中的卡片也照它自己的样子
+ * 显示——和色调卡片一样，选之前就能看出区别。中英混排各来一段，因为中文兜底和
+ * 西文字体是两条独立的链，只看英文看不出中文会落到哪。
+ */
+function FontGrid<Id extends string>({ label, fonts, active, onPick }: {
+  label: string;
+  fonts: readonly FontDefinition<Id>[];
+  active: Id;
+  onPick: (id: Id) => void;
+}): React.JSX.Element {
+  return (
+    <div className="theme-grid" role="radiogroup" aria-label={label}>
+      {fonts.map((font) => (
+        <button
+          key={font.id}
+          className={`theme-card${font.id === active ? " active" : ""}`}
+          type="button"
+          role="radio"
+          aria-checked={font.id === active}
+          onClick={() => onPick(font.id)}
+        >
+          <span aria-hidden className="font-preview" style={{ fontFamily: font.stack }}>
+            <span className="font-preview-latin">Ag 0O1lI</span>
+            <span className="font-preview-cjk">中文示例</span>
+          </span>
+          <span className="theme-card-copy">
+            <strong>{font.name}{font.id === active ? <Check size={12} /> : null}</strong>
+            <small>{font.description}</small>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function AppearanceSettings(): React.JSX.Element {
   const [mode, setMode] = useState<ThemeMode>(storedThemeMode);
   const [surface, setSurface] = useState<SurfaceStyle>(storedSurfaceStyle);
   const [lightToneId, setLightToneId] = useState<LightTone>(storedLightTone);
   const [darkToneId, setDarkToneId] = useState<DarkTone>(storedDarkTone);
+  const [uiFontId, setUiFontId] = useState<UiFont>(storedUiFont);
+  const [monoFontId, setMonoFontId] = useState<MonoFont>(storedMonoFont);
 
   const lightTone = LIGHT_TONES.find((tone) => tone.id === lightToneId) ?? LIGHT_TONES[0];
   const darkTone = DARK_TONES.find((tone) => tone.id === darkToneId) ?? DARK_TONES[0];
@@ -160,6 +207,20 @@ export function AppearanceSettings(): React.JSX.Element {
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="appearance-section">
+        <h3>界面字体</h3>
+        <p className="appearance-hint">只用系统自带的字体，不下载也不打包字体文件。中文始终落在苹方（衬线那一档落在宋体）。</p>
+        <FontGrid label="界面字体" fonts={UI_FONTS} active={uiFontId}
+          onPick={(id) => { applyUiFont(id); setUiFontId(id); }} />
+      </section>
+
+      <section className="appearance-section">
+        <h3>代码字体</h3>
+        <p className="appearance-hint">代码块、文件路径、命令输出这类要对齐的地方用它。终端要重新打开才会换过来。</p>
+        <FontGrid label="代码字体" fonts={MONO_FONTS} active={monoFontId}
+          onPick={(id) => { applyMonoFont(id); setMonoFontId(id); }} />
       </section>
     </div>
   );
