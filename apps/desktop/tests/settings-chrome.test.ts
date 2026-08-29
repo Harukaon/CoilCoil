@@ -47,19 +47,12 @@ test("「返回工作区」的内容盒是完整的 40px，文字才居中", () 
   assert.match(home, /align-items:\s*center/);
 });
 
-test("悬浮阴影是一层很浅的投影，不额外加描边", () => {
+test("「返回工作区」悬浮时只是变底色，没有额外的样式", () => {
+  // 用户的原话：「我不希望有一个奇奇怪怪的样式，居中就好了啊」。所以悬浮态和它
+  // 下面那排栏目按钮一致——只换底色和字色，不加投影、不加描边、不加位移。
   const hover = declarations(settingsCss, ".settings-sidebar-home:hover", "settings.css");
-  const shadow = /box-shadow:\s*([^;}]+)/.exec(hover);
-  assert.ok(shadow, "悬浮态上没有 box-shadow");
-  // 克制：一层、偏移和模糊都在个位数 px、透明度不到 15%，也不是 inset 描边环。
-  const [offsetX, offsetY, blur] = shadow[1].trim().split(/\s+/);
-  assert.equal(offsetX, "0");
-  assert.ok(Number.parseFloat(offsetY) <= 2, `阴影下移了 ${offsetY}，太重`);
-  assert.ok(Number.parseFloat(blur) <= 4, `阴影模糊 ${blur}，太重`);
-  assert.ok(!shadow[1].includes(","), "只要一层阴影");
-  assert.ok(!shadow[1].includes("inset"), "不要用阴影画描边");
-  const alpha = /\/\s*(\d+)%/.exec(shadow[1]);
-  assert.ok(alpha && Number.parseInt(alpha[1], 10) <= 15, "阴影太深");
-  // 悬浮不加边框，用户不喜欢多余描边。
+  assert.ok(!/box-shadow:/.test(hover), "悬浮态又加回了投影");
   assert.ok(!/border(?:-\w+)?:/.test(hover), "悬浮态不应该多出描边");
+  assert.ok(!/transform:/.test(hover), "悬浮态不应该有位移或缩放");
+  assert.match(hover, /background:/);
 });

@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { lstat, mkdir, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell } from "electron";
 import { createRequire } from "node:module";
 import type { DiagnosticLogBatch } from "@coilcoil/runtime-protocol";
 import type { BrowserUiViewport, ImportBrowserCookiesInput, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RemoteAccessInput, RuntimeRequestPayload, RuntimeRequestResult, SaveProjectFileInput } from "../shared/desktop-api";
@@ -23,7 +23,8 @@ import {
   runContextMenuAction,
   type GuestContextMenuParams,
 } from "./browser-context-menu";
-import { hardenGuestPreferences } from "./browser-webview-policy";
+import { BROWSER_PARTITION, hardenGuestPreferences } from "./browser-webview-policy";
+import { configureBrowserIdentity } from "./browser-user-agent";
 import { proxyEnvironment, refreshProxyEnvironment } from "./system-proxy";
 import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
 import { saveProjectFile } from "./file-edit";
@@ -830,6 +831,15 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.error("[migration] legacy data migration failed; starting with current data", error);
   }
+  // 内置浏览器对外报的身份：默认 UA 里带着 Electron 那一段，Google 一类的站点
+  // 会据此判定成自动化程序，同一条网络下系统 Chrome 没事、内置浏览器每次都要过
+  // 人机验证。这里趁 session 还没被任何页面用过就换掉。
+  configureBrowserIdentity(session.fromPartition(BROWSER_PARTITION), {
+    platform: process.platform,
+    platformVersion: process.getSystemVersion(),
+    architecture: process.arch,
+  });
+
   // Only the main window may host <webview> guests, and only through the handler
   // installed in createWindow. Preview windows and anything added later refuse
   // attachment, so a future webPreferences default cannot widen the surface.

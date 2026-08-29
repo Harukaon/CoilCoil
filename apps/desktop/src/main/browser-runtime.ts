@@ -6,6 +6,7 @@ import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
 import { normalizeBrowserUrl } from "./browser-navigation";
+import { applyGuestUserAgent } from "./browser-user-agent";
 import {
   DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
   DEFAULT_BROWSER_URL as DEFAULT_URL,
@@ -557,7 +558,9 @@ export class BrowserRuntimeManager {
 
   private attachDebugger(tab: BrowserTab): void {
     const debug = this.guestOf(tab).debugger;
-    if (!debug.isAttached()) debug.attach("1.3");
+    // 身份要在页面刚附上调试器、还没导航的时候盖，晚了这一次请求就已经带着
+    // Electron 的标记发出去了（见 browser-user-agent）。
+    if (!debug.isAttached()) { debug.attach("1.3"); void applyGuestUserAgent(debug); }
   }
 
   private windowBounds(tab: BrowserTab): Record<string, unknown> {
