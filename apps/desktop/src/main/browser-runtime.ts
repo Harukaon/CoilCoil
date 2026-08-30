@@ -172,7 +172,7 @@ export class BrowserRuntimeManager {
     this.installTabSecurity(tab);
     this.installTabEvents(tab);
     this.installGuestTeardown(tab, guest);
-    this.attachDebugger(tab);
+    await this.attachDebugger(tab);
     await this.applyViewportOverride(tab);
   }
 
@@ -556,11 +556,12 @@ export class BrowserRuntimeManager {
     contents.on("render-process-gone", update);
   }
 
-  private attachDebugger(tab: BrowserTab): void {
+  /** 返回的 promise 是给第一次导航用的：身份必须在导航发出之前盖上（见 attachGuest）。 */
+  private attachDebugger(tab: BrowserTab): Promise<void> {
     const debug = this.guestOf(tab).debugger;
-    // 身份要在页面刚附上调试器、还没导航的时候盖，晚了这一次请求就已经带着
-    // Electron 的标记发出去了（见 browser-user-agent）。
-    if (!debug.isAttached()) { debug.attach("1.3"); void applyGuestUserAgent(debug); }
+    if (debug.isAttached()) return Promise.resolve();
+    debug.attach("1.3");
+    return applyGuestUserAgent(debug);
   }
 
   private windowBounds(tab: BrowserTab): Record<string, unknown> {
