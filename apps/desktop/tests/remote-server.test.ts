@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { WebSocket } from "ws";
 import { isTrustedAddress } from "../src/main/remote/remote-auth";
+import { REMOTE_INVOKE_CHANNELS, bridgeScript } from "../src/main/remote/remote-client";
 import { RemoteServer } from "../src/main/remote/remote-server";
 
 const APP_HTML = "<!doctype html>\n<html>\n  <head>\n    <title>CoilCoil</title>\n  </head>\n  <body></body>\n</html>\n";
@@ -269,4 +270,17 @@ test("clearing the account leaves only the pairing code", async (t) => {
   });
   assert.equal(attempt.status, 403);
   assert.equal(server.auth.username(), undefined);
+});
+
+test("手机拿得到挂载的文件夹清单和任务面板，而不是只剩一个 Home", () => {
+  // 手机上的 localStorage 属于远程那个来源，永远是空的，所以这两份数据只能问
+  // Mac 要。少了这几条通道，手机连上来侧栏里就只有一个 Home——这正是它出过的样子。
+  for (const channel of ["projects:mounted", "projects:mounted:set", "issues:list", "issues:save"]) {
+    assert.ok(REMOTE_INVOKE_CHANNELS.includes(channel as (typeof REMOTE_INVOKE_CHANNELS)[number]),
+      `${channel} 不在远程允许的通道里`);
+  }
+  const script = bridgeScript("darwin");
+  for (const method of ["mountedProjects", "setMountedProjects", "listIssues", "saveIssues"]) {
+    assert.match(script, new RegExp(`${method}: function`), `远程那半个 bridge 少了 ${method}`);
+  }
 });

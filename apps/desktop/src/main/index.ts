@@ -524,6 +524,16 @@ function remoteController(): RemoteAccessController {
       if (channel === PROJECT_HOME_CHANNEL) return homeProject();
       if (channel === PROJECT_DIRECTORY_LIST_CHANNEL) return listProjectDirectory(args[0] as string, args[1] as string | undefined);
       if (channel === PATH_CLASSIFY_CHANNEL) return classifyPaths(args[0] as string[]);
+      // 手机上的浏览器存储是另一个来源的，挂载的文件夹和任务面板都只能问这台机器
+      // 要——同一份文件，桌面和手机看到的是同一份清单。
+      if (channel === MOUNTED_PROJECTS_CHANNEL) return readMountedProjects(mountedProjectsFile());
+      if (channel === MOUNTED_PROJECTS_SET_CHANNEL) return writeMountedProjects(mountedProjectsFile(), args[0]);
+      if (channel === ISSUES_LIST_CHANNEL) {
+        return typeof args[0] === "string" && args[0] ? readIssues(issuesFile(args[0])) : [];
+      }
+      if (channel === ISSUES_SAVE_CHANNEL) {
+        return typeof args[0] === "string" && args[0] ? writeIssues(issuesFile(args[0]), args[1]) : [];
+      }
       // The phone drives the same browser the agent drives — the one belonging
       // to the desktop window — rather than a browser of its own, which it has
       // no way to host anyway.

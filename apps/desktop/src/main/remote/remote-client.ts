@@ -12,6 +12,13 @@ export const REMOTE_INVOKE_CHANNELS = [
   "project:home",
   "project-directory:list",
   "path:classify",
+  // 挂载的文件夹清单。手机上的 localStorage 是另一个来源的，本来就是空的，所以
+  // 这份清单必须问 Mac 要——不接这两条，手机上侧栏里就只有一个 Home。
+  "projects:mounted",
+  "projects:mounted:set",
+  // 任务面板同理：数据在 Mac 的 userData 里，手机只是另一个看它的窗口。
+  "issues:list",
+  "issues:save",
   // The built-in browser is the agent's, running on the Mac. The phone cannot
   // host the view, but it can drive the same tabs and watch frames of them.
   "browser:get-state",
@@ -174,6 +181,10 @@ export function bridgeScript(platform: DesktopPlatform): string {
     homeProject: function () { return invoke("project:home", []); },
     listProjectDirectory: function (root, path) { return invoke("project-directory:list", [root, path]); },
     classifyPaths: function (paths) { return invoke("path:classify", [paths]); },
+    mountedProjects: function () { return invoke("projects:mounted", []); },
+    setMountedProjects: function (projects) { return invoke("projects:mounted:set", [projects]); },
+    listIssues: function (cwd) { return invoke("issues:list", [cwd]); },
+    saveIssues: function (cwd, issues) { return invoke("issues:save", [cwd, issues]); },
 
     // Needs a native dialog on the Mac; the phone browses directories instead.
     selectProject: resolves(null),
