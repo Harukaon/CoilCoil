@@ -133,13 +133,17 @@ function readCheckScript() {
 
   // 返工回来的 Issue 要自己回到「待验收」，不能停在我这边的「打回重做」上
   {
-    const fixed = state.tasks.find((t) => (t.agentNotes || []).some(
-      (n) => Date.parse(n.at) > Date.parse(SEED.meta.exportedAt || 0)));
+    const newest = (t) => Math.max(0, ...[...(t.agentNotes || []), ...(t.commits || [])]
+      .map((x) => Date.parse(x.at) || 0));
+    const fixed = state.tasks.find((t) => newest(t) > Date.parse(SEED.meta.exportedAt || 0));
     check(!!fixed, "内置数据里有一条『导出之后又交了新东西』的 Issue");
-    // 装成「我上次把它打回了、还没导出」的样子，再重新加载一次。
+    // 装成「我上次把它打回了、还没导出」的样子，再重新加载一次。打回必须发生在
+    // 那条新结果之前，不然「谁更晚听谁的」本来就该听我的，测的就不是这件事了。
     const before = localStorage.getItem(LS);
     const stale = structuredClone(state);
-    stale.tasks.find((t) => t.id === fixed.id).status = "rework";
+    const staleTask = stale.tasks.find((t) => t.id === fixed.id);
+    staleTask.status = "rework";
+    staleTask.statusAt = new Date(newest(fixed) - 1000).toISOString();
     localStorage.setItem(LS, JSON.stringify(stale));
     const reloaded = load();
     check(reloaded.tasks.find((t) => t.id === fixed.id).status === fixed.status,

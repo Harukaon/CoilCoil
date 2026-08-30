@@ -1,0 +1,24 @@
+{
+  "id": 30,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "管控",
+      "text": "界面里那两个未读点都改成绿色了：侧栏对话行上的那个，还有工作区文件夹行上的那个。外面那圈很淡的光晕也跟着换成同色。\n\nDock 没动，还是红色的未读数——那个红底白字是 macOS 自己画的，系统也没给改颜色的接口，正好就是你要的样子。\n\n顺手把注释里「未读一律是红点」那段改掉了，免得下次有人照着注释又给改回红的。\n\n怎么验：让一个对话跑完之后别点它，侧栏那条上的点应该是绿的；同时 Dock 上的数字还是红的。",
+      "at": "2026-08-30T14:17:44.232Z"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "3f0cd95f2",
+      "message": "fix(desktop): 界面里的未读点改成绿色，Dock 角标保持红色 (#30)",
+      "files": [
+        "apps/desktop/src/renderer/src/styles.css",
+        "apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx",
+        "apps/desktop/src/main/index.ts",
+        "apps/desktop/tests/unread-badge.test.ts"
+      ],
+      "at": "2026-08-30T14:17:44.232Z"
+    }
+  ]
+}
