@@ -924,6 +924,8 @@ app.whenReady().then(async () => {
     writeMountedProjects(mountedProjectsFile(), projects));
   ipcMain.handle(BADGE_COUNT_CHANNEL, (_event, count: number): void => {
     const unread = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+    // 角标的红底白字是系统画的，跟界面里那两个未读点无关：用户要的是界面里别用
+    // 红色，Dock 上保持红色未读数。这里不去改它，也没有 API 能改它的颜色。
     // Linux 上只有部分桌面环境实现得了，setBadgeCount 会返回 false，不是错误。
     app.setBadgeCount(unread);
   });

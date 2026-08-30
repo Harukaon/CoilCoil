@@ -385,9 +385,9 @@ export function WorkspaceSidebar({
                   <span className="project-leading"><Folder className="project-folder-icon" size={15} strokeWidth={1.7} />{expanded ? <ChevronDown className="project-hover-icon" size={14} /> : <ChevronRight className="project-hover-icon" size={14} />}</span>
                   <span className="project-name">{project.name}</span>
                   {workspaceActivityText ? (
-                    // 运行中是一个转圈，读完了是一个红点。原来两种状态共用一个绿点
-                    // 加呼吸动画，扫过去分不出「还在跑」和「跑完了没看」——这正是
-                    // 一眼要判断的那件事。
+                    // 运行中是一个转圈，读完了是一个静止的绿点。原来两种状态共用
+                    // 一个绿点加呼吸动画，扫过去分不出「还在跑」和「跑完了没看」
+                    // ——这正是一眼要判断的那件事。
                     <span className="project-activity-slot" role="img" aria-label={workspaceActivityText} title={workspaceActivityText}>
                       {workspaceActivity.running ? <OrbitLoader size={11} /> : <i className="project-activity unread" />}
                     </span>
