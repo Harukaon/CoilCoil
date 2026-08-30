@@ -77,10 +77,10 @@
   width: min(720px, 100%);
   height: min(640px, 100%);
   padding: 14px 14px 12px;
-  border: 0;
+  border: 1px solid hsl(var(--th) var(--ts) var(--l-869));
   border-radius: var(--radius-6xl);
   background: hsl(var(--th) var(--ts) var(--l-976));
-  box-shadow: var(--shadow-xl);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 18%);
 }
 .mcp-json-dialog > header {
   display: flex;
@@ -455,10 +455,10 @@
   width: min(640px, 100%);
   height: min(560px, calc(100vh - 48px));
   overflow: hidden;
-  border: 0;
+  border: 1px solid hsl(var(--th) var(--ts) var(--l-841));
   border-radius: var(--radius-8xl);
   background: hsl(var(--th) var(--ts) var(--l-976));
-  box-shadow: var(--shadow-xl);
+  box-shadow: 0 24px 64px rgb(26 26 23 / 22%), 0 2px 10px rgb(26 26 23 / 8%);
   animation: coil-modal-in 160ms cubic-bezier(.16, 1, .3, 1);
 }
 .upstream-model-picker > header {
@@ -835,7 +835,7 @@
 /* 透明度预览。底衬那层斜纹当「后面的桌面」，上面那块是按当前档位画的窗口：
    档位越透，斜纹露得越多。高度和 .theme-preview 一样，混排不会高低不齐。 */
 .opacity-preview { display: block; position: relative; height: 72px; overflow: hidden; border-radius: var(--radius-xl); background: repeating-linear-gradient(-45deg, hsl(var(--th) var(--ts) var(--l-833)) 0 6px, hsl(var(--th) var(--ts) var(--l-902)) 6px 12px); }
-.opacity-preview-window { position: absolute; inset: 8px; border-radius: var(--radius-md); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: var(--shadow-xs); }
+.opacity-preview-window { position: absolute; inset: 8px; border-radius: var(--radius-md); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 3px 10px rgb(28 28 25 / 9%); }
 .theme-card-copy { display: grid; gap: 2px; }
 .theme-card-copy strong { display: flex; align-items: center; gap: 5px; color: hsl(var(--th) var(--ts) var(--l-210)); font-size: 12px; font-weight: 600; }
 .theme-card-copy small { color: hsl(var(--th) var(--ts) var(--l-560)); font-size: 10px; }

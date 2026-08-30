@@ -6,12 +6,10 @@ html.bubble, html.bubble body, html.bubble #root { height: 100%; background: tra
   height: 100%;
   grid-template-rows: 38px minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 0;
+  border: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 70%);
   border-radius: var(--radius-8xl);
   background: hsl(var(--th) var(--ts) var(--l-988));
-  /* 这一层浮在桌面壁纸上而不是应用内，所以比应用内的浮层留得重一点，
-     否则浅色壁纸上会看不出边界。 */
-  box-shadow: 0 18px 44px rgb(15 15 14 / 20%);
+  box-shadow: 0 24px 60px rgb(15 15 14 / 22%);
   /* Called up by a keystroke, so it arrives with a little movement rather than
      appearing fully formed - enough to place it, not enough to wait for. */
   animation: bubble-in 140ms cubic-bezier(.2, .8, .3, 1);
