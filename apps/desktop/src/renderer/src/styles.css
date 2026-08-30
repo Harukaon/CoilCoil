@@ -381,12 +381,14 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .user-bubble-button:hover { background: hsl(var(--th) var(--ts) var(--l-929)); }
 .user-bubble-button:disabled { cursor: default; }
 .user-bubble-button:disabled:hover { background: hsl(var(--th) var(--ts) var(--l-943)); }
-/* 还没发出去的消息：留在原地，但底色更浅、正文淡下来，左边一道竖条说明它只是
-   排着队。以前这里是虚线边框——气泡一律不画边框后，状态改由这道竖条来说。 */
-.user-bubble.queued { background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: inset 3px 0 0 hsl(var(--th) var(--ts) var(--l-861)); color: hsl(var(--th) var(--ts) var(--l-437)); }
-/* Accepted, not yet delivered: the same bar, in the colour that means "running". */
-.user-bubble.steering { background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: inset 3px 0 0 var(--c-green-muted); color: hsl(var(--th) var(--ts) var(--l-375)); }
-.user-bubble-button.queued:disabled:hover { background: hsl(var(--th) var(--ts) var(--l-976)); }
+/* 还没发出去的消息：留在原地，但用虚线边框和淡下来的正文说明它只是排着队。
+   8e4a9582b 曾把这两条改成左侧一道竖条（那次是「气泡一律不画边框」的连带改动），
+   用户指名要虚线回来，所以这里明写 1px dashed——普通气泡仍然不描边，虚线只属于
+   「还没送到」这两个状态，不要再当成漏网的边框去掉。 */
+.user-bubble.queued { border: 1px dashed hsl(var(--th) var(--ts) var(--l-886)); background: transparent; color: hsl(var(--th) var(--ts) var(--l-437)); }
+/* 已被接受、本轮结束才送达：同样的虚线，换成表示「进行中」的绿色。 */
+.user-bubble.steering { border: 1px dashed var(--c-green-muted); color: hsl(var(--th) var(--ts) var(--l-375)); }
+.user-bubble-button.queued:disabled:hover { background: transparent; }
 .user-message-queue-status { display: flex; width: fit-content; align-items: center; gap: 5px; margin-top: 7px; color: hsl(var(--th) var(--ts) var(--l-512)); font-size: 11px; line-height: 1; }
 .message-images { display: grid; margin-top: 8px; grid-template-columns: repeat(auto-fit, minmax(88px, 150px)); gap: 7px; }
 .message-images:first-child { margin-top: 0; }

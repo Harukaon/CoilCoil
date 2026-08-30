@@ -86,3 +86,13 @@ test("滚动条滑块三态是一档比一档实，但都很淡", () => {
   assert.ok(alphas[0] <= 22, `静止态 ${alphas[0]}% 太深`);
   assert.ok(alphas[2] <= 48, `按下态 ${alphas[2]}% 太深`);
 });
+
+/* 「排队中」和「介入中」这两个还没送到的状态，用户指名要虚线边框。这里盯着它，
+   因为它被顺手改掉过一次：那次是在做「聊天气泡一律不描边」，连带把这两条也去了。 */
+
+test("还没送到的两种消息用虚线边框标出来", () => {
+  for (const state of ["queued", "steering"]) {
+    const block = declarations(styles, `.user-bubble.${state}`, "styles.css");
+    assert.match(block, /border:\s*1px dashed /, `.user-bubble.${state} 的虚线边框没了`);
+  }
+});
