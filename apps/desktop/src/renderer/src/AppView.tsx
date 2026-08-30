@@ -23,6 +23,8 @@ import type {
 } from "@coilcoil/runtime-protocol";
 import { useInAppBrowserLinks } from "./features/browser/useInAppBrowserLinks";
 import { ConversationPane } from "./features/conversation/ConversationPane";
+import { IssueBoard } from "./features/issues/IssueBoard";
+import { useIssueBoard } from "./features/issues/useIssueBoard";
 import { MemoryWorkspace } from "./features/memory/MemoryWorkspace";
 import { SkillsWorkspace } from "./features/settings/SkillsWorkspace";
 import { WorkspaceInspector } from "./features/inspector/WorkspaceInspector";
@@ -35,7 +37,7 @@ import type { useComposerController } from "./features/composer/useComposerContr
 import type { usePanelLayout } from "./hooks/usePanelLayout";
 import { toastError } from "./ui/toast";
 
-type WorkspaceSurface = "conversation" | "skills" | "memory";
+type WorkspaceSurface = "conversation" | "skills" | "memory" | "issues";
 type ConversationProps = ComponentProps<typeof ConversationPane>;
 
 
@@ -95,7 +97,7 @@ export interface AppViewController {
   resumeSubagent(activity: SubagentActivity): Promise<void>;
   approvePlan(planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState>;
   rejectPlan(planId: string): Promise<PlanApprovalState>;
-  submitPrompt(event?: FormEvent, intent?: "queue" | "steer"): Promise<void>;
+  submitPrompt(event?: FormEvent, intent?: "queue" | "steer", override?: string): Promise<void>;
   handleTimelineScroll(): void;
   handleFileDragEnter: ConversationProps["onDragEnter"];
   handleFileDragOver: ConversationProps["onDragOver"];
@@ -137,6 +139,17 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  /* 工作区看板。执行器要用的东西（新建对话、发消息、看这个对话跑没跑完）在这一层
+     全都有现成的，所以整块接线放在这里，App 那边只多了一个面板名——它卡在 600 行
+     的模块上限上。 */
+  const board = useIssueBoard({
+    cwd: project?.path,
+    activeSessionPath: snapshot?.session.path,
+    sessionRunning: (sessionPath) => Boolean(sessionActivity[sessionPath]?.running),
+    startConversation: () => { setWorkspaceSurface("conversation"); startNewConversation(project ?? undefined); },
+    sendPrompt: (text) => submitPrompt(undefined, "queue", text),
+  });
 
   useInAppBrowserLinks({
     scopeId: snapshot?.runtimeId ?? project?.path ?? "default",
@@ -181,6 +194,8 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
           setWorkspaceSurface("conversation");
           window.requestAnimationFrame(() => inputRef.current?.focus());
         }}
+        boardOpen={workspaceSurface === "issues"}
+        onOpenBoard={(owner) => { setModelMenuOpen(false); setWorkspaceSurface("issues"); if (owner.path !== project?.path) startNewConversation(owner); }}
         skillsOpen={workspaceSurface === "skills"}
         onOpenSkills={() => { setModelMenuOpen(false); setWorkspaceSurface("skills"); }}
         memoryOpen={workspaceSurface === "memory"}
@@ -196,7 +211,25 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
       ) : null}
       {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
 
-      {workspaceSurface === "skills" ? (
+      {workspaceSurface === "issues" ? (
+        <IssueBoard
+          workspaceName={project?.name}
+          issues={board.issues}
+          loading={board.loading}
+          run={board.run}
+          leftOpen={leftOpen}
+          onOpenLeft={() => setLeftOpen(true)}
+          onClose={() => { shouldAutoScrollRef.current = true; setWorkspaceSurface("conversation"); }}
+          onChange={board.update}
+          onStart={board.start}
+          onStop={board.stop}
+          onOpenSession={(sessionPath) => {
+            const owner = project;
+            const session = owner ? (sessionsByProject[owner.path] ?? []).find((item) => item.path === sessionPath) : undefined;
+            if (owner && session) void openConversation(owner, session);
+          }}
+        />
+      ) : workspaceSurface === "skills" ? (
         <SkillsWorkspace
           runtimeId={snapshot?.runtimeId}
           cwd={project?.path}

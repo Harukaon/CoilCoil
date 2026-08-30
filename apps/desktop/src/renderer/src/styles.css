@@ -206,6 +206,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .project-row-actions { display: flex; flex: 0 0 auto; align-items: center; }
 .project-action { display: grid; width: 27px; height: 27px; flex: 0 0 auto; padding: 0; place-items: center; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-457)); background: transparent; cursor: pointer; opacity: .64; }
 .project-action:hover { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-843)); opacity: 1; }
+.project-action.active { color: hsl(var(--th) var(--ts) var(--l-137)); background: hsl(var(--th) var(--ts) var(--l-878)); opacity: 1; }
 .conversation-list-shell { display: grid; min-height: 0; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 170ms ease, opacity 120ms ease; }
 .conversation-list-shell.expanded { grid-template-rows: 1fr; opacity: 1; }
 .conversation-list { display: grid; min-width: 0; min-height: 0; gap: 1px; padding: 0 0 3px 5px; overflow: hidden; }
