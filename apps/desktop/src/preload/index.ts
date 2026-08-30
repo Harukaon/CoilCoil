@@ -14,6 +14,7 @@ import type {
   BrowserUiViewport,
   ImportBrowserCookiesInput,
   ImportableProfile,
+  Issue,
   FilePreviewDocument,
   OpenFilePreviewInput,
   OpenFilePreviewResult,
@@ -86,6 +87,8 @@ const BROWSER_UI_VIEWPORT_CHANNEL = "browser:ui-viewport";
 const MOUNTED_PROJECTS_CHANNEL = "projects:mounted";
 const MOUNTED_PROJECTS_SET_CHANNEL = "projects:mounted:set";
 type MountedProject = { name: string; path: string; kind: "workspace" };
+const ISSUES_LIST_CHANNEL = "issues:list";
+const ISSUES_SAVE_CHANNEL = "issues:save";
 const BROWSER_IMPORT_LIST_CHANNEL = "browser:import-list";
 const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
 const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
@@ -139,6 +142,10 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(MOUNTED_PROJECTS_CHANNEL) as Promise<MountedProject[]>,
   setMountedProjects: (projects: MountedProject[]) =>
     ipcRenderer.invoke(MOUNTED_PROJECTS_SET_CHANNEL, projects) as Promise<MountedProject[]>,
+  listIssues: (cwd: string) =>
+    ipcRenderer.invoke(ISSUES_LIST_CHANNEL, cwd) as Promise<Issue[]>,
+  saveIssues: (cwd: string, issues: Issue[]) =>
+    ipcRenderer.invoke(ISSUES_SAVE_CHANNEL, cwd, issues) as Promise<Issue[]>,
   // Electron 32 起渲染进程拿不到 File.path，外部拖入文件的真实路径只能在这里解析。
   filePath: (file: File) => webUtils.getPathForFile(file),
   openExternal: (url: string) =>
