@@ -373,6 +373,12 @@ export interface CoilCoilDesktopApi {
   closeWindow(): void;
   isWindowMaximized(): Promise<boolean>;
   onWindowMaximizedChange(listener: (maximized: boolean) => void): () => void;
+  /**
+   * 整个窗口是否持有焦点。注意这不等于 Renderer 自己的 `window.onfocus`：
+   * 内置浏览器的页面占着同一个窗口里另一份 WebContents，焦点落到它上面时
+   * Renderer 会看到 blur，而窗口其实还在用。
+   */
+  onWindowFocusChange(listener: (focused: boolean) => void): () => void;
   /** Hand Renderer entries to the process that owns the log file. */
   writeDiagnostics(batch: DiagnosticLogBatch): void;
   /** Show the log in the file manager and return its path. */

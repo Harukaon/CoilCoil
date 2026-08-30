@@ -104,6 +104,7 @@ const WINDOW_MINIMIZE_CHANNEL = "window:minimize";
 const WINDOW_TOGGLE_MAXIMIZED_CHANNEL = "window:toggle-maximized";
 const WINDOW_IS_MAXIMIZED_CHANNEL = "window:is-maximized";
 const WINDOW_MAXIMIZED_CHANNEL = "window:maximized";
+const WINDOW_FOCUS_CHANNEL = "window:focus";
 const WINDOW_CLOSE_CHANNEL = "window:close";
 const DIAGNOSTIC_LOG_CHANNEL = "diagnostics:log";
 const DIAGNOSTIC_REVEAL_CHANNEL = "diagnostics:reveal";
@@ -662,6 +663,17 @@ async function createWindow(): Promise<void> {
   };
   mainWindow.on("maximize", publishMaximized);
   mainWindow.on("unmaximize", publishMaximized);
+
+  // 窗口级的焦点，用来让纯装饰的动画在没人看的时候停下来（见 renderer 的
+  // `idle-motion.ts`）。这件事必须由主进程来判断：内置浏览器的页面是挂在同一个
+  // 窗口里的独立 WebContents，焦点落进去时 Renderer 自己的 window 会收到 blur，
+  // 照那个信号停就会在用户正浏览网页时把界面上的动画停掉。BrowserWindow 的
+  // focus/blur 只在整个窗口失去焦点时才触发，正是我们要的那个语义。
+  const publishFocus = (focused: boolean) => (): void => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(WINDOW_FOCUS_CHANNEL, focused);
+  };
+  mainWindow.on("focus", publishFocus(true));
+  mainWindow.on("blur", publishFocus(false));
 
   const webviewHostId = mainWindow.webContents.id;
   webviewHostIds.add(webviewHostId);

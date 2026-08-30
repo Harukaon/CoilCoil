@@ -60,6 +60,7 @@ const WINDOW_MINIMIZE_CHANNEL = "window:minimize";
 const WINDOW_TOGGLE_MAXIMIZED_CHANNEL = "window:toggle-maximized";
 const WINDOW_IS_MAXIMIZED_CHANNEL = "window:is-maximized";
 const WINDOW_MAXIMIZED_CHANNEL = "window:maximized";
+const WINDOW_FOCUS_CHANNEL = "window:focus";
 const WINDOW_CLOSE_CHANNEL = "window:close";
 const DIAGNOSTIC_LOG_CHANNEL = "diagnostics:log";
 const DIAGNOSTIC_REVEAL_CHANNEL = "diagnostics:reveal";
@@ -243,6 +244,11 @@ const api: CoilCoilDesktopApi = {
     const handler = (_event: Electron.IpcRendererEvent, maximized: boolean): void => listener(maximized);
     ipcRenderer.on(WINDOW_MAXIMIZED_CHANNEL, handler);
     return () => ipcRenderer.removeListener(WINDOW_MAXIMIZED_CHANNEL, handler);
+  },
+  onWindowFocusChange: (listener: (focused: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, focused: boolean): void => listener(focused);
+    ipcRenderer.on(WINDOW_FOCUS_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(WINDOW_FOCUS_CHANNEL, handler);
   },
   /** Fire-and-forget: logging must never be able to stall the Renderer. */
   writeDiagnostics: (batch: DiagnosticLogBatch) => ipcRenderer.send(DIAGNOSTIC_LOG_CHANNEL, batch),

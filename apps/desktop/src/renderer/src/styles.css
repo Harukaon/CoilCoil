@@ -550,6 +550,12 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 @media (prefers-reduced-motion: reduce) {
   .coil-logo-mask, .coil-logo-mask polygon { animation: none; }
 }
+/* 窗口没人看的时候（最小化、被完全盖住、或者用户在别的 App 里）把这团墨停下来。
+   这条规则纯粹是为了省电：上面那串 blur + contrast 每帧都要重算整条滤镜链，实测
+   能吃掉三分之一个核心，而且窗口在后台时照跑。用 animation-play-state 而不是
+   animation: none，是为了切回来时从停住的地方接着走，不跳帧；判定逻辑和为什么焦点
+   必须由主进程给，见 ui/idle-motion.ts。 */
+:root[data-motion="paused"] .coil-logo-mask, :root[data-motion="paused"] .coil-logo-mask polygon { animation-play-state: paused; }
 /* 加载指示：两团墨沿同一条基线滚过，经 #coil-goo-ink 的模糊 + alpha 陡增合成一团
    会融合又分裂的墨迹。几何与动画照抄给定实现（12em×3em、22em/16em 两个圆、
    wee1/wee2 2s 线性、错开 0.75s），因此这里锁定 font-size: 16px 让那些 em 值仍按
