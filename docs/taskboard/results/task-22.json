@@ -3,25 +3,20 @@
   "status": "review",
   "agentNotes": [
     {
-      "by": "管控（自建）",
-      "at": "2026-08-29T04:00:00.000Z",
-      "text": "现在会变成什么样：设置 → 外观，最下面多了一节「窗口透明度」，四张卡片：不透明（默认）、96%、92%、88%。点一下立刻生效，不用重启，下次开应用还是这一档。\n\n为什么最多只到 88%：这是整扇窗一起变透，文字也会跟着淡。再往下正文开始发虚，读起来累。代码里把下限卡死在 70%，就算存档文件被改坏也透不过去——窗口透没了是没办法从界面里救回来的。\n\n有一个取舍要跟你说清楚：Mac 上还有另一种做法，是「背景毛玻璃、文字仍然实心」的那种（系统通知中心的效果）。那个更好看，但它要求界面里每一层表面都改成半透明配色，而 CoilCoil 整套颜色令牌都是实心的，等于把配色重做一遍，暗色下还极容易糊成一片。所以这次选了整窗透明度：只有一个数值，随时可调，也不挑主题。如果你看完觉得非要毛玻璃那种效果，告诉我，那是一件单独的、比较大的活。\n\n启动时不会闪：透明度存在主进程那边而不是网页那边，所以窗口画出来之前就已经是对的档位，不会先不透明一下再跳过去。\n\nLinux 上是否有效取决于桌面的合成器，设置里那行小字也写了。Mac 和 Windows 都正常。\n\n打包后怎么人工验一遍：（a）设置 → 外观 → 窗口透明度，点 92%，看后面的窗口是不是透出来了；（b）关掉应用重开，确认还停在 92%；（c）切回「不透明」，确认完全挡住后面。"
+      "by": "管控（返工）",
+      "at": "2026-08-30T02:17:33.767Z",
+      "text": "按你实测的结果改了：四档现在是 100% / 99% / 98% / 96%，最透的一档就是 96%，原来那两档 92% 和 88% 删掉了。\n\n主进程那边的下限也从 70% 提到 96%，就算有人手改配置文件也透不过去。设置界面每一档下面的说明跟着改了。"
     }
   ],
   "commits": [
     {
-      "ref": "6aa84ba47",
-      "at": "2026-08-29T04:00:00.000Z",
-      "message": "feat(desktop): 外观设置里加窗口透明度，四档可选 (#22)",
+      "ref": "d972f203e",
+      "at": "2026-08-30T02:17:33.767Z",
+      "message": "fix(desktop): 透明度四档收进 96~100 (#14 #15 #22)",
       "files": [
-        "apps/desktop/src/main/window-opacity.ts",
-        "apps/desktop/src/main/index.ts",
-        "apps/desktop/src/preload/index.ts",
-        "apps/desktop/src/shared/desktop-api.ts",
         "apps/desktop/src/renderer/src/theme.ts",
-        "apps/desktop/src/renderer/src/features/settings/AppearanceSettings.tsx",
-        "apps/desktop/src/renderer/src/features/settings/settings.css",
-        "apps/desktop/tests/window-opacity.test.ts"
+        "apps/desktop/src/main/window-opacity.ts",
+        "apps/desktop/src/renderer/src/features/settings/AppearanceSettings.tsx"
       ]
     }
   ]

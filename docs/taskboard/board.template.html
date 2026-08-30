@@ -422,51 +422,57 @@ let pendingImgs = [];
 let editingComment = null;   // 正在改哪一条我的回复（下标），null = 在写新的
 
 /* ---------- 存取 ---------- */
+/**
+ * 合并两份看板数据：base 是「对方那一份」（内置数据，或者磁盘上现在的 tasks.json），
+ * mine 是「我这一份」（浏览器里存的，或者页面上正在编辑的）。
+ *
+ * 分工是固定的：agentNotes / commits / 管控记录以 base 为准（那是 agent 写的，
+ * 页面从来不产生它们），status / 回复 / 手改过的标题正文以 mine 为准。这样我在
+ * 这边写返工说明、你同时在页面上改状态，两边都不会把对方抹掉。
+ */
+function mergeBoard(base, mine){
+  const byId = new Map((mine.tasks||[]).map(t=>[t.id,t]));
+  /* 状态归谁：
+     · 你在看板上点过状态之后，agent 没再交东西 —— 听你的（最常见）；
+     · 你打回之后 agent 又交了新东西 —— 听新结果的，这条自己回到「待验收」，
+       否则你永远看不出它已经返工完了。
+     老数据里没有「你什么时候点的」这个时间，那就退回到「导出之后交的新东西才
+     算数」，免得把你上次导出时的验收结果冲掉。 */
+  const exportedAt = Date.parse(base.meta?.exportedAt || '') || 0;
+  const agentTime = t => Math.max(0, ...[...(t.agentNotes||[]), ...(t.commits||[])]
+    .map(x => Date.parse(x.at) || 0));
+  const pickStatus = (seed, one) => {
+    const agentAt = agentTime(seed);
+    const localAt = Date.parse(one.statusAt || '') || 0;
+    if(localAt >= agentAt) return one.status ?? seed.status;
+    return agentAt > exportedAt ? seed.status : (one.status ?? seed.status);
+  };
+  const merged = (base.tasks||[]).map(seed=>{
+    const one = byId.get(seed.id);
+    if(!one) return structuredClone(seed);
+    return {...structuredClone(seed),
+      status: pickStatus(seed, one),
+      statusAt: one.statusAt,
+      priority: one.priority ?? seed.priority,
+      area: one.area ?? seed.area,
+      // 标题和正文你改过就以你的为准，没改过就跟着我这边更新
+      title: one.titleEdited ? one.title : seed.title,
+      body:  one.bodyEdited  ? one.body  : seed.body,
+      titleEdited: one.titleEdited, bodyEdited: one.bodyEdited,
+      userComments: one.userComments ?? [],
+    };
+  });
+  // 你在看板上自己新建的 Issue（base 里没有的）保留
+  for(const t of mine.tasks||[]) if(!(base.tasks||[]).some(s=>s.id===t.id)) merged.push(t);
+  return {meta: base.meta, tasks: merged};
+}
+
 function load(){
-  // 联机模式下 tasks.json 就是唯一真相，没有「本地一份、文件一份」这回事，
-  // 也就不需要合并。开机时由 boot() 把文件内容灌进来。
+  // 联机模式下 tasks.json 就是唯一真相，开机时由 boot() 把文件内容灌进来。
   if(ONLINE) return structuredClone(SEED);
   try{
     const raw = localStorage.getItem(LS);
-    if(raw){
-      const saved = JSON.parse(raw);
-      // 以 SEED 为骨架合并，这样我新增/改写任务后你的回复不会丢
-      const byId = new Map((saved.tasks||[]).map(t=>[t.id,t]));
-      /* 状态归谁，按时间先后判断，谁的动作更晚就听谁的：
-         · 你在看板上点过状态之后，agent 没再交东西 —— 听你的（最常见）；
-         · 你打回之后 agent 又交了新东西 —— 听新结果的，这条自己回到「待验收」，
-           否则你永远看不出它已经返工完了。
-         老数据里没有「你什么时候点的」这个时间，那就退回到「导出之后交的新东西
-         才算数」，免得把你上次导出时的验收结果冲掉。 */
-      const exportedAt = Date.parse(SEED.meta?.exportedAt || '') || 0;
-      const agentTime = t => Math.max(0, ...[...(t.agentNotes||[]), ...(t.commits||[])]
-        .map(x => Date.parse(x.at) || 0));
-      const pickStatus = (seed, mine) => {
-        const agentAt = agentTime(seed);
-        const localAt = Date.parse(mine.statusAt || '') || 0;
-        if(localAt >= agentAt) return mine.status ?? seed.status;
-        return agentAt > exportedAt ? seed.status : (mine.status ?? seed.status);
-      };
-      const merged = SEED.tasks.map(seed=>{
-        const mine = byId.get(seed.id);
-        if(!mine) return structuredClone(seed);
-        return {...structuredClone(seed),
-          status: pickStatus(seed, mine),
-          statusAt: mine.statusAt,
-          priority: mine.priority ?? seed.priority,
-          area: mine.area ?? seed.area,
-          // 标题和正文你改过就以你的为准，没改过就跟着我这边更新
-          title: mine.titleEdited ? mine.title : seed.title,
-          body:  mine.bodyEdited  ? mine.body  : seed.body,
-          titleEdited: mine.titleEdited, bodyEdited: mine.bodyEdited,
-          userComments: mine.userComments ?? [],
-          // agent 侧字段（agentNotes / commits）始终以 SEED 为准
-        };
-      });
-      // 你在看板上自己新建的 Issue（SEED 里没有的）保留
-      for(const t of saved.tasks||[]) if(!SEED.tasks.some(s=>s.id===t.id)) merged.push(t);
-      return {meta:SEED.meta, tasks:merged};
-    }
+    if(raw) return mergeBoard(SEED, JSON.parse(raw));
   }catch(e){ console.warn('本地数据读取失败，回退到内置数据', e); }
   return structuredClone(SEED);
 }
@@ -482,6 +488,12 @@ async function pushToServer(){
   if(saving){ saveAgain = true; return; }
   saving = true;
   try{
+    /* 先看一眼磁盘上现在是什么：你在页面上改状态的同时，我可能正好在这边写返工
+       说明。直接整份覆盖会把对方的东西抹掉，所以按 mergeBoard 的分工先合一次。 */
+    try{
+      const disk = await (await fetch('tasks.json', {cache:'no-store'})).json();
+      if(Array.isArray(disk.tasks) && disk.tasks.length) state = mergeBoard(disk, state);
+    }catch{ /* 读不到就按页面这一份写，总比不保存强 */ }
     const r = await fetch('tasks.json', {
       method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(state),
     });
