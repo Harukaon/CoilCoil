@@ -1375,6 +1375,36 @@
       ],
       "createdBy": "user",
       "createdAt": "2026-08-30T13:53:04.455Z"
+    },
+    {
+      "id": 32,
+      "title": "手机远程连上来只显示一个 Home 文件夹",
+      "body": "手机远程过来，侧栏里挂载的文件夹一个都不在，只有一个 Home。",
+      "area": "远程",
+      "priority": "high",
+      "status": "review",
+      "agentNotes": [
+        {
+          "by": "管控",
+          "at": "2026-08-30T15:27:52.893Z",
+          "text": "找到了，已经修好。\n\n原因：这份「挂了哪几个文件夹」的清单原来只存在浏览器的存储里，而浏览器存储是按来源分家的——Mac 上那个界面和手机上那个界面来源不同，各存各的。手机那一侧从来就是空的，所以除了 Mac 当场算出来的 Home，别的什么都没有。\n\n清单前不久已经改成存在 Mac 上的一个文件里了，但手机和 Mac 之间那条通道没开这一项，手机问不到。现在通道开了，手机一连上来就和 Mac 上那份对一次账，两边看到的是同一份。\n\n顺带把任务面板的数据也接上了，手机上也能看能改。\n\n一个说明：对账是取并集，手机那边空的不会反过来把 Mac 上的清单清掉。\n\n要生效得换一个新的安装包——你现在手机连的还是旧的那个。"
+        }
+      ],
+      "userComments": [],
+      "commits": [
+        {
+          "ref": "b94b34ea2",
+          "at": "2026-08-30T15:27:52.893Z",
+          "message": "fix(desktop): 手机远程也拿得到挂载的文件夹，不再只剩一个 Home",
+          "files": [
+            "apps/desktop/src/main/remote/remote-client.ts",
+            "apps/desktop/src/main/index.ts",
+            "apps/desktop/tests/remote-server.test.ts"
+          ]
+        }
+      ],
+      "createdBy": "user",
+      "createdAt": "2026-08-30T15:27:52.893Z"
     }
   ]
 }
