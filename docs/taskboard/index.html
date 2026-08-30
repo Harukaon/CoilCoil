@@ -1538,6 +1538,11 @@ const SEED = {
           "by": "管控",
           "at": "2026-08-30T14:57:28.680Z",
           "text": "上一版整条撤销了（git 里留了一个 revert），按你说的重做，不再照搬这块 HTML 看板。\n\n状态按你定的来，六列加一个动作：\n· 待办池——想到什么先记这儿，不排队，「开始」也不会去拿它\n· 待处理——它的队列，做的东西只从这里挑\n· 进行中\n· 待验收——等你看。一时验不了的可以标「以后再验收」，卡片还在这一列，但批阅时会跳过它\n· 待回复——它卡住了等你拿主意，你一回复就自动回到待处理，不用再手动挪一次卡片\n· 完成——默认不显示，要看得自己勾上\n打回重做做成了一个动作而不是一列：退回待处理，理由记进时间线。\n\n批阅那个界面做出来了：进面板时如果有排队的，直接全屏摆开，一次一条，处理完自动上下一条。通过 / 打回重做 / 以后再验收 / 跳过 / 关掉，五条出口都留着。只自动弹一次，你关掉之后不会一回头又跳出来。待回复的排在待验收前面，因为那是卡着它往下做的。\n\n时间线改成一条线了：你的话、它的话、状态变动，按时间先后排在一起，不是「它一摞、我一摞」并列着看。存盘的时候就排好，直接打开那个文件看到的也是一条连贯的经过。\n\n还做了：拆子任务、搜索、拖卡片换列、已完成默认收起来。\n\n没做的，说清楚：\n1、git 提交还没自动记进时间线。现在时间线上是话和状态，提交要等它做完之后能报回来才接得上，这是下一步。\n2、筛选目前只有搜索和「显示已完成」两个，按优先级、按谁提的这些还没加。\n3、还是一次只做一条。\n\n怎么验：在一个文件夹上点那个按钮，提两条（一条高一条低），点开始看它是不是先做高的；跑完会自己弹批阅让你验；随便打回一条，看它是不是回到待处理而不是停在待回复。"
+        },
+        {
+          "by": "管控",
+          "at": "2026-08-30T15:19:37.669Z",
+          "text": "表格视图加上了，右上角切换，选了哪种下次打开还是哪种。\n\n一行一条，一屏能扫完；能按优先级、任务名、状态、提出时间、最近动静任意一列排，点表头切换，再点一次掉头。状态那一列按流转顺序排（待办池在前、完成在后），不是按字母。\n\n搜索和「显示已完成」这两个筛选对看板和表格都生效，两边看的是同一份数据。\n\n子任务在表格里紧跟着父缩进一格；如果搜索把父滤掉了，子会自己站出来当一行，不会跟着消失。"
         }
       ],
       "userComments": [
@@ -1620,6 +1625,18 @@ const SEED = {
             "apps/desktop/src/renderer/src/features/issues/IssueTimeline.tsx",
             "apps/desktop/src/renderer/src/features/issues/issueModel.ts",
             "apps/desktop/src/renderer/src/features/issues/useIssueBoard.ts",
+            "apps/desktop/src/renderer/src/features/issues/issues.css",
+            "apps/desktop/tests/workspace-issues.test.ts"
+          ]
+        },
+        {
+          "ref": "581bbb366",
+          "at": "2026-08-30T15:19:37.669Z",
+          "message": "feat(desktop): 任务面板加表格视图 (#27)",
+          "files": [
+            "apps/desktop/src/renderer/src/features/issues/IssueTable.tsx",
+            "apps/desktop/src/renderer/src/features/issues/IssueBoard.tsx",
+            "apps/desktop/src/renderer/src/features/issues/issueModel.ts",
             "apps/desktop/src/renderer/src/features/issues/issues.css",
             "apps/desktop/tests/workspace-issues.test.ts"
           ]
@@ -1752,7 +1769,7 @@ const SEED = {
   ]
 }
 ;
-const BUILT_AT = "2026-08-30T14:57:29.413Z";
+const BUILT_AT = "2026-08-30T15:19:38.188Z";
 const LS = 'suocode-taskboard-v2';
 const LS_UI = 'suocode-taskboard-ui-v1';
 
