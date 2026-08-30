@@ -47,7 +47,7 @@ import {
   ACTIVE_PROJECT_STORAGE_KEY,
   EMPTY_PROJECT,
   loadStoredProjects,
-  PROJECTS_STORAGE_KEY,
+  saveMountedProjects,
   uniqueProjects,
 } from "./appState";
 
@@ -348,7 +348,7 @@ export default function App(): React.JSX.Element {
     if (!selection) return;
     const next = uniqueProjects([...projects, selection]);
     setProjects(next);
-    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next.filter((item) => item.kind === "workspace")));
+    saveMountedProjects(next);
     setSessionsByProject((current) => ({ ...current, [selection.path]: current[selection.path] ?? [] }));
     startPendingConversation(selection);
     void window.coilcoil.request<SessionSummary[]>({ type: "list_sessions", cwd: selection.path })
@@ -360,7 +360,7 @@ export default function App(): React.JSX.Element {
     if (target.kind === "home") return;
     setProjects((current) => {
       const next = current.filter((item) => item.path !== target.path);
-      window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next.filter((item) => item.kind === "workspace")));
+      saveMountedProjects(next);
       return next;
     });
     setExpandedProjects((current) => { const next = new Set(current); next.delete(target.path); return next; });

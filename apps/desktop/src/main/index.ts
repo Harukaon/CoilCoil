@@ -25,6 +25,7 @@ import {
 } from "./browser-context-menu";
 import { BROWSER_PARTITION, hardenGuestPreferences } from "./browser-webview-policy";
 import { configureBrowserIdentity } from "./browser-user-agent";
+import { readMountedProjects, writeMountedProjects } from "./mounted-projects";
 import { proxyEnvironment, refreshProxyEnvironment } from "./system-proxy";
 import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
 import { saveProjectFile } from "./file-edit";
@@ -70,6 +71,13 @@ const WINDOW_GROW_WIDTH_CHANNEL = "window:grow-width";
 const WINDOW_BACKGROUND_CHANNEL = "window:background";
 const WINDOW_OPACITY_CHANNEL = "window:opacity";
 const BADGE_COUNT_CHANNEL = "app:badge-count";
+const MOUNTED_PROJECTS_CHANNEL = "projects:mounted";
+const MOUNTED_PROJECTS_SET_CHANNEL = "projects:mounted:set";
+
+/** 挂载的文件夹清单：和 window.json 一样，userData 下自己一个小文件。 */
+function mountedProjectsFile(): string {
+  return join(app.getPath("userData"), "mounted-projects.json");
+}
 
 /** 透明度存在 userData 下的单独一个小文件里，和 remote.json 一样。 */
 function windowOpacityFile(): string {
@@ -899,6 +907,9 @@ app.whenReady().then(async () => {
    * 只有未读会计数，运行中的不算——角标问的是「有几件事等着你」，还在跑的那些
    * 不需要你做任何事。0 要显式清掉，否则上一次的数字会一直挂在图标上。
    */
+  ipcMain.handle(MOUNTED_PROJECTS_CHANNEL, () => readMountedProjects(mountedProjectsFile()));
+  ipcMain.handle(MOUNTED_PROJECTS_SET_CHANNEL, (_event, projects: unknown) =>
+    writeMountedProjects(mountedProjectsFile(), projects));
   ipcMain.handle(BADGE_COUNT_CHANNEL, (_event, count: number): void => {
     const unread = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
     // Linux 上只有部分桌面环境实现得了，setBadgeCount 会返回 false，不是错误。

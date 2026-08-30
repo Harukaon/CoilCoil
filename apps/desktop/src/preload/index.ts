@@ -82,6 +82,9 @@ const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_UI_VIEWPORT_CHANNEL = "browser:ui-viewport";
+const MOUNTED_PROJECTS_CHANNEL = "projects:mounted";
+const MOUNTED_PROJECTS_SET_CHANNEL = "projects:mounted:set";
+type MountedProject = { name: string; path: string; kind: "workspace" };
 const BROWSER_IMPORT_LIST_CHANNEL = "browser:import-list";
 const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
 const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
@@ -131,6 +134,10 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(WINDOW_OPACITY_CHANNEL, opacity) as Promise<number>,
   setBadgeCount: (count: number) =>
     ipcRenderer.invoke(BADGE_COUNT_CHANNEL, count) as Promise<void>,
+  mountedProjects: () =>
+    ipcRenderer.invoke(MOUNTED_PROJECTS_CHANNEL) as Promise<MountedProject[]>,
+  setMountedProjects: (projects: MountedProject[]) =>
+    ipcRenderer.invoke(MOUNTED_PROJECTS_SET_CHANNEL, projects) as Promise<MountedProject[]>,
   // Electron 32 起渲染进程拿不到 File.path，外部拖入文件的真实路径只能在这里解析。
   filePath: (file: File) => webUtils.getPathForFile(file),
   openExternal: (url: string) =>

@@ -286,7 +286,13 @@ export interface CoilCoilDesktopApi {
   growWindowWidth(byPixels: number): Promise<void>;
   /** 同步窗口底色（CSS 颜色字面量），避免暗色主题下窗口画布仍是浅色。 */
   setWindowBackground(color: string): Promise<void>;
-  /** 整窗透明度（0.7~1）。返回真正生效的值——超出范围会被收敛。 */
+  /** 挂载的文件夹清单（存在 userData 里，开发版和安装版共用一份）。 */
+  mountedProjects(): Promise<Array<{ name: string; path: string; kind: "workspace" }>>;
+  /** 覆盖磁盘上的挂载清单；返回真正落盘的那一份。 */
+  setMountedProjects(
+    projects: Array<{ name: string; path: string; kind: "workspace" }>,
+  ): Promise<Array<{ name: string; path: string; kind: "workspace" }>>;
+  /** 整窗透明度（0.96~1）。返回真正生效的值——超出范围会被收敛。 */
   setWindowOpacity(opacity: number): Promise<number>;
   /** Dock/任务栏角标上的未读数；0 表示清掉角标。 */
   setBadgeCount(count: number): Promise<void>;

@@ -35,6 +35,36 @@ export function loadStoredProjects(): ProjectSelection[] {
   }
 }
 
+/**
+ * 挂载清单同时写两处：磁盘上那份是真相，localStorage 只是让下次开机能立刻画出来。
+ *
+ * 为什么不能只有 localStorage：它是按来源分家的，`npm run dev`（http://localhost）
+ * 和安装版（file://）各存各的，在两者之间切一次侧边栏的文件夹就像丢了一样。
+ */
+export function saveMountedProjects(projects: ProjectSelection[]): void {
+  const workspaces = projects
+    .filter((item) => item.kind === "workspace")
+    .map((item) => ({ name: item.name, path: item.path, kind: "workspace" as const }));
+  try {
+    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(workspaces));
+  } catch {
+    // 存不下就算了，磁盘那份才是真相。
+  }
+  void window.coilcoil.setMountedProjects?.(workspaces);
+}
+
+/**
+ * 开机时把磁盘上那份和本地这份合起来：两边都可能是「另一半」，所以取并集，
+ * 以本地的顺序打底（那是用户自己拖出来的），磁盘上多出来的接在后面。
+ */
+export async function syncMountedProjects(): Promise<ProjectSelection[]> {
+  const stored = await window.coilcoil.mountedProjects?.().catch(() => []) ?? [];
+  // 本地那份直接从 localStorage 现读，避免调用方传进来一份不全的。
+  const merged = uniqueProjects([...loadStoredProjects(), ...stored.filter(isWorkspace)]);
+  saveMountedProjects(merged);
+  return merged;
+}
+
 export function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {
   const seen = new Set<string>();
   return projects.filter((project) => {

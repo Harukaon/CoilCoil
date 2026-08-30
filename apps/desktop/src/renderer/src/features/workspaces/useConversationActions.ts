@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type {
   MoveSessionResult,
@@ -6,7 +7,7 @@ import type {
   SessionSummary,
 } from "@coilcoil/runtime-protocol";
 import type { SessionActivityState } from "./WorkspaceSidebar";
-import { PROJECTS_STORAGE_KEY } from "../../appState";
+import { saveMountedProjects, syncMountedProjects } from "../../appState";
 import { toastError } from "../../ui/toast";
 
 /**
@@ -51,6 +52,23 @@ export function useConversationActions({
   moveConversation(owner: ProjectSelection, session: SessionSummary, target: ProjectSelection): Promise<void>;
   reorderProjects(fromPath: string, toPath: string): void;
 } {
+  /* 开机对一次账：磁盘上的挂载清单和界面本地那份取并集。
+     这段本该在 App 里，放在这里是因为 App 卡在 600 行的模块上限上——这个文件本来
+     就是为此拆出来的，挂载清单的写入也在这里。 */
+  useEffect(() => {
+    let cancelled = false;
+    void syncMountedProjects().then((stored) => {
+      if (cancelled || !stored.length) return;
+      setProjects((current) => {
+        const known = new Set(current.map((item) => item.path));
+        const missing = stored.filter((item) => !known.has(item.path));
+        return missing.length ? [...current, ...missing] : current;
+      });
+    });
+    return () => { cancelled = true; };
+    // 只在挂载时对一次账，之后每次改动都会自己写盘。
+  }, []);
+
   const forgetSession = (sessionPath: string): void => {
     snapshotCacheRef.current.delete(sessionPath);
     optimisticSessionsRef.current.delete(sessionPath);
@@ -158,7 +176,7 @@ export function useConversationActions({
       if (from === -1 || to === -1 || from === to) return current;
       const next = [...current];
       next.splice(to, 0, ...next.splice(from, 1));
-      window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next.filter((item) => item.kind === "workspace")));
+      saveMountedProjects(next);
       return next;
     });
   };
