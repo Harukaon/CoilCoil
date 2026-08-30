@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ClipboardCheck, ListChecks, PanelLeft, Play, Plus, Square } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Columns3, ListChecks, PanelLeft, Play, Plus, Rows3, Square } from "lucide-react";
 import type { Issue, IssuePriority, IssueStatus } from "../../../../shared/desktop-api";
 import { Select } from "../../ui/Select";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { IssueDetail } from "./IssueDetail";
 import { IssueReview } from "./IssueReview";
+import { IssueTable } from "./IssueTable";
 import {
   ISSUE_COLUMNS,
   ISSUE_PRIORITY_NAME,
@@ -19,9 +20,27 @@ import {
   withComment,
   withDeferred,
   withStatus,
+  type IssueSortKey,
 } from "./issueModel";
 import type { IssueRunState } from "./useIssueBoard";
 import "./issues.css";
+
+export type IssueView = "board" | "table";
+
+const VIEW_STORAGE_KEY = "coilcoil.issues.view";
+
+/** 上次用的是哪种视图。读不到就按看板——那是这块面板的默认样子。 */
+function loadIssueView(): IssueView {
+  try {
+    return window.localStorage.getItem(VIEW_STORAGE_KEY) === "table" ? "table" : "board";
+  } catch {
+    return "board";
+  }
+}
+
+function saveIssueView(view: IssueView): void {
+  try { window.localStorage.setItem(VIEW_STORAGE_KEY, view); } catch { /* 隐私模式下写不进去，不值得为它报错 */ }
+}
 
 /**
  * 工作区自带的任务面板。
@@ -63,6 +82,9 @@ export function IssueBoard({
   const [dragId, setDragId] = useState<string | undefined>(undefined);
   const [dropStatus, setDropStatus] = useState<IssueStatus | undefined>(undefined);
   const [reviewing, setReviewing] = useState(false);
+  const [view, setView] = useState<IssueView>(loadIssueView);
+  const [sortKey, setSortKey] = useState<IssueSortKey>("priority");
+  const [ascending, setAscending] = useState(true);
   /* 进面板时自动摆开批阅，但只自动一次：关掉之后不该一回头又弹出来。 */
   const [autoOpened, setAutoOpened] = useState(false);
 
@@ -84,6 +106,14 @@ export function IssueBoard({
   }, [autoOpened, loading, queue.length]);
 
   const columns = ISSUE_COLUMNS.filter((column) => column.status !== "done" || showDone);
+  const rows = useMemo(
+    () => showDone ? visible : visible.filter((issue) => issue.status !== "done"),
+    [showDone, visible]);
+
+  const changeView = (next: IssueView): void => {
+    setView(next);
+    saveIssueView(next);
+  };
 
   const submit = (): void => {
     const trimmed = title.trim();
@@ -154,8 +184,30 @@ export function IssueBoard({
           <input type="checkbox" checked={showDone} onChange={(event) => setShowDone(event.target.checked)} />
           显示已完成
         </label>
+        <div className="issue-view-switch" role="group" aria-label="视图">
+          <button className={view === "board" ? "active" : ""} type="button" onClick={() => changeView("board")}>
+            <Columns3 size={13} />看板
+          </button>
+          <button className={view === "table" ? "active" : ""} type="button" onClick={() => changeView("table")}>
+            <Rows3 size={13} />表格
+          </button>
+        </div>
       </div>
 
+      {view === "table" ? (
+        <IssueTable
+          issues={rows}
+          runningId={run.issueId}
+          sortKey={sortKey}
+          ascending={ascending}
+          onSort={(key) => {
+            // 点同一列是掉头，点别的列从正序开始——不然换列时方向莫名其妙。
+            if (key === sortKey) setAscending((current) => !current);
+            else { setSortKey(key); setAscending(true); }
+          }}
+          onOpen={setOpenId}
+        />
+      ) : (
       <div className={`issue-columns ${showDone ? "with-done" : ""}`}>
         {columns.map((column) => {
           const cards = issuesInColumn(visible, column.status);
@@ -218,6 +270,7 @@ export function IssueBoard({
           );
         })}
       </div>
+      )}
 
       {open ? (
         <IssueDetail

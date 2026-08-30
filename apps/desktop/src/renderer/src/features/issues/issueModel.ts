@@ -69,6 +69,54 @@ export function childrenOf(issues: readonly Issue[], parentId: string): Issue[] 
   return sortIssues(issues.filter((issue) => issue.parentId === parentId));
 }
 
+/** 表格能按哪几列排。 */
+export type IssueSortKey = "title" | "status" | "priority" | "updatedAt" | "createdAt";
+
+/** 表格里状态那一列的先后：按流转顺序，不是按字母。 */
+const STATUS_RANK: Record<IssueStatus, number> =
+  Object.fromEntries(ISSUE_COLUMNS.map((column, index) => [column.status, index])) as Record<IssueStatus, number>;
+
+/** 表格视图的排序。同一列里排不出先后时，一律回到「优先级 + 提出的先后」。 */
+export function sortIssuesBy(issues: readonly Issue[], key: IssueSortKey, ascending: boolean): Issue[] {
+  const rank = (issue: Issue): number | string => {
+    if (key === "status") return STATUS_RANK[issue.status];
+    if (key === "priority") return PRIORITY_RANK[issue.priority];
+    if (key === "title") return issue.title;
+    return issue[key];
+  };
+  return sortIssues(issues).sort((a, b) => {
+    const left = rank(a);
+    const right = rank(b);
+    if (left === right) return 0;
+    const order = typeof left === "string" && typeof right === "string"
+      ? left.localeCompare(right, "zh-CN")
+      : Number(left) - Number(right);
+    return ascending ? order : -order;
+  });
+}
+
+/**
+ * 把子任务排到各自的父后面，父不在这一屏（被搜索或筛选滤掉了）的按顶层排。
+ *
+ * 表格是一行一条，光按排序键排的话父子会被拆散在两个地方，看不出从属关系。
+ */
+export function withChildrenInline(
+  issues: readonly Issue[],
+  key: IssueSortKey,
+  ascending: boolean,
+): { issue: Issue; child: boolean }[] {
+  const shown = new Set(issues.map((issue) => issue.id));
+  const tops = issues.filter((issue) => !issue.parentId || !shown.has(issue.parentId));
+  const rows: { issue: Issue; child: boolean }[] = [];
+  for (const issue of sortIssuesBy(tops, key, ascending)) {
+    rows.push({ issue, child: Boolean(issue.parentId) });
+    for (const child of sortIssuesBy(issues.filter((item) => item.parentId === issue.id), key, ascending)) {
+      rows.push({ issue: child, child: true });
+    }
+  }
+  return rows;
+}
+
 /**
  * 「开始」按下去之后该做哪一条。
  *

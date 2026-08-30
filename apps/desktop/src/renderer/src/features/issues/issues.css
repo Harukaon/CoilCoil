@@ -117,3 +117,29 @@
 @media (max-width: 1180px) {
   .issue-columns, .issue-columns.with-done { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* 视图切换：看板和表格看的是同一份数据，只是密度不同。 */
+.issue-view-switch { display: inline-flex; margin-left: auto; padding: 2px; border-radius: var(--radius-lg); background: hsl(var(--th) var(--ts) var(--l-925)); }
+.issue-view-switch button { display: inline-flex; height: 24px; align-items: center; gap: 5px; padding: 0 9px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-512)); background: transparent; font-size: 11px; cursor: pointer; }
+.issue-view-switch button.active { color: hsl(var(--th) var(--ts) var(--l-196)); background: hsl(var(--th) var(--ts) var(--l-1000)); }
+
+/* 表格视图：一行一条，一屏能扫完。 */
+.issue-table-scroll { min-height: 0; overflow: auto; padding: 8px 26px 24px; }
+.issue-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11px; }
+.issue-table th { position: sticky; top: 0; z-index: 1; padding: 0; background: var(--pane-fill); text-align: left; }
+.issue-table th button { display: inline-flex; height: 30px; align-items: center; gap: 4px; padding: 0 10px; color: hsl(var(--th) var(--ts) var(--l-512)); background: transparent; font-size: 10px; font-weight: 650; cursor: pointer; }
+.issue-table th button:hover { color: hsl(var(--th) var(--ts) var(--l-196)); }
+.issue-table th.right, .issue-table td.right { text-align: right; }
+.issue-table th.right button { padding-right: 10px; }
+.issue-table td { padding: 8px 10px; border-top: 1px solid hsl(var(--th) var(--ts) var(--l-925)); color: hsl(var(--th) var(--ts) var(--l-441)); white-space: nowrap; }
+.issue-table tbody tr { cursor: pointer; }
+.issue-table tbody tr:hover td { background: hsl(var(--th) var(--ts) var(--l-963)); }
+.issue-table tbody tr:focus-visible { outline: 2px solid hsl(var(--th) var(--ts) var(--l-729)); outline-offset: -2px; }
+.issue-table tbody tr.active td { box-shadow: inset 0 2px 0 var(--c-green-muted), inset 0 -2px 0 var(--c-green-muted); }
+.issue-table-title { width: 100%; max-width: 0; }
+.issue-table-title-inner { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.issue-table-name { min-width: 0; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-206)); text-overflow: ellipsis; }
+.issue-table-title small { flex: 0 0 auto; color: hsl(var(--th) var(--ts) var(--l-602)); font-size: 9px; }
+.issue-table-title svg { flex: 0 0 auto; color: hsl(var(--th) var(--ts) var(--l-655)); }
+.issue-table-title .issue-tag { flex: 0 0 auto; }
+.issue-table-empty { margin: 0; padding: 20px 26px; color: hsl(var(--th) var(--ts) var(--l-678)); font-size: 11px; }

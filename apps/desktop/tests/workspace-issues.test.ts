@@ -15,7 +15,9 @@ import {
   removeIssue,
   reviewQueue,
   sortIssues,
+  sortIssuesBy,
   upsertIssue,
+  withChildrenInline,
   withComment,
   withDeferred,
   withStatus,
@@ -180,4 +182,33 @@ test("同一条提交两次是覆盖不是加一条", () => {
   const twice = upsertIssue(upsertIssue([], issue), { ...issue, title: "改过的标题" });
   assert.equal(twice.length, 1);
   assert.equal(twice[0].title, "改过的标题");
+});
+
+test("表格排序：点哪一列按哪一列，状态按流转顺序而不是按字母", () => {
+  const issues = [
+    make("待验收的", "low", "2026-01-03", "review"),
+    make("待办池里的", "high", "2026-01-01", "pool"),
+    make("待处理的", "medium", "2026-01-02"),
+  ];
+  assert.deepEqual(sortIssuesBy(issues, "status", true).map((issue) => issue.title),
+    ["待办池里的", "待处理的", "待验收的"]);
+  assert.deepEqual(sortIssuesBy(issues, "status", false).map((issue) => issue.title),
+    ["待验收的", "待处理的", "待办池里的"]);
+  assert.deepEqual(sortIssuesBy(issues, "priority", true).map((issue) => issue.title),
+    ["待办池里的", "待处理的", "待验收的"]);
+  assert.deepEqual(sortIssuesBy(issues, "createdAt", false).map((issue) => issue.title),
+    ["待验收的", "待处理的", "待办池里的"]);
+});
+
+test("表格里子任务紧跟着父，父被筛掉的按顶层排", () => {
+  const parent = { ...newIssue("父", "", "high"), id: "parent", createdAt: "2026-01-01" };
+  const child = { ...newIssue("子", "", "low"), id: "child", parentId: "parent", createdAt: "2026-01-02" };
+  const other = { ...newIssue("另一条", "", "high"), id: "other", createdAt: "2026-01-03" };
+  // 优先级排序会把「子」排到最后，但它必须跟在父后面，不然看不出从属关系。
+  assert.deepEqual(withChildrenInline([parent, child, other], "priority", true).map((row) => row.issue.id),
+    ["parent", "child", "other"]);
+  assert.deepEqual(withChildrenInline([parent, child, other], "priority", true).map((row) => row.child),
+    [false, true, false]);
+  // 搜索把父滤掉之后，子自己站出来，不会跟着消失。
+  assert.deepEqual(withChildrenInline([child, other], "priority", true).map((row) => row.issue.id), ["other", "child"]);
 });
