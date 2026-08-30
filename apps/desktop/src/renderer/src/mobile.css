@@ -46,7 +46,6 @@
   [data-client="remote"] .app-shell > .sidebar,
   [data-client="remote"] .app-shell > .conversation-pane,
   [data-client="remote"] .app-shell > .inspector-pane,
-  [data-client="remote"] .app-shell > .issue-board,
   [data-client="remote"] .app-shell > .skills-workspace,
   [data-client="remote"] .app-shell > .memory-workspace {
     flex: 0 0 100%;

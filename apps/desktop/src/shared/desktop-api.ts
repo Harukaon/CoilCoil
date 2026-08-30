@@ -162,36 +162,6 @@ export interface ImportableProfile {
   problem?: string;
 }
 
-/**
- * 工作区自带的 Issue 看板。
- *
- * 五个状态和用户在浏览器里用的那块 HTML 看板一一对应：待办 → 进行中 → 待验收，
- * 中间可能拐去待回复。「完成」只有用户能点——agent 说自己做完了不算数。
- */
-export type IssueStatus = "todo" | "doing" | "review" | "reply" | "done";
-
-export type IssuePriority = "high" | "medium" | "low";
-
-/** Issue 下面的一条留言：用户的话和 agent 的话交替排成一条时间线。 */
-export interface IssueNote {
-  at: string;
-  by: "user" | "agent";
-  text: string;
-}
-
-export interface Issue {
-  id: string;
-  title: string;
-  body: string;
-  status: IssueStatus;
-  priority: IssuePriority;
-  createdAt: string;
-  updatedAt: string;
-  notes: IssueNote[];
-  /** 这条 Issue 是在哪个对话里做的，做完之后还能翻回去看。 */
-  sessionPath?: string;
-}
-
 export interface ImportBrowserCookiesInput {
   browser: ImportableBrowserId;
   profile: string;
@@ -316,10 +286,6 @@ export interface CoilCoilDesktopApi {
   growWindowWidth(byPixels: number): Promise<void>;
   /** 同步窗口底色（CSS 颜色字面量），避免暗色主题下窗口画布仍是浅色。 */
   setWindowBackground(color: string): Promise<void>;
-  /** 这个工作区的 Issue 看板（存在 userData 里，不写进用户的仓库）。 */
-  listIssues(cwd: string): Promise<Issue[]>;
-  /** 覆盖这个工作区的看板；返回真正落盘的那一份。 */
-  saveIssues(cwd: string, issues: Issue[]): Promise<Issue[]>;
   /** 挂载的文件夹清单（存在 userData 里，开发版和安装版共用一份）。 */
   mountedProjects(): Promise<Array<{ name: string; path: string; kind: "workspace" }>>;
   /** 覆盖磁盘上的挂载清单；返回真正落盘的那一份。 */

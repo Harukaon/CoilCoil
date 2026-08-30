@@ -51,7 +51,7 @@ import {
   uniqueProjects,
 } from "./appState";
 
-type WorkspaceSurface = "conversation" | "skills" | "memory" | "issues";
+type WorkspaceSurface = "conversation" | "skills" | "memory";
 
 export default function App(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSelection[]>([]);
@@ -460,9 +460,9 @@ export default function App(): React.JSX.Element {
    * queueing it behind that turn; the runtime falls back to the queue when
    * nothing is streaming, so the caller never has to check first.
    */
-  const submitPrompt = async (event: FormEvent | undefined, intent: "queue" | "steer" = "queue", override?: string): Promise<void> => {
+  const submitPrompt = async (event: FormEvent | undefined, intent: "queue" | "steer" = "queue"): Promise<void> => {
     event?.preventDefault();
-    const prompt = (override ?? draft).trim();
+    const prompt = draft.trim();
     const images = draftImages;
     const runtimeCommand = prompt === "/memory" && images.length === 0;
     if ((!prompt && !images.length) || !project || startingSession) return;
