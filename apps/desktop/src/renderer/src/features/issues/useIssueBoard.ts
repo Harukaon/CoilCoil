@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PromptImage } from "@coilcoil/runtime-protocol";
 import type { Issue } from "../../../../shared/desktop-api";
-import { agentNote, issuePrompt, nextRunnableIssue, withEvent, withStatus } from "./issueModel";
+import { agentNote, issueImages, issuePrompt, nextRunnableIssue, withEvent, withStatus } from "./issueModel";
 
 /** 「开始」按下去之后，一条 Issue 走到哪一步了。 */
 export type IssueRunPhase = "idle" | "starting" | "running";
@@ -39,8 +40,8 @@ export function useIssueBoard({
   sessionRunning(sessionPath: string): boolean;
   /** 在当前工作区起一个新对话。 */
   startConversation(): void;
-  /** 把这段话作为一条消息发出去。 */
-  sendPrompt(text: string): Promise<void>;
+  /** 把这段话（和贴在这条任务上的图）作为一条消息发出去。 */
+  sendPrompt(text: string, images: PromptImage[]): Promise<void>;
 }): {
   issues: Issue[];
   loading: boolean;
@@ -88,7 +89,7 @@ export function useIssueBoard({
     update(withStatus(issuesRef.current, issue.id, "doing", "agent"));
     setRun({ phase: "starting", issueId: issue.id, auto });
     startConversation();
-    void sendPrompt(issuePrompt(issue, parent)).catch(() => {
+    void sendPrompt(issuePrompt(issue, parent), issueImages(issue)).catch(() => {
       update(withStatus(issuesRef.current, issue.id, "ready", "agent"));
       setRun({ phase: "idle", auto: false });
     });

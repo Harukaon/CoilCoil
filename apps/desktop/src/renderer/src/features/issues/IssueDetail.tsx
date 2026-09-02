@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { CornerDownRight, Plus, Trash2, X } from "lucide-react";
+import type { PromptImage } from "@coilcoil/runtime-protocol";
 import type { Issue, IssueStatus } from "../../../../shared/desktop-api";
 import { Select } from "../../ui/Select";
+import { IssueImagePicker, IssueImageStrip, imageDropHandlers } from "./IssueImages";
 import { IssueTimeline, ISSUE_TIME_FORMAT } from "./IssueTimeline";
 import { ISSUE_COLUMNS, ISSUE_PRIORITY_NAME, childrenOf } from "./issueModel";
 
@@ -28,12 +30,13 @@ export function IssueDetail({
   onOpen(id: string): void;
   onStatus(status: IssueStatus): void;
   onDefer(deferred: boolean): void;
-  onComment(text: string): void;
+  onComment(text: string, images: PromptImage[]): void;
   onAddChild(title: string): void;
   onDelete(): void;
   onOpenSession(sessionPath: string): void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState("");
+  const [draftImages, setDraftImages] = useState<PromptImage[]>([]);
   const [childTitle, setChildTitle] = useState("");
   const parent = issue.parentId ? issues.find((item) => item.id === issue.parentId) : undefined;
   const children = childrenOf(issues, issue.id);
@@ -54,6 +57,7 @@ export function IssueDetail({
 
       <div className="issue-detail-body">
         {issue.body ? <p className="issue-detail-text">{issue.body}</p> : <p className="issue-detail-empty">这条没有写描述。</p>}
+        <IssueImageStrip images={issue.images ?? []} />
 
         <div className="issue-detail-status">
           <span>状态</span>
@@ -114,20 +118,24 @@ export function IssueDetail({
         onSubmit={(event) => {
           event.preventDefault();
           const text = draft.trim();
-          if (!text) return;
-          onComment(text);
+          // 只贴张图不写字也算一条留言——很多时候截图就是全部要说的话。
+          if (!text && !draftImages.length) return;
+          onComment(text, draftImages);
           setDraft("");
+          setDraftImages([]);
         }}
+        {...imageDropHandlers((next) => setDraftImages((current) => [...current, ...next]))}
       >
         <textarea
           value={draft}
-          placeholder={issue.status === "reply" ? "回复它（回复完这条会自动回到待处理）" : "写点什么"}
+          placeholder={issue.status === "reply" ? "回复它（回复完这条会自动回到待处理）" : "写点什么，截图可以直接粘进来"}
           aria-label="给这条任务留言"
           onChange={(event) => setDraft(event.target.value)}
         />
+        {draftImages.length ? <IssueImagePicker images={draftImages} onChange={setDraftImages} /> : null}
         <div>
           <button className="issue-delete" type="button" onClick={onDelete}><Trash2 size={13} />删除</button>
-          <button className="issue-primary" type="submit" disabled={!draft.trim()}>留言</button>
+          <button className="issue-primary" type="submit" disabled={!draft.trim() && !draftImages.length}>留言</button>
         </div>
       </form>
     </aside>

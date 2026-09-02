@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { PromptImage } from "@coilcoil/runtime-protocol";
 import type { Issue, IssueEvent, IssuePriority, IssueStatus } from "../shared/desktop-api";
 
 /**
@@ -20,6 +21,16 @@ const EVENT_KINDS = ["comment", "note", "status", "commit"] as const;
 const MAX_ISSUES = 2000;
 /** 一条 Issue 的时间线同理。 */
 const MAX_EVENTS = 1000;
+/** 一条 Issue 或一条留言最多带几张图。 */
+const MAX_IMAGES = 8;
+/**
+ * 单张图的 base64 长度上限（约 7.5MB 原图）。
+ *
+ * 超了就整张丢掉，不截断：base64 截一半就不是图片了，存下来只会变成一个永远画不出
+ * 来的破图；直接不收，至少行为是明确的。整块面板是一次读一次写的一个 JSON，所以
+ * 这道闸拦的不只是坏数据，也是「贴了几十张图之后面板打不开」。
+ */
+const MAX_IMAGE_CHARS = 10_000_000;
 
 /**
  * 工作区路径 → 文件名。
@@ -37,12 +48,32 @@ function text(value: unknown, limit: number): string {
   return typeof value === "string" ? value.slice(0, limit) : "";
 }
 
+/** 贴的图：只认得出 image/* 的、没超过大小的那些。 */
+function normalizeImages(value: unknown): PromptImage[] {
+  if (!Array.isArray(value)) return [];
+  const out: PromptImage[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const data = typeof record.data === "string" ? record.data : "";
+    const mimeType = text(record.mimeType, 100);
+    if (!data || data.length > MAX_IMAGE_CHARS || !mimeType.startsWith("image/")) continue;
+    const id = text(record.id, 64);
+    const name = text(record.name, 200);
+    out.push({ mimeType, data, ...id ? { id } : {}, ...name ? { name } : {} });
+    if (out.length >= MAX_IMAGES) break;
+  }
+  return out;
+}
+
 function normalizeEvent(value: unknown): IssueEvent | undefined {
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
   const body = text(record.text, 20_000);
   const kind = EVENT_KINDS.includes(record.kind as IssueEvent["kind"]) ? record.kind as IssueEvent["kind"] : "comment";
-  if (!body && kind !== "status") return undefined;
+  const images = normalizeImages(record.images);
+  // 只贴了张图、一个字没写的留言是成立的，别把它当空条目丢掉。
+  if (!body && !images.length && kind !== "status") return undefined;
   const status = STATUSES.includes(record.status as IssueStatus) ? record.status as IssueStatus : undefined;
   const ref = text(record.ref, 64);
   return {
@@ -52,6 +83,7 @@ function normalizeEvent(value: unknown): IssueEvent | undefined {
     text: body,
     ...status ? { status } : {},
     ...ref ? { ref } : {},
+    ...images.length ? { images } : {},
   };
 }
 
@@ -80,6 +112,7 @@ function normalizeIssue(value: unknown): Issue | undefined {
   const now = new Date().toISOString();
   const parentId = text(record.parentId, 64);
   const sessionPath = text(record.sessionPath, 4_096);
+  const images = normalizeImages(record.images);
   return {
     id,
     title,
@@ -93,6 +126,7 @@ function normalizeIssue(value: unknown): Issue | undefined {
     ...parentId && parentId !== id ? { parentId } : {},
     ...record.deferred === true ? { deferred: true as const } : {},
     ...sessionPath ? { sessionPath } : {},
+    ...images.length ? { images } : {},
   };
 }
 

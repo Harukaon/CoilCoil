@@ -7,17 +7,19 @@
 .issue-board-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; }
 [data-platform="darwin"] .app-shell.left-collapsed .issue-board-header { padding-left: 82px; }
 
-/* 提一条任务和「开始」放在同一条上：这两件事是这块面板的全部入口。 */
+/* 提一条任务和「开始」放在同一条上：这两件事是这块面板的全部入口。提任务点开的是
+   弹窗，见下面的 .issue-dialog——一条任务往往一句话说不完，还常带截图。 */
 .issue-board-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 26px 10px; }
-.issue-new { display: flex; min-width: 0; flex: 1; align-items: center; gap: 7px; }
-.issue-new input, .issue-board-filters input[type="text"], .issue-comment textarea, .issue-child-new input, .issue-review textarea {
+.issue-board-filters input[type="text"], .issue-comment textarea, .issue-child-new input, .issue-review textarea,
+.issue-dialog input, .issue-dialog textarea {
   min-width: 0; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-843)); border-radius: var(--radius-xl);
   color: hsl(var(--th) var(--ts) var(--l-235)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px;
 }
-.issue-new input, .issue-child-new input { height: 30px; }
-.issue-new input:first-child { flex: 0 1 260px; }
-.issue-new input:nth-child(2) { flex: 1 1 auto; }
-.issue-new input:focus, .issue-comment textarea:focus, .issue-child-new input:focus, .issue-review textarea:focus { border-color: hsl(var(--th) var(--ts) var(--l-729)); outline: 0; }
+.issue-child-new input { height: 30px; }
+.issue-comment textarea:focus, .issue-child-new input:focus, .issue-review textarea:focus,
+.issue-board-filters input[type="text"]:focus, .issue-dialog input:focus, .issue-dialog textarea:focus {
+  border-color: hsl(var(--th) var(--ts) var(--l-729)); outline: 0;
+}
 /* 下拉走全局那个 Select，这里只把它压到和旁边的输入框一样高。 */
 .issue-select.coil-select { width: auto; height: 30px; flex: 0 0 auto; }
 .issue-runner { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; }
@@ -70,6 +72,8 @@
 .issue-timeline time { color: hsl(var(--th) var(--ts) var(--l-602)); font-size: 9px; }
 .issue-timeline p { grid-column: 1 / -1; margin: 0; color: hsl(var(--th) var(--ts) var(--l-324)); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
 .issue-timeline-empty { margin: 0; color: hsl(var(--th) var(--ts) var(--l-678)); font-size: 11px; }
+/* 留言里贴的图占满这一条的宽度：上面那行 grid 是给「谁、什么时候」那几个小标签排的。 */
+.issue-timeline .issue-images { grid-column: 1 / -1; }
 
 /* 详情从右边压上来。做成抽屉而不是对话框：面板本身还要留在眼前，一条条翻。 */
 .issue-detail { position: absolute; z-index: 5; top: 76px; right: 0; bottom: 0; display: grid; width: min(430px, 46%); grid-template-rows: auto minmax(0, 1fr) auto; border-left: 1px solid hsl(var(--th) var(--ts) var(--l-882)); background: hsl(var(--th) var(--ts) var(--l-1000)); }
@@ -143,3 +147,31 @@
 .issue-table-title svg { flex: 0 0 auto; color: hsl(var(--th) var(--ts) var(--l-655)); }
 .issue-table-title .issue-tag { flex: 0 0 auto; }
 .issue-table-empty { margin: 0; padding: 20px 26px; color: hsl(var(--th) var(--ts) var(--l-678)); font-size: 11px; }
+
+/* 提一条任务的弹窗。压在整块面板上而不是挤进工具条：写清楚一条任务要几行字加张
+   截图，那不是一个单行输入框装得下的（用户原话：「任务怎么可能简简单单用一个描述
+   能解决吗」）。尺寸和层级跟子 Agent 那个弹窗保持一致，一个 App 里不该有两套弹窗。 */
+.issue-dialog-backdrop { position: fixed; z-index: 300; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(30 30 27 / 12%); }
+.issue-dialog { display: grid; width: min(560px, calc(100vw - 48px)); max-height: min(680px, calc(100vh - 48px)); grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: var(--radius-8xl); background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: 0 24px 80px rgb(28 28 25 / 24%), 0 4px 18px rgb(28 28 25 / 12%); }
+.issue-dialog > header { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 14px 14px 12px 16px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
+.issue-dialog > header > div { display: grid; min-width: 0; gap: 3px; }
+.issue-dialog > header strong { color: hsl(var(--th) var(--ts) var(--l-182)); font-size: 13px; font-weight: 650; }
+.issue-dialog > header small { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 10px; }
+.issue-dialog > header > button { display: grid; width: 28px; height: 28px; margin-left: auto; place-items: center; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-512)); background: transparent; cursor: pointer; }
+.issue-dialog > header > button:hover { color: hsl(var(--th) var(--ts) var(--l-182)); background: hsl(var(--th) var(--ts) var(--l-906)); }
+.issue-dialog-body { display: grid; align-content: start; gap: 9px; min-height: 0; overflow-y: auto; padding: 14px 16px 16px; }
+.issue-dialog-body input { height: 32px; font-size: 12px; }
+.issue-dialog-body textarea { min-height: 132px; padding: 9px; resize: vertical; font: inherit; font-size: 12px; line-height: 1.6; }
+.issue-dialog > footer { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
+.issue-dialog > footer .issue-primary { margin-left: auto; }
+
+/* 贴的图。只读的一排按缩略图摆，点不开——面板不是看图的地方，要看细节回原图。 */
+.issue-images { display: grid; gap: 7px; grid-template-columns: repeat(auto-fit, minmax(80px, 132px)); }
+.issue-images img { display: block; width: 100%; border: 1px solid hsl(var(--th) var(--ts) var(--l-882)); border-radius: var(--radius-xl); }
+.issue-image-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.issue-image-picker figure { position: relative; width: 54px; height: 54px; flex: 0 0 auto; margin: 0; }
+.issue-image-picker img { display: block; width: 100%; height: 100%; border: 1px solid hsl(var(--th) var(--ts) var(--l-843)); border-radius: var(--radius-2xl); object-fit: cover; }
+.issue-image-picker figure button { position: absolute; top: -5px; right: -5px; display: grid; width: 18px; height: 18px; padding: 0; place-items: center; border: 1px solid hsl(var(--th) var(--ts) var(--l-816)); border-radius: 50%; color: hsl(var(--th) var(--ts) var(--l-339)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 2px 7px rgb(23 23 20 / 12%); cursor: pointer; }
+.issue-image-add { display: grid; width: 54px; height: 54px; flex: 0 0 auto; gap: 2px; place-items: center; border: 1px dashed hsl(var(--th) var(--ts) var(--l-816)); border-radius: var(--radius-2xl); color: hsl(var(--th) var(--ts) var(--l-563)); background: transparent; cursor: pointer; }
+.issue-image-add span { font-size: 9px; }
+.issue-image-add:hover { color: hsl(var(--th) var(--ts) var(--l-292)); background: hsl(var(--th) var(--ts) var(--l-963)); }

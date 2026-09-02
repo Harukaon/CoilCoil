@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ClipboardCheck, Columns3, ListChecks, PanelLeft, Play, Plus, Rows3, Square } from "lucide-react";
-import type { Issue, IssuePriority, IssueStatus } from "../../../../shared/desktop-api";
-import { Select } from "../../ui/Select";
+import type { Issue, IssueStatus } from "../../../../shared/desktop-api";
 import { WindowDragBar } from "../../ui/WindowDragBar";
+import { IssueCompose } from "./IssueCompose";
 import { IssueDetail } from "./IssueDetail";
 import { IssueReview } from "./IssueReview";
 import { IssueTable } from "./IssueTable";
@@ -73,9 +73,7 @@ export function IssueBoard({
   onStop(): void;
   onOpenSession(sessionPath: string): void;
 }): React.JSX.Element {
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [priority, setPriority] = useState<IssuePriority>("medium");
+  const [composing, setComposing] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | undefined>(undefined);
@@ -115,14 +113,6 @@ export function IssueBoard({
     saveIssueView(next);
   };
 
-  const submit = (): void => {
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    onChange(upsertIssue(issues, newIssue(trimmed, body, priority, { status: "ready" })));
-    setTitle("");
-    setBody("");
-  };
-
   return (
     <section className="issue-board" aria-labelledby="issue-board-title">
       <header className="issue-board-header">
@@ -152,18 +142,9 @@ export function IssueBoard({
       </header>
 
       <div className="issue-board-toolbar">
-        <form className="issue-new" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-          <input value={title} placeholder="提一条任务" aria-label="任务标题" onChange={(event) => setTitle(event.target.value)} />
-          <input value={body} placeholder="说清楚要改成什么样（可留空）" aria-label="任务描述" onChange={(event) => setBody(event.target.value)} />
-          <Select
-            className="issue-select"
-            value={priority}
-            ariaLabel="优先级"
-            options={(["high", "medium", "low"] as const).map((level) => ({ value: level, label: `优先级 ${ISSUE_PRIORITY_NAME[level]}` }))}
-            onChange={(value) => setPriority(value as IssuePriority)}
-          />
-          <button className="issue-primary" type="submit" disabled={!title.trim()}><Plus size={13} />提交</button>
-        </form>
+        <button className="issue-primary" type="button" onClick={() => setComposing(true)}>
+          <Plus size={13} />提一条任务
+        </button>
         <div className="issue-runner">
           {run.phase === "idle" ? (
             <button className="issue-primary" type="button" disabled={!queued} onClick={onStart}>
@@ -179,7 +160,7 @@ export function IssueBoard({
       </div>
 
       <div className="issue-board-filters">
-        <input value={query} placeholder="搜索标题和描述" aria-label="搜索任务" onChange={(event) => setQuery(event.target.value)} />
+        <input type="text" value={query} placeholder="搜索标题和描述" aria-label="搜索任务" onChange={(event) => setQuery(event.target.value)} />
         <label>
           <input type="checkbox" checked={showDone} onChange={(event) => setShowDone(event.target.checked)} />
           显示已完成
@@ -280,10 +261,20 @@ export function IssueBoard({
           onOpen={setOpenId}
           onStatus={(status) => onChange(withStatus(issues, open.id, status))}
           onDefer={(deferred) => onChange(withDeferred(issues, open.id, deferred))}
-          onComment={(text) => onChange(withComment(issues, open.id, text))}
+          onComment={(text, images) => onChange(withComment(issues, open.id, text, images))}
           onAddChild={(childTitle) => onChange(upsertIssue(issues, newIssue(childTitle, "", open.priority, { parentId: open.id })))}
           onDelete={() => { onChange(removeIssue(issues, open.id)); setOpenId(undefined); }}
           onOpenSession={onOpenSession}
+        />
+      ) : null}
+
+      {composing ? (
+        <IssueCompose
+          onClose={() => setComposing(false)}
+          onSubmit={(draft) => onChange(upsertIssue(
+            issues,
+            newIssue(draft.title, draft.body, draft.priority, { status: "ready", images: draft.images }),
+          ))}
         />
       ) : null}
 
@@ -291,8 +282,8 @@ export function IssueBoard({
         <IssueReview
           queue={queue}
           onApprove={(issue) => onChange(withStatus(issues, issue.id, "done"))}
-          onReject={(issue, reason) => onChange(rejectIssue(issues, issue.id, reason))}
-          onReply={(issue, text) => onChange(withComment(issues, issue.id, text))}
+          onReject={(issue, reason, images) => onChange(rejectIssue(issues, issue.id, reason, images))}
+          onReply={(issue, text, images) => onChange(withComment(issues, issue.id, text, images))}
           onDefer={(issue) => onChange(withDeferred(issues, issue.id, true))}
           onClose={() => setReviewing(false)}
         />

@@ -1,3 +1,4 @@
+import type { PromptImage } from "@coilcoil/runtime-protocol";
 import type { Issue, IssueEvent, IssuePriority, IssueStatus } from "../../../../shared/desktop-api";
 
 /**
@@ -27,7 +28,7 @@ export function newIssue(
   title: string,
   body: string,
   priority: IssuePriority,
-  options: { status?: IssueStatus; parentId?: string } = {},
+  options: { status?: IssueStatus; parentId?: string; images?: PromptImage[] } = {},
 ): Issue {
   const now = new Date().toISOString();
   return {
@@ -40,11 +41,12 @@ export function newIssue(
     updatedAt: now,
     events: [],
     ...options.parentId ? { parentId: options.parentId } : {},
+    ...options.images?.length ? { images: options.images } : {},
   };
 }
 
-export function comment(text: string, by: IssueEvent["by"] = "user"): IssueEvent {
-  return { at: new Date().toISOString(), by, kind: "comment", text };
+export function comment(text: string, by: IssueEvent["by"] = "user", images?: PromptImage[]): IssueEvent {
+  return { at: new Date().toISOString(), by, kind: "comment", text, ...images?.length ? { images } : {} };
 }
 
 export function agentNote(text: string): IssueEvent {
@@ -145,17 +147,39 @@ export function reviewQueue(issues: readonly Issue[]): Issue[] {
 
 /** 发给 agent 的那段话。要它自己说清楚做了什么，因为验收的是人。 */
 export function issuePrompt(issue: Issue, parent?: Issue): string {
+  const said = issue.events.filter((event) => event.kind === "comment" || event.kind === "note").slice(-6);
   return [
     `【任务面板】${issue.title}`,
     parent ? `（这是「${parent.title}」下面的一条子任务）` : "",
     "",
     issue.body || "（这条没有写描述，按标题理解。）",
-    ...issue.events.filter((event) => event.kind === "comment" || event.kind === "note").slice(-6).map(
-      (event) => `\n${event.by === "user" ? "我" : "你上一轮"}说：${event.text}`),
+    ...said.map((event) => {
+      const who = event.by === "user" ? "我" : "你上一轮";
+      const shot = event.images?.length ? `（附了 ${event.images.length} 张图）` : "";
+      return `\n${who}说${shot}：${event.text || "（只贴了图）"}`;
+    }),
     "",
     "这是这个工作区任务面板上的一条，请你把它做完。",
     "做完之后用一两句话说明你改了什么、怎么验证的；需要我先拿个主意才能往下走，就直接说卡在哪，不要硬做。",
   ].filter((line) => line !== "").join("\n");
+}
+
+/**
+ * 随这条一起发过去的图：正文贴的，加上最近几条留言贴的。
+ *
+ * 顺序和 `issuePrompt` 里那几段话对得上——先正文，再按时间往后——否则 agent 认不出
+ * 哪张图是哪句话在说。同一张图（同一个 id）只发一次。
+ */
+export function issueImages(issue: Issue): PromptImage[] {
+  const said = issue.events.filter((event) => event.kind === "comment" || event.kind === "note").slice(-6);
+  const all = [...issue.images ?? [], ...said.flatMap((event) => event.images ?? [])];
+  const seen = new Set<string>();
+  return all.filter((image) => {
+    const key = image.id ?? image.data.slice(0, 64);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function patch(issue: Issue, changes: Partial<Issue>, event?: IssueEvent): Issue {
@@ -196,11 +220,14 @@ export function withStatus(
  * 用户说过这不该是一列，是一个动作——打回和「待回复」方向相反，混在一起谁都不知道
  * 该谁动了。理由也不该再单独问一遍，写在批阅界面的那个框里就是理由。
  */
-export function rejectIssue(issues: readonly Issue[], id: string, reason: string): Issue[] {
+export function rejectIssue(issues: readonly Issue[], id: string, reason: string, images?: PromptImage[]): Issue[] {
   return apply(issues, id, (issue) => patch(
     issue,
     { status: "ready", deferred: false },
-    statusEvent("ready", "user", reason.trim() ? `打回重做：${reason.trim()}` : "打回重做"),
+    {
+      ...statusEvent("ready", "user", reason.trim() ? `打回重做：${reason.trim()}` : "打回重做"),
+      ...images?.length ? { images } : {},
+    },
   ));
 }
 
@@ -210,10 +237,10 @@ export function rejectIssue(issues: readonly Issue[], id: string, reason: string
  * 它在「待回复」上等你拿主意，你一回复就自动回到待处理——这一步不该还要你再手动
  * 挪一次卡片。
  */
-export function withComment(issues: readonly Issue[], id: string, text: string): Issue[] {
+export function withComment(issues: readonly Issue[], id: string, text: string, images?: PromptImage[]): Issue[] {
   return apply(issues, id, (issue) => issue.status === "reply"
-    ? patch(issue, { status: "ready" }, { ...comment(text), kind: "comment" })
-    : patch(issue, {}, comment(text)));
+    ? patch(issue, { status: "ready" }, comment(text, "user", images))
+    : patch(issue, {}, comment(text, "user", images)));
 }
 
 export function withEvent(issues: readonly Issue[], id: string, event: IssueEvent): Issue[] {

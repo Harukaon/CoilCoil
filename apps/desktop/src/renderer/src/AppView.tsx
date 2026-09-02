@@ -97,7 +97,7 @@ export interface AppViewController {
   resumeSubagent(activity: SubagentActivity): Promise<void>;
   approvePlan(planId: string, target: PlanExecutionTarget, agent?: string): Promise<PlanApprovalState>;
   rejectPlan(planId: string): Promise<PlanApprovalState>;
-  submitPrompt(event?: FormEvent, intent?: "queue" | "steer", override?: string): Promise<void>;
+  submitPrompt(event?: FormEvent, intent?: "queue" | "steer", override?: string, overrideImages?: PromptImage[]): Promise<void>;
   handleTimelineScroll(): void;
   handleFileDragEnter: ConversationProps["onDragEnter"];
   handleFileDragOver: ConversationProps["onDragOver"];
@@ -148,7 +148,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     activeSessionPath: snapshot?.session.path,
     sessionRunning: (sessionPath) => Boolean(sessionActivity[sessionPath]?.running),
     startConversation: () => { setWorkspaceSurface("conversation"); startNewConversation(project ?? undefined); },
-    sendPrompt: (text) => submitPrompt(undefined, "queue", text),
+    sendPrompt: (text, images) => submitPrompt(undefined, "queue", text, images),
   });
 
   useInAppBrowserLinks({

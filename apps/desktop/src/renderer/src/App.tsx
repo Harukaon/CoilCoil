@@ -459,11 +459,13 @@ export default function App(): React.JSX.Element {
    * `intent: "steer"` interjects it into the turn already running instead of
    * queueing it behind that turn; the runtime falls back to the queue when
    * nothing is streaming, so the caller never has to check first.
+   * An `override` sends on the user's behalf (the task board), composer untouched.
    */
-  const submitPrompt = async (event: FormEvent | undefined, intent: "queue" | "steer" = "queue", override?: string): Promise<void> => {
+  const submitPrompt = async (event: FormEvent | undefined, intent: "queue" | "steer" = "queue", override?: string, overrideImages?: PromptImage[]): Promise<void> => {
     event?.preventDefault();
+    const fromComposer = override === undefined;
     const prompt = (override ?? draft).trim();
-    const images = draftImages;
+    const images = overrideImages ?? (fromComposer ? draftImages : []);
     const runtimeCommand = prompt === "/memory" && images.length === 0;
     if ((!prompt && !images.length) || !project || startingSession) return;
     if (runtimeCommand && (
@@ -483,8 +485,7 @@ export default function App(): React.JSX.Element {
       toastError("当前模型不支持图片输入，请切换到支持图片的模型。");
       return;
     }
-    setDraft("");
-    setDraftImages([]);
+    if (fromComposer) { setDraft(""); setDraftImages([]); }
     if (runtimeCommand) {
       inspector.openRuntimeTab();
     }
@@ -553,8 +554,7 @@ export default function App(): React.JSX.Element {
       else if (intent === "steer") await window.coilcoil.request({ type: "steer", text: prompt, images, clientMessageId }, target.runtimeId);
       else await window.coilcoil.request({ type: "prompt", text: prompt, images, clientMessageId }, target.runtimeId);
     } catch (caught) {
-      setDraft(prompt);
-      setDraftImages(images);
+      if (fromComposer) { setDraft(prompt); setDraftImages(images); }
       dispatchConversationMessages({ type: "reject", id: clientMessageId });
       if (createdSessionPath) {
         const failedSessionPath = createdSessionPath;

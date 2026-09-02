@@ -1,4 +1,5 @@
 import type { Issue, IssueEvent } from "../../../../shared/desktop-api";
+import { IssueImageStrip } from "./IssueImages";
 
 const WHEN = new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -27,6 +28,7 @@ export function IssueTimeline({ issue, limit }: { issue: Issue; limit?: number }
           {KIND_LABEL[event.kind] ? <em>{KIND_LABEL[event.kind]}</em> : null}
           <time>{WHEN.format(new Date(event.at))}</time>
           <p>{event.text}{event.ref ? ` · ${event.ref}` : ""}</p>
+          {event.images?.length ? <IssueImageStrip images={event.images} /> : null}
         </li>
       ))}
     </ol>

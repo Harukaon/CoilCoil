@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Check, Clock, RotateCcw, SkipForward, X } from "lucide-react";
+import type { PromptImage } from "@coilcoil/runtime-protocol";
 import type { Issue } from "../../../../shared/desktop-api";
+import { IssueImagePicker, IssueImageStrip, imageDropHandlers } from "./IssueImages";
 import { IssueTimeline } from "./IssueTimeline";
 import { ISSUE_PRIORITY_NAME } from "./issueModel";
 
@@ -23,18 +25,19 @@ export function IssueReview({
 }: {
   queue: Issue[];
   onApprove(issue: Issue): void;
-  onReject(issue: Issue, reason: string): void;
-  onReply(issue: Issue, text: string): void;
+  onReject(issue: Issue, reason: string, images: PromptImage[]): void;
+  onReply(issue: Issue, text: string, images: PromptImage[]): void;
   onDefer(issue: Issue): void;
   onClose(): void;
 }): React.JSX.Element | null {
   const [skipped, setSkipped] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  const [draftImages, setDraftImages] = useState<PromptImage[]>([]);
   const pending = queue.filter((issue) => !skipped.includes(issue.id));
   const issue = pending[0];
 
   // 换到下一条时把上一条写了一半的话清掉，免得它跟着落到别人头上。
-  useEffect(() => { setDraft(""); }, [issue?.id]);
+  useEffect(() => { setDraft(""); setDraftImages([]); }, [issue?.id]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => { if (event.key === "Escape") onClose(); };
@@ -60,22 +63,24 @@ export function IssueReview({
       <div className="issue-review-body">
         <h1>{issue.title}</h1>
         {issue.body ? <p className="issue-review-text">{issue.body}</p> : null}
+        <IssueImageStrip images={issue.images ?? []} />
         <IssueTimeline issue={issue} limit={8} />
       </div>
 
-      <footer>
+      <footer {...imageDropHandlers((next) => setDraftImages((current) => [...current, ...next]))}>
         <textarea
           value={draft}
-          placeholder={waitingReply ? "写下你的决定，它会接着做" : "打回重做的话，在这里写清楚哪里不对"}
+          placeholder={waitingReply ? "写下你的决定，它会接着做（截图可以直接粘进来）" : "打回重做的话，在这里写清楚哪里不对，截图可以直接粘进来"}
           aria-label={waitingReply ? "回复" : "打回理由"}
           onChange={(event) => setDraft(event.target.value)}
         />
+        {draftImages.length ? <IssueImagePicker images={draftImages} onChange={setDraftImages} /> : null}
         <div className="issue-review-actions">
           <button className="issue-ghost" type="button" onClick={() => setSkipped((current) => [...current, issue.id])}>
             <SkipForward size={13} />跳过
           </button>
           {waitingReply ? (
-            <button className="issue-primary" type="button" disabled={!draft.trim()} onClick={() => onReply(issue, draft)}>
+            <button className="issue-primary" type="button" disabled={!draft.trim() && !draftImages.length} onClick={() => onReply(issue, draft, draftImages)}>
               <Check size={13} />回复并继续
             </button>
           ) : (
@@ -83,7 +88,7 @@ export function IssueReview({
               <button className="issue-ghost" type="button" onClick={() => onDefer(issue)}>
                 <Clock size={13} />以后再验收
               </button>
-              <button className="issue-secondary" type="button" onClick={() => onReject(issue, draft)}>
+              <button className="issue-secondary" type="button" onClick={() => onReject(issue, draft, draftImages)}>
                 <RotateCcw size={13} />打回重做
               </button>
               <button className="issue-primary" type="button" onClick={() => onApprove(issue)}>

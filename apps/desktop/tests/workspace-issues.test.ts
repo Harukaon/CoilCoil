@@ -7,6 +7,7 @@ import { issuesFileFor, normalizeIssues, readIssues, writeIssues } from "../src/
 import {
   ISSUE_COLUMNS,
   childrenOf,
+  issueImages,
   issuePrompt,
   issuesInColumn,
   newIssue,
@@ -211,4 +212,52 @@ test("表格里子任务紧跟着父，父被筛掉的按顶层排", () => {
     [false, true, false]);
   // 搜索把父滤掉之后，子自己站出来，不会跟着消失。
   assert.deepEqual(withChildrenInline([child, other], "priority", true).map((row) => row.issue.id), ["other", "child"]);
+});
+
+/** 一张能通过校验的最小图片。内容不重要，这里盯的是「带没带上」。 */
+const shot = (id: string) => ({ id, mimeType: "image/png", data: `data-${id}`, name: `${id}.png` });
+
+test("提任务时贴的图存得下来，也跟着发给它", () => {
+  const issue = {
+    ...newIssue("界面不对", "看图", "high", { images: [shot("a")] }),
+    events: [
+      { at: "2026-01-01T00:00:00.000Z", by: "user" as const, kind: "comment" as const, text: "补一张", images: [shot("b")] },
+    ],
+  };
+  // 正文的图在前，留言的图在后：和 issuePrompt 里那几段话的先后对得上。
+  assert.deepEqual(issueImages(issue).map((image) => image.id), ["a", "b"]);
+  // 同一张图贴在两处只发一次，不然模型会以为是两张不同的图。
+  assert.deepEqual(
+    issueImages({ ...issue, images: [shot("a"), shot("b")] }).map((image) => image.id),
+    ["a", "b"]);
+  assert.match(issuePrompt(issue), /附了 1 张图/);
+});
+
+test("图片跟着 Issue 一起落盘，坏的、超大的不收", () => {
+  const dir = scratch();
+  const file = issuesFileFor(dir, "/tmp/pic");
+  const huge = { id: "huge", mimeType: "image/png", data: "x".repeat(10_000_001) };
+  writeIssues(file, [{
+    ...newIssue("带图的一条", "", "medium", { images: [shot("keep"), huge, { id: "pdf", mimeType: "application/pdf", data: "no" }] }),
+    id: "with-image",
+  }]);
+  const stored = readIssues(file);
+  assert.deepEqual(stored[0].images?.map((image) => image.id), ["keep"]);
+});
+
+test("只贴了图、一个字没写的留言不算空条目", () => {
+  const issue = { ...newIssue("标题", "", "medium"), id: "only-image" };
+  const [after] = withComment([issue], "only-image", "", [shot("c")]);
+  assert.equal(after.events.length, 1);
+  // 存一轮再读回来，那条留言和它的图都还在。
+  const file = issuesFileFor(scratch(), "/tmp/only-image");
+  writeIssues(file, [after]);
+  assert.deepEqual(readIssues(file)[0].events[0].images?.map((image) => image.id), ["c"]);
+});
+
+test("打回重做的理由也能配图", () => {
+  const issue = { ...newIssue("改错了", "", "high"), id: "rework", status: "review" as const };
+  const [after] = rejectIssue([issue], "rework", "这里还是不对", [shot("d")]);
+  assert.equal(after.status, "ready");
+  assert.deepEqual(after.events.at(-1)?.images?.map((image) => image.id), ["d"]);
 });

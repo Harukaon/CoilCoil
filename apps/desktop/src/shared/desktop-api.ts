@@ -2,6 +2,7 @@ import type {
   DiagnosticLogBatch,
   FileNode,
   ProjectSelection,
+  PromptImage,
   RuntimeCommand,
   RuntimeEvent,
   ScopedRuntimeEvent,
@@ -193,6 +194,8 @@ export interface IssueEvent {
   status?: IssueStatus;
   /** kind 为 commit 时：提交号。 */
   ref?: string;
+  /** 随这条一起贴的图。和聊天里的附图是同一种东西，会一并发给 agent。 */
+  images?: PromptImage[];
 }
 
 export interface Issue {
@@ -210,6 +213,8 @@ export interface Issue {
   deferred?: boolean;
   /** 这条是在哪个对话里做的，做完之后还能翻回去看。 */
   sessionPath?: string;
+  /** 提这条时贴的图：截图往往比一段描述说得清，做的时候会一并发给 agent。 */
+  images?: PromptImage[];
 }
 
 export interface ImportBrowserCookiesInput {
