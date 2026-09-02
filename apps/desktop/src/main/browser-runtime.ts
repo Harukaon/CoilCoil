@@ -132,7 +132,7 @@ export class BrowserRuntimeManager {
    * announced stays false and pageTargetId is a placeholder — so no CDP client
    * can see a target that has no WebContents behind it yet.
    */
-  private createTabRecord(activate: boolean, scopeId: string): BrowserTab {
+  private createTabRecord(activate: boolean, scopeId: string, implicit = false): BrowserTab {
     const id = randomUUID();
     const tab: BrowserTab = {
       id,
@@ -142,6 +142,7 @@ export class BrowserRuntimeManager {
       guestNonce: randomBytes(16).toString("hex"),
       phase: "awaiting-guest",
       announced: false,
+      ...implicit ? { implicit: true } : {},
     };
     this.tabs.set(id, tab);
     if (activate || !this.activeTabIds.has(scopeId)) this.activeTabIds.set(scopeId, id);
@@ -262,9 +263,9 @@ export class BrowserRuntimeManager {
     tab.pageTargetId = targetId;
   }
 
-  private async createCdpTab(rawUrl: string | undefined, activate: boolean, scopeId: string): Promise<BrowserTab> {
+  private async createCdpTab(rawUrl: string | undefined, activate: boolean, scopeId: string, implicit = false): Promise<BrowserTab> {
     const url = normalizeBrowserUrl(rawUrl);
-    const tab = this.createTabRecord(activate, scopeId);
+    const tab = this.createTabRecord(activate, scopeId, implicit);
     try {
       await this.attachGuest(tab);
       await tab.guest!.loadURL(url);
@@ -287,7 +288,7 @@ export class BrowserRuntimeManager {
     if (active) return active;
     const inFlight = this.pendingEnsure.get(scopeId);
     if (inFlight) return inFlight;
-    const attempt = this.createCdpTab(undefined, true, scopeId)
+    const attempt = this.createCdpTab(undefined, true, scopeId, true)
       .finally(() => {
         if (this.pendingEnsure.get(scopeId) === attempt) this.pendingEnsure.delete(scopeId);
       });

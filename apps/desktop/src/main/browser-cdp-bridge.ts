@@ -11,6 +11,7 @@ import {
   DEFAULT_BROWSER_URL,
   browserContextId,
   browserTargetInfo,
+  isReusableBlankTab,
   type BrowserTab,
 } from "./browser-runtime-types";
 
@@ -357,6 +358,29 @@ export class BrowserCdpBridge {
     }
   }
 
+  /**
+   * 开新标签页之前，先用掉这个桥自己垫出来的那张空白页。
+   *
+   * 一个客户端刚连上来就会问浏览器版本、要目标列表，这两条都得有一个页面才答得
+   * 出来，`ensureActiveTab` 于是先垫一张空白页。agent 紧接着 new_page，结果每个
+   * 会话都从「一张没人要的空白页 + 一张真正在用的页」开始——用户看到的就是「默认
+   * 两个标签页起步」。那张空白页只要还停在 about:blank 上，就没有任何理由不给
+   * agent 用。
+   *
+   * 只有这条 CDP 路径会复用。用户自己按「+」开的空白页不算（implicit 是 false）：
+   * 那是他刚开的，替他导航走会很奇怪。
+   */
+  private async adoptBlankTab(url: string | undefined, activate: boolean, scopeId: string): Promise<BrowserTab | undefined> {
+    const blank = this.host.cdpTabs(scopeId).find((tab) =>
+      tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab(tab, tab.guest.getURL()));
+    if (!blank) return undefined;
+    blank.implicit = false;
+    if (activate) this.host.selectTab(blank.id, scopeId);
+    await this.host.guestOf(blank).loadURL(normalizeBrowserUrl(url));
+    this.announceChanged(blank);
+    return blank;
+  }
+
   private async executeRootCommand(client: CdpClient, method: string, params: Record<string, unknown>): Promise<unknown> {
     if (method === "Target.getBrowserContexts") return { browserContextIds: [browserContextId(client.scopeId)] };
     if (method === "Browser.getVersion") {
@@ -383,7 +407,10 @@ export class BrowserCdpBridge {
       return { targetInfo: this.findTargetInfo(requestedId, client.scopeId) };
     }
     if (method === "Target.createTarget") {
-      const tab = await this.host.createTab(typeof params.url === "string" ? params.url : undefined, params.background !== true, client.scopeId);
+      const url = typeof params.url === "string" ? params.url : undefined;
+      const activate = params.background !== true;
+      const tab = await this.adoptBlankTab(url, activate, client.scopeId)
+        ?? await this.host.createTab(url, activate, client.scopeId);
       return { targetId: tab.pageTargetId };
     }
     if (method === "Target.activateTarget") {
