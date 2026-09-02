@@ -105,11 +105,20 @@ test("窗口露着但用户去了别的 App，一样停；卸载时把焦点订�
   assert.equal(dom.focusListeners, 0);
 });
 
-test("暂停用的是 play-state，而且真的挂在墨团标志上", () => {
+test("暂停用的是 play-state，而且真的挂在等回复那团墨上", () => {
   const rule = /^:root\[data-motion="paused"\][^{]*\{([^}]*)\}/m.exec(styles);
   assert.ok(rule, "styles.css 里找不到 data-motion=paused 这条规则");
   // animation: none 会让切回来时跳一帧，进度得留着。
   assert.match(rule[1], /animation-play-state:\s*paused/);
   assert.doesNotMatch(rule[1], /animation:\s*none/);
-  assert.match(rule[0], /\.coil-logo-mask/);
+  assert.match(rule[0], /\.coil-loader-ink/);
+});
+
+test("墨团标志是静态的，一帧都不画", () => {
+  // 用户看过实测账单之后要求取消这个动画：一枚 26px 的图标，滤镜链每帧重算，
+  // 能稳定吃掉三分之一个核心。谁要是再给它加回 animation，这条会拦下来。
+  const logoRules = styles.split("\n").filter((line) => line.startsWith(".coil-logo"));
+  assert.ok(logoRules.length, "styles.css 里找不到墨团标志的样式");
+  for (const rule of logoRules) assert.doesNotMatch(rule, /animation/);
+  assert.doesNotMatch(styles, /coil-logo-rotation|coil-logo-roundness/);
 });

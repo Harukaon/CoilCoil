@@ -1,15 +1,22 @@
 import { useId } from "react";
 
 /**
- * The CoilCoil mark: triangles rotating under a blurred mask, so the shape reads
- * as one drifting ink blob rather than as its parts.
+ * The CoilCoil mark: overlapping triangles under a blurred mask, so the shape
+ * reads as one ink blob rather than as its parts.
  *
  * This is the design source (`apps/desktop/build/logo.svg`) copied as-is — the
- * geometry, the blur, the contrast pulse and every rotation timing are unchanged,
- * and they live in `styles.css` next to the rest of the app's animation. Two
- * things had to move: the CSS hooks are classes instead of ids, and the ids the
- * mask and gradient are referenced by are per-instance, because a screen renders
- * the mark more than once and duplicate ids would collide.
+ * geometry and the blur are unchanged, and they live in `styles.css` next to the
+ * rest of the app's visual detail. Two things had to move: the CSS hooks are
+ * classes instead of ids, and the ids the mask and gradient are referenced by are
+ * per-instance, because a screen renders the mark more than once and duplicate
+ * ids would collide.
+ *
+ * The mark no longer animates. The design source spins six of the triangles under
+ * a pulsing contrast filter; that filter chain has to be recomputed every frame
+ * and measurably drained the battery (the numbers are in `ui/idle-motion.ts`), so
+ * the user asked for a static mark instead. The rotations left in `styles.css` are
+ * the ones the animation held at its first frame, so the shape is the same one the
+ * app has always shown — it just stopped moving.
  *
  * The effect is CSS, so it only exists where CSS runs: Chromium renders it, and
  * a static rasterizer (macOS Quick Look, an exported PNG) shows the unblurred
