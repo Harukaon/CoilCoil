@@ -31,11 +31,40 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 const TEXT_PREVIEW_LIMIT = 2 * 1024 * 1024;
 const EMBEDDED_PREVIEW_LIMIT = 20 * 1024 * 1024;
 
+/**
+ * 谁在看这份预览，以及文件变了要把新内容送到哪里去。
+ *
+ * 桌面窗口是一份 WebContents，手机远程端不是——它在这台机器上没有自己的
+ * WebContents，更新得沿着远程连接广播回去。预览本身两边完全一样（内容是主进程读
+ * 出来直接放进返回值里的），差的只是这一条回程，所以把回程抽出来，远程就不必再被
+ * 挡在门外。
+ */
+export interface PreviewOwner {
+  /** 关预览时用来认人：只有开这份预览的人能关它。 */
+  id: number;
+  alive(): boolean;
+  send(document: FilePreviewDocument): void;
+  /** 这个人不在了（窗口关掉）时把预览一起收掉。 */
+  onGone(handler: () => void): void;
+}
+
+/** 桌面窗口的那一份。 */
+export function windowPreviewOwner(contents: Electron.WebContents): PreviewOwner {
+  return {
+    id: contents.id,
+    alive: () => !contents.isDestroyed(),
+    send: (document) => contents.send(PREVIEW_UPDATED_CHANNEL, document),
+    onGone: (handler) => { contents.once("destroyed", handler); },
+  };
+}
+
+export const PREVIEW_UPDATED_CHANNEL = "preview:updated";
+
 interface PreviewRecord {
   id: string;
   path: string;
   forceText: boolean;
-  owner: Electron.WebContents;
+  owner: PreviewOwner;
   watcher?: FSWatcher;
   document?: FilePreviewDocument;
 }
@@ -102,24 +131,24 @@ function closePreviewRecord(id: string): void {
 async function updatePreview(record: PreviewRecord): Promise<void> {
   try {
     record.document = await readPreview(record);
-    if (record.owner.isDestroyed()) {
+    if (!record.owner.alive()) {
       closePreviewRecord(record.id);
       return;
     }
-    record.owner.send("preview:updated", record.document);
+    record.owner.send(record.document);
   } catch {
     // The file may be in the middle of an atomic replace; the next watch event retries it.
   }
 }
 
-async function createPreviewRecord(event: Electron.IpcMainInvokeEvent, input: OpenFilePreviewInput, resolvePath: PreviewPathResolver): Promise<FilePreviewDocument> {
+async function createPreviewRecord(owner: PreviewOwner, input: OpenFilePreviewInput, resolvePath: PreviewPathResolver): Promise<FilePreviewDocument> {
   const target = await resolvePath(input);
   const id = randomUUID();
   const record: PreviewRecord = {
     id,
     path: target.path,
     forceText: Boolean(input.forceText),
-    owner: event.sender,
+    owner,
   };
   previews.set(id, record);
   try {
@@ -127,7 +156,7 @@ async function createPreviewRecord(event: Electron.IpcMainInvokeEvent, input: Op
     record.watcher = watch(dirname(record.path), { persistent: false }, (_event, filename) => {
       if (!filename || filename.toString() === basename(record.path)) void updatePreview(record);
     });
-    event.sender.once("destroyed", () => closePreviewRecord(id));
+    owner.onGone(() => closePreviewRecord(id));
     return record.document;
   } catch (error) {
     closePreviewRecord(id);
@@ -136,13 +165,13 @@ async function createPreviewRecord(event: Electron.IpcMainInvokeEvent, input: Op
 }
 
 export async function openFilePreview(
-  event: Electron.IpcMainInvokeEvent,
+  owner: PreviewOwner,
   input: OpenFilePreviewInput,
   resolvePath: PreviewPathResolver,
 ): Promise<OpenFilePreviewResult> {
   const target = await resolvePath(input);
   if (previewKind(target.path, Boolean(input.forceText))) {
-    return { opened: true, document: await createPreviewRecord(event, input, resolvePath) };
+    return { opened: true, document: await createPreviewRecord(owner, input, resolvePath) };
   }
   return { opened: false, actions: ["reveal", "force-text", "trash"] };
 }

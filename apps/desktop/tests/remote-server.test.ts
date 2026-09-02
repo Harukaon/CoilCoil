@@ -284,3 +284,18 @@ test("手机拿得到挂载的文件夹清单和任务面板，而不是只剩�
     assert.match(script, new RegExp(`${method}: function`), `远程那半个 bridge 少了 ${method}`);
   }
 });
+
+test("手机能看图、也能看到 Mac 上已经开着的网页标签", () => {
+  // 预览的内容是 Mac 读出来随返回值送过去的，浏览器则是 Mac 上那一个——两样都没有
+  // 「手机做不到」的理由，之前只是被 shim 直接回绝或者回了一份空数据。
+  for (const channel of ["preview:open", "preview:close", "browser:get-state"]) {
+    assert.ok(REMOTE_INVOKE_CHANNELS.includes(channel as (typeof REMOTE_INVOKE_CHANNELS)[number]),
+      `${channel} 不在远程允许的通道里`);
+  }
+  const script = bridgeScript("darwin");
+  assert.match(script, /openFilePreview: function \(input\) \{ return invoke\("preview:open"/);
+  assert.doesNotMatch(script, /openFilePreview: rejects/, "文件预览又被回绝了");
+  // 空状态会让手机以为一个标签都没有，于是每次打开面板都在 Mac 上多建一个。
+  assert.match(script, /setBrowserScope: function \(scopeId\) \{ return invoke\("browser:get-state"/);
+  assert.match(script, /onBrowserStateUpdated: subscribe\("browser:state"\)/);
+});

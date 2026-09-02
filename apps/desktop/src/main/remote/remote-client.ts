@@ -19,6 +19,10 @@ export const REMOTE_INVOKE_CHANNELS = [
   // 任务面板同理：数据在 Mac 的 userData 里，手机只是另一个看它的窗口。
   "issues:list",
   "issues:save",
+  // 文件预览。图片、PDF、Markdown 的内容都是主进程读出来放进返回值里的，手机拿到
+  // 的和桌面拿到的是同一份文档，没有任何理由把它挡在门外。
+  "preview:open",
+  "preview:close",
   // The built-in browser is the agent's, running on the Mac. The phone cannot
   // host the view, but it can drive the same tabs and watch frames of them.
   "browser:get-state",
@@ -33,7 +37,13 @@ export const REMOTE_INVOKE_CHANNELS = [
 ] as const;
 
 /** Main-process pushes forwarded to remote clients. */
-export const REMOTE_PUSH_CHANNELS = ["runtime:event", "update:available"] as const;
+export const REMOTE_PUSH_CHANNELS = [
+  "runtime:event",
+  "update:available",
+  // 手机和桌面看的是同一个浏览器、同一份预览，那边变了这边就得跟着变。
+  "browser:state",
+  "preview:updated",
+] as const;
 
 /**
  * The browser-side half of the desktop bridge.
@@ -156,10 +166,6 @@ export function bridgeScript(platform: DesktopPlatform): string {
 
   function ignore() { return function () {}; }
 
-  function emptyBrowserState(scopeId) {
-    return { scopeId: scopeId || "default", tabs: [] };
-  }
-
   connect();
 
   window.coilcoil = {
@@ -192,9 +198,11 @@ export function bridgeScript(platform: DesktopPlatform): string {
     performProjectFileAction: rejects("远程会话暂不支持修改项目文件。"),
     saveProjectFile: rejects("远程会话暂不支持编辑文件。"),
     testMcpConnection: rejects("远程会话暂不支持测试 MCP 连接。"),
-    openFilePreview: rejects("远程会话暂不支持文件预览。"),
-    closeFilePreview: resolves(undefined),
-    onFilePreviewUpdated: ignore,
+
+    // 预览的内容是 Mac 读出来随返回值一起送过来的，所以图片、PDF 在手机上照样看。
+    openFilePreview: function (input) { return invoke("preview:open", [input]); },
+    closeFilePreview: function (id) { return invoke("preview:close", [id]); },
+    onFilePreviewUpdated: subscribe("preview:updated"),
 
     // The desktop window's own controls have no meaning on a phone.
     setWindowMinimumWidth: resolves(undefined),
@@ -214,7 +222,10 @@ export function bridgeScript(platform: DesktopPlatform): string {
     // The agent still drives the Mac's real browser. The phone controls the same
     // tabs and shows captured frames instead of an embedded view, so the panel
     // is live rather than disabled.
-    setBrowserScope: function (scopeId) { return Promise.resolve(emptyBrowserState(scopeId)); },
+    // 不往 Mac 上设 UI scope（那会把桌面窗口正看着的东西也换掉），只问它这个
+    // scope 现在有哪些标签页。以前这里直接回一份空的，于是手机既看不到 Mac 上已经
+    // 开着的标签，还会每次打开面板都在 Mac 上多建一个。
+    setBrowserScope: function (scopeId) { return invoke("browser:get-state", [scopeId]); },
     getBrowserState: function (scopeId) { return invoke("browser:get-state", [scopeId]); },
     captureBrowserTab: function (scopeId) { return invoke("browser:capture", [scopeId]); },
     createBrowserTab: function (scopeId, url) { return invoke("browser:create-tab", [scopeId, url]); },
@@ -231,7 +242,7 @@ export function bridgeScript(platform: DesktopPlatform): string {
     registerBrowserGuest: resolves(undefined),
     reportBrowserGuestFailure: resolves(undefined),
     onBrowserGuestRoster: ignore,
-    onBrowserStateUpdated: ignore,
+    onBrowserStateUpdated: subscribe("browser:state"),
     onBrowserAgentActivated: ignore,
 
     // The user's own terminal panel is a Mac-side pty; the agent's terminal

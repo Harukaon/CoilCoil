@@ -30,7 +30,7 @@ import { issuesFileFor, readIssues, writeIssues } from "./workspace-issues";
 import { proxyEnvironment, refreshProxyEnvironment } from "./system-proxy";
 import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
 import { saveProjectFile } from "./file-edit";
-import { closeAllFilePreviews, closeFilePreview, openFilePreview } from "./file-preview";
+import { closeAllFilePreviews, closeFilePreview, openFilePreview, windowPreviewOwner, PREVIEW_UPDATED_CHANNEL, type PreviewOwner } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
 import { applicationMenuTemplate, windowChromeOptions } from "./window-chrome";
@@ -503,6 +503,19 @@ async function classifyPaths(paths: string[]): Promise<Record<string, PathKind>>
   return Object.fromEntries(entries);
 }
 
+/**
+ * 手机远程端在这台机器上没有自己的 WebContents，所以它开的预览把更新广播回去。
+ *
+ * id 用一个负数：WebContents 的 id 都是正的，这样「谁开的预览谁才能关」这条判断
+ * 对远程和桌面是同一套，不会互相认错。
+ */
+const remotePreviewOwner: PreviewOwner = {
+  id: -1,
+  alive: () => Boolean(remoteAccess),
+  send: (document) => remoteAccess?.broadcast(PREVIEW_UPDATED_CHANNEL, document),
+  onGone: () => {},
+};
+
 function remoteController(): RemoteAccessController {
   if (remoteAccess) return remoteAccess;
   remoteAccess = new RemoteAccessController({
@@ -534,6 +547,10 @@ function remoteController(): RemoteAccessController {
       if (channel === ISSUES_SAVE_CHANNEL) {
         return typeof args[0] === "string" && args[0] ? writeIssues(issuesFile(args[0]), args[1]) : [];
       }
+      // 文件预览：内容是这台机器读出来直接放进返回值里的，手机拿到的和桌面拿到的
+      // 是同一份文档，所以图片、PDF、Markdown 在手机上照样看得到。
+      if (channel === PREVIEW_OPEN_CHANNEL) return openFilePreview(remotePreviewOwner, args[0] as OpenFilePreviewInput, safePreviewPath);
+      if (channel === PREVIEW_CLOSE_CHANNEL) return closeFilePreview(remotePreviewOwner.id, args[0] as string);
       // The phone drives the same browser the agent drives — the one belonging
       // to the desktop window — rather than a browser of its own, which it has
       // no way to host anyway.
@@ -714,6 +731,9 @@ async function createWindow(): Promise<void> {
 
   const browserRuntime = new BrowserRuntimeManager(mainWindow, (state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_STATE_CHANNEL, state);
+    // 手机看的是同一个浏览器：标签开了关了、地址变了，那边也得跟着变，否则它只能
+    // 看到自己刚打开面板那一刻的样子。
+    remoteAccess?.broadcast(BROWSER_STATE_CHANNEL, state);
   }, (scopeId) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
   }, (roster) => {
@@ -999,7 +1019,7 @@ app.whenReady().then(async () => {
     if (typeof text !== "string" || text.length > 1_000_000) throw new Error("剪贴板内容无效。");
     clipboard.writeText(text);
   });
-  ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openFilePreview(event, input, safePreviewPath));
+  ipcMain.handle(PREVIEW_OPEN_CHANNEL, (event, input: OpenFilePreviewInput) => openFilePreview(windowPreviewOwner(event.sender), input, safePreviewPath));
   ipcMain.handle(PREVIEW_CLOSE_CHANNEL, (event, id: string): void => {
     closeFilePreview(event.sender.id, id);
   });
