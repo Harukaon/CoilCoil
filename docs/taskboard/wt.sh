@@ -29,6 +29,17 @@ LINK_DIRS=(
   packages/workflow/node_modules
   vendor/pi/node_modules
 )
+# 根 package.json 里的 workspaces，用来在 worktree 内部垫 @coilcoil/* 的解析
+WORKSPACES=(
+  apps/desktop
+  apps/cli
+  packages/diagnostics
+  packages/runtime-core
+  packages/runtime-protocol
+  packages/runtime-server
+  packages/openai-responses-ws
+  packages/workflow
+)
 COPY_DIRS=(
   apps/cli/dist
   packages/openai-responses-ws/dist
@@ -74,6 +85,23 @@ case "$cmd" in
     mkdir -p "$(dirname "$excl")"
     for d in "${LINK_DIRS[@]}"; do
       grep -qxF "/$d" "$excl" 2>/dev/null || printf '/%s\n' "$d" >> "$excl"
+    done
+
+    # 工作区内部包（@coilcoil/*）的解析要单独垫一层。根 node_modules 是软链回主仓库的，
+    # 里面的 @coilcoil/* 又指向主仓库的源码，于是在 worktree 里跨包 import 读到的是
+    # **主仓库那份**——你在 worktree 里改了 packages/xxx，tsc 根本看不见，跨包改动等于
+    # 没法 typecheck。Node/tsc 是从引用它的文件逐级向上找 node_modules 的，所以在
+    # worktree 自己的 apps/ 和 packages/ 下各放一份 @coilcoil，就能把根那份挡掉。
+    for base in apps packages; do
+      scope="$dir/$base/node_modules/@coilcoil"
+      mkdir -p "$scope"
+      for ws in "${WORKSPACES[@]}"; do
+        [ -f "$MAIN/$ws/package.json" ] || continue
+        pkg="$(sed -n 's|.*"name": *"@coilcoil/\([^"]*\)".*|\1|p' "$MAIN/$ws/package.json" | head -1)"
+        [ -n "$pkg" ] || continue
+        # 从 <base>/node_modules/@coilcoil/ 回到 worktree 根要上三层
+        ln -sfn "../../../$ws" "$scope/$pkg"
+      done
     done
 
     for d in "${COPY_DIRS[@]}"; do
