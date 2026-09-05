@@ -18,6 +18,22 @@ export const BUBBLE_SET_SHORTCUT_CHANNEL = "bubble:set-shortcut";
  */
 export const SUGGESTED_BUBBLE_SHORTCUT = "CommandOrControl+Shift+Space";
 
+/**
+ * 快速提问气泡整条功能暂时停用（#39）。
+ *
+ * 用户把 Ctrl+E 设成了呼出这个气泡，但这个功能本身还没做完、也没什么用，所以停的
+ * 不只是那一个组合键，而是整条入口：不注册全局快捷键、不挂 IPC、也不建那扇窗；
+ * 设置里的「快捷键」栏目同步撤掉了（见 SettingsDialog.tsx），所以也没有地方能再设
+ * 一次。让出来的 Ctrl+E 就回到它原本该去的地方，比如终端里的「跳到行尾」。
+ *
+ * 只是停用，不是删除。这个文件、气泡的界面、设置页面都原样留着：把这里改回 true、
+ * 再把设置里那个栏目按钮放回去，功能就回来了。用户以前存下的组合键还躺在
+ * userData/bubble-shortcut.json 里，没有被动过，所以那个设置也会跟着一起回来。
+ *
+ * 类型标成 boolean 而不是让它收窄成字面量 false，免得下面整段被当成不可达代码。
+ */
+const BUBBLE_ENABLED: boolean = false;
+
 const BUBBLE_WIDTH = 680;
 const BUBBLE_HEIGHT = 460;
 
@@ -155,6 +171,9 @@ function applyShortcut(host: BubbleHost, accelerator: string | undefined): Bubbl
 }
 
 export function setupBubbleWindow(host: BubbleHost): () => void {
+  // 停用期间什么都不挂上去，收尾也就没什么要做的。
+  if (!BUBBLE_ENABLED) return () => undefined;
+
   const stored = readStoredShortcut();
   if (stored) {
     const state = applyShortcut(host, stored);

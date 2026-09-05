@@ -609,7 +609,10 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
           <button className={section === "models" ? "active" : ""} type="button" onClick={() => setSection("models")}><Settings size={15} />模型与服务商</button>
           <button className={section === "mcp" ? "active" : ""} type="button" onClick={() => setSection("mcp")}><Network size={15} />MCP</button>
           <button className={section === "skills" ? "active" : ""} type="button" onClick={() => setSection("skills")}><Sparkles size={15} />技能</button>
-          {mobile ? null : <button className={section === "shortcuts" ? "active" : ""} type="button" onClick={() => setSection("shortcuts")}><Keyboard size={15} />快捷键</button>}
+          {/* 「快捷键」栏目暂时撤掉：它底下只有「快速提问气泡」这一项，而那个功能
+              已经整条停用了（#39，见 main/bubble-window.ts）。这里是唯一能进到那页
+              的入口，撤掉之后就没有地方能再给气泡设快捷键。页面本身留着，功能回来
+              时把这个按钮放回去即可。 */}
           {mobile ? null : <button className={section === "remote" ? "active" : ""} type="button" onClick={() => setSection("remote")}><Smartphone size={15} />远程控制</button>}
           <button className={section === "appearance" ? "active" : ""} type="button" onClick={() => setSection("appearance")}><Palette size={15} />外观</button>
         </nav>
