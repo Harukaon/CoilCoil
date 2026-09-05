@@ -18,7 +18,8 @@
         "apps/desktop/src/renderer/src/assets/app-icon-light.png",
         "apps/desktop/src/renderer/src/assets/app-icon-dark.png",
         "apps/desktop/tests/app-icon.test.ts"
-      ]
+      ],
+      "ref": "6197664ea"
     }
   ]
 }

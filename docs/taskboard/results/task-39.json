@@ -16,7 +16,8 @@
         "apps/desktop/src/main/bubble-window.ts",
         "apps/desktop/src/renderer/src/features/settings/SettingsDialog.tsx",
         "apps/desktop/tests/shortcut-accelerator.test.ts"
-      ]
+      ],
+      "ref": "d7f64ac89"
     }
   ]
 }
