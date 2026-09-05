@@ -92,6 +92,14 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .window-drag-layer { position: absolute; z-index: 0; inset: 0; }
 /* 拖动层铺在最底下，标题栏里的内容整体抬到它上面，否则它会把按钮的点击吃掉。 */
 .window-drag-layer ~ * { position: relative; z-index: 1; }
+/* 承载拖动层的标题栏容器。既是拖动层的定位上下文，也是刷新机制认人的依据：指针
+   压在它上面（哪怕压着的是标签条、标题文字这些盖在拖动层上面的东西）就先把拖动
+   矩形重算一遍。挂 <WindowDragBar /> 时会自动补上这个类，见 ui/window-drag.ts。 */
+.window-drag-bar { position: relative; }
+/* 标题栏里的文字不参与选中：在标题上按下会被判成「选文字」，同一次按下只会命中
+   其中一个，拖窗口的动作就丢了。输入框仍然要能选中。 */
+.window-drag-bar, .window-drag-bar * { -webkit-user-select: none; user-select: none; }
+.window-drag-bar input, .window-drag-bar textarea, .window-drag-bar [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
 /* 强制 Chromium 重算拖动矩形用的哨兵：0×0、在窗口外，翻转它的 app-region 只是把
    整份矩形列表标脏，不会真的挡住或让出任何一块区域（见 ui/window-drag.ts）。 */
 .window-drag-sentinel { position: fixed; z-index: -1; top: 0; left: -1px; width: 0; height: 0; overflow: hidden; opacity: 0; pointer-events: none; }

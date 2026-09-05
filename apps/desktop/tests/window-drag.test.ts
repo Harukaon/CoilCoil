@@ -3,9 +3,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import {
+  DRAG_BAR_CLASS,
   HOVER_REFRESH_INTERVAL_MS,
   initialHoverRefreshState,
+  isDragBarPoint,
   nextHoverRefresh,
+  TITLE_BAR_STRIP_PX,
 } from "../src/renderer/src/ui/window-drag.ts";
 
 const rendererRoot = resolve(import.meta.dirname, "../src/renderer/src");
@@ -43,6 +46,26 @@ test("刚进入拖动带就重算，停在里面按间隔重算，离开后复�
   assert.equal(left.state.inside, false);
   // 重新进来必须立刻重算，哪怕离上一次不到一个间隔——按下鼠标就在这一下之后。
   assert.equal(nextHoverRefresh(left.state, true, 1_020).refresh, true);
+});
+
+test("压在标题栏上就算数，不管指针命中的是哪个元素", () => {
+  // 上一版认的是拖动层元素本身，可它被压在内容底下：右侧栏那条空带、技能/记忆页
+  // 标题栏里包标题的那个 div 都盖在它上面，于是那几条标题栏一次都没刷新过。
+  assert.equal(isDragBarPoint(true, 900), true, "标题栏不一定在窗口顶上（设置页就是）");
+  assert.equal(isDragBarPoint(false, 0), true);
+  assert.equal(isDragBarPoint(false, TITLE_BAR_STRIP_PX), true);
+  assert.equal(isDragBarPoint(false, TITLE_BAR_STRIP_PX + 1), false, "顶上那条以外不该白刷");
+});
+
+test("顶部兜底的那条盖得住最高的一条标题栏", () => {
+  // 谁将来加了标题栏却忘了标 .window-drag-bar，靠这条兜底。
+  const rows = /grid-template-rows:\s*([\d.]+)px/.exec(declarations(".conversation-pane"));
+  assert.ok(rows, ".conversation-pane 的 grid-template-rows 必须以标题栏高度开头");
+  assert.ok(TITLE_BAR_STRIP_PX >= Number.parseFloat(rows[1]), "兜底范围比会话标题栏还矮");
+});
+
+test("标记类的名字和样式表里的一致", () => {
+  assert.match(declarations(`.${DRAG_BAR_CLASS}`), /position:\s*relative/);
 });
 
 test("拖动层铺满标题栏，并且排在内容下面", () => {
