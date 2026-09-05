@@ -10,9 +10,9 @@
   ],
   "commits": [
     {
-      "ref": "a5fa5e311",
+      "ref": "a0753766a",
       "at": "2026-09-05T00:00:00.000Z",
-      "message": "fix(desktop): 标题栏的拖动区改成认整条标题栏，而不是认那层垫子 (#5)",
+      "message": "fix(desktop): 标题栏拖动区改成认整条标题栏，而不是认那层垫子 (#5)",
       "files": [
         "apps/desktop/src/renderer/src/ui/window-drag.ts",
         "apps/desktop/src/renderer/src/ui/WindowDragBar.tsx",
