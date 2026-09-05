@@ -1,0 +1,30 @@
+{
+  "id": 38,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r4b",
+      "at": "2026-09-05T15:33:06.000Z",
+      "text": "**回调之前为什么回不来**\nCoilCoil 里点「认证」时，其实只做了一半：它让内置的 MCP 扩展生成一个授权网址，然后打开浏览器；本机上那个专门用来接浏览器回跳的小服务确实是开着的，但**没有人在门口等**。所以你在浏览器里登录、点了同意之后，浏览器带着授权码跳回来，那个小服务只回了一句英文的「授权已收到，请把地址栏里的网址复制回 Pi」，然后就把授权码丢掉了——它压根没有交给 CoilCoil。从你这边看就是：浏览器说好了，应用这边什么反应都没有，除非你自己去地址栏复制一长串网址粘回来。\n\n**现在改成什么样**\n点认证的那一刻，CoilCoil 会先在那个小门口派人守着，再打开浏览器。你在浏览器里登录完，回跳的授权码会被直接接住，应用自己去换令牌、保存凭据，还会顺手把这个 MCP 服务器重新连上，不需要你复制任何东西。\n\n**点认证之后你会看到什么**\n1. 弹出一个窗口，写着正在准备授权，随后自动打开浏览器；\n2. 浏览器打开后，窗口里一直显示「等待浏览器完成授权…」，并且告诉你：在浏览器里登录并同意授权，完成后回到这里；这期间窗口里有「重新打开授权页」和「取消」；\n3. 成功时窗口标题变成「认证成功」，并写明凭据已保存、服务器可以直接用了；\n4. 失败时标题变成「认证失败」，下面用中文写清楚原因，并且有一个「重试」按钮，点一下就从头再来；\n5. 只有在极少数确实收不到自动回跳的服务器上（授权网址里没有可对得上的标识），窗口里才会出现那个「粘贴回调地址」的输入框，并明确告诉你这台服务器需要手动粘贴——不再是默认路径。\n\n入口没有新开设置页：还是 设置 → MCP → 选中那台服务器 → 「认证」按钮，只是点下去之后从「一个没有反馈的按钮 + 一个粘贴框」变成了上面这个有进行中／成功／失败三种状态的弹窗。\n取消或者关掉窗口会真的停止等待，不会在后台留着一个悬着的授权。授权最长等 5 分钟，超时会明确报出来并可以重试。\n\n**你怎么验**\n用你那个需要 OAuth 的 MCP：设置 → MCP → 选中它 → 点「认证」。应该马上弹窗并自动开浏览器；在浏览器里登录同意后，**不要**做任何复制粘贴，直接切回 CoilCoil，窗口应该已经变成「认证成功」，并且左边那台服务器的状态点变成已连接、显示出工具数量。如果还是不行，请把这个弹窗上写的失败原因（那一整句中文）发我，那句话就是根因。\n\n**开发侧说明**：根因见 packages/workflow/extensions/mcp-adapter.ts —— pi 的 auth-start 只在本地回调服务器上「预留」了 state，没有注册等待者，回调命中 mcp-callback-server.ts 的 `if (!pending)` 分支返回手动粘贴页。新增 auth-await / auth-cancel 两个 RPC，在 auth-start 回包之前就挂上等待者。已加回归测试证明「没有等待者=授权码被丢弃 / 有等待者=授权码被接住」。"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "f26556281",
+      "at": "2026-09-05T15:33:06.000Z",
+      "message": "fix(mcp): OAuth 回调自动接回，认证改成有状态的弹窗 (#38)",
+      "files": [
+        "packages/workflow/extensions/mcp-adapter.ts",
+        "packages/runtime-core/src/runtime-inspection-mcp.ts",
+        "packages/runtime-protocol/src/index.ts",
+        "packages/runtime-server/src/index.ts",
+        "apps/desktop/src/renderer/src/features/settings/McpAuthDialog.tsx",
+        "apps/desktop/src/renderer/src/features/settings/mcpAuthPresentation.ts",
+        "apps/desktop/src/renderer/src/features/settings/SettingsDialog.tsx",
+        "apps/desktop/src/renderer/src/features/settings/settings.css",
+        "packages/workflow/tests/mcp-oauth-callback.test.ts",
+        "apps/desktop/tests/mcp-auth-presentation.test.ts"
+      ]
+    }
+  ]
+}
