@@ -1,0 +1,24 @@
+{
+  "id": 40,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r4c",
+      "at": "2026-09-05T15:28:52.000Z",
+      "text": "换好了，左下角现在就是 Dock 里那只小幽灵。\n\n原来那一格画的是一团黑色的墨（一个模糊的抽象圆点），和 Dock 里的图标压根不是一个东西。现在直接用应用图标本身那张图，所以你在 Dock 上看到的和左下角看到的是同一个形象。跟 Dock 一样分明暗两张：浅色界面是黑幽灵，暗色界面是白幽灵。\n\n位置和大小一点没动：还是左侧栏最底下那一格、还是原来那个 26 像素见方的位置，右边的「CoilCoil」、下面的模型名、最右边的设置齿轮都在原位，间距也没改。\n\n上一轮刚修好的耗电问题不会回来：现在这枚图标就是一张贴上去的静态图片，不转、不闪、不带滤镜，画一次就完事，CPU 上看不到它。我还加了一条自动检查，谁以后再给它加动画会被直接拦下来。\n\n有一处我特意没动：新建对话时那张空白页中间也有一枚同样的墨团标志。你说的是左下角，我就只换了左下角，没顺手改别的地方。如果你希望那里也一起换成小幽灵，回一句就行。\n\n你怎么验（同样要装上这次改动之后的版本）：\n1. 看左侧栏最下面那一格，应该是 Dock 里那只小幽灵，不再是一团糊糊的墨。\n2. 切到暗色主题再看一眼，应该变成白色的幽灵，在深色底上看得清。\n3. 顺手确认图标没变大也没变小，右边的字没有被挤歪、没有换行。"
+    }
+  ],
+  "commits": [
+    {
+      "at": "2026-09-05T15:28:52.000Z",
+      "message": "feat(desktop): 左下角标志换成 Dock 里的应用图标 (#40)",
+      "files": [
+        "apps/desktop/src/renderer/src/features/workspaces/WorkspaceSidebar.tsx",
+        "apps/desktop/src/renderer/src/styles.css",
+        "apps/desktop/src/renderer/src/assets/app-icon-light.png",
+        "apps/desktop/src/renderer/src/assets/app-icon-dark.png",
+        "apps/desktop/tests/app-icon.test.ts"
+      ]
+    }
+  ]
+}

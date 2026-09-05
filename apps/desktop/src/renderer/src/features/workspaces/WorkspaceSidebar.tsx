@@ -26,7 +26,6 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protocol";
 import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { OrbitLoader } from "../../ui/loaders";
-import { CoilLogo } from "../../ui/CoilLogo";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
@@ -590,7 +589,7 @@ export function WorkspaceSidebar({
         </section> : null}
         {sectionOrder.map((name) => <Fragment key={name}>{name === "recent" ? recentSection : projectsSection}</Fragment>)}
       </section>
-      <div className="sidebar-footer"><div className="brand-mark"><CoilLogo size={26} /></div><div className="brand-copy"><strong>CoilCoil</strong><span>{modelLabel}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={onOpenSettings}><Settings size={17} strokeWidth={1.7} /></button></div>
+      <div className="sidebar-footer"><div className="brand-mark"><span className="brand-icon" aria-hidden="true" /></div><div className="brand-copy"><strong>CoilCoil</strong><span>{modelLabel}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={onOpenSettings}><Settings size={17} strokeWidth={1.7} /></button></div>
     </aside>
   );
 }
