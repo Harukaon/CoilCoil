@@ -43,6 +43,17 @@ import {
   redactSensitiveValue,
 } from "./session-values.js";
 
+/** Kept in step with the MCP extension's own RPC surface in @coilcoil/workflow. */
+type McpRpcMethod =
+  | "status"
+  | "connect"
+  | "auth-start"
+  | "auth-await"
+  | "auth-cancel"
+  | "auth-complete"
+  | "logout"
+  | "session-enable";
+
 export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
   private subagentSettingsPath(): string {
     return join(this.agentDir, "subagent-settings.json");
@@ -274,7 +285,7 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     throw new Error(ORIGINAL_SESSION_MUTATION_UNSUPPORTED);
   }
 
-  protected mcpRpc(method: "status" | "connect" | "auth-start" | "auth-complete" | "logout" | "session-enable", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  protected mcpRpc(method: McpRpcMethod, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const active = this.requireActive();
     const requestId = `coilcoil-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const replyChannel = `coilcoil:mcp:rpc:v1:reply:${requestId}`;
@@ -282,7 +293,10 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     // tool becomes ready. That bootstrap can legitimately consume a server's
     // configured request timeout, so the GUI bridge must not abandon the
     // extension at the old eight-second boundary.
-    const timeoutMs = method === "status" ? 30_000 : 120_000;
+    // `auth-await` is parked on a person finishing a login in their browser.
+    // pi's loopback listener gives them five minutes; abandoning the request
+    // first would report a failure while the flow is still perfectly alive.
+    const timeoutMs = method === "status" ? 30_000 : method === "auth-await" ? 360_000 : 120_000;
     return new Promise((resolvePromise, rejectPromise) => {
       let settled = false;
       const finish = (callback: () => void): void => {
@@ -460,7 +474,7 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     );
   }
 
-  protected async mcpAction(method: "connect" | "auth-start" | "auth-complete" | "logout", params: Record<string, unknown>): Promise<McpActionResult> {
+  protected async mcpAction(method: Exclude<McpRpcMethod, "status" | "session-enable">, params: Record<string, unknown>): Promise<McpActionResult> {
     const secrets = await this.mcpSensitiveValues();
     let result: Record<string, unknown>;
     try {
@@ -493,6 +507,24 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
   async startMcpAuth(name: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
     return this.mcpAction("auth-start", { server: name.trim() });
+  }
+
+  /**
+   * Wait for the browser to hand the authorization back.
+   *
+   * Started right after `startMcpAuth`, so the MCP extension's waiter on pi's
+   * loopback listener is already armed: this call resolves once the redirect
+   * lands and the token exchange has been done, without anyone copying a URL.
+   */
+  async awaitMcpAuth(name: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    return this.mcpAction("auth-await", { server: name.trim() });
+  }
+
+  /** Give up on a browser authorization the user walked away from. */
+  async cancelMcpAuth(name: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    return this.mcpAction("auth-cancel", { server: name.trim() });
   }
 
   async completeMcpAuth(name: string, input: string): Promise<McpActionResult> {

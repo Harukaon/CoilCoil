@@ -1186,6 +1186,8 @@ export type RuntimeCommand =
   | { type: "import_mcp_servers"; input: ImportMcpServersInput }
   | { type: "connect_mcp_server"; name: string }
   | { type: "start_mcp_auth"; name: string }
+  | { type: "await_mcp_auth"; name: string }
+  | { type: "cancel_mcp_auth"; name: string }
   | { type: "complete_mcp_auth"; name: string; input: string }
   | { type: "logout_mcp_server"; name: string }
   | { type: "get_memory_configuration"; cwd?: string }

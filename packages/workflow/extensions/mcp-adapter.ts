@@ -31,6 +31,26 @@ const { loadMetadataCache } = jiti(join(adapterDirectory, "metadata-cache.ts")) 
 const { resolveDirectTools } = jiti(join(adapterDirectory, "direct-tools.ts")) as {
   resolveDirectTools: (config: unknown, cache: unknown, prefix: string, envOverride?: string[]) => Array<{ serverName: string; prefixedName: string }>;
 };
+/**
+ * The loopback listener pi already binds for OAuth redirects.
+ *
+ * `auth-start` only *reserves* the flow's state on that listener; nobody waits
+ * for the redirect, so the browser lands on "copy this URL back into Pi" and
+ * the authorization code is dropped on the floor. Claiming the same singleton
+ * through the same jiti instance — the module identity pi's own
+ * `mcp-auth-flow.ts` uses — lets the GUI wait for the callback the way the
+ * terminal flow does, and finish the exchange without anyone pasting anything.
+ */
+const { waitForCallback, cancelPendingCallback } = jiti(join(adapterDirectory, "mcp-callback-server.ts")) as {
+  waitForCallback: (oauthState: string) => Promise<OAuthCallbackResult>;
+  cancelPendingCallback: (oauthState: string) => void;
+};
+
+interface OAuthCallbackResult {
+  code: string;
+  /** RFC 9207 `iss`, when the authorization server sends one. */
+  iss?: string;
+}
 const MCP_STATUS_EVENT = "pi-mcp-adapter/status/v1";
 const MCP_TOOL_APPROVAL_REQUEST_EVENT = "pi-mcp-adapter:tool-approval-request";
 const MCP_SESSION_POLICY_ENTRY = "coilcoil-mcp-session-policy";
@@ -58,7 +78,7 @@ export const MCP_RPC_PROTOCOL_VERSION = 1;
 export const MCP_RPC_REQUEST_EVENT = "coilcoil:mcp:rpc:v1:request";
 export const MCP_RPC_REPLY_EVENT_PREFIX = "coilcoil:mcp:rpc:v1:reply:";
 
-type McpRpcMethod = "status" | "connect" | "auth-start" | "auth-complete" | "logout" | "session-enable";
+type McpRpcMethod = "status" | "connect" | "auth-start" | "auth-await" | "auth-cancel" | "auth-complete" | "logout" | "session-enable";
 
 interface McpRpcRequest {
   version: typeof MCP_RPC_PROTOCOL_VERSION;
@@ -116,18 +136,60 @@ function requestId(raw: unknown): string {
   return raw.requestId;
 }
 
+const MCP_RPC_METHODS: readonly McpRpcMethod[] = [
+  "status",
+  "connect",
+  "auth-start",
+  "auth-await",
+  "auth-cancel",
+  "auth-complete",
+  "logout",
+  "session-enable",
+];
+
 function parseRequest(raw: unknown): McpRpcRequest {
   const id = requestId(raw);
   if (!isRecord(raw) || raw.version !== MCP_RPC_PROTOCOL_VERSION) throw new Error("MCP RPC 版本不受支持。");
-  if (raw.method !== "status" && raw.method !== "connect" && raw.method !== "auth-start" && raw.method !== "auth-complete" && raw.method !== "logout" && raw.method !== "session-enable") {
+  const method = raw.method as McpRpcMethod;
+  if (typeof raw.method !== "string" || !MCP_RPC_METHODS.includes(method)) {
     throw new Error("MCP RPC 方法不受支持。");
   }
   return {
     version: MCP_RPC_PROTOCOL_VERSION,
     requestId: id,
-    method: raw.method,
+    method,
     params: isRecord(raw.params) ? raw.params : {},
   };
+}
+
+/**
+ * The `state` pi generated for this authorization request.
+ *
+ * It is the key the loopback listener files the redirect under, and the
+ * authorization URL is the only place the GUI bridge can read it from: pi keeps
+ * it in module-private runtime state.
+ */
+export function oauthStateFromAuthorizationUrl(authorizationUrl: unknown): string | undefined {
+  if (typeof authorizationUrl !== "string" || !authorizationUrl.trim()) return undefined;
+  try {
+    const state = new URL(authorizationUrl).searchParams.get("state");
+    return state?.trim() ? state : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Rebuild the redirect pi's `auth-complete` expects to be pasted by hand.
+ *
+ * `parseAuthorizationRedirectInput` accepts a bare query string and re-checks
+ * `state` against the pending flow, so the captured callback is handed back in
+ * exactly the shape a human would have copied out of the address bar.
+ */
+export function authorizationRedirectInput(result: OAuthCallbackResult, oauthState: string): string {
+  const params = new URLSearchParams({ code: result.code, state: oauthState });
+  if (result.iss) params.set("iss", result.iss);
+  return `?${params.toString()}`;
 }
 
 function serverName(params: Record<string, unknown>): string {
@@ -212,6 +274,8 @@ export default function coilcoilMcpAdapter(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
   let statusSnapshot: McpStatusSnapshot | undefined;
   const sessionDisabledServers = new Set<string>();
+  /** Browser authorizations whose loopback redirect this bridge is waiting on. */
+  const pendingBrowserAuths = new Map<string, { oauthState: string; callback: Promise<OAuthCallbackResult> }>();
   const serverProxyTools = new Map<string, Set<string>>();
   const serverDirectTools = new Map<string, Set<string>>();
   const hiddenDirectTools = new Set<string>();
@@ -237,6 +301,37 @@ export default function coilcoilMcpAdapter(pi: ExtensionAPI): void {
     const current = [...active];
     const desired = [...next];
     if (current.length !== desired.length || current.some((name) => !next.has(name))) pi.setActiveTools(desired);
+  };
+
+  /** Stop waiting for a server's redirect and free its slot on the listener. */
+  const forgetBrowserAuth = (server: string): void => {
+    const pending = pendingBrowserAuths.get(server);
+    if (!pending) return;
+    pendingBrowserAuths.delete(server);
+    try {
+      cancelPendingCallback(pending.oauthState);
+    } catch {
+      // The listener may already have shut down with the OAuth runtime.
+    }
+  };
+
+  /**
+   * Claim the redirect for an authorization that just started.
+   *
+   * Registered before `auth-start` replies, so the listener is holding a waiter
+   * by the time the caller opens the browser — otherwise a fast approval lands
+   * on the "paste this back into Pi" page and the code is lost.
+   */
+  const claimBrowserAuth = (server: string, details: unknown): boolean => {
+    forgetBrowserAuth(server);
+    const oauthState = oauthStateFromAuthorizationUrl(isRecord(details) ? details.authorizationUrl : undefined);
+    if (!oauthState) return false;
+    const callback = waitForCallback(oauthState);
+    // Nobody is attached until `auth-await` arrives; a timeout in between must
+    // not surface as an unhandled rejection.
+    callback.catch(() => undefined);
+    pendingBrowserAuths.set(server, { oauthState, callback });
+    return true;
   };
 
   const refreshDirectToolOwnership = (): void => {
@@ -421,6 +516,83 @@ export default function coilcoilMcpAdapter(pi: ExtensionAPI): void {
         });
         return;
       }
+      if (request.method === "auth-cancel") {
+        const name = serverName(request.params ?? {});
+        forgetBrowserAuth(name);
+        pi.events.emit(`${MCP_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
+          version: MCP_RPC_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          method: request.method,
+          success: true,
+          data: {
+            text: `已停止等待 ${name} 的浏览器授权。`,
+            details: { mode: "auth-cancel", server: name },
+          },
+        });
+        return;
+      }
+      if (request.method === "auth-await") {
+        if (!proxyTool) throw new Error("pi-mcp-adapter 没有注册 MCP 代理工具。");
+        const name = serverName(request.params ?? {});
+        const pending = pendingBrowserAuths.get(name);
+        if (!pending) throw new Error(`${name} 没有正在等待的浏览器授权，请重新开始认证。`);
+        let callback: OAuthCallbackResult;
+        try {
+          callback = await pending.callback;
+        } finally {
+          if (pendingBrowserAuths.get(name) === pending) pendingBrowserAuths.delete(name);
+        }
+        // The redirect is handed to pi's own `auth-complete`, which re-checks
+        // the state and runs the PKCE token exchange; this bridge never touches
+        // the code beyond passing it along.
+        const completion = await proxyTool.execute(
+          `coilcoil-mcp-rpc-${request.requestId}`,
+          {
+            action: "auth-complete",
+            server: name,
+            args: JSON.stringify({ input: authorizationRedirectInput(callback, pending.oauthState) }),
+          },
+          context?.signal,
+          undefined,
+          context ?? ({} as ExtensionContext),
+        ) as McpProxyResult;
+        const completionDetails = isRecord(completion.details) ? completion.details : {};
+        if (completion.isError || completionDetails.error) {
+          throw new Error(
+            (typeof completionDetails.message === "string" ? completionDetails.message : "")
+            || resultText(completion)
+            || "MCP OAuth 认证没有完成。",
+          );
+        }
+        // A fresh token is worth nothing until the server is reconnected with
+        // it, and the user who just approved in a browser expects the server to
+        // be usable, not to have to press another button.
+        let connected = false;
+        try {
+          const connection = await proxyTool.execute(
+            `coilcoil-mcp-rpc-${request.requestId}-connect`,
+            { connect: name },
+            context?.signal,
+            undefined,
+            context ?? ({} as ExtensionContext),
+          ) as McpProxyResult;
+          connected = !connection.isError && !(isRecord(connection.details) && Boolean(connection.details.error));
+        } catch {
+          // Authentication still succeeded; the panel's own status refresh will
+          // show whatever the connection ends up doing.
+        }
+        pi.events.emit(`${MCP_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
+          version: MCP_RPC_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          method: request.method,
+          success: true,
+          data: {
+            text: connected ? `${name} 已完成认证并重新连接。` : `${name} 已完成认证。`,
+            details: { ...completionDetails, mode: "auth-await", server: name, authenticated: true, connected },
+          },
+        });
+        return;
+      }
       if (!proxyTool) throw new Error("pi-mcp-adapter 没有注册 MCP 代理工具。");
       const result = await proxyTool.execute(
         `coilcoil-mcp-rpc-${request.requestId}`,
@@ -430,9 +602,15 @@ export default function coilcoilMcpAdapter(pi: ExtensionAPI): void {
         context ?? ({} as ExtensionContext),
       ) as McpProxyResult;
       if (result.isError) throw new Error(resultText(result) || "MCP 扩展请求失败。");
-      const details = request.method === "status" && statusSnapshot
+      let details = request.method === "status" && statusSnapshot
         ? { ...statusSnapshot, ...(isRecord(result.details) ? result.details : {}), mode: "status" }
         : result.details;
+      if (request.method === "auth-start") {
+        // Claim the redirect before the reply leaves, so the browser the caller
+        // is about to open cannot beat this bridge to the loopback listener.
+        const awaitingCallback = claimBrowserAuth(serverName(request.params ?? {}), result.details);
+        details = { ...(isRecord(details) ? details : {}), awaitingCallback };
+      }
       pi.events.emit(`${MCP_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
         version: MCP_RPC_PROTOCOL_VERSION,
         requestId: request.requestId,
@@ -452,6 +630,7 @@ export default function coilcoilMcpAdapter(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async () => {
     context = undefined;
     statusSnapshot = undefined;
+    for (const server of [...pendingBrowserAuths.keys()]) forgetBrowserAuth(server);
     if (pi.registerTool === wrappedRegisterTool) pi.registerTool = registerTool as ExtensionAPI["registerTool"];
     unsubscribeStatus();
     unsubscribeApproval();

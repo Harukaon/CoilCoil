@@ -347,6 +347,8 @@
 .provider-oauth-prompt > strong, .provider-oauth-prompt > label { color: hsl(var(--th) var(--ts) var(--l-324)); font-size: 11px; font-weight: 600; line-height: 1.5; }
 .provider-oauth-prompt > input { box-sizing: border-box; width: 100%; height: 36px; padding: 0 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-839)); border-radius: var(--radius-xl); color: hsl(var(--th) var(--ts) var(--l-192)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px; outline: none; }
 .provider-oauth-prompt > input:focus { border-color: hsl(var(--th) var(--ts) var(--l-559)); box-shadow: 0 0 0 2px rgb(80 80 75 / 8%); }
+.provider-oauth-prompt > textarea { box-sizing: border-box; width: 100%; min-height: 62px; padding: 8px 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-839)); border-radius: var(--radius-xl); color: hsl(var(--th) var(--ts) var(--l-192)); background: hsl(var(--th) var(--ts) var(--l-1000)); font: 11px/1.5 inherit; resize: vertical; outline: none; }
+.provider-oauth-prompt > textarea:focus { border-color: hsl(var(--th) var(--ts) var(--l-559)); box-shadow: 0 0 0 2px rgb(80 80 75 / 8%); }
 .provider-oauth-submit { justify-self: end; }
 .provider-oauth-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .provider-oauth-options > button { display: grid; min-width: 0; gap: 3px; padding: 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-847)); border-radius: var(--radius-2xl); color: hsl(var(--th) var(--ts) var(--l-259)); background: hsl(var(--th) var(--ts) var(--l-1000)); text-align: left; cursor: pointer; }
@@ -428,13 +430,8 @@
 .mcp-runtime-card > span { display: flex; min-width: 0; flex: 1; align-items: center; gap: 7px; }
 .mcp-runtime-card strong { color: hsl(var(--th) var(--ts) var(--l-286)); font-size: 10px; }
 .mcp-runtime-card small { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 9px; }
-.mcp-runtime-card > button, .mcp-auth-panel > button:not(.primary-button) { display: inline-flex; height: 27px; align-items: center; gap: 5px; padding: 0 8px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-359)); background: hsl(var(--th) var(--ts) var(--l-906)); font-size: 9px; cursor: pointer; }
+.mcp-runtime-card > button { display: inline-flex; height: 27px; align-items: center; gap: 5px; padding: 0 8px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-359)); background: hsl(var(--th) var(--ts) var(--l-906)); font-size: 9px; cursor: pointer; }
 .mcp-runtime-card > button:disabled { opacity: .5; cursor: default; }
-.mcp-auth-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 10px; padding: 10px; border: 1px solid var(--c-amber-border); border-radius: var(--radius-xl); background: hsl(var(--th) var(--ts) var(--l-961)); }
-.mcp-auth-panel strong { align-self: center; font-size: 11px; }
-.mcp-auth-panel p { grid-column: 1 / -1; margin: 0; color: hsl(var(--th) var(--ts) var(--l-441)); font-size: 9px; line-height: 1.45; }
-.mcp-auth-panel textarea { grid-column: 1 / -1; }
-.mcp-auth-panel .primary-button { justify-self: end; grid-column: 1 / -1; }
 .danger-icon-button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-lg); color: var(--c-red-muted); background: var(--c-red-subtle); cursor: pointer; }
 .checkbox-setting { display: flex !important; min-height: 34px; align-items: center; align-self: end; gap: 8px !important; }
 .checkbox-setting input { width: 14px; height: 14px; flex: 0 0 auto; }

@@ -15,6 +15,14 @@ import { toastError, toastSuccess } from "../../ui/toast";
 import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
 import { ModelSettings } from "./ModelSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { McpAuthDialog } from "./McpAuthDialog";
+import {
+  mcpAuthFlowFailed,
+  mcpAuthFlowFromStart,
+  mcpAuthFlowStarted,
+  mcpAuthFlowSucceeded,
+  type McpAuthFlowState,
+} from "./mcpAuthPresentation";
 import { McpDiscoveryDialog } from "./McpDiscoveryDialog";
 import { McpJsonEditor } from "./McpJsonEditor";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
@@ -158,8 +166,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   const [removeArmed, setRemoveArmed] = useState(false);
   const [listRemoveArmed, setListRemoveArmed] = useState<string>();
   const [runtimeStatus, setRuntimeStatus] = useState<McpRuntimeStatus>();
-  const [authorizationUrl, setAuthorizationUrl] = useState<string>();
-  const [authInput, setAuthInput] = useState("");
+  const [authFlow, setAuthFlow] = useState<McpAuthFlowState>();
   const editVersionRef = useRef(0);
   const loadVersionRef = useRef(0);
 
@@ -239,8 +246,6 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     setHeadersText(JSON.stringify(maskedStringMap(next.headers), null, 2));
     setDirectToolsText(Array.isArray(next.directTools) ? next.directTools.join("\n") : "");
     setExcludeToolsText(next.excludeTools.join("\n"));
-    setAuthorizationUrl(undefined);
-    setAuthInput("");
     setProbeResult(undefined);
     setRemoveArmed(false);
     setListRemoveArmed(undefined);
@@ -329,37 +334,87 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     toastSuccess(result.text || "MCP 扩展已完成操作。");
   };
 
-  const startAuth = async (): Promise<void> => {
-    if (!selectedName) return;
+  const actionErrorMessage = (result: McpActionResult): string | undefined => {
+    const error = typeof result.details?.error === "string" ? result.details.error : undefined;
+    if (!error) return undefined;
+    return typeof result.details?.message === "string" ? result.details.message : error;
+  };
+
+  /**
+   * Reconnect with the credential that was just saved.
+   *
+   * A token nobody connects with looks to the user exactly like a failed
+   * login, so this runs on both completion paths and never blocks them.
+   */
+  const connectAfterAuth = async (server: string): Promise<void> => {
+    try {
+      const result = await window.coilcoil.request<McpActionResult>({ type: "connect_mcp_server", name: server }, runtimeId);
+      if (result.status) setRuntimeStatus(result.status);
+    } catch {
+      // The status refresh below reports whatever the connection settles on.
+    }
+  };
+
+  /**
+   * Take one MCP server through its browser authorization.
+   *
+   * `start_mcp_auth` arms the runtime's waiter on pi's loopback listener before
+   * it answers, so the browser is opened only after that reply lands — an
+   * approval that comes back sooner than the reply would otherwise arrive with
+   * nobody listening, which is exactly how the redirect used to get lost. Once
+   * the browser is open this parks on `await_mcp_auth` until the redirect is
+   * captured and the token exchange is done.
+   */
+  const runAuth = async (server: string): Promise<void> => {
+    const started = mcpAuthFlowStarted(server);
+    setAuthFlow(started);
     setActionBusy(true);
     try {
-      const result = await window.coilcoil.request<McpActionResult>({ type: "start_mcp_auth", name: selectedName }, runtimeId);
-      applyActionResult(result);
-      const url = typeof result.details?.authorizationUrl === "string" ? result.details.authorizationUrl : undefined;
-      setAuthorizationUrl(url);
-      if (url) await window.coilcoil.openExternal(url);
+      const startResult = await window.coilcoil.request<McpActionResult>({ type: "start_mcp_auth", name: server }, runtimeId);
+      if (startResult.status) setRuntimeStatus(startResult.status);
+      const waiting = mcpAuthFlowFromStart(started, startResult);
+      setAuthFlow((current) => current?.server === server ? waiting : current);
+      if (waiting.phase !== "waiting" || !waiting.authorizationUrl) return;
+      await window.coilcoil.openExternal(waiting.authorizationUrl);
+      if (!waiting.awaitingCallback) return;
+      const result = await window.coilcoil.request<McpActionResult>({ type: "await_mcp_auth", name: server }, runtimeId);
+      if (result.status) setRuntimeStatus(result.status);
+      setAuthFlow((current) => current?.server === server ? mcpAuthFlowSucceeded(current, result) : current);
+      void loadStatus();
     } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
+      setAuthFlow((current) => current?.server === server ? mcpAuthFlowFailed(current, caught) : current);
     } finally {
       setActionBusy(false);
     }
   };
 
-  const completeAuth = async (): Promise<void> => {
-    if (!selectedName || !authInput.trim()) return;
+  /** The paste-the-redirect fallback, for servers whose callback never arrives. */
+  const completeAuth = async (input: string): Promise<void> => {
+    const server = authFlow?.server;
+    if (!server || !input.trim()) return;
     setActionBusy(true);
+    setAuthFlow((current) => current?.server === server ? { ...current, phase: "completing", message: undefined } : current);
     try {
-      const result = await window.coilcoil.request<McpActionResult>({ type: "complete_mcp_auth", name: selectedName, input: authInput }, runtimeId);
-      applyActionResult(result);
-      if (!result.details?.error) {
-        setAuthorizationUrl(undefined);
-        setAuthInput("");
-      }
+      const result = await window.coilcoil.request<McpActionResult>({ type: "complete_mcp_auth", name: server, input: input.trim() }, runtimeId);
+      if (result.status) setRuntimeStatus(result.status);
+      const failure = actionErrorMessage(result);
+      if (failure) throw new Error(failure);
+      await connectAfterAuth(server);
+      setAuthFlow((current) => current?.server === server ? mcpAuthFlowSucceeded(current, result) : current);
+      void loadStatus();
     } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
+      setAuthFlow((current) => current?.server === server ? mcpAuthFlowFailed(current, caught) : current);
     } finally {
       setActionBusy(false);
     }
+  };
+
+  /** Closing an unfinished flow releases the runtime's waiter for that server. */
+  const closeAuth = (): void => {
+    const flow = authFlow;
+    setAuthFlow(undefined);
+    if (!flow || flow.phase === "succeeded" || flow.phase === "failed") return;
+    void window.coilcoil.request({ type: "cancel_mcp_auth", name: flow.server }, runtimeId).catch(() => undefined);
   };
 
   const logout = async (): Promise<void> => {
@@ -477,7 +532,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
       <section className="mcp-editor">
         <form onSubmit={(event) => void save(event)}>
           <div className="mcp-editor-heading"><div><strong>{selectedName ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</strong><small>连接、认证与工具发现均由内置 pi-mcp-adapter 执行。</small></div></div>
-          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpEnablementClass(draft, selectedStatus)}`} /><strong>{mcpEnablementLabel(draft, selectedStatus)}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={togglingEnabled || actionBusy || !cwd} onClick={() => void setEnabled()}>{togglingEnabled ? <LoaderCircle className="spin" size={13} /> : <Power size={13} />}{draft.disabled ? "启用" : "停用"}</button>{supportsAuth ? <><button type="button" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void startAuth()}><ExternalLink size={13} />认证</button><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void logout()}><LogOut size={13} />登出</button></> : null}</div> : null}
+          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpEnablementClass(draft, selectedStatus)}`} /><strong>{mcpEnablementLabel(draft, selectedStatus)}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={togglingEnabled || actionBusy || !cwd} onClick={() => void setEnabled()}>{togglingEnabled ? <LoaderCircle className="spin" size={13} /> : <Power size={13} />}{draft.disabled ? "启用" : "停用"}</button>{supportsAuth ? <><button type="button" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void runAuth(selectedName)}><ExternalLink size={13} />认证</button><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void logout()}><LogOut size={13} />登出</button></> : null}</div> : null}
           {runtimeStatus?.diagnostic ? <p className="mcp-source-note">{runtimeStatus.diagnostic}</p> : null}
           {mounted ? <p className="mcp-source-note">这个服务器挂载自 {mcpOriginLabel(draft)}，定义保存在 <code>{draft.source}</code>。CoilCoil 只叠加启用状态等本地覆盖，要改命令、地址或请求头请到该应用里编辑。</p> : null}
           {mounted ? null : <div className="mcp-snippet">
@@ -500,7 +555,6 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
           <div className="settings-grid"><label className="checkbox-setting"><input type="checkbox" checked={draft.directTools === true} disabled={Boolean(directToolsText.trim())} onChange={(event) => setDraft((current) => ({ ...current, directTools: event.target.checked }))} />直接注册全部服务器工具</label><label className="checkbox-setting"><input type="checkbox" checked={draft.exposeResources} onChange={(event) => setDraft((current) => ({ ...current, exposeResources: event.target.checked }))} />向 Agent 暴露资源</label></div>
           </fieldset>
           {draft.sourceKind === "import" || (draft.source && draft.source !== configuration?.configPath) ? <p className="mcp-source-note">{draft.sourceKind === "import" ? <>当前条目来自外部导入{draft.source ? `（${draft.source}）` : ""}。删除只会从 CoilCoil 列表中移除并本地停用，不会修改外部应用配置。保存会写入 CoilCoil 私有覆盖。</> : <>当前配置来自 {draft.source}。保存后会在 CoilCoil 私有配置中创建同名覆盖，不会修改外部应用。</>}</p> : null}
-          {authorizationUrl ? <div className="mcp-auth-panel"><strong>完成 OAuth 认证</strong><p>浏览器已打开扩展生成的授权地址。完成授权后，粘贴回调地址或授权码。</p><button type="button" onClick={() => void window.coilcoil.openExternal(authorizationUrl)}><ExternalLink size={13} />重新打开授权页</button><textarea value={authInput} placeholder="粘贴回调地址或授权码" onChange={(event) => setAuthInput(event.target.value)} /><button className="primary-button" type="button" disabled={actionBusy || !authInput.trim()} onClick={() => void completeAuth()}>完成认证</button></div> : null}
           <footer>
             <span>{configuration?.configPath}</span>
             <div className="mcp-editor-footer-actions">
@@ -511,6 +565,13 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
         </form>
         {configuration?.imports.length ? <div className="mcp-imports"><div><strong>检测到的兼容配置</strong><small>Cursor、Claude、Codex 等工具已有的 MCP。点右边逐个挑，选中的会抄一份到 CoilCoil，不会整包接管。</small></div><div className="mcp-import-list">{configuration.imports.map((item) => <span className={item.enabled ? "enabled" : ""} key={`${item.kind}-${item.path}`}><b>{item.kind}</b><small>{item.serverCount} 个服务器</small></span>)}</div><button type="button" disabled={saving} onClick={() => setDiscoveryOpen(true)}>发现并按需导入</button></div> : null}
         <McpDiscoveryDialog open={discoveryOpen} cwd={cwd} runtimeId={runtimeId} onClose={() => setDiscoveryOpen(false)} onImported={(snapshot) => { setConfiguration(snapshot); void loadStatus(); }} />
+        {authFlow ? <McpAuthDialog
+          state={authFlow}
+          submitting={actionBusy}
+          onRetry={() => void runAuth(authFlow.server)}
+          onManualComplete={(input) => void completeAuth(input)}
+          onClose={closeAuth}
+        /> : null}
       </section>
     </div>
   );
