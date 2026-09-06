@@ -10,7 +10,7 @@
   ],
   "commits": [
     {
-      "ref": "cbddc4a05",
+      "ref": "538cf9df5",
       "at": "2026-09-06T04:40:00.000Z",
       "message": "feat(context): 压缩之前先清理旧工具输出，压缩保留量跟随模型窗口 (#41)",
       "files": [
