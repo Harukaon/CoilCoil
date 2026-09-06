@@ -56,6 +56,15 @@ function downgradeUnsupportedImages<TApi extends Api>(messages: Message[], model
 	});
 }
 
+const MAX_TOOL_CALL_ID_LENGTH = 64;
+
+/** Append an occurrence suffix without growing past the tightest provider id limit. */
+function appendToolCallIdOccurrence(id: string, occurrence: number): string {
+	const suffix = `_${occurrence}`;
+	const base = id.length + suffix.length > MAX_TOOL_CALL_ID_LENGTH ? id.slice(0, MAX_TOOL_CALL_ID_LENGTH - suffix.length) : id;
+	return `${base}${suffix}`;
+}
+
 /**
  * Normalize tool call ID for cross-provider compatibility.
  * OpenAI Responses API generates IDs that are 450+ chars with special characters like `|`.
@@ -66,8 +75,30 @@ export function transformMessages<TApi extends Api>(
 	model: Model<TApi>,
 	normalizeToolCallId?: (id: string, model: Model<TApi>, source: AssistantMessage) => string,
 ): Message[] {
-	// Build a map of original tool call IDs to normalized IDs
+	// Build a map of original tool call IDs to the IDs replayed to the provider
 	const toolCallIdMap = new Map<string, string>();
+
+	// Some OpenAI-compatible providers number their tool calls per response (`call_0`,
+	// `call_1`, ... restarting on every assistant turn), so a history replayed from one
+	// of them carries the same id turn after turn. Anthropic-shaped endpoints validate
+	// ids across the whole request ("each tool_use must have a single result") and reject
+	// it, which leaves every later turn of that session unsendable. Rename the repeats;
+	// the tool result that follows the renamed call picks up the new id through the map.
+	const usedToolCallIds = new Set<string>();
+	const claimToolCallId = (id: string): string => {
+		if (!usedToolCallIds.has(id)) {
+			usedToolCallIds.add(id);
+			return id;
+		}
+		let occurrence = 2;
+		let candidate = appendToolCallIdOccurrence(id, occurrence);
+		while (usedToolCallIds.has(candidate)) {
+			occurrence++;
+			candidate = appendToolCallIdOccurrence(id, occurrence);
+		}
+		usedToolCallIds.add(candidate);
+		return candidate;
+	};
 	// Normalize null/undefined content from untyped callers (custom tools, hand-built
 	// histories, old session files) so downstream code can rely on the type contract.
 	const normalizedMessages = messages.map((msg) => (msg.content == null ? { ...msg, content: [] } : msg));
@@ -136,9 +167,16 @@ export function transformMessages<TApi extends Api>(
 					if (!isSameModel && normalizeToolCallId) {
 						const normalizedId = normalizeToolCallId(toolCall.id, model, assistantMsg);
 						if (normalizedId !== toolCall.id) {
-							toolCallIdMap.set(toolCall.id, normalizedId);
 							normalizedToolCall = { ...normalizedToolCall, id: normalizedId };
 						}
+					}
+
+					const replayId = claimToolCallId(normalizedToolCall.id);
+					if (replayId !== normalizedToolCall.id) {
+						normalizedToolCall = { ...normalizedToolCall, id: replayId };
+					}
+					if (replayId !== toolCall.id) {
+						toolCallIdMap.set(toolCall.id, replayId);
 					}
 
 					return normalizedToolCall;
