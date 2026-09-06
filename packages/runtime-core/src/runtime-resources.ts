@@ -37,8 +37,10 @@ import {
 } from "node:path";
 import {
   listProjectMemoryDocuments,
+  normalizeSummarizeEveryTurns,
   PROJECT_MEMORY_FILE,
   readMemoryDocument,
+  readMemoryTurnCount,
 } from "./memory-documents.js";
 import {
   loadMcpAdapterConfigModule,
@@ -105,6 +107,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       globalMaxChars: integer("globalMaxChars", 2_000),
       generationRules: rules,
       autoSummarize: record.autoSummarize !== false,
+      summarizeEveryTurns: normalizeSummarizeEveryTurns(record.summarizeEveryTurns),
       globalEnabled: record.globalEnabled !== false,
       projectEnabled: record.projectEnabled !== false,
     };
@@ -164,6 +167,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       global,
       project,
       projects: listProjectMemoryDocuments(storageRoot, settings.projectMaxChars, project),
+      turnsSinceSummary: readMemoryTurnCount(projectDirectory),
     };
   }
 

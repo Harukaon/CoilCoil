@@ -996,12 +996,16 @@ export interface MemorySettings {
   globalMaxChars: number;
   generationRules: string;
   autoSummarize: boolean;
+  /** 自动整理的间隔轮数：累计这么多轮回复后，后台才检查一次记忆。 */
+  summarizeEveryTurns: number;
   globalEnabled: boolean;
   projectEnabled: boolean;
 }
 
 export interface MemoryDocumentSnapshot {
   scope: "global" | "project";
+  /** `entry` is one memory body file; `index` is the file that lists them. */
+  kind?: "index" | "entry";
   label: string;
   filePath: string;
   directory: string;
@@ -1022,6 +1026,8 @@ export interface MemoryConfigurationSnapshot {
   project?: MemoryDocumentSnapshot;
   /** Every project the memory store holds, sorted by name, open project included. */
   projects: MemoryDocumentSnapshot[];
+  /** Turns counted for the open project since the last background summary ran. */
+  turnsSinceSummary: number;
 }
 
 export interface SaveMemoryConfigurationInput {

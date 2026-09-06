@@ -209,6 +209,8 @@ export function MemoryWorkspace({
                   const count = charCount(draft);
                   const expanded = memoryEditorExpanded("project", document.filePath, expandedProjectEditors);
                   const current = document.filePath === configuration.project?.filePath;
+                  // 只有索引会被每轮注入，所以只有索引有字数预算；正文按需读取，不设上限。
+                  const limit = document.kind === "entry" ? 0 : projectMaxChars;
                   return (
                     <div className="memory-project-entry" key={document.filePath}>
                       <button className="memory-editor-meta project-toggle" type="button" aria-expanded={expanded} onClick={() => toggleProjectEditor(document.filePath)}>
@@ -217,7 +219,7 @@ export function MemoryWorkspace({
                         {current ? <em className="memory-project-current">当前</em> : null}
                         {!document.exists ? <em className="memory-project-empty">未创建</em> : null}
                         <code title={document.filePath}>{document.filePath}</code>
-                        <small className={count > projectMaxChars ? "over" : ""}>{count.toLocaleString()} / {projectMaxChars.toLocaleString()} 字</small>
+                        <small className={limit > 0 && count > limit ? "over" : ""}>{limit > 0 ? `${count.toLocaleString()} / ${limit.toLocaleString()} 字` : `${count.toLocaleString()} 字`}</small>
                       </button>
                       {expanded ? <>
                         <textarea
@@ -227,7 +229,9 @@ export function MemoryWorkspace({
                           spellCheck={false}
                           placeholder="记录该项目的稳定事实、约定和关键决策…"
                         />
-                        <p className="memory-editor-hint">超过限制不会截断原文，但注入模型时只会取前 {projectMaxChars.toLocaleString()} 个 Unicode 字符。</p>
+                        <p className="memory-editor-hint">{limit > 0
+                          ? `超过限制不会截断原文，但注入模型时只会取前 ${limit.toLocaleString()} 个 Unicode 字符。`
+                          : "这是一条记忆正文，不会常驻上下文；模型按索引里的摘要判断要不要读它。"}</p>
                       </> : null}
                     </div>
                   );
@@ -241,12 +245,14 @@ export function MemoryWorkspace({
               <div className="memory-toggle-grid">
                 <label><input type="checkbox" checked={settings.globalEnabled} onChange={(event) => updateSettings("globalEnabled", event.target.checked)} /><span><strong>注入全局记忆</strong><small>对所有工作区生效</small></span></label>
                 <label><input type="checkbox" checked={settings.projectEnabled} onChange={(event) => updateSettings("projectEnabled", event.target.checked)} /><span><strong>注入项目记忆</strong><small>仅对当前工作区生效</small></span></label>
-                <label><input type="checkbox" checked={settings.autoSummarize} onChange={(event) => updateSettings("autoSummarize", event.target.checked)} /><span><strong>回复后自动整理</strong><small>后台记忆任务会在会话结束后运行</small></span></label>
+                <label><input type="checkbox" checked={settings.autoSummarize} onChange={(event) => updateSettings("autoSummarize", event.target.checked)} /><span><strong>回复后自动整理</strong><small>每满设定轮数后在后台整理一次</small></span></label>
               </div>
               <div className="memory-limit-grid">
                 <label><span>全局记忆上限（字）</span><input type="number" min={100} max={1000000} step={100} value={settings.globalMaxChars} onChange={(event) => updateSettings("globalMaxChars", Math.max(100, Number(event.target.value) || 100))} /></label>
                 <label><span>项目记忆上限（字）</span><input type="number" min={100} max={1000000} step={100} value={settings.projectMaxChars} onChange={(event) => updateSettings("projectMaxChars", Math.max(100, Number(event.target.value) || 100))} /></label>
+                <label><span>自动整理间隔（轮）</span><input type="number" min={1} max={1000} step={1} value={settings.summarizeEveryTurns} onChange={(event) => updateSettings("summarizeEveryTurns", Math.min(1000, Math.max(1, Math.round(Number(event.target.value) || 1))))} /></label>
               </div>
+              <p className="memory-editor-hint">当前已累计 {configuration.turnsSinceSummary.toLocaleString()} / {settings.summarizeEveryTurns.toLocaleString()} 轮，攒够后后台才整理一次；点「立即整理」会马上跑并重新计数。</p>
               <label className="memory-rules-field"><span>记忆生成规则</span><textarea value={settings.generationRules} onChange={(event) => updateSettings("generationRules", event.target.value)} spellCheck={false} /></label>
             </section>
 

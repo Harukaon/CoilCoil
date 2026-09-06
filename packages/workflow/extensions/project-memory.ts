@@ -22,9 +22,12 @@ import {
   canonicalPath,
   enforceProjectMemoryLimit,
   isInsidePiDirectory,
+  listMemoryEntryFiles,
   pathExists,
   readPersistedMemoryState,
   readUtf8,
+  recordMemoryTurn,
+  resetMemoryTurns,
   resolveProjectMemoryPaths,
   resolveProjectMemoryStorageRoot,
   ensureProjectMemory,
@@ -33,6 +36,7 @@ import {
 
 export {
   DEFAULT_MEMORY_GENERATION_RULES,
+  DEFAULT_MEMORY_SUMMARIZE_EVERY_TURNS,
   GLOBAL_MEMORY_MAX_CHARS,
   MEMORY_PROMPT_MARKER,
   PROJECT_MEMORY_MAX_CHARS,
@@ -41,9 +45,19 @@ export {
   buildMemoryWorkerPrompt,
   buildProjectMemoryPrompt,
   countCharacters,
+  normalizeSummarizeEveryTurns,
   readMemorySettings,
   resolveMemorySettingsPath,
 } from "./memory-settings.ts";
+export {
+  MEMORY_ENTRIES_DIRNAME,
+  MEMORY_INDEX_MARKER,
+  isMemoryIndex,
+  parseMemoryIndex,
+  renderMemoryIndex,
+  splitLegacyMemory,
+} from "./memory-index.ts";
+export type { MemoryIndexEntry } from "./memory-index.ts";
 export { buildMemoryWorkerLaunch, resolvePiWorkerInvocation } from "./memory-worker.ts";
 export type { MemoryWorkerChild, MemoryWorkerLaunch, MemoryWorkerOptions, MemoryWorkerRequest } from "./memory-worker.ts";
 export type { MemorySettings, ProjectMemoryPaths } from "./memory-settings.ts";
@@ -52,10 +66,14 @@ export {
   enforceProjectMemoryLimit,
   ensureProjectMemory,
   isInsidePiDirectory,
+  listMemoryEntryFiles,
+  migrateProjectMemoryToIndex,
   pathExists,
   readPersistedMemoryState,
   readUtf8,
+  recordMemoryTurn,
   recordProcessedSession,
+  resetMemoryTurns,
   resolveProjectMemoryPaths,
   resolveProjectMemoryStorageRoot,
   resolveProjectRoot,
@@ -291,6 +309,9 @@ export default function projectMemoryExtension(
           });
         },
       });
+      // 跑过一次就从头开始数：手动整理同样重置倒计时，否则用户点完「立即整理」
+      // 还会在几轮后被自动整理再跑一遍。
+      if (result === "started") await resetMemoryTurns(paths);
       if (notifyStarted && result === "started") notify?.("记忆整理已在后台启动", "info");
       if (result === "busy") {
         publishStatus(cwd, {
@@ -353,6 +374,7 @@ export default function projectMemoryExtension(
       const settings = await readMemorySettings(env);
       const { paths, memory } = await prepareMemory(cwd, storageRoot, settings.projectMaxChars);
       const globalContent = settings.globalEnabled ? await readUtf8(paths.globalMemoryFile) : "";
+      const entryFiles = settings.projectEnabled ? await listMemoryEntryFiles(paths) : [];
       publishStatus(cwd, {
         state: status?.state === "running" ? "running" : "idle",
         source: "prompt",
@@ -364,7 +386,7 @@ export default function projectMemoryExtension(
         systemPrompt: [
           event.systemPrompt,
           settings.globalEnabled ? buildGlobalMemoryPrompt(paths, globalContent, settings.globalMaxChars) : "",
-          settings.projectEnabled ? buildProjectMemoryPrompt(paths, memory.content, settings.projectMaxChars, settings.generationRules) : "",
+          settings.projectEnabled ? buildProjectMemoryPrompt(paths, memory.content, settings.projectMaxChars, settings.generationRules, entryFiles) : "",
         ].filter(Boolean).join("\n\n"),
       };
     } catch (error) {
@@ -404,9 +426,22 @@ export default function projectMemoryExtension(
     }
   });
 
+  // 每轮回复结束都会触发 agent_settled，但记忆整理是一次完整的后台模型调用，
+  // 一轮跑一次既贵又提炼不出新东西。这里只累计轮数，攒够配置的间隔才真正去跑。
   pi.on("agent_settled", async (_event, ctx) => {
+    const cwd = ctx.cwd;
     const settings = await readMemorySettings(env);
     if (!settings.autoSummarize) return;
+    if (await memoryIsDisabled(cwd, env)) return;
+    try {
+      const paths = await resolveProjectMemoryPaths(cwd, storageRoot);
+      const turns = await recordMemoryTurn(paths);
+      if (turns < settings.summarizeEveryTurns) return;
+      await resetMemoryTurns(paths);
+    } catch (error) {
+      notifyOnce(backgroundWarningState, snapshotNotifier(ctx), error, "记忆整理轮次计数失败");
+      return;
+    }
     await summarizeSession(ctx, false, "automatic");
   });
 

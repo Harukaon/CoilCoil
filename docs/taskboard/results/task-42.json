@@ -1,0 +1,35 @@
+{
+  "id": 42,
+  "status": "review",
+  "agentNotes": [
+    {
+      "by": "r5b",
+      "at": "2026-09-05T00:00:00.000Z",
+      "text": "【原来是怎么样的】\n后台记忆整理确实是每一轮都在跑：你每发一条消息、AI 回完，扩展就立刻在后台另起一个模型去读整段会话、改记忆文件。一天下来能跑几十上百次，绝大多数轮次根本没有新东西值得记，纯属白花钱、白占机器。\n\n【现在改成什么样】\n每轮只记一笔数，攒够 30 轮才真的整理一次，默认就是 30。\n这个 30 你可以自己改：记忆面板 →「生成与注入规则」那一块，我在「全局记忆上限」「项目记忆上限」旁边加了一个「自动整理间隔（轮）」，填几就是几轮整理一次（1 到 1000）。下面还有一行小字告诉你现在攒到第几轮了，比如「当前已累计 7 / 30 轮」。\n没有新开设置页，就在记忆面板原来那一屏里，改完点右上角「保存」就生效。\n另外：点「立即整理」会马上跑一次，并且把计数清零重新数，不会刚整理完没几轮又自动跑一次。「回复后自动整理」这个开关关掉的话，就完全不跑，和以前一样。\n\n【记忆原来怎么存】\n一个项目一个 MEMORY.md，什么都往里堆，而且每一轮对话都把这个文件的全文塞进 AI 的上下文里。记得越多，每轮浪费的上下文越多。\n\n【现在怎么存】\n改成「目录 + 分册」：\n- MEMORY.md 从今往后只是一份索引，一条记忆一行，写清楚标题、一句话摘要和正文在哪个文件；\n- 每条记忆的正文各自存成一个单独的 Markdown 文件，放在同目录的 memories/ 文件夹里；\n- 每轮只把那份很短的索引给 AI，AI 看摘要判断这次要不要用某条记忆，需要哪条自己去读哪条。这样记得再多，日常也不占地方。\n\n【你已有的记忆会怎么样】\n不会丢，也不用你做任何事。下次 CoilCoil 打开这个项目时会自动转格式：原来 MEMORY.md 里的内容按小标题拆成一条一条，原文一字不改地搬进 memories/ 下的独立文件，MEMORY.md 换成指向它们的索引。以前散落在记忆目录里的其他 .md 文件（比如 server.md）留在原地不动，只是补进索引里，方便 AI 找到。已经是索引格式的文件不会被反复重写，你在面板里手工编辑过的索引也不会被洗掉。\n记忆面板里现在能看到这些正文文件：项目那一栏除了原来的 MEMORY.md，还会多列出每条记忆的正文，点开就能改。正文不再算「字数上限」，因为它本来就不占常驻上下文，只有索引才受上限约束。\n\n【验证】\n类型检查和单元测试都过了（workflow / runtime-core / runtime-protocol / desktop 四个包）。新增测试覆盖：第 30 轮才触发、间隔可配置、关掉开关就不跑、手动整理会重置计数、旧的整块记忆迁移成索引且内容不丢、再次启动不会重复迁移、注入上下文的只有索引不含正文。终端那个已知偶发失败的测试单独重跑是过的。\n一个说明：全局记忆（GLOBAL.md）这次没改成索引式，它本来就短、是你手写的，后台任务也不会动它。"
+    },
+    {
+      "by": "r5b",
+      "at": "2026-09-05T00:00:00.000Z",
+      "text": "【你可以这样验一下】\n1. 打开记忆面板，「生成与注入规则」里应该多了一个「自动整理间隔（轮）」，默认 30，下面一行显示当前累计轮数。\n2. 把它改成 2，保存，然后随便聊两轮，第二轮结束后应该能看到记忆整理在后台跑起来（面板右上角状态会变「整理中」）。验完记得改回 30。\n3. 看记忆面板项目那一栏：原来的 MEMORY.md 变成了一份索引（每行一条：标题、摘要、文件名），下面多出几行就是各条记忆的正文文件，点开能看到原来的内容一字没少。"
+    }
+  ],
+  "commits": [
+    {
+      "ref": "d1fd2528e",
+      "at": "2026-09-05T00:00:00.000Z",
+      "message": "feat(memory): 后台整理按轮数触发，记忆改为索引 + 分文件 (#42)",
+      "files": [
+        "packages/workflow/extensions/memory-index.ts",
+        "packages/workflow/extensions/memory-settings.ts",
+        "packages/workflow/extensions/memory-storage.ts",
+        "packages/workflow/extensions/project-memory.ts",
+        "packages/runtime-core/src/memory-documents.ts",
+        "packages/runtime-core/src/runtime-resources.ts",
+        "packages/runtime-protocol/src/index.ts",
+        "apps/desktop/src/renderer/src/features/memory/MemoryWorkspace.tsx",
+        "packages/workflow/tests/project-memory.test.ts",
+        "packages/runtime-core/tests/memory-configuration.test.ts"
+      ]
+    }
+  ]
+}

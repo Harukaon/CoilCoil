@@ -128,3 +128,49 @@ test("memory configuration lists every project in the store, not just the open o
     else process.env.PI_PROJECT_MEMORY_DIR = previousStorage;
   }
 });
+
+test("memory bodies and the turn counter reach the panel", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-memory-entries-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const storageRoot = join(root, "memory");
+  const project = join(root, "project-open");
+  mkdirSync(join(project, ".git"), { recursive: true });
+  const projectStore = join(storageRoot, "project-open");
+  mkdirSync(join(projectStore, "memories"), { recursive: true });
+  writeFileSync(join(projectStore, "MEMORY.md"), "- [部署](memories/部署.md)：生产用 server-a\n");
+  writeFileSync(join(projectStore, "memories", "部署.md"), "端口 8443");
+  writeFileSync(
+    join(projectStore, ".coilcoil-memory-state.json"),
+    JSON.stringify({ version: 1, processedSessions: [], turnsSinceSummary: 7 }),
+  );
+  const previousStorage = process.env.PI_PROJECT_MEMORY_DIR;
+  process.env.PI_PROJECT_MEMORY_DIR = storageRoot;
+  const runtime = Object.create(CoilCoilRuntime.prototype) as MemoryRuntime;
+  runtime.agentDir = join(root, "agent");
+  runtime.mcpCwd = (cwd) => cwd ?? project;
+  runtime.reloadActiveSessionResources = () => undefined;
+
+  try {
+    const listed = await runtime.getMemoryConfiguration(project);
+    assert.equal(listed.settings.summarizeEveryTurns, 30);
+    assert.equal(listed.turnsSinceSummary, 7);
+    const entry = listed.projects.find((document) => document.kind === "entry");
+    assert.equal(entry?.content, "端口 8443");
+    // Bodies are read on demand, so they carry no injection budget of their own.
+    assert.equal(entry?.maxChars, 0);
+    assert.equal(listed.projects.find((document) => document.kind === "index")?.filePath, listed.project?.filePath);
+
+    // A body edited in the panel is written back like any other memory file.
+    const saved = await runtime.saveMemoryConfiguration({
+      settings: { ...listed.settings, summarizeEveryTurns: 0 },
+      globalContent: "",
+      projectContents: [{ filePath: entry!.filePath, content: "端口 9443" }],
+    }, project);
+    assert.equal(readFileSync(entry!.filePath, "utf8"), "端口 9443");
+    // An out-of-range interval is clamped rather than rejected.
+    assert.equal(saved.settings.summarizeEveryTurns, 1);
+  } finally {
+    if (previousStorage === undefined) delete process.env.PI_PROJECT_MEMORY_DIR;
+    else process.env.PI_PROJECT_MEMORY_DIR = previousStorage;
+  }
+});

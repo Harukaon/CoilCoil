@@ -14,6 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  DEFAULT_MEMORY_SUMMARIZE_EVERY_TURNS,
+  MEMORY_ENTRIES_DIRNAME,
+  MEMORY_INDEX_MARKER,
   PROJECT_MEMORY_MAX_CHARS,
   PROJECT_MEMORY_STATUS_EVENT,
   buildMemoryWorkerLaunch,
@@ -23,6 +26,9 @@ import {
   enforceProjectMemoryLimit,
   ensureProjectMemory,
   isInsidePiDirectory,
+  listMemoryEntryFiles,
+  parseMemoryIndex,
+  readPersistedMemoryState,
   resolveProjectMemoryPaths,
   resolveProjectMemoryStorageRoot,
   resolveProjectRoot,
@@ -94,6 +100,15 @@ async function waitFor(
     if (Date.now() >= deadline) throw new Error("timed out waiting for condition");
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
+}
+
+/** 写一份记忆设置，避免测试读到开发机上真实的 ~/.pi/agent/memory-settings.json。 */
+async function writeMemorySettings(
+  agentDir: string,
+  settings: Record<string, unknown>,
+): Promise<void> {
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(join(agentDir, "memory-settings.json"), JSON.stringify(settings), "utf8");
 }
 
 async function pathMissing(path: string): Promise<boolean> {
@@ -184,13 +199,18 @@ test("legacy project-local memory migrates into its global project folder", asyn
   await ensureProjectMemory(paths);
 
   assert.equal(paths.projectMemoryDir, join(memoryRoot, "Project"));
-  assert.match(await readFile(paths.memoryFile, "utf8"), /^索引：server\.md/);
+  const index = await readFile(paths.memoryFile, "utf8");
+  assert.match(index, new RegExp(MEMORY_INDEX_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const entries = parseMemoryIndex(index);
+  assert.deepEqual(entries.map((entry) => entry.file).sort(), [`${MEMORY_ENTRIES_DIRNAME}/既有记忆.md`, "server.md"]);
+  const body = await readFile(join(paths.projectMemoryDir, `${MEMORY_ENTRIES_DIRNAME}/既有记忆.md`), "utf8");
+  assert.match(body, /生产服务使用 server-a/);
   assert.equal(await readFile(join(paths.projectMemoryDir, "server.md"), "utf8"), "端口 8443");
   assert.equal(await pathMissing(join(project, ".pi", "MEMORY.md")), true);
   assert.equal(await pathMissing(join(legacyMemoryDir, "server.md")), true);
 });
 
-test("memory length is a soft constraint and oversized content is not rewritten", async (t) => {
+test("oversized memory is moved into a body file instead of being truncated", async (t) => {
   const root = await temporaryDirectory(t);
   const project = join(root, "Project");
   const memoryRoot = join(root, "global-memory");
@@ -201,12 +221,18 @@ test("memory length is a soft constraint and oversized content is not rewritten"
   await writeFile(paths.memoryFile, original, "utf8");
 
   const result = await enforceProjectMemoryLimit(paths);
-  assert.equal(result.content, original);
-  assert.equal(await readFile(paths.memoryFile, "utf8"), original);
+  const entries = parseMemoryIndex(result.content);
+  assert.equal(entries.length, 1);
+  assert.ok(countCharacters(result.content) < countCharacters(original));
+  assert.equal(
+    (await readFile(join(paths.projectMemoryDir, entries[0].file), "utf8")).trim(),
+    original.trim(),
+  );
   assert.deepEqual(
     (await readdir(paths.projectMemoryDir)).filter((name) => name.endsWith(".md")),
     ["MEMORY.md"],
   );
+  assert.deepEqual(await listMemoryEntryFiles(paths), ["既有记忆.md"]);
 });
 
 test("system prompt injects current project memory and soft limit guidance", async (t) => {
@@ -221,7 +247,8 @@ test("system prompt injects current project memory and soft limit guidance", asy
 
   assert.equal(countCharacters(injected ?? ""), PROJECT_MEMORY_MAX_CHARS);
   assert.match(prompt, /可以使用 read、write、edit/);
-  assert.match(prompt, /并不要求是索引/);
+  assert.match(prompt, /常驻上下文里只有索引/);
+  assert.match(prompt, new RegExp(`${MEMORY_ENTRIES_DIRNAME}/`));
   assert.match(prompt, /采用软约束/);
   assert.match(prompt, /\[记忆字数\]/);
   assert.doesNotMatch(prompt, /wc -m/);
@@ -245,10 +272,11 @@ test("worker prompt contains paths and policy but never embeds session contents"
 
   assert.match(prompt, new RegExp(sessionFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(prompt, new RegExp(sentinel));
-  assert.ok(prompt.indexOf("先读取现有 MEMORY.md") < prompt.indexOf("再读取指定的 session JSONL"));
+  assert.ok(prompt.indexOf("先读取 MEMORY.md 索引") < prompt.indexOf("再读取指定的 session JSONL"));
   assert.match(prompt, /不会有用户|不要向用户提问|无人值守/);
   assert.match(prompt, /严禁读取或修改任何其他文件或目录/);
-  assert.match(prompt, /普通记忆正文，也可能是索引/);
+  assert.match(prompt, /MEMORY\.md 是索引/);
+  assert.match(prompt, /不要把正文写进 MEMORY\.md/);
   assert.match(prompt, /采用软约束/);
   assert.match(prompt, /\[记忆字数\]/);
   assert.doesNotMatch(prompt, /wc -m/);
@@ -337,11 +365,13 @@ test("settled sessions are summarized in the background and injected into later 
   const sessionFile = join(root, "session.jsonl");
   await mkdir(project, { recursive: true });
   await writeFile(sessionFile, '{"type":"message","message":{"role":"user","content":"部署端口是 8443"}}\n', "utf8");
+  const agentDir = join(root, "agent");
+  await writeMemorySettings(agentDir, { version: 1, summarizeEveryTurns: 1 });
   const launches: MemoryWorkerLaunch[] = [];
   const children: FakeWorker[] = [];
   const harness = createHarness();
   projectMemoryExtension(harness.pi as any, {
-    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi", PI_CODING_AGENT_DIR: agentDir },
     spawnWorker: (launch) => {
       launches.push(launch);
       const child = new FakeWorker();
@@ -714,4 +744,171 @@ test("worker completion does not hard-reject or roll back MEMORY.md", async (t) 
   const memory = await readFile(paths.memoryFile, "utf8");
   assert.equal(memory, workerResult);
   assert.equal(notices.some((notice) => notice.includes("拒绝保存")), false);
+});
+
+test("background summaries wait for the configured number of turns", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const agentDir = join(root, "agent");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  await writeMemorySettings(agentDir, { version: 1 });
+  const launches: MemoryWorkerLaunch[] = [];
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi", PI_CODING_AGENT_DIR: agentDir },
+    spawnWorker: (launch) => {
+      launches.push(launch);
+      return new FakeWorker();
+    },
+  });
+  const context = contextFor(project, sessionFile);
+  const settle = harness.handlers.get("agent_settled")?.[0];
+
+  for (let turn = 1; turn < DEFAULT_MEMORY_SUMMARIZE_EVERY_TURNS; turn++) await settle?.({}, context);
+  assert.equal(DEFAULT_MEMORY_SUMMARIZE_EVERY_TURNS, 30);
+  assert.equal(launches.length, 0);
+
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  assert.equal(
+    (await readPersistedMemoryState(paths)).turnsSinceSummary,
+    DEFAULT_MEMORY_SUMMARIZE_EVERY_TURNS - 1,
+  );
+
+  await settle?.({}, context);
+  assert.equal(launches.length, 1);
+  assert.equal((await readPersistedMemoryState(paths)).turnsSinceSummary, 0);
+});
+
+test("the turn interval is configurable and manual runs restart the count", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const agentDir = join(root, "agent");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  await writeMemorySettings(agentDir, { version: 1, summarizeEveryTurns: 3 });
+  const children: FakeWorker[] = [];
+  const launches: MemoryWorkerLaunch[] = [];
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi", PI_CODING_AGENT_DIR: agentDir },
+    spawnWorker: (launch) => {
+      launches.push(launch);
+      const child = new FakeWorker();
+      children.push(child);
+      return child;
+    },
+  });
+  const context = contextFor(project, sessionFile);
+  const settle = harness.handlers.get("agent_settled")?.[0];
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+
+  await settle?.({}, context);
+  await settle?.({}, context);
+  assert.equal(launches.length, 0);
+  await settle?.({}, context);
+  assert.equal(launches.length, 1);
+  children[0].emit("exit", 0, null);
+  await waitFor(() => pathMissing(paths.workerLockFile));
+
+  await settle?.({}, context);
+  await settle?.({}, context);
+  await harness.commands.get("memory")?.handler("", context);
+  assert.equal(launches.length, 2);
+  assert.equal((await readPersistedMemoryState(paths)).turnsSinceSummary, 0);
+  children[1].emit("exit", 0, null);
+  await waitFor(() => pathMissing(paths.workerLockFile));
+
+  await settle?.({}, context);
+  assert.equal(launches.length, 2);
+});
+
+test("turning auto summaries off stops the background task entirely", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const agentDir = join(root, "agent");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  await writeMemorySettings(agentDir, { version: 1, autoSummarize: false, summarizeEveryTurns: 1 });
+  const launches: MemoryWorkerLaunch[] = [];
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi", PI_CODING_AGENT_DIR: agentDir },
+    spawnWorker: (launch) => {
+      launches.push(launch);
+      return new FakeWorker();
+    },
+  });
+  const context = contextFor(project, sessionFile);
+
+  await harness.handlers.get("agent_settled")?.[0]({}, context);
+  await harness.handlers.get("agent_settled")?.[0]({}, context);
+  assert.equal(launches.length, 0);
+});
+
+test("a legacy single-file memory becomes an index plus one body file per section", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  await mkdir(project, { recursive: true });
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  await ensureProjectMemory(paths);
+  await writeFile(
+    paths.memoryFile,
+    "## 部署\n生产用 server-a\n端口 8443，回滚要先停 worker\n\n## 用户偏好\n回答要短，不要贴代码\n",
+    "utf8",
+  );
+
+  await ensureProjectMemory(paths);
+  const index = await readFile(paths.memoryFile, "utf8");
+  const entries = parseMemoryIndex(index);
+
+  assert.deepEqual(entries.map((entry) => entry.title), ["部署", "用户偏好"]);
+  assert.deepEqual(await listMemoryEntryFiles(paths), ["部署.md", "用户偏好.md"]);
+  assert.equal(entries[0].summary, "生产用 server-a");
+  assert.doesNotMatch(index, /回滚要先停 worker/);
+  assert.match(
+    await readFile(join(paths.projectMemoryDir, entries[0].file), "utf8"),
+    /端口 8443，回滚要先停 worker/,
+  );
+
+  // 已经是索引就别再动它：用户可能手工编辑过索引正文。
+  const edited = `${index}- [手写条目](memories/手写条目.md)：手工加的\n`;
+  await writeFile(paths.memoryFile, edited, "utf8");
+  await ensureProjectMemory(paths);
+  assert.equal(await readFile(paths.memoryFile, "utf8"), edited);
+});
+
+test("only the index is injected while bodies stay listed for on-demand reads", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const agentDir = join(root, "agent");
+  await mkdir(project, { recursive: true });
+  await writeMemorySettings(agentDir, { version: 1 });
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  await ensureProjectMemory(paths);
+  await writeFile(
+    paths.memoryFile,
+    "## 部署\n生产用 server-a\n发布脚本在 ops/deploy.sh，回滚要先停 worker\n",
+    "utf8",
+  );
+
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_CODING_AGENT_DIR: agentDir },
+  });
+  const context = contextFor(project, join(root, "session.jsonl"));
+  const result = await harness.handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, context);
+
+  assert.match(result.systemPrompt, /- \[部署\]/);
+  assert.match(result.systemPrompt, /生产用 server-a/);
+  assert.match(result.systemPrompt, new RegExp(`${MEMORY_ENTRIES_DIRNAME}/部署\\.md`));
+  assert.doesNotMatch(result.systemPrompt, /回滚要先停 worker/);
 });
