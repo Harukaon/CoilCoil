@@ -10,6 +10,15 @@ import { Type } from "typebox";
 const TOOL_NAME = "todo";
 const WIDGET_KEY = "hao-todo-plan";
 const MAX_VISIBLE_ITEMS = 6;
+/**
+ * Custom message type carrying the current plan back into the model's context.
+ *
+ * The tool result alone only reaches the model once, at the moment of the call.
+ * A long turn later, the plan sits hundreds of messages back and the model stops
+ * acting on it — it neither marks items done nor picks up the next one. This
+ * message re-states the plan next to every new user message instead.
+ */
+const CONTEXT_MESSAGE_TYPE = "coilcoil-todo-state";
 
 export const TODO_STATUSES = [
   "pending",
@@ -122,6 +131,69 @@ function formatPlanForModel(plan: readonly TodoItem[]): string {
   ].join("\n");
 }
 
+/**
+ * The plan as the model should see it at the start of every round.
+ *
+ * Returns `undefined` when there is nothing left to track — no plan at all, or
+ * one whose items are all completed. Re-stating a finished list every round is
+ * pure noise, and an empty list has nothing to say.
+ */
+export function buildTodoContextText(
+  plan: readonly TodoItem[],
+): string | undefined {
+  const completed = plan.filter((item) => item.status === "completed").length;
+  if (plan.length === 0 || completed === plan.length) return undefined;
+
+  const active = plan.find((item) => item.status === "in_progress");
+  const lines = [
+    "<todo_state>",
+    `当前 Todo（已完成 ${completed}/${plan.length}）`,
+    ...plan.map((item, index) => {
+      const line = `${statusSymbol(item.status)} ${index + 1}. ${item.text}`;
+      return item.status === "in_progress" ? `${line} ← 进行中` : line;
+    }),
+    active
+      ? "做完「进行中」这一项就立刻调用 todo 工具更新状态，再开始下一项。"
+      : "当前没有进行中的项：开始下一项之前，先用 todo 工具把它标成 in_progress。",
+    "</todo_state>",
+  ];
+  return lines.join("\n");
+}
+
+function samePlan(
+  left: readonly TodoItem[] | undefined,
+  right: readonly TodoItem[],
+): boolean {
+  if (!left || left.length !== right.length) return false;
+  return left.every((item, index) =>
+    item.text === right[index].text && item.status === right[index].status
+  );
+}
+
+/**
+ * The freshest plan the given context still shows the model.
+ *
+ * Both the tool's own result and the injected state message carry the plan in
+ * `details`, so either one counts as "the model can see it". Used to decide
+ * whether context compaction has dropped the plan out of the window.
+ */
+export function newestTodoStateInContext(
+  messages: readonly unknown[],
+): TodoItem[] | undefined {
+  let newest: TodoItem[] | undefined;
+  for (const message of messages) {
+    if (typeof message !== "object" || message === null) continue;
+    const record = message as Record<string, unknown>;
+    const isToolResult = record.role === "toolResult" &&
+      record.toolName === TOOL_NAME;
+    const isStateMessage = record.role === "custom" &&
+      record.customType === CONTEXT_MESSAGE_TYPE;
+    if (!isToolResult && !isStateMessage) continue;
+    if (isTodoDetails(record.details)) newest = clonePlan(record.details.plan);
+  }
+  return newest;
+}
+
 function visibleRange(plan: readonly TodoItem[]): {
   start: number;
   end: number;
@@ -223,11 +295,50 @@ export default function todoExtension(pi: ExtensionAPI): void {
     renderWidget(ctx);
   };
 
+  const stateMessage = () => {
+    const text = buildTodoContextText(plan);
+    if (!text) return undefined;
+    return {
+      customType: CONTEXT_MESSAGE_TYPE,
+      content: text,
+      // Context only: the plan already has its own widget and tool cards.
+      display: false,
+      details: { plan: clonePlan(plan) } satisfies TodoDetails,
+    };
+  };
+
   pi.on("session_start", (_event, ctx) => reconstructState(ctx));
   pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
   pi.on("session_shutdown", (_event, ctx) => {
     if (ctx.hasUI) ctx.ui.setWidget(WIDGET_KEY, undefined);
     plan = [];
+  });
+
+  // Every round starts with the plan in view. The message is appended to the
+  // conversation rather than folded into the system prompt on purpose: history
+  // only ever grows, so the provider's prompt cache still hits, while a system
+  // prompt that changed with the plan would invalidate the whole prefix.
+  pi.on("before_agent_start", () => {
+    const message = stateMessage();
+    return message ? { message } : undefined;
+  });
+
+  // Safety net for context compaction. The appended message is normally still
+  // in the window, and re-stating the plan on every request would cost the
+  // conversation's prompt cache, so this only fires once compaction has
+  // actually dropped the plan out of what the model can see.
+  pi.on("context", (event) => {
+    const message = stateMessage();
+    if (!message) return undefined;
+    if (samePlan(newestTodoStateInContext(event.messages), plan)) {
+      return undefined;
+    }
+    return {
+      messages: [
+        ...event.messages,
+        { role: "custom" as const, ...message, timestamp: Date.now() },
+      ],
+    };
   });
 
   pi.registerTool({
