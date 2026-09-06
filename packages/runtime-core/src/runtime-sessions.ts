@@ -42,6 +42,7 @@ import {
   SUBAGENT_ACTIVITY_CHANNEL,
   projectMemoryStatusByCwd,
 } from "./runtime-constants.js";
+import { installCompactionSettings } from "./compaction-settings.js";
 import { RuntimeMcpConfig } from "./runtime-mcp-config.js";
 import {
   ActiveSession,
@@ -254,6 +255,11 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     }
 
     const settingsManager = SettingsManager.create(cwd, this.agentDir, { projectTrusted: true });
+    // Pi's compaction budget is two absolute token counts that never look at the
+    // model. Bind it to the window the session is actually running under, which
+    // the session itself reports once it exists.
+    let compactionModelSource: { model?: { contextWindow: number } } | undefined;
+    installCompactionSettings(settingsManager, () => compactionModelSource?.model?.contextWindow);
     configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
     const eventBus = createEventBus();
     let installedActive: ActiveSession | undefined;
@@ -393,6 +399,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       excludeTools: [...HIDDEN_AGENT_TOOLS],
     });
     markTiming("createAgentSession");
+    compactionModelSource = created.session;
     await created.session.bindExtensions({});
     markTiming("bindExtensions");
     if (created.session.model) {
