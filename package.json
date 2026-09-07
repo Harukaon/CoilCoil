@@ -11,6 +11,7 @@
     "apps/desktop",
     "apps/cli",
     "packages/diagnostics",
+    "packages/mcp",
     "packages/runtime-core",
     "packages/runtime-protocol",
     "packages/runtime-server",

@@ -1,0 +1,23 @@
+{
+  "name": "@coilcoil/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CoilCoil's own MCP client: connections, credentials and tool discovery",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@coilcoil/runtime-protocol": "0.1.0",
+    "@modelcontextprotocol/sdk": "1.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

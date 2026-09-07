@@ -11,6 +11,7 @@ export default defineConfig({
           // rather than externalized: an externalized one is resolved at runtime
           // and dies on its own `.js` import specifiers before anything starts.
           "@coilcoil/diagnostics",
+          "@coilcoil/mcp",
           "@coilcoil/runtime-core",
           "@coilcoil/runtime-protocol",
           "@coilcoil/runtime-server",
