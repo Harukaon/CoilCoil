@@ -47,6 +47,8 @@ export interface McpAuthStart {
 
 /** pi's listener gave five minutes; a person logging in deserves at least that. */
 const AUTH_TIMEOUT_MS = 5 * 60_000;
+/** How often idle connections are swept. Coarse on purpose — this is housekeeping. */
+const IDLE_SWEEP_MS = 30_000;
 
 interface AuthFlow {
   /** Open the browser rather than only recording where it would have gone. */
@@ -96,6 +98,9 @@ export class McpManager {
   private readonly connections = new Map<string, McpConnection>();
   private readonly definitions = new Map<string, McpServerConfiguration>();
   private readonly failedAt = new Map<string, number>();
+  /** When each connection was last actually used, for the idle sweep. */
+  private readonly lastUsedAt = new Map<string, number>();
+  private idleSweep?: ReturnType<typeof setInterval>;
   private readonly flows = new Map<string, AuthFlow>();
   /** Servers switched off for the current conversation only. */
   private readonly sessionDisabled = new Set<string>();
@@ -135,7 +140,55 @@ export class McpManager {
     const connection = this.connections.get(name);
     this.connections.delete(name);
     this.failedAt.delete(name);
+    this.lastUsedAt.delete(name);
     await connection?.close();
+  }
+
+  /**
+   * Let go of servers nobody has used for a while.
+   *
+   * An MCP server is usually a child process holding a network session, and a
+   * workspace someone left open for a day should not still be running six of
+   * them. `keep-alive` is the opt-out for the servers that are expensive to
+   * start; `eager` means the user wants it up, so it is left alone too.
+   */
+  private sweepIdleConnections(): void {
+    const now = Date.now();
+    for (const [name, connection] of this.connections) {
+      const definition = this.definitions.get(name);
+      if (!definition || definition.lifecycle !== "lazy") continue;
+      const minutes = definition.idleTimeout;
+      if (!minutes || minutes <= 0) continue;
+      if (connection.status !== "connected") continue;
+      const since = this.lastUsedAt.get(name) ?? now;
+      if (now - since < minutes * 60_000) continue;
+      void this.drop(name);
+    }
+  }
+
+  private startIdleSweep(): void {
+    if (this.idleSweep) return;
+    this.idleSweep = setInterval(() => this.sweepIdleConnections(), IDLE_SWEEP_MS);
+    // Housekeeping must never be the reason the process stays alive.
+    this.idleSweep.unref?.();
+  }
+
+  /** Tools whose servers the user asked to register directly with the Agent. */
+  async directTools(): Promise<Array<{ server: string; tool: McpToolSummary }>> {
+    await this.reload();
+    const listed: Array<{ server: string; tool: McpToolSummary }> = [];
+    await Promise.all(this.availableDefinitions()
+      .filter((definition) => definition.directTools === true || (Array.isArray(definition.directTools) && definition.directTools.length > 0))
+      .map(async (definition) => {
+        const wanted = Array.isArray(definition.directTools) ? new Set(definition.directTools) : undefined;
+        const connection = this.connectionFor(definition.name);
+        if (connection.status !== "connected" && await connection.connect() !== "connected") return;
+        for (const tool of connection.tools) {
+          if (wanted && !wanted.has(tool.name)) continue;
+          listed.push({ server: definition.name, tool });
+        }
+      }));
+    return listed;
   }
 
   private connectionFor(name: string): McpConnection {
@@ -170,7 +223,14 @@ export class McpManager {
     flow.state = authorizationState(url);
     this.flows.set(name, flow);
     if (!flow.interactive) return;
-    if (flow.state) flow.waiting = this.callback.expect(flow.state, AUTH_TIMEOUT_MS);
+    if (flow.state) {
+      const waiting = this.callback.expect(flow.state, AUTH_TIMEOUT_MS);
+      // Nobody is obliged to await this. The dialog can be closed, the app can
+      // quit, the five minutes can simply run out — and an abandoned login must
+      // not surface as an unhandled rejection in the runtime process.
+      waiting.catch(() => undefined);
+      flow.waiting = waiting;
+    }
     await this.options.openAuthorization(url);
   }
 
@@ -240,6 +300,8 @@ export class McpManager {
     const outcome = await this.connectionFor(name).connect();
     if (outcome === "failed") this.failedAt.set(name, Date.now());
     else this.failedAt.delete(name);
+    this.lastUsedAt.set(name, Date.now());
+    this.startIdleSweep();
     return this.statusFor(definition);
   }
 
@@ -381,6 +443,8 @@ export class McpManager {
     if (!definition) throw new Error(`没有找到 MCP Server「${server}」。`);
     if (definition.disabled) throw new Error(`MCP Server「${server}」已停用。`);
     if (this.sessionDisabled.has(server)) throw new Error(`MCP Server「${server}」已在当前会话停用。`);
+    this.lastUsedAt.set(server, Date.now());
+    this.startIdleSweep();
     return this.connectionFor(server).callTool(tool, args);
   }
 
@@ -395,6 +459,8 @@ export class McpManager {
   }
 
   async close(): Promise<void> {
+    if (this.idleSweep) clearInterval(this.idleSweep);
+    this.idleSweep = undefined;
     for (const name of [...this.flows.keys()]) this.cancelAuth(name);
     await Promise.allSettled([...this.connections.values()].map((connection) => connection.close()));
     this.connections.clear();

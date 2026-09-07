@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
-import { MCP_MANAGER_CHANNEL, describeTools, requestMcpManager } from "../extensions/mcp-tools.ts";
+import { MCP_MANAGER_CHANNEL, describeTools, directToolName, requestMcpManager } from "../extensions/mcp-tools.ts";
 
 test("向运行时要 MCP 客户端，拿到的是同一个对象", () => {
   // 不是复制一份配置自己再连一遍——Agent 和设置界面共用同一套连接和同一份凭据。
@@ -35,4 +35,10 @@ test("一个工具都没有的时候说清楚可能是为什么", () => {
   const rendered = describeTools([]);
   assert.match(rendered, /没有可用的 MCP 工具/);
   assert.match(rendered, /还没配置|已停用/);
+});
+
+test("直接注册的工具名字带着服务器，横杠换成下划线", () => {
+  // `mcp__` 这个前缀是 CoilCoil 其他地方（上下文统计）认 MCP 工具的依据。
+  assert.equal(directToolName("github", "search"), "mcp__github__search");
+  assert.equal(directToolName("my-server", "read"), "mcp__my_server__read");
 });

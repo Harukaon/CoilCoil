@@ -80,6 +80,54 @@ export function describeTools(listed: Array<{ server: string; tool: { name: stri
   return [...byServer].map(([server, lines]) => `${server}\n${lines.join("\n")}`).join("\n\n");
 }
 
+/**
+ * The name one MCP tool gets when it is registered with the Agent directly.
+ *
+ * Qualified by server because two servers routinely ship a `search`, and the
+ * `mcp__` prefix is what the rest of CoilCoil already uses to recognise an MCP
+ * tool when accounting for context (see `runtime-token-breakdown.ts`).
+ */
+export function directToolName(server: string, tool: string): string {
+  return `mcp__${server.replace(/-/g, "_")}__${tool}`;
+}
+
+/**
+ * Register the tools of servers the user asked to expose directly.
+ *
+ * Opt-in, and deliberately so: every directly registered tool sits in the
+ * model's schema on every turn whether or not it is used, which is exactly the
+ * cost the single `mcp` tool exists to avoid. Someone who turns this on for one
+ * server has decided that server is worth it.
+ *
+ * This runs after activation because it has to connect to find out what the
+ * tools are. Failing is not fatal — the `mcp` tool still reaches every server.
+ */
+async function registerDirectTools(pi: ExtensionAPI, manager: McpManager): Promise<void> {
+  const listed = await manager.directTools();
+  for (const { server, tool } of listed) {
+    const name = directToolName(server, tool.name);
+    pi.registerTool({
+      name,
+      label: `${server} · ${tool.name}`,
+      description: tool.description ?? `${server} 提供的 ${tool.name} 工具。`,
+      parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as never,
+      async execute(_toolCallId, params) {
+        try {
+          const result = await manager.callTool(server, tool.name, (params ?? {}) as Record<string, unknown>);
+          const content = (result as { content?: Array<{ type: string; text?: string }> }).content;
+          const text = Array.isArray(content)
+            ? content.filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n")
+            : JSON.stringify(result);
+          return textResult(text || "（服务器没有返回内容）", { server, tool: tool.name });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return textResult(message, { error: "call_failed", message, server, tool: tool.name }, true);
+        }
+      },
+    });
+  }
+}
+
 export default function coilcoilMcpTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: TOOL_NAME,
@@ -126,4 +174,11 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
       }
     },
   });
+
+  const manager = requestMcpManager(pi.events);
+  if (manager) {
+    void registerDirectTools(pi, manager).catch(() => {
+      // A server that will not come up must not take the `mcp` tool with it.
+    });
+  }
 }

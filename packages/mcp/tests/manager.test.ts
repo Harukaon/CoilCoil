@@ -217,3 +217,53 @@ test("关掉之后连接全部收干净", async () => {
   await mcp.close();
   assert.equal((await mcp.status()).connectedCount, 0);
 });
+
+test("只有明确要求直接注册的服务器才进 directTools", async (t) => {
+  // 直接注册的工具每一轮都躺在模型的 schema 里，不管用不用都在付 token，
+  // 所以这是一件要用户明说的事。
+  const { manager: mcp, servers } = manager([server()]);
+  t.after(() => mcp.close());
+  assert.deepEqual(await mcp.directTools(), []);
+
+  servers[0] = server({ directTools: true });
+  assert.deepEqual((await mcp.directTools()).map((entry) => entry.tool.name), ["echo"]);
+});
+
+test("directTools 给了名单就只注册名单里那几个", async (t) => {
+  const { manager: mcp } = manager([server({ directTools: ["不存在的工具"] })]);
+  t.after(() => mcp.close());
+  assert.deepEqual(await mcp.directTools(), []);
+});
+
+test("停用的服务器不会因为 directTools 就被 Agent 看到", async (t) => {
+  const { manager: mcp } = manager([server({ directTools: true, disabled: true })]);
+  t.after(() => mcp.close());
+  assert.deepEqual(await mcp.directTools(), []);
+});
+
+test("空闲超时只针对按需的服务器，保持连接的那档不受影响", async (t) => {
+  const { manager: mcp, servers } = manager([server({ lifecycle: "keep-alive", idleTimeout: 1 })]);
+  t.after(() => mcp.close());
+  await mcp.connect("smoke");
+  // 直接把「上次使用」推到很久以前，再手动扫一次。
+  (mcp as unknown as { lastUsedAt: Map<string, number> }).lastUsedAt.set("smoke", Date.now() - 10 * 60_000);
+  (mcp as unknown as { sweepIdleConnections(): void }).sweepIdleConnections();
+  assert.equal((await mcp.status()).servers[0]?.status, "connected", "keep-alive 不该被扫掉");
+
+  servers[0] = server({ lifecycle: "lazy", idleTimeout: 1 });
+  await mcp.connect("smoke");
+  (mcp as unknown as { lastUsedAt: Map<string, number> }).lastUsedAt.set("smoke", Date.now() - 10 * 60_000);
+  (mcp as unknown as { sweepIdleConnections(): void }).sweepIdleConnections();
+  await new Promise((resolveTick) => setImmediate(resolveTick));
+  assert.equal((await mcp.status()).servers[0]?.status, "not connected");
+});
+
+test("没设空闲超时就不会被扫掉", async (t) => {
+  const { manager: mcp } = manager([server({ lifecycle: "lazy" })]);
+  t.after(() => mcp.close());
+  await mcp.connect("smoke");
+  (mcp as unknown as { lastUsedAt: Map<string, number> }).lastUsedAt.set("smoke", 0);
+  (mcp as unknown as { sweepIdleConnections(): void }).sweepIdleConnections();
+  await new Promise((resolveTick) => setImmediate(resolveTick));
+  assert.equal((await mcp.status()).servers[0]?.status, "connected");
+});
