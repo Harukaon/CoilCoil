@@ -2073,3 +2073,27 @@
   --pane-fill: hsl(var(--th) var(--ts) 12.5%);
   --composer-fill: hsl(var(--th) var(--ts) 19.0%);
 }
+
+/* 毛玻璃。
+ *
+ * 窗口背后那层高斯模糊由系统画（macOS 的 vibrancy、Windows 的 acrylic），窗口
+ * 自己的底色只要是实心的就把它整个盖住，一点也看不见。所以贴着窗口边的那几块
+ * 大面积表面改成留一点透明度，模糊就从那一点里透出来。
+ *
+ * 只改 `--window-tint` 这一个数就能调深浅；10% 是能看出是块毛玻璃、正文又还
+ * 干净的那一档。表面本身的颜色仍然只有 `--pane-fill` / `--side-fill` 那一套真
+ * 相源，这里不新增颜色。
+ *
+ * 默认等于实心：没有系统模糊的平台（Linux 取决于合成器）留一块半透明的窗口只
+ * 会看见桌面本身，比不透还糟。只有确定画得出模糊的平台才真的兑现透明度。 */
+:root {
+  --pane-glass: var(--pane-fill);
+  --side-glass: var(--side-fill);
+}
+
+:root[data-platform="darwin"],
+:root[data-platform="win32"] {
+  --window-tint: 10%;
+  --pane-glass: color-mix(in srgb, transparent var(--window-tint), var(--pane-fill));
+  --side-glass: color-mix(in srgb, transparent var(--window-tint), var(--side-fill));
+}

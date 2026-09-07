@@ -1,5 +1,5 @@
 /* 工作区任务面板。整块占满主面板（chat 和右侧栏都收起来），布局和技能面板同一套。 */
-.issue-board { position: relative; display: grid; min-width: 0; min-height: 0; grid-column: 2 / -1; grid-template-rows: 76px auto auto minmax(0, 1fr); background: var(--pane-fill); }
+.issue-board { position: relative; display: grid; min-width: 0; min-height: 0; grid-column: 2 / -1; grid-template-rows: 76px auto auto minmax(0, 1fr); background: var(--pane-glass); }
 .issue-board-header { position: relative; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
 .issue-board-header > div:first-of-type { display: flex; min-width: 0; align-items: center; gap: 11px; }
 .issue-board-header h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-198)); font-size: 17px; font-weight: 650; }

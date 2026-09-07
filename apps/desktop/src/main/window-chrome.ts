@@ -22,6 +22,8 @@ export function windowChromeOptions(platform: DesktopPlatform): BrowserWindowCon
       titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 18, y: 18 },
       hasShadow: true,
+      // 见 windowBlursBackdrop 的注释。
+      vibrancy: "under-window",
     };
   }
   return {
@@ -29,10 +31,35 @@ export function windowChromeOptions(platform: DesktopPlatform): BrowserWindowCon
     // can draw its own, which is what `WindowControls` does. See its comment for
     // what that costs.
     titleBarStyle: "hidden",
+    // Windows 的等价物；见 windowBlursBackdrop。Linux 上没有对应的东西，
+    // 那边的窗口底色仍然是实心的。
+    ...(platform === "win32" ? { backgroundMaterial: "acrylic" as const } : {}),
     // Belt and braces with `hidden`, which already leaves the bar nowhere to
     // render: without a menu bar, Alt must not be able to summon one.
     autoHideMenuBar: true,
   };
+}
+
+/**
+ * 这个平台会不会自己在窗口背后画高斯模糊。
+ *
+ * macOS 用 vibrancy、Windows 用 acrylic，两者都是系统画的：窗口自己只要留出
+ * 一点透明度，模糊就从那一点透出来（渲染进程那边是 `--window-tint`）。反过来
+ * 说，窗口底色只要是实心的就把它整个盖住，所以这两个平台的底色要跟着留同样的
+ * 透明度，否则模糊等于没开。
+ *
+ * Linux 有没有模糊取决于合成器，问不出来，所以一律当作没有：在那边留一块半透明
+ * 的窗口只会直接看见桌面本身，比不透还糟。
+ */
+export function windowBlursBackdrop(platform: DesktopPlatform): boolean {
+  return platform === "darwin" || platform === "win32";
+}
+
+/** 窗口底色。会画模糊的平台上留出 `--window-tint` 那 10%，让模糊透上来。 */
+export function windowBackgroundColor(color: string, platform: DesktopPlatform): string {
+  if (!windowBlursBackdrop(platform)) return color;
+  const solid = /^#[0-9a-f]{6}$/i.test(color) ? color : undefined;
+  return solid ? `${solid}e6` : color;
 }
 
 /**

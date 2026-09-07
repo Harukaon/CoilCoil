@@ -33,7 +33,7 @@ import { saveProjectFile } from "./file-edit";
 import { closeAllFilePreviews, closeFilePreview, openFilePreview, windowPreviewOwner, PREVIEW_UPDATED_CHANNEL, type PreviewOwner } from "./file-preview";
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
-import { applicationMenuTemplate, windowChromeOptions } from "./window-chrome";
+import { applicationMenuTemplate, windowBackgroundColor, windowChromeOptions } from "./window-chrome";
 import { readStoredWindowOpacity, writeStoredWindowOpacity } from "./window-opacity";
 import { migrateLegacyUserData } from "./data-migration";
 import {
@@ -659,7 +659,7 @@ async function createWindow(): Promise<void> {
     minWidth: 395,
     minHeight: 500,
     show: false,
-    backgroundColor: WINDOW_BACKGROUND[nativeTheme.shouldUseDarkColors ? "dark" : "light"],
+    backgroundColor: windowBackgroundColor(WINDOW_BACKGROUND[nativeTheme.shouldUseDarkColors ? "dark" : "light"], platform),
     title: "CoilCoil",
     ...(platform !== "darwin" && !initialIcon.isEmpty() ? { icon: initialIcon } : {}),
     ...windowChromeOptions(platform),
@@ -949,7 +949,7 @@ app.whenReady().then(async () => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window || window.isDestroyed()) return;
     if (typeof color !== "string" || !CSS_COLOR.test(color.trim())) return;
-    window.setBackgroundColor(color.trim());
+    window.setBackgroundColor(windowBackgroundColor(color.trim(), currentPlatform(process.platform)));
   });
   /**
    * Dock 角标：有几个对话回复完了还没看。

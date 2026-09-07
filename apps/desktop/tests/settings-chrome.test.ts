@@ -25,8 +25,13 @@ function property(css: string, selector: string, name: string, label: string): s
 test("设置界面的两块底色读主界面同一组表面令牌", () => {
   // 写死明度档位是配色对不上的原因：表面令牌还带着「界面层次」的选择，
   // 明度阶梯跟不上。见 settings.css 顶部的注释。
-  assert.equal(property(settingsCss, ".settings-screen", "background", "settings.css"), "var(--pane-fill)");
-  assert.equal(property(settingsCss, ".settings-sidebar", "background", "settings.css"), "var(--side-fill)");
+  // 贴着窗口边的表面读的是 `-glass` 那一层：颜色仍然来自 `--pane-fill` /
+  // `--side-fill`，只是留出 `--window-tint` 让系统的高斯模糊透上来。
+  assert.equal(property(settingsCss, ".settings-screen", "background", "settings.css"), "var(--pane-glass)");
+  assert.equal(property(settingsCss, ".settings-sidebar", "background", "settings.css"), "var(--side-glass)");
+  // 主界面的对应两块必须读同一组令牌，否则设置一开就跳色。
+  assert.equal(property(styles, ".conversation-pane", "background", "styles.css"), "var(--pane-glass)");
+  assert.equal(property(styles, ".sidebar", "background", "styles.css"), "var(--side-glass)");
 });
 
 test("设置侧栏和主界面左侧栏用同一条分界线", () => {
