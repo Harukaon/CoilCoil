@@ -1,4 +1,4 @@
-import { ArrowLeft, ClipboardPaste, ExternalLink, FileJson, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Smartphone, Sparkles, Trash2 } from "lucide-react";
+import { Activity, ArrowLeft, ClipboardPaste, FileJson, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Smartphone, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
@@ -12,7 +12,7 @@ import type {
 import { parseMcpServerSnippets } from "@coilcoil/runtime-protocol";
 import { Select, type SelectOption } from "../../ui/Select";
 import { toastError, toastSuccess } from "../../ui/toast";
-import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
+import { mcpConnectionClass, mcpConnectionLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
 import { ModelSettings } from "./ModelSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { McpAuthDialog } from "./McpAuthDialog";
@@ -162,6 +162,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   const [statusLoading, setStatusLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [removeArmed, setRemoveArmed] = useState(false);
   const [listRemoveArmed, setListRemoveArmed] = useState<string>();
@@ -251,12 +252,15 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     setListRemoveArmed(undefined);
   };
 
+  /**
+   * Ask the runtime for live status, with or without a runtimeId.
+   *
+   * Settings opened from the home screen has no conversation to name, and this
+   * used to bail out on that alone — leaving every status blank and every action
+   * greyed out. The runtime already falls back to the last session it served, so
+   * the request is sent either way and its own error is what gets reported.
+   */
   const loadStatus = async (surfaceError = false): Promise<void> => {
-    if (!runtimeId) {
-      setRuntimeStatus(undefined);
-      if (surfaceError) toastError("打开一个会话后即可查看 MCP 连接状态。");
-      return;
-    }
     setStatusLoading(true);
     try {
       setRuntimeStatus(await window.coilcoil.request<McpRuntimeStatus>({ type: "get_mcp_status" }, runtimeId));
@@ -429,6 +433,45 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     }
   };
 
+  /**
+   * The one question the panel is actually asked: does this server work?
+   *
+   * It used to be unanswerable. "已启用" only ever meant the user had not
+   * switched the server off, and the separate 认证 button sat greyed out unless a
+   * session happened to be open — so a server that had never authenticated
+   * looked exactly like a healthy one, with no lit control to press. This
+   * connects for real and reports what came back; when the answer is that nobody
+   * is logged in, the authorization dialog opens on the spot rather than sending
+   * the user off to find a second button.
+   */
+  const checkServer = async (server: string): Promise<void> => {
+    setChecking(true);
+    try {
+      const result = await window.coilcoil.request<McpActionResult>({ type: "connect_mcp_server", name: server }, runtimeId);
+      if (result.status) setRuntimeStatus(result.status);
+      const entry = result.status?.servers.find((item) => item.name === server);
+      if (entry?.status === "needs-auth") {
+        await runAuth(server);
+        return;
+      }
+      const failure = actionErrorMessage(result);
+      if (failure) {
+        toastError(failure);
+        return;
+      }
+      if (entry?.status === "connected" || entry?.status === "cached") {
+        toastSuccess(`${server} 已连接${entry.toolCount ? ` · ${entry.toolCount} 个工具` : ""}`);
+        return;
+      }
+      toastError(result.text || `${server} 未能连接。`);
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setChecking(false);
+      void loadStatus();
+    }
+  };
+
   const setEnabled = async (): Promise<void> => {
     if (!selectedName || !cwd) return;
     const name = selectedName;
@@ -491,8 +534,8 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   return (
     <div className="mcp-settings">
       <aside className="mcp-server-list">
-        <div className="mcp-list-toolbar"><button className="mcp-add-button" type="button" disabled={loading} onClick={() => selectServer(undefined, true)}><Plus size={13} />添加服务器</button><button className="mcp-refresh-button" type="button" aria-label="刷新 MCP 状态" disabled={statusLoading || !runtimeId} onClick={() => void loadStatus(true)}>{statusLoading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button></div>
-        {runtimeStatus ? <p className="mcp-status-summary">{runtimeStatus.state === "initializing" ? "MCP 扩展初始化中" : runtimeStatus.state === "unavailable" ? "MCP 扩展暂不可用" : `${runtimeStatus.servers.length - runtimeStatus.disabledCount} 个已启用 · ${runtimeStatus.totalTools} 个工具 · ${runtimeStatus.totalResources} 个资源${runtimeStatus.disabledCount ? ` · ${runtimeStatus.disabledCount} 个已停用` : ""}`}</p> : null}
+        <div className="mcp-list-toolbar"><button className="mcp-add-button" type="button" disabled={loading} onClick={() => selectServer(undefined, true)}><Plus size={13} />添加服务器</button><button className="mcp-refresh-button" type="button" aria-label="刷新 MCP 状态" disabled={statusLoading} onClick={() => void loadStatus(true)}>{statusLoading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button></div>
+        {runtimeStatus ? <p className="mcp-status-summary">{runtimeStatus.state === "initializing" ? "MCP 扩展初始化中" : runtimeStatus.state === "unavailable" ? "MCP 扩展暂不可用" : `${runtimeStatus.connectedCount} 个已连接 · ${runtimeStatus.totalTools} 个工具 · ${runtimeStatus.totalResources} 个资源${runtimeStatus.disabledCount ? ` · ${runtimeStatus.disabledCount} 个已停用` : ""}`}</p> : null}
         {loading ? <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载 MCP 配置…</div> : configuration?.servers.map((server) => {
           const status = runtimeStatus?.servers.find((item) => item.name === server.name);
           const armed = listRemoveArmed === server.name;
@@ -500,13 +543,13 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
             <div className={`mcp-server-row${server.name === selectedName ? " active" : ""}`} key={server.name}>
               <button className="mcp-server-select" type="button" onClick={() => selectServer(server, true)}>
                 <span className="mcp-server-title">
-                  <i className={`mcp-status-dot ${mcpEnablementClass(server, status)}`} />
+                  <i className={`mcp-status-dot ${mcpConnectionClass(server, status)}`} />
                   <strong>{server.name}</strong>
                 </span>
                 <span className="mcp-server-meta">
                   {mcpMountBadge(server) ? <em className="mounted">{mcpOriginLabel(server)}</em> : null}
                   {status && (status.toolCount || status.resourceCount) ? <em>{status.toolCount} 工具 · {status.resourceCount} 资源</em> : null}
-                  <small>{mcpEnablementLabel(server, status)} · {server.transport === "http" ? server.url : server.command}</small>
+                  <small>{mcpConnectionLabel(server, status)} · {server.transport === "http" ? server.url : server.command}</small>
                 </span>
               </button>
               <button
@@ -527,12 +570,12 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
           );
         })}
         {!loading && !configuration?.servers.length ? <p>尚未配置 MCP 服务器。</p> : null}
-        {!loading ? <p className="mcp-list-hint">启用即交给 Agent 使用，具体何时连接由该服务器的生命周期决定（按需 / 保持 / 启动时）。停用表示 Agent 永远看不到它。</p> : null}
+        {!loading ? <p className="mcp-list-hint">停用表示 Agent 永远看不到它。想知道某个服务器现在通不通，点开它再点「检查状态」。</p> : null}
       </aside>
       <section className="mcp-editor">
         <form onSubmit={(event) => void save(event)}>
           <div className="mcp-editor-heading"><div><strong>{selectedName ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</strong><small>连接、认证与工具发现均由内置 pi-mcp-adapter 执行。</small></div></div>
-          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpEnablementClass(draft, selectedStatus)}`} /><strong>{mcpEnablementLabel(draft, selectedStatus)}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={togglingEnabled || actionBusy || !cwd} onClick={() => void setEnabled()}>{togglingEnabled ? <LoaderCircle className="spin" size={13} /> : <Power size={13} />}{draft.disabled ? "启用" : "停用"}</button>{supportsAuth ? <><button type="button" disabled={actionBusy || draft.disabled || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void runAuth(selectedName)}><ExternalLink size={13} />认证</button><button type="button" disabled={actionBusy || !runtimeId || runtimeStatus?.state === "initializing"} onClick={() => void logout()}><LogOut size={13} />登出</button></> : null}</div> : null}
+          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpConnectionClass(draft, selectedStatus)}`} /><strong>{mcpConnectionLabel(draft, selectedStatus)}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={togglingEnabled || actionBusy || !cwd} onClick={() => void setEnabled()}>{togglingEnabled ? <LoaderCircle className="spin" size={13} /> : <Power size={13} />}{draft.disabled ? "启用" : "停用"}</button><button type="button" disabled={checking || actionBusy || draft.disabled} onClick={() => void checkServer(selectedName)}>{checking ? <LoaderCircle className="spin" size={13} /> : <Activity size={13} />}检查状态</button>{supportsAuth ? <button type="button" disabled={checking || actionBusy} onClick={() => void logout()}><LogOut size={13} />登出</button> : null}</div> : null}
           {runtimeStatus?.diagnostic ? <p className="mcp-source-note">{runtimeStatus.diagnostic}</p> : null}
           {mounted ? <p className="mcp-source-note">这个服务器挂载自 {mcpOriginLabel(draft)}，定义保存在 <code>{draft.source}</code>。CoilCoil 只叠加启用状态等本地覆盖，要改命令、地址或请求头请到该应用里编辑。</p> : null}
           {mounted ? null : <div className="mcp-snippet">
