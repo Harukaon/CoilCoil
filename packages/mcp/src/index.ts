@@ -30,6 +30,17 @@ export {
   type StdioLaunch,
 } from "./definition.js";
 export {
+  McpAuthCallbackServer,
+  type McpAuthCallback,
+} from "./auth-callback.js";
+export {
+  McpManager,
+  authorizationCode,
+  authorizationState,
+  type McpAuthStart,
+  type McpManagerOptions,
+} from "./manager.js";
+export {
   McpConnection,
   type McpConnectionOptions,
   type McpConnectionStatus,

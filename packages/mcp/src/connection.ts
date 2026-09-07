@@ -50,8 +50,13 @@ export interface McpResourceSummary {
 export interface McpConnectionOptions {
   definition: McpServerConfiguration;
   store: McpCredentialStore;
-  /** Where an authorization server sends the browser back to. */
-  redirectUrl: string;
+  /**
+   * Where an authorization server sends the browser back to.
+   *
+   * Accepts a getter so the loopback listener is only started when a login
+   * actually needs it: a workspace of stdio servers should never open a port.
+   */
+  redirectUrl: string | (() => string);
   openAuthorization: (url: URL) => void | Promise<void>;
   environment?: EnvironmentSource;
   clientName?: string;
@@ -117,11 +122,12 @@ export class McpConnection {
         stderr: "inherit",
       });
     }
+    const redirectUrl = this.options.redirectUrl;
     this.oauth = launch.oauth
       ? new McpOAuthProvider({
         serverUrl: launch.url,
         store: this.options.store,
-        redirectUrl: this.options.redirectUrl,
+        redirectUrl: typeof redirectUrl === "function" ? redirectUrl() : redirectUrl,
         openAuthorization: this.options.openAuthorization,
         clientName: this.options.clientName,
       })
