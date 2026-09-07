@@ -69,15 +69,28 @@ function textResult(text: string, details: Record<string, unknown>, isError = fa
  * Names are qualified by server because two servers routinely ship a `search`
  * or a `read`, and an unqualified list is an invitation to call the wrong one.
  */
-export function describeTools(listed: Array<{ server: string; tool: { name: string; description?: string } }>): string {
-  if (!listed.length) return "当前没有可用的 MCP 工具。可能是还没配置服务器，或者配置的服务器都已停用。";
+export function describeTools(listed: {
+  tools: Array<{ server: string; tool: { name: string; description?: string } }>;
+  unavailable?: Array<{ server: string; status: string; failure?: string }>;
+}): string {
   const byServer = new Map<string, string[]>();
-  for (const { server, tool } of listed) {
+  for (const { server, tool } of listed.tools) {
     const lines = byServer.get(server) ?? [];
     lines.push(`  - ${tool.name}${tool.description ? `：${tool.description}` : ""}`);
     byServer.set(server, lines);
   }
-  return [...byServer].map(([server, lines]) => `${server}\n${lines.join("\n")}`).join("\n\n");
+  const sections = [...byServer].map(([server, lines]) => `${server}\n${lines.join("\n")}`);
+  // A server that could not answer is reported rather than silently omitted: a
+  // tool the model expected and cannot see would otherwise look like a tool
+  // that never existed, and it would keep guessing instead of saying why.
+  for (const entry of listed.unavailable ?? []) {
+    const reason = entry.status === "needs-auth"
+      ? "需要在设置里完成认证"
+      : entry.failure?.split("\n")[0] ?? "连不上";
+    sections.push(`${entry.server}（暂时用不了：${reason}）`);
+  }
+  if (!sections.length) return "当前没有可用的 MCP 工具。可能是还没配置服务器，或者配置的服务器都已停用。";
+  return sections.join("\n\n");
 }
 
 /**
@@ -149,8 +162,9 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
       if (params.action === "list") {
         const listed = await manager.listTools();
         return textResult(describeTools(listed), {
-          servers: [...new Set(listed.map((entry) => entry.server))],
-          toolCount: listed.length,
+          servers: [...new Set(listed.tools.map((entry) => entry.server))],
+          toolCount: listed.tools.length,
+          unavailable: listed.unavailable.map((entry) => entry.server),
         });
       }
 

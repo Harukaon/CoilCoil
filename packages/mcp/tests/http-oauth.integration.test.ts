@@ -126,7 +126,7 @@ test("HTTP 服务器的整条 OAuth 流程，从头到尾不需要任何会话",
   assert.equal(Object.keys(onDisk.servers).length, 1);
 
   // 5. 带着令牌真的调得动工具。
-  const called = await manager.callTool("oauth", (await manager.listTools())[0].tool.name, {}) as {
+  const called = await manager.callTool("oauth", (await manager.listTools()).tools[0].tool.name, {}) as {
     content?: Array<{ text?: string }>;
   };
   assert.ok(Array.isArray(called.content), `工具调用没有返回内容：${JSON.stringify(called)}`);

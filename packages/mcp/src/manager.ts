@@ -419,22 +419,35 @@ export class McpManager {
   }
 
   /**
-   * Everything the Agent can call.
+   * Everything the Agent can call, and what stopped the rest from answering.
    *
-   * Servers are connected on demand here rather than up front: a workspace with
-   * six configured servers should not pay six process spawns to answer one
-   * question. `eager` is the opt-in for the servers that want it.
+   * Listing connects the servers it has to. Nothing else does — no server is
+   * started merely because a session began — but an explicit "what is
+   * available?" cannot be answered from a cache that is empty precisely because
+   * nothing has been used yet. Reporting the ones that failed matters as much
+   * as the ones that worked: a tool the model expected and cannot see is
+   * otherwise indistinguishable from a tool that does not exist.
    */
-  async listTools(): Promise<Array<{ server: string; tool: McpToolSummary }>> {
+  async listTools(): Promise<{
+    tools: Array<{ server: string; tool: McpToolSummary }>;
+    unavailable: Array<{ server: string; status: McpConnectionStatus; failure?: string }>;
+  }> {
     await this.reload();
-    const listed: Array<{ server: string; tool: McpToolSummary }> = [];
+    const tools: Array<{ server: string; tool: McpToolSummary }> = [];
+    const unavailable: Array<{ server: string; status: McpConnectionStatus; failure?: string }> = [];
     await Promise.all(this.availableDefinitions().map(async (definition) => {
       const connection = this.connectionFor(definition.name);
-      if (connection.status !== "connected" && definition.lifecycle !== "eager") return;
-      if (connection.status !== "connected") await connection.connect();
-      for (const tool of connection.tools) listed.push({ server: definition.name, tool });
+      const status = connection.status === "connected" ? "connected" : await connection.connect();
+      if (status !== "connected") {
+        if (status === "failed") this.failedAt.set(definition.name, Date.now());
+        unavailable.push({ server: definition.name, status, failure: connection.failure });
+        return;
+      }
+      this.lastUsedAt.set(definition.name, Date.now());
+      for (const tool of connection.tools) tools.push({ server: definition.name, tool });
     }));
-    return listed;
+    this.startIdleSweep();
+    return { tools, unavailable };
   }
 
   async callTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {

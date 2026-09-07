@@ -23,16 +23,33 @@ test("总线抛错也不能把工具本身弄崩", () => {
 
 test("工具清单按服务器分组，名字不脱离出处", () => {
   // 两个服务器同时有 search 是常事，不写清楚是哪一个等于请模型调错。
-  const rendered = describeTools([
-    { server: "github", tool: { name: "search", description: "搜索仓库" } },
-    { server: "github", tool: { name: "read" } },
-    { server: "notion", tool: { name: "search", description: "搜索页面" } },
-  ]);
+  const rendered = describeTools({
+    tools: [
+      { server: "github", tool: { name: "search", description: "搜索仓库" } },
+      { server: "github", tool: { name: "read" } },
+      { server: "notion", tool: { name: "search", description: "搜索页面" } },
+    ],
+  });
   assert.match(rendered, /^github\n {2}- search：搜索仓库\n {2}- read\n\nnotion\n {2}- search：搜索页面$/);
 });
 
+test("用不了的服务器会被点名，并带上原因", () => {
+  // 悄悄不列出来，模型只会以为这个工具不存在，然后继续瞎猜。
+  const rendered = describeTools({
+    tools: [{ server: "github", tool: { name: "search" } }],
+    unavailable: [
+      { server: "notion", status: "needs-auth" },
+      { server: "local", status: "failed", failure: "spawn ENOENT\n栈信息若干" },
+    ],
+  });
+  assert.match(rendered, /notion（暂时用不了：需要在设置里完成认证）/);
+  // 只取第一行：栈信息对模型没用，还挤掉真正有用的部分。
+  assert.match(rendered, /local（暂时用不了：spawn ENOENT）/);
+  assert.doesNotMatch(rendered, /栈信息若干/);
+});
+
 test("一个工具都没有的时候说清楚可能是为什么", () => {
-  const rendered = describeTools([]);
+  const rendered = describeTools({ tools: [] });
   assert.match(rendered, /没有可用的 MCP 工具/);
   assert.match(rendered, /还没配置|已停用/);
 });

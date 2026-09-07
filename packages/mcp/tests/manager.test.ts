@@ -113,20 +113,36 @@ test("Agent 拿得到工具，也调得动", async (t) => {
   const { manager: mcp } = manager([server()]);
   t.after(() => mcp.close());
   await mcp.connect("smoke");
-  assert.deepEqual(await mcp.listTools(), [{
-    server: "smoke",
-    tool: { name: "echo", description: "Return the supplied smoke-test text unchanged.", inputSchema: (await mcp.listTools())[0]?.tool.inputSchema },
-  }]);
+  const listed = await mcp.listTools();
+  assert.deepEqual(listed.tools.map((entry) => [entry.server, entry.tool.name]), [["smoke", "echo"]]);
+  assert.deepEqual(listed.unavailable, []);
   const result = await mcp.callTool("smoke", "echo", { text: "hi" }) as { content: Array<{ text?: string }> };
   assert.equal(result.content[0]?.text, "MCP_ECHO:hi");
 });
 
-test("按需的服务器不会因为列一次工具就被全部拉起来", async (t) => {
-  // 一个工作区配了六个服务器，问一句话不该付六次进程启动的代价。
+test("问「有什么工具」就真的去连着问，不是回一句空的", async (t) => {
+  // 会话一开不会去启动任何服务器；但模型明确问「现在有什么」的时候，从一个
+  // 因为还没人用过所以本来就是空的缓存里回答，等于告诉它这里什么都没有。
   const { manager: mcp } = manager([server()]);
   t.after(() => mcp.close());
-  assert.deepEqual(await mcp.listTools(), []);
-  assert.equal((await mcp.status()).servers[0]?.status, "not connected");
+  assert.equal((await mcp.status()).servers[0]?.status, "not connected", "光看状态不该连");
+  const listed = await mcp.listTools();
+  assert.deepEqual(listed.tools.map((entry) => entry.tool.name), ["echo"]);
+  assert.equal((await mcp.status()).servers[0]?.status, "connected");
+});
+
+test("连不上的服务器会被点名，而不是从清单里悄悄消失", async (t) => {
+  // 模型以为该有的工具找不到，和这个工具压根不存在，长得一模一样——只会让它
+  // 继续瞎猜，而不是说出哪里不对。
+  const { manager: mcp } = manager([
+    server(),
+    server({ name: "broken", command: "coilcoil-definitely-not-a-command" }),
+  ]);
+  t.after(() => mcp.close());
+  const listed = await mcp.listTools();
+  assert.deepEqual(listed.tools.map((entry) => entry.server), ["smoke"]);
+  assert.deepEqual(listed.unavailable.map((entry) => [entry.server, entry.status]), [["broken", "failed"]]);
+  assert.match(listed.unavailable[0]?.failure ?? "", /ENOENT|not found|spawn/i);
 });
 
 test("标了「启动时」的服务器会被主动连上", async (t) => {
@@ -134,7 +150,7 @@ test("标了「启动时」的服务器会被主动连上", async (t) => {
   t.after(() => mcp.close());
   await mcp.startEagerServers();
   assert.equal((await mcp.status()).connectedCount, 1);
-  assert.equal((await mcp.listTools()).length, 1);
+  assert.equal((await mcp.listTools()).tools.length, 1);
 });
 
 test("会话内停用只挡 Agent，不改配置也不断连接", async (t) => {
@@ -147,7 +163,7 @@ test("会话内停用只挡 Agent，不改配置也不断连接", async (t) => {
   assert.equal(status.servers[0]?.sessionDisabled, true);
   assert.equal(status.servers[0]?.disabled, false, "配置本身没被改动");
   assert.equal(status.sessionDisabledCount, 1);
-  assert.deepEqual(await mcp.listTools(), []);
+  assert.deepEqual((await mcp.listTools()).tools, []);
   await assert.rejects(() => mcp.callTool("smoke", "echo", { text: "x" }), /当前会话停用/);
 
   mcp.setSessionEnabled("smoke", true);
@@ -158,7 +174,7 @@ test("会话内停用只挡 Agent，不改配置也不断连接", async (t) => {
 test("停用的服务器 Agent 一个工具都看不到", async (t) => {
   const { manager: mcp } = manager([server({ disabled: true })]);
   t.after(() => mcp.close());
-  assert.deepEqual(await mcp.listTools(), []);
+  assert.deepEqual((await mcp.listTools()).tools, []);
   await assert.rejects(() => mcp.callTool("smoke", "echo", { text: "x" }), /已停用/);
 });
 
