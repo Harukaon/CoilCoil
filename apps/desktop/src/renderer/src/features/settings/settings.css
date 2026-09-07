@@ -18,7 +18,7 @@
   min-height: 0;
   grid-template-columns: var(--settings-sidebar-width) minmax(0, 1fr);
   color: hsl(var(--th) var(--ts) var(--l-198));
-  background: var(--pane-fill);
+  background: var(--pane-glass);
   position: relative;
 }
 .settings-sidebar {
@@ -30,7 +30,7 @@
   /* 和主界面左侧栏同一条分界线（styles.css 的 .sidebar），齐平层次下两块底色
      一样，这条线就是唯一的分界。 */
   border-right: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 45%);
-  background: var(--side-fill);
+  background: var(--side-glass);
 }
 .settings-window-drag { height: 52px; flex: 0 0 52px; }
 /* 图标和文字在 40px 里居中。以前这里写的是 `padding: 0 10px 6px` —— 那 6px 是
@@ -432,6 +432,10 @@
 .mcp-runtime-card small { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 9px; }
 .mcp-runtime-card > button { display: inline-flex; height: 27px; align-items: center; gap: 5px; padding: 0 8px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-359)); background: hsl(var(--th) var(--ts) var(--l-906)); font-size: 9px; cursor: pointer; }
 .mcp-runtime-card > button:disabled { opacity: .5; cursor: default; }
+/* 「检查状态」这一次按下的答案，只属于这一次；平时那行标签不说连没连。 */
+.mcp-runtime-card .mcp-check-result { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-runtime-card .mcp-check-result.ok { color: var(--c-green-solid); }
+.mcp-runtime-card .mcp-check-result.failed { color: var(--c-red-solid); }
 .danger-icon-button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-lg); color: var(--c-red-muted); background: var(--c-red-subtle); cursor: pointer; }
 .checkbox-setting { display: flex !important; min-height: 34px; align-items: center; align-self: end; gap: 8px !important; }
 .checkbox-setting input { width: 14px; height: 14px; flex: 0 0 auto; }

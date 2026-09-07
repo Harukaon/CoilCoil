@@ -3,8 +3,8 @@ import test from "node:test";
 import type { McpServerRuntimeStatus } from "@coilcoil/runtime-protocol";
 import {
   isMountedMcpServer,
-  mcpConnectionClass,
-  mcpConnectionLabel,
+  mcpEnablementClass,
+  mcpEnablementLabel,
   mcpMountBadge,
   mcpOriginLabel,
   mcpSectionBadge,
@@ -116,33 +116,32 @@ test("no servers means no badge at all", () => {
   assert.equal(mcpSectionBadge([]), undefined);
 });
 
-test("each connection outcome gets its own word", () => {
-  // The panel used to answer "已启用" to every one of these, so a server that had
-  // never connected was indistinguishable from one serving tools.
-  const cases: Array<[McpServerRuntimeStatus["status"], string, string]> = [
-    ["connected", "已连接", "connected"],
-    ["cached", "已连接", "connected"],
-    ["needs-auth", "需要认证", "needs-auth"],
-    ["failed", "连接失败", "failed"],
-    ["not connected", "未连接", "not-connected"],
-  ];
-  for (const [status, label, className] of cases) {
-    assert.equal(mcpConnectionLabel({ disabled: false }, { status }), label);
-    assert.equal(mcpConnectionClass({ disabled: false }, { status }), className);
+test("a lazy connection state never reaches the label", () => {
+  // Every server here connects on demand, so "connected" and "not connected" are
+  // two readings of the same healthy server. Showing the difference made an
+  // untouched server look broken; the answer belongs to 检查状态 instead.
+  for (const status of ["not connected", "cached", "connected", "failed"] as const) {
+    assert.equal(mcpEnablementLabel({ disabled: false }, { status }), "已启用");
+    assert.equal(mcpEnablementClass({ disabled: false }, { status }), "connected");
   }
 });
 
 test("a disabled server reads as disabled even if a connection lingers", () => {
-  assert.equal(mcpConnectionLabel({ disabled: true }, { status: "connected" }), "已停用");
-  assert.equal(mcpConnectionClass({ disabled: true }, { status: "connected" }), "disabled");
-  // …and an opt-out is never overridden by something the user could act on.
-  assert.equal(mcpConnectionLabel({ disabled: true }, { status: "needs-auth" }), "已停用");
+  assert.equal(mcpEnablementLabel({ disabled: true }, { status: "connected" }), "已停用");
+  assert.equal(mcpEnablementClass({ disabled: true }, { status: "connected" }), "disabled");
 });
 
-test("a server with no runtime status yet reads as not connected", () => {
-  // Nothing has been checked, so claiming a connection would be a guess.
-  assert.equal(mcpConnectionLabel({ disabled: false }), "未连接");
-  assert.equal(mcpConnectionClass({ disabled: false }), "not-connected");
+test("only the status the user can act on survives normalization", () => {
+  assert.equal(mcpEnablementLabel({ disabled: false }, { status: "needs-auth" }), "需要认证");
+  assert.equal(mcpEnablementClass({ disabled: false }, { status: "needs-auth" }), "needs-auth");
+  // …and it never overrides an explicit opt-out.
+  assert.equal(mcpEnablementLabel({ disabled: true }, { status: "needs-auth" }), "已停用");
+});
+
+test("a server with no runtime status yet still reads as enabled", () => {
+  // The extension reports nothing while booting; that must not look like "off".
+  assert.equal(mcpEnablementLabel({ disabled: false }), "已启用");
+  assert.equal(mcpEnablementClass({ disabled: false }), "connected");
 });
 
 test("both surfaces agree on whether the Agent can use a server", () => {
@@ -153,7 +152,7 @@ test("both surfaces agree on whether the Agent can use a server", () => {
     server({ name: "auth", status: "needs-auth" }),
   ];
   for (const candidate of cases) {
-    const settingsSaysEnabled = mcpConnectionLabel(candidate, candidate) !== "已停用";
+    const settingsSaysEnabled = mcpEnablementLabel(candidate, candidate) !== "已停用";
     const panelSaysVisible = mcpVisibility({ ...candidate, sessionDisabled: false }) === "visible";
     assert.equal(settingsSaysEnabled, panelSaysVisible, `${candidate.name} disagrees across surfaces`);
   }

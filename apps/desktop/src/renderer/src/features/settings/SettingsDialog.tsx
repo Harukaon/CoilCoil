@@ -12,7 +12,7 @@ import type {
 import { parseMcpServerSnippets } from "@coilcoil/runtime-protocol";
 import { Select, type SelectOption } from "../../ui/Select";
 import { toastError, toastSuccess } from "../../ui/toast";
-import { mcpConnectionClass, mcpConnectionLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
+import { mcpEnablementClass, mcpEnablementLabel, mcpMountBadge, isMountedMcpServer, mcpOriginLabel } from "../runtime/mcpPolicy";
 import { ModelSettings } from "./ModelSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { McpAuthDialog } from "./McpAuthDialog";
@@ -163,6 +163,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   const [saving, setSaving] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<{ server: string; ok: boolean; text: string }>();
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [removeArmed, setRemoveArmed] = useState(false);
   const [listRemoveArmed, setListRemoveArmed] = useState<string>();
@@ -248,6 +249,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     setDirectToolsText(Array.isArray(next.directTools) ? next.directTools.join("\n") : "");
     setExcludeToolsText(next.excludeTools.join("\n"));
     setProbeResult(undefined);
+    setCheckResult(undefined);
     setRemoveArmed(false);
     setListRemoveArmed(undefined);
   };
@@ -436,16 +438,20 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   /**
    * The one question the panel is actually asked: does this server work?
    *
-   * It used to be unanswerable. "已启用" only ever meant the user had not
-   * switched the server off, and the separate 认证 button sat greyed out unless a
-   * session happened to be open — so a server that had never authenticated
-   * looked exactly like a healthy one, with no lit control to press. This
-   * connects for real and reports what came back; when the answer is that nobody
-   * is logged in, the authorization dialog opens on the spot rather than sending
-   * the user off to find a second button.
+   * It used to be unanswerable. 已启用 only ever meant the user had not switched
+   * the server off, and the separate 认证 button sat greyed out unless a session
+   * happened to be open — so a server nobody had logged into looked exactly like
+   * a healthy one, with no lit control to press. This connects for real and
+   * reports what came back; when the answer is that nobody is logged in, the
+   * authorization dialog opens on the spot.
+   *
+   * The answer is deliberately transient and belongs to this one press. Lazy
+   * connection means an idle server is a healthy server, so a stale "not
+   * connected" must never leak back out into the label.
    */
   const checkServer = async (server: string): Promise<void> => {
     setChecking(true);
+    setCheckResult(undefined);
     try {
       const result = await window.coilcoil.request<McpActionResult>({ type: "connect_mcp_server", name: server }, runtimeId);
       if (result.status) setRuntimeStatus(result.status);
@@ -456,19 +462,19 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
       }
       const failure = actionErrorMessage(result);
       if (failure) {
-        toastError(failure);
+        setCheckResult({ server, ok: false, text: failure });
         return;
       }
       if (entry?.status === "connected" || entry?.status === "cached") {
-        toastSuccess(`${server} 已连接${entry.toolCount ? ` · ${entry.toolCount} 个工具` : ""}`);
+        const tools = entry.toolCount ? ` · ${entry.toolCount} 个工具` : "";
+        setCheckResult({ server, ok: true, text: `已连接${tools}` });
         return;
       }
-      toastError(result.text || `${server} 未能连接。`);
+      setCheckResult({ server, ok: false, text: result.text || "连不上，服务器没有说明原因。" });
     } catch (caught) {
-      toastError(caught instanceof Error ? caught.message : String(caught));
+      setCheckResult({ server, ok: false, text: caught instanceof Error ? caught.message : String(caught) });
     } finally {
       setChecking(false);
-      void loadStatus();
     }
   };
 
@@ -535,7 +541,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     <div className="mcp-settings">
       <aside className="mcp-server-list">
         <div className="mcp-list-toolbar"><button className="mcp-add-button" type="button" disabled={loading} onClick={() => selectServer(undefined, true)}><Plus size={13} />添加服务器</button><button className="mcp-refresh-button" type="button" aria-label="刷新 MCP 状态" disabled={statusLoading} onClick={() => void loadStatus(true)}>{statusLoading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button></div>
-        {runtimeStatus ? <p className="mcp-status-summary">{runtimeStatus.state === "initializing" ? "MCP 扩展初始化中" : runtimeStatus.state === "unavailable" ? "MCP 扩展暂不可用" : `${runtimeStatus.connectedCount} 个已连接 · ${runtimeStatus.totalTools} 个工具 · ${runtimeStatus.totalResources} 个资源${runtimeStatus.disabledCount ? ` · ${runtimeStatus.disabledCount} 个已停用` : ""}`}</p> : null}
+        {runtimeStatus ? <p className="mcp-status-summary">{runtimeStatus.state === "initializing" ? "MCP 扩展初始化中" : runtimeStatus.state === "unavailable" ? "MCP 扩展暂不可用" : `${runtimeStatus.servers.length - runtimeStatus.disabledCount} 个已启用 · ${runtimeStatus.totalTools} 个工具 · ${runtimeStatus.totalResources} 个资源${runtimeStatus.disabledCount ? ` · ${runtimeStatus.disabledCount} 个已停用` : ""}`}</p> : null}
         {loading ? <div className="settings-loading"><LoaderCircle className="spin" size={15} />加载 MCP 配置…</div> : configuration?.servers.map((server) => {
           const status = runtimeStatus?.servers.find((item) => item.name === server.name);
           const armed = listRemoveArmed === server.name;
@@ -543,13 +549,13 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
             <div className={`mcp-server-row${server.name === selectedName ? " active" : ""}`} key={server.name}>
               <button className="mcp-server-select" type="button" onClick={() => selectServer(server, true)}>
                 <span className="mcp-server-title">
-                  <i className={`mcp-status-dot ${mcpConnectionClass(server, status)}`} />
+                  <i className={`mcp-status-dot ${mcpEnablementClass(server, status)}`} />
                   <strong>{server.name}</strong>
                 </span>
                 <span className="mcp-server-meta">
                   {mcpMountBadge(server) ? <em className="mounted">{mcpOriginLabel(server)}</em> : null}
                   {status && (status.toolCount || status.resourceCount) ? <em>{status.toolCount} 工具 · {status.resourceCount} 资源</em> : null}
-                  <small>{mcpConnectionLabel(server, status)} · {server.transport === "http" ? server.url : server.command}</small>
+                  <small>{mcpEnablementLabel(server, status)} · {server.transport === "http" ? server.url : server.command}</small>
                 </span>
               </button>
               <button
@@ -575,7 +581,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
       <section className="mcp-editor">
         <form onSubmit={(event) => void save(event)}>
           <div className="mcp-editor-heading"><div><strong>{selectedName ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</strong><small>连接、认证与工具发现均由内置 pi-mcp-adapter 执行。</small></div></div>
-          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpConnectionClass(draft, selectedStatus)}`} /><strong>{mcpConnectionLabel(draft, selectedStatus)}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={togglingEnabled || actionBusy || !cwd} onClick={() => void setEnabled()}>{togglingEnabled ? <LoaderCircle className="spin" size={13} /> : <Power size={13} />}{draft.disabled ? "启用" : "停用"}</button><button type="button" disabled={checking || actionBusy || draft.disabled} onClick={() => void checkServer(selectedName)}>{checking ? <LoaderCircle className="spin" size={13} /> : <Activity size={13} />}检查状态</button>{supportsAuth ? <button type="button" disabled={checking || actionBusy} onClick={() => void logout()}><LogOut size={13} />登出</button> : null}</div> : null}
+          {selectedName ? <div className="mcp-runtime-card"><span><i className={`mcp-status-dot ${mcpEnablementClass(draft, selectedStatus)}`} /><strong>{mcpEnablementLabel(draft, selectedStatus)}</strong>{selectedStatus && (selectedStatus.toolCount || selectedStatus.resourceCount) ? <small>{selectedStatus.toolCount} 个工具 · {selectedStatus.resourceCount} 个资源</small> : null}{checkResult?.server === selectedName ? <small className={`mcp-check-result${checkResult.ok ? " ok" : " failed"}`}>{checkResult.text}</small> : null}</span><button type="button" aria-label={draft.disabled ? "启用 MCP 服务器" : "停用 MCP 服务器"} disabled={togglingEnabled || actionBusy || !cwd} onClick={() => void setEnabled()}>{togglingEnabled ? <LoaderCircle className="spin" size={13} /> : <Power size={13} />}{draft.disabled ? "启用" : "停用"}</button><button type="button" disabled={checking || actionBusy || draft.disabled} onClick={() => void checkServer(selectedName)}>{checking ? <LoaderCircle className="spin" size={13} /> : <Activity size={13} />}检查状态</button>{supportsAuth ? <button type="button" disabled={checking || actionBusy} onClick={() => void logout()}><LogOut size={13} />登出</button> : null}</div> : null}
           {runtimeStatus?.diagnostic ? <p className="mcp-source-note">{runtimeStatus.diagnostic}</p> : null}
           {mounted ? <p className="mcp-source-note">这个服务器挂载自 {mcpOriginLabel(draft)}，定义保存在 <code>{draft.source}</code>。CoilCoil 只叠加启用状态等本地覆盖，要改命令、地址或请求头请到该应用里编辑。</p> : null}
           {mounted ? null : <div className="mcp-snippet">

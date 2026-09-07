@@ -76,50 +76,30 @@ export function toggledVisibility(current: McpVisibility): McpVisibility {
 /**
  * What Settings says about one server, in one word.
  *
- * This used to collapse everything into 已启用 / 已停用, which answered a
- * question nobody was asking: the green dot meant "you have not switched this
- * off", never "this works". A server that had never connected, one whose token
- * had expired and one serving tools all looked identical. The runtime already
- * reports what actually happened, so that is what is shown — and 检查状态 is the
- * single action that goes and produces a fresh answer.
+ * Deliberately silent about whether anything is connected. Every server here is
+ * lazy — pi dials one only when the Agent reaches for it — so `connected` and
+ * `not connected` are two readings of the same healthy state, an artefact of how
+ * much has been disclosed to the Agent so far rather than anything the user
+ * needs to see at rest. Surfacing it made an untouched server look broken.
  *
- * `cached` folds into 已连接 on purpose: it means the tools are usable, which is
- * the only distinction worth a word here.
+ * `needs-auth` is the one status that survives, because it is the one the user
+ * can do something about. Anything else worth knowing comes from pressing
+ * 检查状态, which reports that attempt's own result on the card.
  */
-export function mcpConnectionLabel(
+export function mcpEnablementLabel(
   server: { disabled: boolean },
   status?: Pick<McpServerRuntimeStatus, "status">,
 ): string {
   if (server.disabled) return "已停用";
-  switch (status?.status) {
-    case "connected":
-    case "cached":
-      return "已连接";
-    case "needs-auth":
-      return "需要认证";
-    case "failed":
-      return "连接失败";
-    default:
-      return "未连接";
-  }
+  return status?.status === "needs-auth" ? "需要认证" : "已启用";
 }
 
-export function mcpConnectionClass(
+export function mcpEnablementClass(
   server: { disabled: boolean },
   status?: Pick<McpServerRuntimeStatus, "status">,
 ): string {
   if (server.disabled) return "disabled";
-  switch (status?.status) {
-    case "connected":
-    case "cached":
-      return "connected";
-    case "needs-auth":
-      return "needs-auth";
-    case "failed":
-      return "failed";
-    default:
-      return "not-connected";
-  }
+  return status?.status === "needs-auth" ? "needs-auth" : "connected";
 }
 
 const importOriginLabel: Record<string, string> = {
