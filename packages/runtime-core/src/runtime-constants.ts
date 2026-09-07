@@ -96,6 +96,16 @@ export const MCP_AGENT_CONFIG_REGISTRY = Symbol.for("coilcoil-workflow.mcp-agent
  */
 export const MCP_AGENT_CONFIG_CHANNEL = "coilcoil:mcp:agent-config:v1";
 
+/**
+ * How the MCP tools extension reaches the runtime's own MCP client.
+ *
+ * Same trick as the configuration channel above, and for the same reason: Pi
+ * hands extensions a wrapper around the event bus rather than the bus itself,
+ * so an identity lookup misses. The extension emits a request object and the
+ * runtime fills it in synchronously.
+ */
+export const MCP_MANAGER_CHANNEL = "coilcoil:mcp:manager:v1";
+
 export const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 
 export const IGNORED_DIRECTORIES = new Set([

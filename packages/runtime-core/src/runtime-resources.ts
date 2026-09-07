@@ -46,7 +46,7 @@ import {
   loadMcpAdapterConfigModule,
   mcpAgentConfigRegistry,
   mcpConfigurationForAgent,
-  serveMcpAgentConfig,
+  serveMcpToExtension,
   withBundledBrowserMcp,
 } from "./browser-mcp.js";
 import { RuntimeProviderAuth } from "./runtime-provider-auth.js";
@@ -286,7 +286,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     this.mcpConfigServed ??= new WeakSet<object>();
     if (!this.mcpConfigServed.has(eventBus)) {
       this.mcpConfigServed.add(eventBus);
-      serveMcpAgentConfig(eventBus, () => registry.get(eventBus));
+      serveMcpToExtension(eventBus, { configuration: () => registry.get(eventBus), manager: () => this.mcpManager() });
     }
   }
 

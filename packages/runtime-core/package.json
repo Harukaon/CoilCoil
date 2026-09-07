@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@coilcoil/diagnostics": "0.1.0",
+    "@coilcoil/mcp": "0.1.0",
     "@coilcoil/openai-responses-ws": "0.1.0",
     "@coilcoil/runtime-protocol": "0.1.0",
     "@coilcoil/workflow": "0.1.0",

@@ -580,6 +580,9 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       pending?.reject(new Error("运行时已关闭，订阅登录已取消。"));
     }
     this.providerAuthFlows.clear();
+    // MCP servers are child processes and a loopback listener; both outlive the
+    // runtime unless they are told to go.
+    await this.closeMcp();
     if (this.active) {
       const active = this.active;
       this.active = undefined;

@@ -3,9 +3,9 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mcpConfigurationForAgent, CoilCoilRuntime, serveMcpAgentConfig, withBundledBrowserMcp } from "../src/index.js";
+import { mcpConfigurationForAgent, CoilCoilRuntime, serveMcpManager, withBundledBrowserMcp } from "../src/index.js";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
-import { registeredMcpConfiguration } from "../../workflow/extensions/mcp-adapter.js";
+import { requestMcpManager } from "../../workflow/extensions/mcp-tools.js";
 
 test("Agent MCP configuration contains enabled servers only", () => {
   const source = {
@@ -214,22 +214,22 @@ test("a devtools server aimed at a named browser is left alone", () => {
   assert.ok(configuration.mcpServers["coilcoil-browser"]);
 });
 
-test("the adapter gets CoilCoil's servers even when Pi wraps the event bus", () => {
-  // Pi hands extensions a {emit, on} wrapper, not the bus, so identity lookups
-  // miss and the adapter used to fall back to the raw config files.
+test("扩展隔着 Pi 包出来的那层 wrapper 也拿得到运行时的 MCP 客户端", () => {
+  // Pi 给扩展的是一个 {emit, on} 包装，不是总线本身，所以按对象身份查一定查不到；
+  // 在总线上应答才真的送得到扩展手里。
   const bus = createEventBus();
-  const supplied = { mcpServers: { "coilcoil-browser": { command: "/node", args: [] } } };
-  serveMcpAgentConfig(bus, () => supplied);
+  const manager = { marker: "runtime-manager" };
+  serveMcpManager(bus, () => manager);
 
   const wrapper = {
     emit: (channel: string, data: unknown) => bus.emit(channel, data),
     on: (channel: string, handler: (data: unknown) => void) => bus.on(channel, handler),
   };
-  assert.deepEqual(registeredMcpConfiguration(wrapper as never), supplied);
+  assert.equal(requestMcpManager(wrapper as never), manager as never);
 });
 
-test("a host with no CoilCoil config gets nothing rather than a stale answer", () => {
+test("没人应答就是没有，不是拿一个过期的答案顶上", () => {
   const bus = createEventBus();
   const wrapper = { emit: (channel: string, data: unknown) => bus.emit(channel, data) };
-  assert.equal(registeredMcpConfiguration(wrapper as never), undefined);
+  assert.equal(requestMcpManager(wrapper as never), undefined);
 });

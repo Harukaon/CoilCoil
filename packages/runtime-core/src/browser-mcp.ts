@@ -12,6 +12,7 @@ import { resolvePackageDirectory } from "./package-resolution.js";
 import {
   MCP_AGENT_CONFIG_CHANNEL,
   MCP_AGENT_CONFIG_REGISTRY,
+  MCP_MANAGER_CHANNEL,
   require
 } from "./runtime-constants.js";
 import {
@@ -67,6 +68,45 @@ export function serveMcpAgentConfig(
     if (!data || typeof data !== "object") return;
     (data as McpAgentConfigRequest).configuration = read();
   });
+}
+
+export interface McpManagerRequest {
+  manager?: unknown;
+}
+
+/**
+ * Hand the Agent's side the very same MCP client the settings panel uses.
+ *
+ * One client, two callers. Running a second one for the Agent is what made
+ * pi-mcp-adapter's connections invisible to the panel — and would put the
+ * keychain-style credential prompt back, since two clients means two sets of
+ * stored credentials.
+ */
+export function serveMcpManager(
+  bus: { on?(channel: string, handler: (data: unknown) => void): () => void },
+  read: () => unknown,
+): () => void {
+  if (typeof bus.on !== "function") return () => undefined;
+  return bus.on(MCP_MANAGER_CHANNEL, (data) => {
+    if (!data || typeof data !== "object") return;
+    (data as McpManagerRequest).manager = read();
+  });
+}
+
+/**
+ * Everything the MCP extension is allowed to ask the runtime for.
+ *
+ * Both answers are registered together because they are one contract: the
+ * extension needs the server list and the client that connects to them, and a
+ * bus that has one but not the other is a state nobody should have to reason
+ * about.
+ */
+export function serveMcpToExtension(
+  bus: { on?(channel: string, handler: (data: unknown) => void): () => void },
+  read: { configuration: () => McpAdapterEffectiveConfig | undefined; manager: () => unknown },
+): void {
+  serveMcpAgentConfig(bus, read.configuration);
+  serveMcpManager(bus, read.manager);
 }
 
 export function mcpConfigurationForAgent(

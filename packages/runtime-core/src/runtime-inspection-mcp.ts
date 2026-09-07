@@ -19,6 +19,11 @@ import {
   join,
 } from "node:path";
 import {
+  McpCredentialStore,
+  McpManager,
+  defaultCredentialFile,
+} from "@coilcoil/mcp";
+import {
   ORIGINAL_SESSION_MUTATION_UNSUPPORTED,
   RUNTIME_BRIDGE_COMMAND_EVENT,
   RUNTIME_BRIDGE_REPLY_PREFIX,
@@ -42,17 +47,6 @@ import {
   redactSensitiveText,
   redactSensitiveValue,
 } from "./session-values.js";
-
-/** Kept in step with the MCP extension's own RPC surface in @coilcoil/workflow. */
-type McpRpcMethod =
-  | "status"
-  | "connect"
-  | "auth-start"
-  | "auth-await"
-  | "auth-cancel"
-  | "auth-complete"
-  | "logout"
-  | "session-enable";
 
 export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
   private subagentSettingsPath(): string {
@@ -285,85 +279,6 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     throw new Error(ORIGINAL_SESSION_MUTATION_UNSUPPORTED);
   }
 
-  protected mcpRpc(method: McpRpcMethod, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-    const active = this.requireActive();
-    const requestId = `coilcoil-mcp-${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const replyChannel = `coilcoil:mcp:rpc:v1:reply:${requestId}`;
-    // pi-mcp-adapter performs a first-run metadata bootstrap before its proxy
-    // tool becomes ready. That bootstrap can legitimately consume a server's
-    // configured request timeout, so the GUI bridge must not abandon the
-    // extension at the old eight-second boundary.
-    // `auth-await` is parked on a person finishing a login in their browser.
-    // pi's loopback listener gives them five minutes; abandoning the request
-    // first would report a failure while the flow is still perfectly alive.
-    const timeoutMs = method === "status" ? 30_000 : method === "auth-await" ? 360_000 : 120_000;
-    return new Promise((resolvePromise, rejectPromise) => {
-      let settled = false;
-      const finish = (callback: () => void): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        unsubscribe();
-        callback();
-      };
-      const unsubscribe = active.eventBus.on(replyChannel, (raw) => {
-        if (!isRecord(raw)) return;
-        if (raw.success === true && isRecord(raw.data)) {
-          const data = raw.data;
-          finish(() => resolvePromise(data));
-          return;
-        }
-        const rpcError = isRecord(raw.error) ? stringValue(raw.error.message) : "MCP 扩展请求失败。";
-        finish(() => rejectPromise(new Error(rpcError || "MCP 扩展请求失败。")));
-      });
-      const timer = setTimeout(() => finish(() => rejectPromise(new Error("MCP 扩展请求超时。"))), timeoutMs);
-      active.eventBus.emit("coilcoil:mcp:rpc:v1:request", {
-        version: 1,
-        requestId,
-        method,
-        params,
-        source: { client: "coilcoil-desktop" },
-      });
-    });
-  }
-
-  protected mcpStatusFromDetails(details: unknown): McpRuntimeStatus | undefined {
-    if (isRecord(details) && (details.error === "not_initialized" || details.error === "init_failed")) return undefined;
-    if (!isRecord(details) || details.mode !== "status" || !Array.isArray(details.servers)) {
-      const shape = isRecord(details)
-        ? `{ mode: ${JSON.stringify(details.mode)}, servers: ${Array.isArray(details.servers) ? "array" : typeof details.servers} }`
-        : String(details);
-      throw new Error(`pi-mcp-adapter 返回了无效的状态数据：${shape}`);
-    }
-    const statuses = new Set<McpServerRuntimeStatus["status"]>(["connected", "needs-auth", "failed", "cached", "not connected", "disabled"]);
-    const servers = details.servers.map((raw) => {
-      if (!isRecord(raw)) throw new Error("pi-mcp-adapter 返回了无效的 Server 状态。");
-      const rawStatus = stringValue(raw.status);
-      const status = (rawStatus === "not-connected" ? "not connected" : rawStatus) as McpServerRuntimeStatus["status"];
-      if (!statuses.has(status)) throw new Error(`未知的 MCP Server 状态：${status || "empty"}`);
-      return {
-        name: stringValue(raw.name),
-        status,
-        toolCount: typeof raw.toolCount === "number" && Number.isFinite(raw.toolCount) ? raw.toolCount : 0,
-        resourceCount: typeof raw.resourceCount === "number" && Number.isFinite(raw.resourceCount) ? raw.resourceCount : 0,
-        failedAgo: typeof raw.failedAgoSeconds === "number" ? raw.failedAgoSeconds : typeof raw.failedAgo === "number" ? raw.failedAgo : null,
-        disabled: raw.disabled === true || status === "disabled",
-        sessionDisabled: raw.sessionDisabled === true,
-      } satisfies McpServerRuntimeStatus;
-    });
-    return {
-      servers,
-      totalTools: typeof details.totalTools === "number" && Number.isFinite(details.totalTools) ? details.totalTools : 0,
-      totalResources: typeof details.totalResources === "number" && Number.isFinite(details.totalResources) ? details.totalResources : servers.reduce((sum, server) => sum + server.resourceCount, 0),
-      connectedCount: typeof details.connectedCount === "number" && Number.isFinite(details.connectedCount) ? details.connectedCount : 0,
-      disabledCount: typeof details.disabledCount === "number" && Number.isFinite(details.disabledCount) ? details.disabledCount : servers.filter((server) => server.disabled).length,
-      sessionDisabledCount: typeof details.sessionDisabledCount === "number" && Number.isFinite(details.sessionDisabledCount)
-        ? details.sessionDisabledCount
-        : servers.filter((server) => server.sessionDisabled).length,
-      state: "ready",
-    };
-  }
-
   protected async mcpSensitiveValues(cwd?: string): Promise<string[]> {
     const configuration = await this.getMcpConfiguration(cwd);
     const secrets: string[] = [];
@@ -420,134 +335,184 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     });
   }
 
-  protected async normalizeMcpStatus(
-    reported: McpRuntimeStatus | undefined,
-    fallbackState: McpRuntimeStatus["state"],
-    diagnostic?: string,
-  ): Promise<McpRuntimeStatus> {
-    // Pass the active cwd: `loadMcpConfig` resolves project overrides against it
-    // either way, so omitting it would read those overrides without first
-    // reconciling them — leaving the inspector and Settings disagreeing.
-    const configuration = await this.getMcpConfiguration(this.active?.cwd);
-    const reportedByName = new Map((reported?.servers ?? []).map((server) => [server.name, server]));
-    const servers = configuration.servers.map((server) => {
-      const live = reportedByName.get(server.name);
-      return {
-        name: server.name,
-        status: server.disabled ? "disabled" as const : live?.status ?? "not connected" as const,
-        toolCount: live?.toolCount ?? 0,
-        resourceCount: live?.resourceCount ?? 0,
-        failedAgo: live?.failedAgo ?? null,
-        disabled: server.disabled,
-        sessionDisabled: live?.sessionDisabled ?? false,
-      } satisfies McpServerRuntimeStatus;
+  /**
+   * CoilCoil's MCP client, owned by the runtime rather than by a session.
+   *
+   * This is the whole point of dropping pi-mcp-adapter. That adapter was a Pi
+   * extension, so everything about MCP lived inside a conversation: with no
+   * session open the settings panel could not report a status, could not
+   * connect, and answered 请先打开项目并创建会话 to someone who only wanted to
+   * check a server. One manager per runtime is up whenever the app is.
+   */
+  protected mcpManager(): McpManager {
+    if (this.mcpManagerInstance) return this.mcpManagerInstance;
+    this.mcpManagerInstance = new McpManager({
+      loadServers: async () => (await this.getMcpConfiguration(this.active?.cwd)).servers,
+      store: new McpCredentialStore(defaultCredentialFile(this.agentDir)),
+      // The renderer opens the authorization page itself, so that it can show
+      // the dialog and the browser in the right order; the manager only has to
+      // arm the loopback listener before handing the address back.
+      openAuthorization: () => undefined,
     });
-    const visible = servers.filter((server) => !server.disabled && !server.sessionDisabled);
-    this.recordMcpTrouble(servers, diagnostic);
-    return {
-      servers,
-      totalTools: visible.reduce((sum, server) => sum + server.toolCount, 0),
-      totalResources: visible.reduce((sum, server) => sum + server.resourceCount, 0),
-      connectedCount: visible.filter((server) => server.status === "connected").length,
-      disabledCount: servers.filter((server) => server.disabled).length,
-      sessionDisabledCount: servers.filter((server) => server.sessionDisabled).length,
-      state: reported ? "ready" : fallbackState,
-      diagnostic: reported ? undefined : diagnostic,
-    };
+    return this.mcpManagerInstance;
   }
+
+  private mcpManagerInstance?: McpManager;
 
   async getMcpStatus(): Promise<McpRuntimeStatus> {
-    const secrets = await this.mcpSensitiveValues();
-    let result: Record<string, unknown>;
-    try {
-      result = await this.mcpRpc("status");
-    } catch (error) {
-      const message = redactSensitiveText(errorMessage(error), secrets);
-      this.log.error("mcp", "mcp_status_failed", message);
-      throw new Error(message);
-    }
-    const details = isRecord(result.details) ? result.details : {};
-    return this.normalizeMcpStatus(
-      this.mcpStatusFromDetails(result.details),
-      details.error === "init_failed" ? "unavailable" : "initializing",
-      redactSensitiveText(stringValue(details.message) || stringValue(result.text), secrets) || undefined,
-    );
+    const status = await this.mcpManager().status();
+    this.recordMcpTrouble(status.servers);
+    return status;
   }
 
-  protected async mcpAction(method: Exclude<McpRpcMethod, "status" | "session-enable">, params: Record<string, unknown>): Promise<McpActionResult> {
+  /**
+   * Wrap one manager call as the panel's `McpActionResult`.
+   *
+   * Failures are values here, not exceptions: a refused credential and an
+   * unreachable address are answers the panel shows verbatim, and the secrets
+   * that routinely live in an MCP address never reach the renderer.
+   */
+  private async mcpAction(
+    mode: string,
+    server: string,
+    run: () => Promise<McpServerRuntimeStatus>,
+    describe: (status: McpServerRuntimeStatus) => string,
+  ): Promise<McpActionResult> {
     const secrets = await this.mcpSensitiveValues();
-    let result: Record<string, unknown>;
     try {
-      result = await this.mcpRpc(method, params);
+      const outcome = await run();
+      const status = await this.getMcpStatus();
+      if (outcome.status === "failed") {
+        const failure = this.mcpManager().failure(server);
+        const message = redactSensitiveText(failure ?? `MCP Server「${server}」连不上。`, secrets);
+        return { text: message, details: { mode, error: "connect_failed", message, server }, status };
+      }
+      if (outcome.status === "needs-auth") {
+        // An answer, not a fault: the panel turns this straight into the
+        // authorization dialog rather than showing an error.
+        const message = `${server} 需要认证。`;
+        return { text: message, details: { mode, error: "auth_required", message, server }, status };
+      }
+      return { text: describe(outcome), details: { mode, server, status: outcome.status }, status };
     } catch (error) {
       const message = redactSensitiveText(errorMessage(error), secrets);
-      // `params.server` is a name, never an address: these servers routinely
-      // carry their credential inside the URL.
-      this.log.error("mcp", "mcp_action_failed", message, { method, server: params.server });
-      throw new Error(message);
+      this.log.error("mcp", "mcp_action_failed", message, { mode, server });
+      return { text: message, details: { mode, error: "action_failed", message, server } };
     }
-    let status: McpRuntimeStatus | undefined;
-    try {
-      status = await this.getMcpStatus();
-    } catch {
-      status = undefined;
-    }
-    return {
-      text: redactSensitiveText(stringValue(result.text), secrets),
-      details: isRecord(result.details) ? redactSensitiveValue(result.details, secrets) as Record<string, unknown> : undefined,
-      status,
-    };
   }
 
   async connectMcpServer(name: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
-    return this.mcpAction("connect", { server: name.trim() });
-  }
-
-  async startMcpAuth(name: string): Promise<McpActionResult> {
-    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
-    return this.mcpAction("auth-start", { server: name.trim() });
+    const server = name.trim();
+    return this.mcpAction(
+      "connect",
+      server,
+      () => this.mcpManager().connect(server),
+      (status) => status.status === "connected"
+        ? `${server} 已连接${status.toolCount ? ` · ${status.toolCount} 个工具` : ""}`
+        : status.status === "needs-auth"
+          ? `${server} 需要认证。`
+          : status.status === "disabled"
+            ? `${server} 已停用。`
+            : `${server} 未连接。`,
+    );
   }
 
   /**
-   * Wait for the browser to hand the authorization back.
+   * Open a browser authorization and report where it got to.
    *
-   * Started right after `startMcpAuth`, so the MCP extension's waiter on pi's
-   * loopback listener is already armed: this call resolves once the redirect
-   * lands and the token exchange has been done, without anyone copying a URL.
+   * The loopback listener is armed inside `startAuth`, before this returns, so
+   * an approval that comes back faster than the renderer can call
+   * `awaitMcpAuth` is still captured rather than dropped.
    */
+  async startMcpAuth(name: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    const server = name.trim();
+    const secrets = await this.mcpSensitiveValues();
+    try {
+      const started = await this.mcpManager().startAuth(server);
+      const status = await this.getMcpStatus();
+      if (started.error) {
+        const message = redactSensitiveText(started.error, secrets);
+        return { text: message, details: { mode: "auth-start", error: "auth_start_failed", message, server }, status };
+      }
+      if (started.authenticated) {
+        return { text: `${server} 已经完成认证。`, details: { mode: "auth-start", authenticated: true, server }, status };
+      }
+      return {
+        text: `${server} 需要在浏览器里完成授权。`,
+        details: {
+          mode: "auth-start",
+          server,
+          authorizationUrl: started.authorizationUrl,
+          awaitingCallback: started.awaitingCallback,
+        },
+        status,
+      };
+    } catch (error) {
+      const message = redactSensitiveText(errorMessage(error), secrets);
+      this.log.error("mcp", "mcp_auth_start_failed", message, { server });
+      return { text: message, details: { mode: "auth-start", error: "auth_start_failed", message, server } };
+    }
+  }
+
   async awaitMcpAuth(name: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
-    return this.mcpAction("auth-await", { server: name.trim() });
+    const server = name.trim();
+    return this.mcpAction("auth-await", server, () => this.mcpManager().awaitAuth(server), () => `${server} 已完成认证。`);
   }
 
   /** Give up on a browser authorization the user walked away from. */
   async cancelMcpAuth(name: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
-    return this.mcpAction("auth-cancel", { server: name.trim() });
+    const server = name.trim();
+    this.mcpManager().cancelAuth(server);
+    return { text: `${server} 的授权已取消。`, details: { mode: "auth-cancel", server }, status: await this.getMcpStatus() };
   }
 
   async completeMcpAuth(name: string, input: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
     if (!input.trim()) throw new Error("缺少 OAuth 回调内容。");
-    return this.mcpAction("auth-complete", { server: name.trim(), input: input.trim() });
+    const server = name.trim();
+    return this.mcpAction(
+      "auth-complete",
+      server,
+      () => this.mcpManager().completeAuth(server, input),
+      () => `${server} 已完成认证。`,
+    );
   }
 
   async logoutMcpServer(name: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
-    return this.mcpAction("logout", { server: name.trim() });
+    const server = name.trim();
+    const result = await this.mcpAction("logout", server, () => this.mcpManager().logout(server), () => `${server} 的登录信息已清除。`);
+    // The panel reports "signed out" off this flag rather than off the text.
+    if (!result.details?.error) result.details = { ...result.details, loggedOut: true };
+    return result;
   }
 
+  /**
+   * Hide a server from the Agent for this conversation only.
+   *
+   * Unlike the rest of the MCP surface this genuinely is session-scoped, so it
+   * still needs an open session — that is the thing being changed, not an
+   * implementation detail leaking into the panel.
+   */
   async setSessionMcpServerEnabled(name: string, enabled: boolean): Promise<RuntimeInspectionSnapshot> {
     const normalizedName = name.trim();
     if (!normalizedName) throw new Error("缺少 MCP Server 名称。");
     const active = this.requireActive();
-    const result = await this.mcpRpc("session-enable", { server: normalizedName, enabled });
-    const reported = this.mcpStatusFromDetails(result.details);
-    if (!reported) throw new Error("MCP 扩展没有返回当前会话状态。");
-    active.mcpStatus = await this.normalizeMcpStatus(reported, "ready");
+    this.mcpManager().setSessionEnabled(normalizedName, enabled);
+    active.mcpStatus = await this.getMcpStatus();
     const inspection = this.runtimeInspection(active);
     this.emitEvent({ type: "runtime_inspection_updated", inspection });
     return inspection;
+  }
+
+  /** Let go of every MCP connection when the runtime goes down. */
+  async closeMcp(): Promise<void> {
+    const manager = this.mcpManagerInstance;
+    this.mcpManagerInstance = undefined;
+    await manager?.close();
   }
 }

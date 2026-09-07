@@ -35,7 +35,7 @@ export function isMcpTool(
 ): boolean {
   if (name === "mcp") return true;
   const source = `${sourceInfo?.source ?? ""} ${sourceInfo?.path ?? ""}`.toLowerCase();
-  if (source.includes("mcp-adapter") || source.includes("/mcp.")) return true;
+  if (source.includes("mcp-adapter") || source.includes("mcp-tools") || source.includes("/mcp.")) return true;
 
   return serverNames.some((serverName) => {
     const sanitized = sanitizedServerName(serverName);

@@ -426,11 +426,11 @@ try {
   );
   const mcpStatus = await request({ type: "get_mcp_status" });
   if (!mcpStatus.servers.some((server) => server.name === "smoke-server") || typeof mcpStatus.totalTools !== "number" || typeof mcpStatus.totalResources !== "number") {
-    throw new Error(`The extension-native MCP status bridge did not expose pi-mcp-adapter state: ${JSON.stringify(mcpStatus)}`);
+    throw new Error(`The extension-native MCP status bridge did not expose CoilCoil's MCP client state: ${JSON.stringify(mcpStatus)}`);
   }
   const disabledMcp = await request({ type: "set_mcp_server_enabled", name: "smoke-server", enabled: false, cwd: projectDir });
   if (disabledMcp.servers.find((server) => server.name === "smoke-server")?.disabled !== true) {
-    throw new Error("The pi-mcp-adapter project override did not disable the MCP server.");
+    throw new Error("The project override did not disable the MCP server.");
   }
   const disabledStatus = await waitForMcpStatus((status) => status.servers.some((server) => server.name === "smoke-server" && server.status === "disabled"));
   const disabledServerStatus = disabledStatus.servers.find((server) => server.name === "smoke-server");
@@ -439,12 +439,12 @@ try {
   }
   const enabledMcp = await request({ type: "set_mcp_server_enabled", name: "smoke-server", enabled: true, cwd: projectDir });
   if (enabledMcp.servers.find((server) => server.name === "smoke-server")?.disabled === true) {
-    throw new Error("The pi-mcp-adapter project override did not re-enable the MCP server.");
+    throw new Error("The project override did not re-enable the MCP server.");
   }
   await waitForMcpStatus((status) => status.state === "ready" && status.servers.some((server) => server.name === "smoke-server" && server.status !== "disabled"));
   const connectedMcp = await request({ type: "connect_mcp_server", name: "smoke-server" });
   if (!connectedMcp.text || connectedMcp.details?.error || connectedMcp.status?.servers?.find((server) => server.name === "smoke-server")?.status !== "connected") {
-    throw new Error(`The bundled pi-mcp-adapter did not connect to the real stdio MCP fixture: ${JSON.stringify(connectedMcp)}`);
+    throw new Error(`CoilCoil's MCP client did not connect to the real stdio MCP fixture: ${JSON.stringify(connectedMcp)}`);
   }
   const connectedMcpStatus = await waitForMcpStatus((status) => status.servers.some((server) => (
     server.name === "smoke-server"
@@ -456,25 +456,22 @@ try {
   if (connectedMcpStatus.totalTools < 1 || !connectedSmokeServer || ((connectedSmokeServer.resourceCount ?? 0) < 1 && connectedSmokeServer.toolCount < 2)) {
     throw new Error(`The real MCP tool/resource discovery was not projected: ${JSON.stringify(connectedMcpStatus)}`);
   }
-  const directToolName = "smoke_server_echo";
-  await waitForRuntimeInspection((inspection) => inspection.tools.some((tool) => tool.name === directToolName && tool.active));
+  // CoilCoil's own MCP client exposes one `mcp` tool rather than one tool per
+  // MCP tool: a workspace with a few servers can offer dozens, and carrying all
+  // of them in the model's schema costs tokens on every turn. So what a session
+  // toggle changes is which servers that tool can reach, not which tools exist.
+  await waitForRuntimeInspection((inspection) => inspection.tools.some((tool) => tool.name === "mcp" && tool.active));
   const mcpConfigBeforeSessionToggle = readFileSync(savedMcp.configPath, "utf8");
   const sessionDisabledInspection = await request({ type: "set_session_mcp_server_enabled", name: "smoke-server", enabled: false });
-  if (
-    sessionDisabledInspection.mcp?.servers.find((server) => server.name === "smoke-server")?.sessionDisabled !== true
-    || sessionDisabledInspection.tools.find((tool) => tool.name === directToolName)?.active !== false
-  ) {
-    throw new Error(`The session MCP policy did not hide the disabled server and direct tool: ${JSON.stringify(sessionDisabledInspection)}`);
+  if (sessionDisabledInspection.mcp?.servers.find((server) => server.name === "smoke-server")?.sessionDisabled !== true) {
+    throw new Error(`The session MCP policy did not hide the disabled server: ${JSON.stringify(sessionDisabledInspection)}`);
   }
   if (readFileSync(savedMcp.configPath, "utf8") !== mcpConfigBeforeSessionToggle) {
     throw new Error("The session MCP policy unexpectedly rewrote the workspace MCP configuration.");
   }
   const sessionEnabledInspection = await request({ type: "set_session_mcp_server_enabled", name: "smoke-server", enabled: true });
-  if (
-    sessionEnabledInspection.mcp?.servers.find((server) => server.name === "smoke-server")?.sessionDisabled === true
-    || sessionEnabledInspection.tools.find((tool) => tool.name === directToolName)?.active !== true
-  ) {
-    throw new Error(`Re-enabling the session MCP server did not restore its direct tool: ${JSON.stringify(sessionEnabledInspection)}`);
+  if (sessionEnabledInspection.mcp?.servers.find((server) => server.name === "smoke-server")?.sessionDisabled === true) {
+    throw new Error(`Re-enabling the session MCP server did not restore it: ${JSON.stringify(sessionEnabledInspection)}`);
   }
   if (readFileSync(savedMcp.configPath, "utf8") !== mcpConfigBeforeSessionToggle) {
     throw new Error("Re-enabling a session MCP server unexpectedly rewrote the workspace MCP configuration.");
@@ -493,18 +490,18 @@ try {
   });
   const failedMcpConnect = await request({ type: "connect_mcp_server", name: "failing-smoke-server" });
   if (!failedMcpConnect.text || failedMcpConnect.details?.mode !== "connect" || !failedMcpConnect.details?.error) {
-    throw new Error(`The extension-native MCP connect bridge did not return pi-mcp-adapter diagnostics: ${JSON.stringify(failedMcpConnect)}`);
+    throw new Error(`The extension-native MCP connect bridge did not return connection diagnostics: ${JSON.stringify(failedMcpConnect)}`);
   }
   if (JSON.stringify(failedMcpConnect).includes(mcpSecret)) {
     throw new Error("The MCP action bridge leaked a configured credential in diagnostics.");
   }
   const loggedOutMcp = await request({ type: "logout_mcp_server", name: "failing-smoke-server" });
   if (!loggedOutMcp.text || loggedOutMcp.details?.mode !== "logout" || loggedOutMcp.details?.loggedOut !== true) {
-    throw new Error(`The extension-native MCP logout bridge did not invoke pi-mcp-adapter: ${JSON.stringify(loggedOutMcp)}`);
+    throw new Error(`The extension-native MCP logout bridge did not clear the stored credentials: ${JSON.stringify(loggedOutMcp)}`);
   }
   const removedFailingMcp = await request({ type: "remove_mcp_server", cwd: projectDir, name: "failing-smoke-server", scope: "global" });
   if (removedFailingMcp.servers.some((server) => server.name === "failing-smoke-server")) {
-    throw new Error("The Pi MCP adapter configuration bridge did not remove the failing test server.");
+    throw new Error("The MCP configuration bridge did not remove the failing test server.");
   }
 
   const oauthServerName = `oauth-smoke-${oauthFixtureReady.instanceId}`;
@@ -536,7 +533,7 @@ try {
   const authStarted = await request({ type: "start_mcp_auth", name: oauthServerName });
   const authorizationUrl = authStarted.details?.authorizationUrl;
   if (!authorizationUrl || authStarted.details?.mode !== "auth-start") {
-    throw new Error(`The pi-mcp-adapter did not start the real OAuth authorization-code flow: ${JSON.stringify(authStarted)}`);
+    throw new Error(`CoilCoil's MCP client did not start the real OAuth authorization-code flow: ${JSON.stringify(authStarted)}`);
   }
   const authorizationResponse = await fetch(authorizationUrl, { redirect: "manual" });
   const callbackUrl = authorizationResponse.headers.get("location");
@@ -544,7 +541,9 @@ try {
     throw new Error(`The OAuth fixture did not issue a PKCE callback redirect: ${authorizationResponse.status} ${callbackUrl}`);
   }
   const authCompleted = await request({ type: "complete_mcp_auth", name: oauthServerName, input: callbackUrl });
-  if (authCompleted.details?.authenticated !== true || authCompleted.details?.error) {
+  // Redeeming the code also reconnects, so a finished exchange shows up as a
+  // connected server rather than as a bare "authenticated" flag.
+  if (authCompleted.details?.error || authCompleted.details?.status !== "connected") {
     throw new Error(`The OAuth callback/token exchange did not complete: ${JSON.stringify(authCompleted)}`);
   }
   const authenticatedConnect = await request({ type: "connect_mcp_server", name: oauthServerName });

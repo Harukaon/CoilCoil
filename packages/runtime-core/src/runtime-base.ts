@@ -8,6 +8,7 @@ import {
   ModelRuntime,
   configureHttpDispatcher,
 } from "@earendil-works/pi-coding-agent";
+import type { McpManager } from "@coilcoil/mcp";
 import {
   type McpConfigurationSnapshot,
   type ProjectSnapshot,
@@ -191,6 +192,9 @@ export abstract class RuntimeBase {
   ): T;
 
   abstract getMcpConfiguration(cwd?: string): Promise<McpConfigurationSnapshot>;
+
+  /** The runtime's own MCP client; see `runtime-inspection-mcp.ts`. */
+  protected abstract mcpManager(): McpManager;
 
   protected abstract reconstructState(session: AgentSession): ReconstructedSessionState;
 
