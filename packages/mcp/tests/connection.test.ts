@@ -115,3 +115,22 @@ test("没连上的时候调工具会把原因带出来", async () => {
   const link = connection(server({ command: "coilcoil-definitely-not-a-command" }));
   await assert.rejects(() => link.callTool("echo", { text: "hi" }), /ENOENT|not found|spawn/i);
 });
+
+test("服务器起不来时，把它自己在 stderr 上说的那句话带出来", async () => {
+  // 「连接失败」四个字打发不了人。服务器多半已经说了原因，只是没人转达。
+  const link = connection(server({
+    command: process.execPath,
+    args: ["-e", "process.stderr.write('Cannot find module \\'nope\\''); process.exit(1)"],
+  }));
+  assert.equal(await link.connect(), "failed");
+  assert.match(link.failure ?? "", /Cannot find module 'nope'/);
+});
+
+test("服务器啰嗦也不会把面板撑爆", async () => {
+  const link = connection(server({
+    command: process.execPath,
+    args: ["-e", "process.stderr.write('x'.repeat(50000)); process.exit(1)"],
+  }));
+  assert.equal(await link.connect(), "failed");
+  assert.ok((link.failure ?? "").length < 1200, `失败信息过长：${(link.failure ?? "").length}`);
+});

@@ -170,6 +170,19 @@ try {
   const mcpSecret = "coilcoil-mcp-secret-do-not-leak";
   const bootstrap = await request({ type: "bootstrap" });
   if (!bootstrap?.configuration?.models) throw new Error("Bootstrap did not return model configuration.");
+
+  // Before any session exists. This is the regression that started the whole
+  // rewrite: under pi-mcp-adapter the MCP world lived inside a Pi session, so
+  // the settings panel answered 请先打开项目并创建会话 to anyone who opened it
+  // from the home screen and pressed 检查状态. It must answer for real now.
+  const sessionlessMcpStatus = await request({ type: "get_mcp_status" });
+  if (!Array.isArray(sessionlessMcpStatus.servers) || sessionlessMcpStatus.state !== "ready") {
+    throw new Error(`MCP status required a session: ${JSON.stringify(sessionlessMcpStatus)}`);
+  }
+  const sessionlessConnect = await request({ type: "connect_mcp_server", name: "definitely-not-configured" });
+  if (!sessionlessConnect.details?.error || /会话/.test(String(sessionlessConnect.details.message ?? sessionlessConnect.text))) {
+    throw new Error(`Connecting without a session asked for one: ${JSON.stringify(sessionlessConnect)}`);
+  }
   await request({
     type: "save_openai_responses_ws_configuration",
     input: { baseUrl: responsesWsBaseUrl, apiKey: "responses-ws-smoke-key", preserveApiKey: false, fast: false },

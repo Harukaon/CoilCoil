@@ -64,6 +64,8 @@ export interface McpConnectionOptions {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+/** Enough of a failing server's stderr to name the problem, not enough to fill the panel. */
+const STDERR_TAIL_LIMIT = 600;
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -78,6 +80,8 @@ export class McpConnection {
   private discoveredTools: McpToolSummary[] = [];
   private discoveredResources: McpResourceSummary[] = [];
   private oauth?: McpOAuthProvider;
+  /** The last thing a stdio server wrote to stderr, for the failure message. */
+  private stderrTail = "";
   /** One connect at a time; a second press must join the first, not race it. */
   private inFlight?: Promise<McpConnectionStatus>;
 
@@ -112,15 +116,26 @@ export class McpConnection {
     const environment = this.options.environment ?? process.env;
     const launch = launchFor(this.options.definition, environment);
     if (launch.kind === "stdio") {
-      return new StdioClientTransport({
+      const transport = new StdioClientTransport({
         command: launch.command,
         args: launch.args,
         env: launch.env,
         cwd: launch.cwd,
-        // The server's own stderr is diagnostic gold when it refuses to start;
-        // letting it reach this process's stderr puts it in the runtime log.
-        stderr: "inherit",
+        // Piped rather than inherited so a server that refuses to start can be
+        // quoted back to the user. "Cannot find module 'x'" is the answer; a
+        // bare "the connection failed" is what sent people to the logs.
+        // `debug` additionally mirrors it to the runtime log, live.
+        stderr: "pipe",
       });
+      this.stderrTail = "";
+      transport.stderr?.on("data", (chunk: Buffer | string) => {
+        const text = String(chunk);
+        if (this.options.definition.debug) process.stderr.write(text);
+        // Only the tail is kept: a chatty server must not be able to grow this
+        // without bound, and the last thing it said is the useful part.
+        this.stderrTail = `${this.stderrTail}${text}`.slice(-STDERR_TAIL_LIMIT);
+      });
+      return transport;
     }
     const redirectUrl = this.options.redirectUrl;
     this.oauth = launch.oauth
@@ -175,9 +190,23 @@ export class McpConnection {
         return this.state;
       }
       this.state = "failed";
-      this.lastFailure = errorText(error);
+      this.lastFailure = this.failureText(error);
       return this.state;
     }
+  }
+
+  /**
+   * What to tell the user when a connection did not happen.
+   *
+   * A stdio server that dies on startup usually says why on stderr and then the
+   * transport reports something generic like "closed"; joining the two is the
+   * difference between an actionable message and a shrug.
+   */
+  private failureText(error: unknown): string {
+    const reason = errorText(error);
+    const stderr = this.stderrTail.trim();
+    if (!stderr) return reason;
+    return reason.includes(stderr) ? reason : `${reason}\n${stderr}`;
   }
 
   /**
