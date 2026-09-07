@@ -354,6 +354,9 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
       // arm the loopback listener before handing the address back.
       openAuthorization: () => undefined,
     });
+    // 「启动时」这一档只在客户端刚起来的时候兑现一次，而不是每次配置刷新都重来；
+    // 失败不该拖住任何东西，所以是放出去不等。
+    void this.mcpManagerInstance.startEagerServers().catch(() => undefined);
     return this.mcpManagerInstance;
   }
 
