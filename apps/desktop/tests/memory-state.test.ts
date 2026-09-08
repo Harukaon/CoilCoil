@@ -1,24 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  DEFAULT_MEMORY_SCOPE,
-  memoryEditorExpanded,
-  memoryMaxChars,
-} from "../src/renderer/src/features/memory/memoryState.ts";
+import { memoryMaxChars } from "../src/renderer/src/features/memory/memoryState.ts";
 
-test("project memory editor starts collapsed", () => {
-  assert.equal(DEFAULT_MEMORY_SCOPE, "project");
-  assert.equal(memoryEditorExpanded("project", "/memory/project-a.md", new Set()), false);
-});
-
-test("project memory editors expand independently by project document", () => {
-  const expanded = new Set(["/memory/project-a.md"]);
-  assert.equal(memoryEditorExpanded("project", "/memory/project-a.md", expanded), true);
-  assert.equal(memoryEditorExpanded("project", "/memory/project-b.md", expanded), false);
-  assert.equal(memoryEditorExpanded("global", "/memory/global.md", new Set()), true);
-});
-
-test("draft memory limits drive counters and hints before saving", () => {
+test("正在编辑的上限立刻生效，不用等保存", () => {
+  // 编辑框旁边那个数字必须跟着上面刚输入的上限走，而不是文件读进来时的那个。
   const settings = {
     globalEnabled: true,
     projectEnabled: true,
@@ -30,4 +15,9 @@ test("draft memory limits drive counters and hints before saving", () => {
   const staleDocument = { maxChars: 1_000 } as never;
   assert.equal(memoryMaxChars("project", settings, staleDocument), 2_000);
   assert.equal(memoryMaxChars("global", settings, staleDocument), 3_000);
+});
+
+test("设置还没加载出来时，退回文件自己记录的上限", () => {
+  assert.equal(memoryMaxChars("project", undefined, { maxChars: 1_000 } as never), 1_000);
+  assert.equal(memoryMaxChars("project", undefined, undefined), 0);
 });

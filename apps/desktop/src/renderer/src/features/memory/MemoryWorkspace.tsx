@@ -1,27 +1,34 @@
-import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, ChevronRight, Globe2, LoaderCircle, PanelLeft, RefreshCw, Save, Sparkles } from "lucide-react";
+import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle, PanelLeft, RefreshCw, Save, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   MemoryConfigurationSnapshot,
+  MemoryDocumentSnapshot,
   MemorySettings,
   RuntimeInspectionSnapshot,
 } from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { WindowDragBar } from "../../ui/WindowDragBar";
-import {
-  DEFAULT_MEMORY_SCOPE,
-  memoryEditorExpanded,
-  memoryMaxChars,
-  type MemoryScope,
-} from "./memoryState";
+import { MemoryNebula } from "./MemoryNebula";
+import type { NebulaNode } from "./nebulaLayout";
+import { memoryMaxChars } from "./memoryState";
 import "./memory.css";
 
 function charCount(value: string): number {
   return Array.from(value).length;
 }
 
-/** One editable draft per project memory the store holds, keyed by its file. */
+/**
+ * One editable draft per file the store holds, global included.
+ *
+ * Keying everything by path lets the map hand back a node and the editor open it
+ * without caring which of the two kinds of memory it was — the distinction that
+ * used to be a pair of tabs is now just where the node sits on the map.
+ */
 function draftsFor(configuration: MemoryConfigurationSnapshot): Record<string, string> {
-  return Object.fromEntries(configuration.projects.map((document) => [document.filePath, document.content]));
+  return Object.fromEntries([
+    [configuration.global.filePath, configuration.global.content],
+    ...configuration.projects.map((document) => [document.filePath, document.content] as const),
+  ]);
 }
 
 function statusLabel(inspection?: RuntimeInspectionSnapshot): string {
@@ -34,6 +41,14 @@ function statusLabel(inspection?: RuntimeInspectionSnapshot): string {
   return "就绪";
 }
 
+/**
+ * The memory workspace: every memory this machine holds, drawn as one map.
+ *
+ * It is deliberately not scoped to the open conversation. Memory outlives the
+ * workspace you happen to be standing in, and a panel that only ever showed the
+ * current one made the rest of the store invisible — including projects whose
+ * folder is long gone but whose memory is still being kept.
+ */
 export function MemoryWorkspace({
   runtimeId,
   cwd,
@@ -49,11 +64,10 @@ export function MemoryWorkspace({
 }): React.JSX.Element {
   const [configuration, setConfiguration] = useState<MemoryConfigurationSnapshot>();
   const [inspection, setInspection] = useState<RuntimeInspectionSnapshot>();
-  const [scope, setScope] = useState<MemoryScope>(DEFAULT_MEMORY_SCOPE);
-  const [expandedProjectEditors, setExpandedProjectEditors] = useState<Set<string>>(new Set());
-  const [globalContent, setGlobalContent] = useState("");
-  const [projectDrafts, setProjectDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<MemorySettings>();
+  const [selectedPath, setSelectedPath] = useState<string>();
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
@@ -69,10 +83,9 @@ export function MemoryWorkspace({
       ]);
       setConfiguration(next);
       setSettings(next.settings);
-      setGlobalContent(next.global.content);
-      setProjectDrafts(draftsFor(next));
+      setDrafts(draftsFor(next));
       setInspection(nextInspection);
-      if (!next.projects.length) setScope("global");
+      setSelectedPath((current) => current ?? next.global.filePath);
     } catch (caught) {
       if (surfaceError) toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -90,57 +103,49 @@ export function MemoryWorkspace({
     });
   }, [runtimeId]);
 
-  const globalDocument = configuration?.global;
-  const globalCount = charCount(globalContent);
-  const globalMaxChars = memoryMaxChars("global", settings, globalDocument);
-  const projectDocuments = configuration?.projects ?? [];
-  const projectMaxChars = memoryMaxChars("project", settings, configuration?.project);
-  const settingsReady = settings !== undefined;
-  const editedProjects = useMemo(
-    () => projectDocuments.filter((document) => (projectDrafts[document.filePath] ?? "") !== document.content),
-    [projectDocuments, projectDrafts],
+  const documents = useMemo((): MemoryDocumentSnapshot[] => (
+    configuration ? [configuration.global, ...configuration.projects] : []
+  ), [configuration]);
+  const selected = documents.find((document) => document.filePath === selectedPath);
+  const selectedDraft = selectedPath ? drafts[selectedPath] ?? "" : "";
+  const selectedLimit = selected
+    ? selected.kind === "entry" ? 0 : memoryMaxChars(selected.scope, settings, selected)
+    : 0;
+  const selectedCount = charCount(selectedDraft);
+
+  const editedDocuments = useMemo(
+    () => documents.filter((document) => (drafts[document.filePath] ?? "") !== document.content),
+    [documents, drafts],
   );
   const dirty = useMemo(() => {
     if (!configuration || !settings) return false;
-    return globalContent !== configuration.global.content
-      || editedProjects.length > 0
-      || JSON.stringify(settings) !== JSON.stringify(configuration.settings);
-  }, [configuration, editedProjects, globalContent, settings]);
+    return editedDocuments.length > 0 || JSON.stringify(settings) !== JSON.stringify(configuration.settings);
+  }, [configuration, editedDocuments, settings]);
 
   const updateSettings = <K extends keyof MemorySettings>(key: K, value: MemorySettings[K]): void => {
     setSettings((current) => current ? { ...current, [key]: value } : current);
   };
 
-  const toggleProjectEditor = (filePath: string): void => {
-    setExpandedProjectEditors((current) => {
-      const next = new Set(current);
-      if (next.has(filePath)) next.delete(filePath);
-      else next.add(filePath);
-      return next;
-    });
-  };
-
   const save = async (): Promise<void> => {
-    if (!settings) return;
+    if (!settings || !configuration) return;
     setSaving(true);
     try {
+      const globalPath = configuration.global.filePath;
       const next = await window.coilcoil.request<MemoryConfigurationSnapshot>({
         type: "save_memory_configuration",
         cwd,
         input: {
           settings,
-          globalContent,
-          projectContents: editedProjects.map((document) => ({
-            filePath: document.filePath,
-            content: projectDrafts[document.filePath] ?? "",
-          })),
+          globalContent: drafts[globalPath] ?? configuration.global.content,
+          projectContents: editedDocuments
+            .filter((document) => document.filePath !== globalPath)
+            .map((document) => ({ filePath: document.filePath, content: drafts[document.filePath] ?? "" })),
         },
       }, runtimeId);
       setConfiguration(next);
       setSettings(next.settings);
-      setGlobalContent(next.global.content);
-      setProjectDrafts(draftsFor(next));
-      toastSuccess("记忆设置已保存，后续会话将使用新规则。");
+      setDrafts(draftsFor(next));
+      toastSuccess("记忆已保存，后续会话将使用新内容。");
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -152,12 +157,18 @@ export function MemoryWorkspace({
     setRunning(true);
     try {
       await window.coilcoil.request({ type: "run_memory_now" }, runtimeId);
-      toastSuccess("项目记忆整理已在后台启动。");
+      toastSuccess("记忆整理已在后台启动。");
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setRunning(false);
     }
+  };
+
+  const selectNode = (node: NebulaNode): void => {
+    // A project whose MEMORY.md was never written has no file to open; its card
+    // is still worth clicking, so fall back to leaving the current editor alone.
+    if (node.filePath) setSelectedPath(node.filePath);
   };
 
   return (
@@ -168,100 +179,79 @@ export function MemoryWorkspace({
           {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
           <span className="settings-icon"><BookOpen size={17} /></span>
           <div>
-            <h1 id="memory-workspace-title">记忆</h1>
-            <p>管理全局与项目级记忆、生成规则和注入字数限制。</p>
+            <h1 id="memory-workspace-title">记忆星云</h1>
+            <p>这台机器上的全部记忆：中心是全局记忆，外圈是各个项目和它们的记忆条目。</p>
           </div>
         </div>
         <div className="memory-header-actions no-drag">
+          <span className={`memory-status ${inspection?.memory?.state ?? "idle"}`}><Sparkles size={12} />{statusLabel(inspection)}</span>
           <button className="settings-header-action" type="button" disabled={loading || saving} onClick={() => void load(true)}><RefreshCw className={loading ? "spin" : ""} size={13} />刷新</button>
-          <button className="settings-header-action primary" type="button" disabled={!settingsReady || !dirty || saving} onClick={() => void save()}><Save size={13} />保存</button>
+          <button className="settings-header-action primary" type="button" disabled={!settings || !dirty || saving} onClick={() => void save()}><Save size={13} />保存</button>
           <button className="settings-header-action" type="button" onClick={onClose}><ArrowLeft size={14} />返回对话</button>
         </div>
       </header>
 
       <div className="memory-workspace-content">
-        {loading ? <div className="memory-loading"><LoaderCircle className="spin" size={15} />加载记忆配置…</div> : null}
-        {!loading && configuration && settings ? (
-          <div className="memory-settings">
-            <section className="memory-overview-card">
-              <div><strong>{configuration.project?.projectName ?? "当前工作区"}</strong><p>后台记忆模块会把项目记忆保存到独立目录，不修改项目源码。</p></div>
-              <span className={`memory-status ${inspection?.memory?.state ?? "idle"}`}><Sparkles size={12} />{statusLabel(inspection)}</span>
-              <dl>
-                <div><dt>全局路径</dt><dd title={configuration.global.filePath}>{configuration.global.filePath}</dd></div>
-                {configuration.project ? <div><dt>项目路径</dt><dd title={configuration.project.filePath}>{configuration.project.filePath}</dd></div> : null}
-                <div><dt>存储目录</dt><dd title={configuration.storageRoot}>{configuration.storageRoot}</dd></div>
-              </dl>
-            </section>
-
-            <section className="memory-editor-card">
-              <div className="memory-section-heading"><div><strong>记忆内容</strong><p>全局记忆注入所有工作区；项目记忆逐项目保存，只有当前工作区的那份会被注入。</p></div><div className="memory-scope-tabs">
-                <button type="button" className={scope === "global" ? "active" : ""} onClick={() => setScope("global")}><Globe2 size={12} />全局</button>
-                <button type="button" className={scope === "project" ? "active" : ""} disabled={!projectDocuments.length} onClick={() => setScope("project")}><BookOpen size={12} />项目（{projectDocuments.length}）</button>
-              </div></div>
-              {scope === "global" && globalDocument ? <>
-                <div className="memory-editor-meta"><span>{globalDocument.label}</span><code>{globalDocument.filePath}</code><small className={globalCount > globalMaxChars ? "over" : ""}>{globalCount.toLocaleString()} / {globalMaxChars.toLocaleString()} 字</small></div>
-                <textarea className="memory-content-editor" value={globalContent} onChange={(event) => setGlobalContent(event.target.value)} spellCheck={false} placeholder="记录跨项目长期偏好、稳定工具约定…" />
-                <p className="memory-editor-hint">超过限制不会截断原文，但注入模型时只会取前 {globalMaxChars.toLocaleString()} 个 Unicode 字符。</p>
-              </> : null}
-              {scope === "project" ? (
-                projectDocuments.length ? projectDocuments.map((document) => {
-                  const draft = projectDrafts[document.filePath] ?? "";
-                  const count = charCount(draft);
-                  const expanded = memoryEditorExpanded("project", document.filePath, expandedProjectEditors);
-                  const current = document.filePath === configuration.project?.filePath;
-                  // 只有索引会被每轮注入，所以只有索引有字数预算；正文按需读取，不设上限。
-                  const limit = document.kind === "entry" ? 0 : projectMaxChars;
-                  return (
-                    <div className="memory-project-entry" key={document.filePath}>
-                      <button className="memory-editor-meta project-toggle" type="button" aria-expanded={expanded} onClick={() => toggleProjectEditor(document.filePath)}>
-                        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                        <span>{document.label}</span>
-                        {current ? <em className="memory-project-current">当前</em> : null}
-                        {!document.exists ? <em className="memory-project-empty">未创建</em> : null}
-                        <code title={document.filePath}>{document.filePath}</code>
-                        <small className={limit > 0 && count > limit ? "over" : ""}>{limit > 0 ? `${count.toLocaleString()} / ${limit.toLocaleString()} 字` : `${count.toLocaleString()} 字`}</small>
-                      </button>
-                      {expanded ? <>
-                        <textarea
-                          className="memory-content-editor"
-                          value={draft}
-                          onChange={(event) => setProjectDrafts((drafts) => ({ ...drafts, [document.filePath]: event.target.value }))}
-                          spellCheck={false}
-                          placeholder="记录该项目的稳定事实、约定和关键决策…"
-                        />
-                        <p className="memory-editor-hint">{limit > 0
-                          ? `超过限制不会截断原文，但注入模型时只会取前 ${limit.toLocaleString()} 个 Unicode 字符。`
-                          : "这是一条记忆正文，不会常驻上下文；模型按索引里的摘要判断要不要读它。"}</p>
-                      </> : null}
-                    </div>
-                  );
-                }) : <p className="memory-empty">记忆目录里还没有任何项目记忆。</p>
-              ) : null}
-              {scope === "project" && projectDocuments.length ? <p className="memory-editor-hint collapsed">点击项目行展开对应的文本编辑框。</p> : null}
-            </section>
-
-            <section className="memory-settings-card">
-              <div className="memory-section-heading"><div><strong>生成与注入规则</strong><p>控制后台整理频率、两类记忆是否注入，以及各自的字数预算。</p></div></div>
-              <div className="memory-toggle-grid">
-                <label><input type="checkbox" checked={settings.globalEnabled} onChange={(event) => updateSettings("globalEnabled", event.target.checked)} /><span><strong>注入全局记忆</strong><small>对所有工作区生效</small></span></label>
-                <label><input type="checkbox" checked={settings.projectEnabled} onChange={(event) => updateSettings("projectEnabled", event.target.checked)} /><span><strong>注入项目记忆</strong><small>仅对当前工作区生效</small></span></label>
-                <label><input type="checkbox" checked={settings.autoSummarize} onChange={(event) => updateSettings("autoSummarize", event.target.checked)} /><span><strong>回复后自动整理</strong><small>每满设定轮数后在后台整理一次</small></span></label>
-              </div>
-              <div className="memory-limit-grid">
-                <label><span>全局记忆上限（字）</span><input type="number" min={100} max={1000000} step={100} value={settings.globalMaxChars} onChange={(event) => updateSettings("globalMaxChars", Math.max(100, Number(event.target.value) || 100))} /></label>
-                <label><span>项目记忆上限（字）</span><input type="number" min={100} max={1000000} step={100} value={settings.projectMaxChars} onChange={(event) => updateSettings("projectMaxChars", Math.max(100, Number(event.target.value) || 100))} /></label>
-                <label><span>自动整理间隔（轮）</span><input type="number" min={1} max={1000} step={1} value={settings.summarizeEveryTurns} onChange={(event) => updateSettings("summarizeEveryTurns", Math.min(1000, Math.max(1, Math.round(Number(event.target.value) || 1))))} /></label>
-              </div>
-              <p className="memory-editor-hint">当前已累计 {configuration.turnsSinceSummary.toLocaleString()} / {settings.summarizeEveryTurns.toLocaleString()} 轮，攒够后后台才整理一次；点「立即整理」会马上跑并重新计数。</p>
-              <label className="memory-rules-field"><span>记忆生成规则</span><textarea value={settings.generationRules} onChange={(event) => updateSettings("generationRules", event.target.value)} spellCheck={false} /></label>
-            </section>
-
-            <section className="memory-actions-card">
-              <div><strong>立即整理当前项目</strong><p>{inspection?.memory?.message ?? "使用当前模型在后台分析最近会话，更新项目记忆。"}</p></div>
-              <button className="memory-run-button" type="button" disabled={!runtimeId || running || inspection?.memory?.state === "running"} onClick={() => void runMemory()}>{running || inspection?.memory?.state === "running" ? <LoaderCircle className="spin" size={13} /> : <CheckCircle2 size={13} />}立即整理</button>
-            </section>
+        {loading && !configuration ? <div className="memory-loading"><LoaderCircle className="spin" size={15} />加载记忆…</div> : null}
+        {configuration && settings ? <>
+          {/* 固定选项放在最上面：它们管的是整个记忆模块，不属于底下任何一个节点。 */}
+          <div className="memory-controls">
+            <div className="memory-control-group">
+              <label><input type="checkbox" checked={settings.globalEnabled} onChange={(event) => updateSettings("globalEnabled", event.target.checked)} /><span>注入全局记忆</span></label>
+              <label><input type="checkbox" checked={settings.projectEnabled} onChange={(event) => updateSettings("projectEnabled", event.target.checked)} /><span>注入项目记忆</span></label>
+              <label><input type="checkbox" checked={settings.autoSummarize} onChange={(event) => updateSettings("autoSummarize", event.target.checked)} /><span>回复后自动整理</span></label>
+            </div>
+            <div className="memory-control-group">
+              <label><span>全局上限</span><input type="number" min={100} max={1000000} step={100} value={settings.globalMaxChars} onChange={(event) => updateSettings("globalMaxChars", Math.max(100, Number(event.target.value) || 100))} /></label>
+              <label><span>索引上限</span><input type="number" min={100} max={1000000} step={100} value={settings.projectMaxChars} onChange={(event) => updateSettings("projectMaxChars", Math.max(100, Number(event.target.value) || 100))} /></label>
+              <label><span>整理间隔</span><input type="number" min={1} max={1000} step={1} value={settings.summarizeEveryTurns} onChange={(event) => updateSettings("summarizeEveryTurns", Math.min(1000, Math.max(1, Math.round(Number(event.target.value) || 1))))} /><small>轮（已 {configuration.turnsSinceSummary.toLocaleString()}）</small></label>
+            </div>
+            <div className="memory-control-group end">
+              <button className="memory-rules-toggle" type="button" aria-expanded={rulesOpen} onClick={() => setRulesOpen((open) => !open)}>
+                {rulesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}生成规则
+              </button>
+              <button className="memory-run-button" type="button" disabled={!runtimeId || running || inspection?.memory?.state === "running"} onClick={() => void runMemory()}>
+                {running || inspection?.memory?.state === "running" ? <LoaderCircle className="spin" size={13} /> : <CheckCircle2 size={13} />}立即整理
+              </button>
+            </div>
           </div>
-        ) : null}
+          {rulesOpen ? <div className="memory-rules-strip">
+            <textarea value={settings.generationRules} onChange={(event) => updateSettings("generationRules", event.target.value)} spellCheck={false} aria-label="记忆生成规则" />
+            <p>这段规则会随记忆一起进系统提示，决定后台整理时什么该记、什么不该记。</p>
+          </div> : null}
+
+          <div className="memory-stage">
+            <MemoryNebula
+              global={configuration.global}
+              documents={configuration.projects}
+              selectedPath={selectedPath}
+              onSelect={selectNode}
+            />
+            <aside className="memory-inspector">
+              {selected ? <>
+                <header>
+                  <strong>{selected.label}</strong>
+                  <small className={selectedLimit > 0 && selectedCount > selectedLimit ? "over" : ""}>
+                    {selectedLimit > 0
+                      ? `${selectedCount.toLocaleString()} / ${selectedLimit.toLocaleString()} 字`
+                      : `${selectedCount.toLocaleString()} 字`}
+                  </small>
+                </header>
+                <code title={selected.filePath}>{selected.filePath}</code>
+                <textarea
+                  className="memory-content-editor"
+                  value={selectedDraft}
+                  onChange={(event) => setDrafts((current) => ({ ...current, [selected.filePath]: event.target.value }))}
+                  spellCheck={false}
+                  placeholder={selected.kind === "entry" ? "这条记忆的正文，写细一点…" : "索引和重要事实…"}
+                />
+                <p>{selected.kind === "entry"
+                  ? "正文不常驻上下文，也不限字数——模型按索引里的一句话说明决定要不要读它。"
+                  : "只有这一层会每轮注入模型，所以它只放索引行和极少数重要事实。"}</p>
+              </> : <p className="memory-empty">在左边的星云里点一个节点，就能在这里读它、改它。</p>}
+            </aside>
+          </div>
+        </> : null}
       </div>
     </section>
   );

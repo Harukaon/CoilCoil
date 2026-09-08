@@ -2,17 +2,13 @@ import type { MemoryDocumentSnapshot, MemorySettings } from "@coilcoil/runtime-p
 
 export type MemoryScope = "global" | "project";
 
-export const DEFAULT_MEMORY_SCOPE: MemoryScope = "project";
-
-export function memoryEditorExpanded(
-  scope: MemoryScope,
-  documentPath: string | undefined,
-  expandedProjectEditors: ReadonlySet<string>,
-): boolean {
-  return scope === "global"
-    || Boolean(documentPath && expandedProjectEditors.has(documentPath));
-}
-
+/**
+ * The character budget a memory document is measured against.
+ *
+ * Unsaved settings win over the document's own `maxChars`: the number beside the
+ * editor has to track the limit being typed into the box above it, not the one
+ * the file was last read with.
+ */
 export function memoryMaxChars(
   scope: MemoryScope,
   settings: MemorySettings | undefined,
