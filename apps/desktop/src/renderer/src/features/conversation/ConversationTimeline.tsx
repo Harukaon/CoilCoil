@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronRight, Copy, FileText, Folder, FolderOpen, LoaderCircle } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Copy, ExternalLink, FileText, Folder, FolderOpen, LoaderCircle } from "lucide-react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -19,9 +19,10 @@ import type {
 } from "@coilcoil/runtime-protocol";
 import { ConversationComposer } from "../composer/ConversationComposer";
 import { clipboardImage, imageDataUrl } from "../composer/promptImages";
+import { inAppBrowserModifierLabel, markdownBrowserUrl } from "../browser/useInAppBrowserLinks";
 import { ConfirmDialog } from "../../ui/dialog";
 import { CollapsibleCodeBlock } from "./CollapsibleCodeBlock";
-import { copyPath, revealLabel, revealPath } from "../files/pathActions";
+import { copyPath, copyText, revealLabel, revealPath } from "../files/pathActions";
 import { parseMarkdownFileHref, type MarkdownFileTarget } from "./markdownFileLinks";
 import { useFileLinkKind } from "./fileLinkKinds";
 import { TerminalNoticeCard } from "./TerminalNoticeCard";
@@ -93,13 +94,58 @@ function MarkdownFileLink({
   );
 }
 
+/**
+ * A web link in the transcript.
+ *
+ * Clicking goes to the user's own browser (see `useInAppBrowserLinks`); the
+ * built-in panel is one modifier away and named in the tooltip, because a
+ * modifier nobody can see is a modifier nobody uses. Right-click offers the
+ * address itself — the visible text is often a title, and what someone wants to
+ * paste elsewhere is the URL underneath it.
+ */
+function MarkdownWebLink({
+  url,
+  className,
+  children,
+  href,
+  ...props
+}: {
+  url: string;
+  className?: string;
+  children?: ReactNode;
+  href?: string;
+} & Record<string, unknown>): React.JSX.Element {
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <a
+          {...props}
+          className={className}
+          href={href}
+          title={`${url}\n单击在浏览器中打开，${inAppBrowserModifierLabel()} + 单击在内置浏览器打开`}
+        >
+          {children}
+        </a>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
+          <ContextMenu.Item className="conversation-context-item" onSelect={() => { void copyText(url, "链接地址"); }}><Copy size={13} /><span>复制链接地址</span></ContextMenu.Item>
+          <ContextMenu.Item className="conversation-context-item" onSelect={() => { void window.coilcoil.openExternal(url); }}><ExternalLink size={13} /><span>在浏览器中打开</span></ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  );
+}
+
 const MARKDOWN_COMPONENTS: Components = {
   table: ({ node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props} /></div>,
   pre: ({ node: _node, ...props }) => <CollapsibleCodeBlock {...props} />,
   a: ({ node: _node, children, className, href, ...props }) => {
     const file = parseMarkdownFileHref(href);
-    if (!file) return <a className={className} href={href} {...props}>{children}</a>;
-    return <MarkdownFileLink {...props} file={file} className={className} href={href}>{children}</MarkdownFileLink>;
+    if (file) return <MarkdownFileLink {...props} file={file} className={className} href={href}>{children}</MarkdownFileLink>;
+    const url = markdownBrowserUrl(href ?? null);
+    if (url) return <MarkdownWebLink {...props} url={url} className={className} href={href}>{children}</MarkdownWebLink>;
+    return <a className={className} href={href} {...props}>{children}</a>;
   },
 };
 

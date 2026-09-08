@@ -1,5 +1,22 @@
 import { useCallback, useEffect } from "react";
 
+/**
+ * Whether this click asked for the built-in browser rather than the real one.
+ *
+ * Command on macOS, Control elsewhere — the same chord those platforms already
+ * use for "open this somewhere other than here". Control is deliberately not
+ * accepted on macOS: there it is a right-click, and treating it as a modifier
+ * would fire a navigation every time someone opened the context menu.
+ */
+export function wantsInAppBrowser(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
+  return window.coilcoil.platform === "darwin" ? event.metaKey : event.ctrlKey;
+}
+
+/** The key to name in a tooltip, spelled the way the platform spells it. */
+export function inAppBrowserModifierLabel(): string {
+  return window.coilcoil.platform === "darwin" ? "⌘" : "Ctrl";
+}
+
 export function markdownBrowserUrl(href: string | null): string | undefined {
   if (!href) return undefined;
   try {
@@ -21,12 +38,30 @@ export function useInAppBrowserLinks({
   openFile(path: string): void;
   reportError(message: string): void;
 }): void {
-  const openLink = useCallback((url: string): void => {
+  const openInApp = useCallback((url: string): void => {
     openBrowser();
     void window.coilcoil.createBrowserTab(scopeId, url).catch((error: unknown) => {
       reportError(error instanceof Error ? error.message : String(error));
     });
   }, [openBrowser, reportError, scopeId]);
+
+  /**
+   * A link in the transcript goes where a link goes: the user's own browser.
+   *
+   * It used to be captured into the panel on the right, which is the wrong
+   * default — that panel is a tool for the Agent to drive, and sending someone's
+   * click there strands them in a window with no history, no extensions and none
+   * of their logins. The panel stays one modifier away.
+   */
+  const openLink = useCallback((url: string, inApp: boolean): void => {
+    if (inApp) {
+      openInApp(url);
+      return;
+    }
+    void window.coilcoil.openExternal(url).catch((error: unknown) => {
+      reportError(error instanceof Error ? error.message : String(error));
+    });
+  }, [openInApp, reportError]);
 
   useEffect(() => {
     const routeMarkdownLink = (event: MouseEvent): void => {
@@ -52,7 +87,7 @@ export function useInAppBrowserLinks({
       if (!url) return;
       event.preventDefault();
       event.stopPropagation();
-      openLink(url);
+      openLink(url, wantsInAppBrowser(event));
     };
     document.addEventListener("click", routeMarkdownLink, true);
     return () => document.removeEventListener("click", routeMarkdownLink, true);
