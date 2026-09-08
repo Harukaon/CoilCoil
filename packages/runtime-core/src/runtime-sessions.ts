@@ -24,6 +24,7 @@ import {
   existsSync,
   statSync,
 } from "node:fs";
+import { SessionListingCache } from "./session-listing-cache.js";
 import {
   sessionSummary,
   subagentActivitiesFromPayload,
@@ -68,9 +69,28 @@ import { rewriteSessionHeaderCwd } from "./session-relocation.js";
 import { systemPromptLayerFiles } from "./system-prompt-layers.js";
 
 export abstract class RuntimeSessions extends RuntimeMcpConfig {
+  private readonly sessionListings = new SessionListingCache<Awaited<ReturnType<typeof SessionManager.list>>[number]>();
+
+  /**
+   * The session list, read from disk only when disk has changed.
+   *
+   * Pi's listing streams every line of every session file, which on a few
+   * hundred conversations is most of a second — and opening a workspace asks
+   * for it several times over. See `session-listing-cache.ts`.
+   */
+  protected listSessionInfos(
+    resolvedCwd: string,
+  ): Promise<Awaited<ReturnType<typeof SessionManager.list>>> {
+    return this.sessionListings.list(
+      resolvedCwd,
+      this.sessionDir,
+      () => SessionManager.list(resolvedCwd, this.sessionDir),
+    );
+  }
+
   async listSessions(cwd: string): Promise<SessionSummary[]> {
     const resolvedCwd = safeRealPath(cwd);
-    const sessions = await SessionManager.list(resolvedCwd, this.sessionDir);
+    const sessions = await this.listSessionInfos(resolvedCwd);
     const archived = this.readArchivedSessions();
     const pinned = this.readPinnedSessions();
     const mapped = sessions
@@ -95,7 +115,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     await this.ready();
     const resolvedCwd = safeRealPath(cwd);
     const archived = this.readArchivedSessions();
-    return (await SessionManager.list(resolvedCwd, this.sessionDir)).flatMap((session) => {
+    return (await this.listSessionInfos(resolvedCwd)).flatMap((session) => {
       const archivedAt = archived[safeRealPath(session.path)];
       return archivedAt ? [{ ...sessionSummary(session), archivedAt }] : [];
     });
@@ -104,7 +124,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
   protected async requireProjectSession(cwd: string, sessionPath: string): Promise<{ resolvedCwd: string; resolvedSession: string; }> {
     const resolvedCwd = safeRealPath(cwd);
     const resolvedSession = ensureInside(this.sessionDir, sessionPath);
-    const belongsToProject = (await SessionManager.list(resolvedCwd, this.sessionDir))
+    const belongsToProject = (await this.listSessionInfos(resolvedCwd))
       .some((session) => safeRealPath(session.path) === safeRealPath(resolvedSession));
     if (!belongsToProject) throw new Error("所选会话不属于当前工作区。");
     return { resolvedCwd, resolvedSession };
@@ -158,7 +178,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
 
   async forkSession(cwd: string, sessionPath: string): Promise<{ sessions: SessionSummary[]; session: SessionSummary; }> {
     const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
-    const source = (await SessionManager.list(resolvedCwd, this.sessionDir))
+    const source = (await this.listSessionInfos(resolvedCwd))
       .find((session) => safeRealPath(session.path) === safeRealPath(resolvedSession));
     if (!source) throw new Error("所选会话不属于当前工作区。");
     const forked = SessionManager.forkFrom(resolvedSession, resolvedCwd, this.sessionDir);
