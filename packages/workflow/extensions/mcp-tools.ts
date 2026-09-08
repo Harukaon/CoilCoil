@@ -76,9 +76,11 @@ export function describeServers(servers: Array<{
 }>): string {
   if (!servers.length) return "当前没有可用的 MCP Server。可能是还没配置，或者配置的都已停用。";
   const lines = servers.map((entry) => {
-    if (entry.status === "connected") {
-      return `- ${entry.server}（已连接，${entry.tools.length} 个工具：${entry.tools.map((tool) => tool.name).join("、")}）`;
-    }
+    // Only the count. Naming every tool of a connected server sounds harmless
+    // until one of them offers thirty — and then every `list` pays for thirty
+    // names nobody asked for. Asking a connected server for its tools costs no
+    // network at all, so the names are one cheap step away.
+    if (entry.status === "connected") return `- ${entry.server}（已连接，${entry.tools.length} 个工具）`;
     if (entry.status === "needs-auth") return `- ${entry.server}（需要先在设置里完成认证）`;
     if (entry.status === "failed") return `- ${entry.server}（上次连接失败）`;
     return `- ${entry.server}（未连接，用 action="tools" 查看它有哪些工具）`;
@@ -87,7 +89,7 @@ export function describeServers(servers: Array<{
     "已配置的 MCP Server：",
     ...lines,
     "",
-    "这一步没有联网。要知道某个 Server 具体有哪些工具，用 action=\"tools\" 加 server 名字——那一步才会真的去连它，可能要几秒。",
+    "这一步没有联网，也没有列出具体工具名。要看某个 Server 有哪些工具，用 action=\"tools\" 加 server 名字；已连接的服务器问一下不花任何代价，没连的那一步才会真的去连它、可能要几秒。",
   ].join("\n");
 }
 

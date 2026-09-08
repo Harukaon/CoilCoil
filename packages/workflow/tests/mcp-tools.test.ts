@@ -38,8 +38,10 @@ test("列 Server 这一步明说自己没联网，并指路下一步", () => {
   assert.match(rendered, /没有联网/);
   assert.match(rendered, /- firecrawl（未连接/);
   assert.match(rendered, /- beeswax（需要先在设置里完成认证）/);
-  // 已经连着的就顺手把工具名给了，没必要瞒着已经知道的事。
-  assert.match(rendered, /- local（已连接，2 个工具：echo、read）/);
+  // 只报数量，不报名字：一个服务器三十个工具的时候，每次 list 都要为三十个
+  // 没人要的名字买单；而向已连接的服务器要工具清单是不花钱的。
+  assert.match(rendered, /- local（已连接，2 个工具）/);
+  assert.doesNotMatch(rendered, /echo/);
   assert.match(rendered, /action="tools"/);
 });
 
