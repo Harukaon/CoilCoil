@@ -18,6 +18,7 @@ import {
   toolResultText,
 } from "./message-helpers.js";
 import { agentRetryRuntimeEvent } from "./runtime-agent-retry.js";
+import { beginStreamingToolRun } from "./streaming-tool-call.js";
 import {
   isShellToolName,
   MAX_TERMINAL_OUTPUT,
@@ -294,6 +295,11 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             this.emitEvent({ type: "message_delta", id, field: "text", delta: update.delta, revision: ++active.messageRevision });
           } else if (update.type === "thinking_delta") {
             this.emitEvent({ type: "message_delta", id, field: "thinking", delta: update.delta, revision: ++active.messageRevision });
+          } else if (update.type === "toolcall_start" || update.type === "toolcall_delta") {
+            // The card belongs on screen while the arguments stream, not after.
+            const started = beginStreamingToolRun(active, update, (name, args, callId) =>
+              this.toolLabel(name, args, callId, undefined, active.session.sessionId));
+            if (started) this.emitEvent(started);
           }
           break;
         }
