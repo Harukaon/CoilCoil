@@ -56,6 +56,16 @@ export interface McpAuthStart {
 const AUTH_TIMEOUT_MS = 5 * 60_000;
 /** How often idle connections are swept. Coarse on purpose — this is housekeeping. */
 const IDLE_SWEEP_MS = 30_000;
+/**
+ * How many servers are opened at once.
+ *
+ * Measured, not guessed: five servers connecting in parallel through a local
+ * proxy stopped responding altogether, while the same five opened one after
+ * another took six seconds each and all succeeded. Handshakes are the expensive
+ * part and the proxy is the bottleneck, so a small window is faster in practice
+ * than an unbounded fan-out that stalls.
+ */
+const CONNECT_CONCURRENCY = 2;
 
 interface AuthFlow {
   /** Open the browser rather than only recording where it would have gone. */
@@ -99,6 +109,17 @@ export function authorizationCode(input: string): string | undefined {
     if (code) return code;
   }
   return /^[\w.~-]+$/.test(trimmed) ? trimmed : undefined;
+}
+
+/** Run `work` over `items`, at most `limit` at a time, never rejecting. */
+async function mapLimited<T>(items: T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
+  const queue = [...items];
+  const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+      await work(next).catch(() => undefined);
+    }
+  });
+  await Promise.all(runners);
 }
 
 export class McpManager {
@@ -184,17 +205,17 @@ export class McpManager {
   async directTools(): Promise<Array<{ server: string; tool: McpToolSummary }>> {
     await this.reload();
     const listed: Array<{ server: string; tool: McpToolSummary }> = [];
-    await Promise.all(this.availableDefinitions()
-      .filter((definition) => definition.directTools === true || (Array.isArray(definition.directTools) && definition.directTools.length > 0))
-      .map(async (definition) => {
-        const wanted = Array.isArray(definition.directTools) ? new Set(definition.directTools) : undefined;
-        const connection = this.connectionFor(definition.name);
-        if (connection.status !== "connected" && await connection.connect() !== "connected") return;
-        for (const tool of connection.tools) {
-          if (wanted && !wanted.has(tool.name)) continue;
-          listed.push({ server: definition.name, tool });
-        }
-      }));
+    const wantsDirect = this.availableDefinitions()
+      .filter((definition) => definition.directTools === true || (Array.isArray(definition.directTools) && definition.directTools.length > 0));
+    await mapLimited(wantsDirect, CONNECT_CONCURRENCY, async (definition) => {
+      const wanted = Array.isArray(definition.directTools) ? new Set(definition.directTools) : undefined;
+      const connection = this.connectionFor(definition.name);
+      if (connection.status !== "connected" && await this.openConnection(definition.name) !== "connected") return;
+      for (const tool of connection.tools) {
+        if (wanted && !wanted.has(tool.name)) continue;
+        listed.push({ server: definition.name, tool });
+      }
+    });
     return listed;
   }
 
@@ -243,6 +264,24 @@ export class McpManager {
 
   private async ensureCallbackServer(): Promise<void> {
     await this.callback.listen();
+  }
+
+  /**
+   * Open one server, having first made sure it can be opened.
+   *
+   * Every path that connects goes through here. An OAuth server's transport is
+   * built with a redirect address, and that address does not exist until the
+   * loopback listener is up — so a caller that skipped this step did not get a
+   * connection failure, it got 授权回调服务还没有启动, which is a sentence about
+   * our own plumbing that no user can act on. That is precisely what happened
+   * to `listTools`: the Agent asked what was available and every server needing
+   * authorization reported itself broken.
+   */
+  private async openConnection(name: string): Promise<McpConnectionStatus> {
+    const definition = this.definitions.get(name);
+    if (!definition) throw new Error(`没有找到 MCP Server「${name}」。`);
+    if (this.supportsOAuth(definition)) await this.ensureCallbackServer();
+    return this.connectionFor(name).connect();
   }
 
   /** Whether a definition could ever need the browser flow. */
@@ -303,8 +342,7 @@ export class McpManager {
     const definition = this.definitions.get(name);
     if (!definition) throw new Error(`没有找到 MCP Server「${name}」。`);
     if (definition.disabled) return this.statusFor(definition);
-    if (this.supportsOAuth(definition)) await this.ensureCallbackServer();
-    const outcome = await this.connectionFor(name).connect();
+    const outcome = await this.openConnection(name);
     if (outcome === "failed") this.failedAt.set(name, Date.now());
     else this.failedAt.delete(name);
     this.lastUsedAt.set(name, Date.now());
@@ -484,9 +522,9 @@ export class McpManager {
     await this.reload();
     const tools: Array<{ server: string; tool: McpToolSummary }> = [];
     const unavailable: Array<{ server: string; status: McpConnectionStatus; failure?: string }> = [];
-    await Promise.all(this.availableDefinitions().map(async (definition) => {
+    await mapLimited(this.availableDefinitions(), CONNECT_CONCURRENCY, async (definition) => {
       const connection = this.connectionFor(definition.name);
-      const status = connection.status === "connected" ? "connected" : await connection.connect();
+      const status = connection.status === "connected" ? "connected" : await this.openConnection(definition.name);
       if (status !== "connected") {
         if (status === "failed") this.failedAt.set(definition.name, Date.now());
         unavailable.push({ server: definition.name, status, failure: connection.failure });
@@ -494,7 +532,7 @@ export class McpManager {
       }
       this.lastUsedAt.set(definition.name, Date.now());
       for (const tool of connection.tools) tools.push({ server: definition.name, tool });
-    }));
+    });
     this.startIdleSweep();
     return { tools, unavailable };
   }
@@ -507,16 +545,19 @@ export class McpManager {
     if (this.sessionDisabled.has(server)) throw new Error(`MCP Server「${server}」已在当前会话停用。`);
     this.lastUsedAt.set(server, Date.now());
     this.startIdleSweep();
+    // `callTool` connects on demand, so the redirect address has to exist first
+    // for exactly the same reason as above.
+    if (this.supportsOAuth(definition)) await this.ensureCallbackServer();
     return this.connectionFor(server).callTool(tool, args);
   }
 
   /** Connect everything marked `eager`, without letting one failure stop the rest. */
   async startEagerServers(): Promise<void> {
     await this.reload();
-    await Promise.allSettled(
-      this.availableDefinitions()
-        .filter((definition) => definition.lifecycle === "eager")
-        .map((definition) => this.connect(definition.name)),
+    await mapLimited(
+      this.availableDefinitions().filter((definition) => definition.lifecycle === "eager"),
+      CONNECT_CONCURRENCY,
+      async (definition) => { await this.connect(definition.name); },
     );
   }
 

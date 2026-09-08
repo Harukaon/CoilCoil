@@ -134,3 +134,25 @@ test("服务器啰嗦也不会把面板撑爆", async () => {
   assert.equal(await link.connect(), "failed");
   assert.ok((link.failure ?? "").length < 1200, `失败信息过长：${(link.failure ?? "").length}`);
 });
+
+test("服务器接了连接却不说话，不会永远挂着", async (t) => {
+  // SDK 只给自己的请求设了超时，connect 没有。而 Agent 是并行列服务器的，
+  // 一个这样的服务器以前会把其他所有服务器的答案一起拖死。
+  const { createServer } = await import("node:http");
+  const hanging = createServer(() => { /* 永远不回应 */ });
+  await new Promise((ready) => hanging.listen(0, "127.0.0.1", ready));
+  const { port } = hanging.address() as { port: number };
+  t.after(() => new Promise((done) => { hanging.closeAllConnections?.(); hanging.close(() => done(undefined)); }));
+
+  const link = connection(server({
+    transport: "http",
+    command: undefined,
+    url: `http://127.0.0.1:${port}/mcp`,
+    auth: false,
+    requestTimeoutMs: 700,
+  }));
+  const started = Date.now();
+  assert.equal(await link.connect(), "failed");
+  assert.ok(Date.now() - started < 8_000, "超时没有生效");
+  assert.match(link.failure ?? "", /超时/);
+});

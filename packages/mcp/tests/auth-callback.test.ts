@@ -89,3 +89,17 @@ test("关闭时把还在等的授权一起了结掉", async () => {
   await server.close();
   await settled;
 });
+
+test("同时喊五次启动，只会有一个监听", async (t) => {
+  // 多个服务器会在同一拍里一起要这个监听。没有防护的话，每个都自己建一个、
+  // 各占一个端口，最后记下来的是最晚完成的那个——回调就可能送到没人等的那一个上。
+  const server = new McpAuthCallbackServer([0]);
+  t.after(() => server.close());
+  const urls = await Promise.all(Array.from({ length: 5 }, () => server.listen()));
+  assert.equal(new Set(urls).size, 1, `同时启动出现了多个地址：${[...new Set(urls)].join(", ")}`);
+
+  // 而且这个唯一的地址是真的活着的。
+  const waiting = server.expect("s-concurrent", 5_000);
+  await (await fetch(`${urls[0]}?code=abc&state=s-concurrent`)).text();
+  assert.deepEqual(await waiting, { code: "abc", iss: undefined });
+});

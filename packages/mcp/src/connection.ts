@@ -68,9 +68,23 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 /** Enough of a failing server's stderr to name the problem, not enough to fill the panel. */
 const STDERR_TAIL_LIMIT = 600;
 
-function errorText(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
+/**
+ * Everything an error actually says, including what it is wrapping.
+ *
+ * `fetch failed` is undici's message for every network problem there is; the
+ * reason — refused, DNS, certificate, proxy — is only ever in `cause`. Reporting
+ * the top-level message alone put a sentence in front of the user that could not
+ * be acted on, and left the same sentence in the log for us.
+ */
+function errorText(error: unknown, depth = 0): string {
+  if (!(error instanceof Error)) return String(error);
+  const own = error.message || error.name;
+  const code = (error as { code?: string }).code;
+  const line = code && !own.includes(code) ? `${own} (${code})` : own;
+  const cause = depth < 4 ? (error as { cause?: unknown }).cause : undefined;
+  if (!cause) return line;
+  const nested = errorText(cause, depth + 1);
+  return nested && !line.includes(nested) ? `${line}：${nested}` : line;
 }
 
 export class McpConnection {
@@ -183,7 +197,10 @@ export class McpConnection {
         { capabilities: {} },
       );
       const transport = this.buildTransport();
-      await client.connect(transport);
+      await this.withTimeout(
+        client.connect(transport),
+        `连接 ${this.name} 超时（${Math.round(this.timeoutMs / 1000)} 秒）。`,
+      );
       this.client = client;
       this.transport = transport;
       await this.discover(client);
@@ -199,6 +216,33 @@ export class McpConnection {
       this.state = "failed";
       this.lastFailure = this.failureText(error);
       return this.state;
+    }
+  }
+
+  private get timeoutMs(): number {
+    return this.options.definition.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  }
+
+  /**
+   * Put a ceiling on the handshake.
+   *
+   * The SDK times out its own requests but not `connect`, so a server that
+   * accepts a socket and then says nothing hangs forever — and because the
+   * Agent lists servers in parallel, one such server used to take every other
+   * server's answer down with it.
+   */
+  private async withTimeout<T>(work: Promise<T>, message: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), this.timeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -224,7 +268,7 @@ export class McpConnection {
    * not allowed to fail the whole connection — the tools are what matter.
    */
   private async discover(client: Client): Promise<void> {
-    const timeout = this.options.definition.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const timeout = this.timeoutMs;
     const tools = await client.listTools(undefined, { timeout });
     const excluded = new Set(this.options.definition.excludeTools);
     this.discoveredTools = tools.tools

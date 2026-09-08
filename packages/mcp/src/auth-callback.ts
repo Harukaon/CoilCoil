@@ -48,6 +48,8 @@ const FAILED_PAGE = `<!doctype html><meta charset="utf-8"><title>CoilCoil</title
 export class McpAuthCallbackServer {
   private server?: Server;
   private port?: number;
+  /** The listen in flight, so concurrent callers share one listener. */
+  private starting?: Promise<string>;
   private readonly waiters = new Map<string, Waiter>();
 
   /**
@@ -57,8 +59,22 @@ export class McpAuthCallbackServer {
    */
   constructor(private readonly ports: readonly number[] = CANDIDATE_PORTS) {}
 
-  /** Start listening, or return the address already being listened on. */
+  /**
+   * Start listening, or return the address already being listened on.
+   *
+   * Guarded against being called concurrently. Several servers connecting at
+   * once all reach for the listener in the same tick, and without this each one
+   * bound its own port, leaked every listener but the last, and left the
+   * recorded address pointing at whichever finished last — so a redirect could
+   * arrive at a listener nobody was waiting on.
+   */
   async listen(): Promise<string> {
+    if (this.server && this.port !== undefined) return this.redirectUrl;
+    this.starting ??= this.startListening().finally(() => { this.starting = undefined; });
+    return this.starting;
+  }
+
+  private async startListening(): Promise<string> {
     if (this.server && this.port !== undefined) return this.redirectUrl;
     const server = createServer((request, response) => this.handle(request, response));
     server.on("error", () => undefined);
