@@ -145,6 +145,40 @@ test("a domain cookie keeps its leading dot in the domain but not in the URL", (
   assert.equal(mapped.path, "/sub");
 });
 
+test("主机专属的 Cookie 不带 domain，否则会被悄悄放宽到子域", () => {
+  // Electron 会给拿到的 domain 前面补一个点，所以传了就等于把「只属于这个
+  // 主机」改成「连子域一起算」——比原来的范围大，也不是 Chrome 里的样子。
+  const mapped = toElectronCookie({
+    host: "accounts.google.com",
+    name: "sid",
+    value: "1",
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    sameSite: "lax",
+  });
+  assert.equal(mapped.domain, undefined);
+  assert.equal(mapped.url, "https://accounts.google.com/");
+});
+
+test("__Host- 前缀的 Cookie 能导进去", () => {
+  // 这一条正是以前全军覆没的那一类：__Host- 只有在完全不带 Domain 属性时才
+  // 会被接受，而我们每条都塞了 domain，于是每一条都被浏览器拒绝——偏偏
+  // Google 登录就重度依赖这一族。
+  const mapped = toElectronCookie({
+    host: "accounts.google.com",
+    name: "__Host-GAPS",
+    value: "1",
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    sameSite: "lax",
+  });
+  assert.equal(mapped.domain, undefined, "带上 domain 就一定会被拒");
+  assert.equal(mapped.path, "/");
+  assert.equal(mapped.secure, true);
+});
+
 test("an insecure cookie cannot claim SameSite=None, which Electron would reject", () => {
   const mapped = toElectronCookie({
     host: "example.com",

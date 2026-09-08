@@ -25,7 +25,8 @@ export interface ElectronCookieInput {
   url: string;
   name: string;
   value: string;
-  domain: string;
+  /** Omitted for a host-only cookie; see `toElectronCookie`. */
+  domain?: string;
   path: string;
   secure: boolean;
   httpOnly: boolean;
@@ -37,17 +38,28 @@ export interface ElectronCookieInput {
  * Translate one harvested cookie into the shape Electron accepts.
  *
  * Electron addresses a cookie by the URL it would have been set from, while
- * Chromium stores the host key directly. A leading dot means "this host and its
- * subdomains" and belongs in `domain`, not in the URL.
+ * Chromium stores the host key directly.
+ *
+ * The leading dot is the whole distinction. `.example.com` is a domain cookie —
+ * it covers subdomains, and that belongs in `domain`. `example.com` is
+ * **host-only**, and for those `domain` must be left out entirely: Electron
+ * normalizes whatever it is given by prefixing a dot, so supplying it turns a
+ * host-only cookie into a subdomain-wide one.
+ *
+ * That silent widening is also why imports lost cookies. A `__Host-` cookie is
+ * only accepted when it carries no Domain attribute at all, so passing one made
+ * the browser reject every single `__Host-` record — which is exactly the family
+ * Google's sign-in relies on.
  */
 export function toElectronCookie(cookie: ImportedCookie): ElectronCookieInput {
-  const host = cookie.host.startsWith(".") ? cookie.host.slice(1) : cookie.host;
+  const domainCookie = cookie.host.startsWith(".");
+  const host = domainCookie ? cookie.host.slice(1) : cookie.host;
   const path = cookie.path.startsWith("/") ? cookie.path : `/${cookie.path}`;
   return {
     url: `${cookie.secure ? "https" : "http"}://${host}${path}`,
     name: cookie.name,
     value: cookie.value,
-    domain: cookie.host,
+    ...(domainCookie ? { domain: cookie.host } : {}),
     path,
     secure: cookie.secure,
     httpOnly: cookie.httpOnly,
