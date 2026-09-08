@@ -913,10 +913,24 @@ export interface RuntimeSummaryEvent {
   retryMaxAttempts?: number;
 }
 
+/**
+ * One batch of tool results dropped from the context.
+ *
+ * This is the first, cheap stage of compaction — the tool call stays, only its
+ * output goes — and it used to happen with no trace anywhere in the interface.
+ */
+export interface ContextClearingRecord {
+  at: number;
+  clearedResults: number;
+  freedTokens: number;
+}
+
 export interface RuntimeInspectionSnapshot {
   sessionRevision: number;
   activeLeafId?: string;
   summaryEvents: RuntimeSummaryEvent[];
+  /** Tool-result clearings this session has done, oldest first. */
+  contextClearings?: ContextClearingRecord[];
   effectiveSystemPrompt?: string;
   systemPromptOverride: boolean;
   estimates: {

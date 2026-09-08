@@ -50,6 +50,24 @@ const STATE_TOOLS = new Set(["todo", "goal"]);
 
 const CLEARED_PREFIX = "[上下文已清理]";
 
+/**
+ * Channel this extension announces its batches on.
+ *
+ * Clearing is the one stage of compaction with no trace anywhere: the model
+ * simply stops seeing old tool output, and the person watching the chat is told
+ * nothing at all. Announcing each batch is what lets the transcript draw a line
+ * where it happened.
+ */
+export const CONTEXT_CLEARING_EVENT = "coilcoil:context-clearing:v1";
+
+export interface ContextClearingRecord {
+  at: number;
+  /** Tool results dropped in this batch. */
+  clearedResults: number;
+  /** Roughly how many tokens that freed. */
+  freedTokens: number;
+}
+
 /** Pi's own chars/4 heuristic, with the same allowance for an inline image. */
 const CHARS_PER_TOKEN = 4;
 const IMAGE_CHARS = 4_800;
@@ -152,8 +170,14 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
   pi.on("context", (event, ctx) => {
     const usage = ctx.getContextUsage();
     if (usage) {
-      for (const toolCallId of planToolResultClearing(event.messages, cleared, usage).toolCallIds) {
-        cleared.add(toolCallId);
+      const plan = planToolResultClearing(event.messages, cleared, usage);
+      for (const toolCallId of plan.toolCallIds) cleared.add(toolCallId);
+      if (plan.toolCallIds.length) {
+        pi.events.emit(CONTEXT_CLEARING_EVENT, {
+          at: Date.now(),
+          clearedResults: plan.toolCallIds.length,
+          freedTokens: plan.freedTokens,
+        } satisfies ContextClearingRecord);
       }
     }
     const messages = applyToolResultClearing(event.messages, cleared);

@@ -339,8 +339,8 @@ export default function App(): React.JSX.Element {
     selectedModel && configuration?.configuredProviders.includes(selectedModel.provider),
   );
   const timeline = useMemo(
-    () => buildConversationTimeline(messages, tools, subagents, projectState.planApproval),
-    [messages, projectState.planApproval, subagents, tools],
+    () => buildConversationTimeline(messages, tools, subagents, projectState.planApproval, snapshot?.runtimeInspection),
+    [messages, projectState.planApproval, snapshot?.runtimeInspection, subagents, tools],
   );
 
   const openProject = async (): Promise<void> => {

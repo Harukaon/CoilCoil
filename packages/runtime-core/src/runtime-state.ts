@@ -14,6 +14,7 @@ import {
   type PendingSessionModel,
   type QueuedPrompt,
   type ResponseMetrics,
+  type ContextClearingRecord,
   type RuntimeSummaryEvent,
   type SkillConfigurationSnapshot,
   type SubagentActivity,
@@ -85,6 +86,8 @@ export interface ActiveSession {
   responseMetricsHistory: ResponseMetrics[];
   sessionRevision: number;
   summaryActivity?: RuntimeSummaryEvent;
+  /** Tool-result clearings this session has done, oldest first. */
+  contextClearings?: ContextClearingRecord[];
   bridgeState?: RuntimeBridgeState;
   fastState?: FastRuntimeState;
   memoryStatus?: ProjectMemoryRuntimeStatus;
@@ -354,6 +357,27 @@ export function mergeWorkspaceMemoryStatus(
   }
 
   return { ...previous, ...incoming, injected: false, processedSessions };
+}
+
+/**
+ * Read one clearing announcement off the event bus.
+ *
+ * Extensions run in the same process but are reloadable and independently
+ * versioned, so their payloads are validated like anything else crossing a
+ * boundary rather than trusted by shape.
+ */
+export function contextClearingRecord(value: unknown): ContextClearingRecord | undefined {
+  if (!isRecord(value)) return undefined;
+  const number = (candidate: unknown): number | undefined =>
+    typeof candidate === "number" && Number.isFinite(candidate) ? candidate : undefined;
+  const at = number(value.at);
+  const clearedResults = number(value.clearedResults);
+  if (at === undefined || clearedResults === undefined || clearedResults <= 0) return undefined;
+  return {
+    at,
+    clearedResults: Math.round(clearedResults),
+    freedTokens: Math.max(0, Math.round(number(value.freedTokens) ?? 0)),
+  };
 }
 
 export function memoryStatusForInspection(

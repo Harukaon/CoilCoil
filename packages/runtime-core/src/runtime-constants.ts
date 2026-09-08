@@ -29,6 +29,10 @@ export const WORKFLOW_AUDIT_ENTRY_TYPE = "coilcoil-tool-purpose-audit";
 export const RESPONSE_METRICS_ENTRY_TYPE = "coilcoil-response-metrics";
 
 export const PROJECT_MEMORY_STATUS_EVENT = "coilcoil:project-memory:status:v1";
+/** Where context-clearing announces each batch of tool results it drops. */
+export const CONTEXT_CLEARING_EVENT = "coilcoil:context-clearing:v1";
+/** Clearings kept per session. Old ones scroll out of the transcript anyway. */
+export const MAX_CONTEXT_CLEARINGS = 40;
 
 export const FAST_STATE_EVENT = "coilcoil:fast:state:v1";
 

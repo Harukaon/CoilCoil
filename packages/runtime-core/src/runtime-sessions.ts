@@ -10,6 +10,7 @@ import {
   createEventBus,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type ContextClearingRecord,
   type GoalState,
   type MoveSessionResult,
   type PlanApprovalState,
@@ -39,11 +40,14 @@ import {
   GOAL_STATE_CHANNEL,
   HIDDEN_AGENT_TOOLS,
   PLAN_STATE_CHANNEL,
+  CONTEXT_CLEARING_EVENT,
+  MAX_CONTEXT_CLEARINGS,
   PROJECT_MEMORY_STATUS_EVENT,
   RUNTIME_BRIDGE_STATE_EVENT,
   SUBAGENT_ACTIVITY_CHANNEL,
   projectMemoryStatusByCwd,
 } from "./runtime-constants.js";
+import { contextClearingRecord } from "./runtime-state.js";
 import { installCompactionSettings } from "./compaction-settings.js";
 import { RuntimeMcpConfig } from "./runtime-mcp-config.js";
 import {
@@ -282,6 +286,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
     const eventBus = createEventBus();
     let installedActive: ActiveSession | undefined;
+    let pendingContextClearings: ContextClearingRecord[] = [];
     let pendingBridgeState: RuntimeBridgeState | undefined;
     let pendingFastState: FastRuntimeState | undefined;
     let pendingMemoryStatus: ProjectMemoryRuntimeStatus | undefined;
@@ -302,6 +307,16 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       if (!installedActive) return;
       installedActive.fastState = next;
       this.emitEvent({ type: "session_fast_updated", fast: next.enabled });
+    });
+    eventBus.on(CONTEXT_CLEARING_EVENT, (value) => {
+      // Clearing runs while a request is being built, which can be before the
+      // active session is installed, so the record is held until it is.
+      const next = contextClearingRecord(value);
+      if (!next) return;
+      pendingContextClearings = [...pendingContextClearings, next].slice(-MAX_CONTEXT_CLEARINGS);
+      if (!installedActive) return;
+      installedActive.contextClearings = pendingContextClearings;
+      this.publishRuntimeInspection(installedActive);
     });
     eventBus.on(PROJECT_MEMORY_STATUS_EVENT, (value) => {
       const parsed = projectMemoryStatus(value);
@@ -468,6 +483,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
       sessionRevision: 1,
+      contextClearings: pendingContextClearings,
       bridgeState: pendingBridgeState,
       fastState: pendingFastState,
       memoryStatus: pendingMemoryStatus ?? projectMemoryStatusByCwd.get(safeRealPath(cwd)),

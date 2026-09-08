@@ -1148,3 +1148,17 @@ button.runtime-chip:hover:not(:disabled), .runtime-chip.mcp:hover { border-color
 .app-crash-actions button:hover { background: hsl(var(--th) var(--ts) var(--l-896)); }
 .runtime-log-button { height: 22px; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-886)); border-radius: var(--radius-md); background: transparent; color: hsl(var(--th) var(--ts) var(--l-437)); font-size: 11px; cursor: pointer; }
 .runtime-log-button:hover { border-color: hsl(var(--th) var(--ts) var(--l-861)); background: hsl(var(--th) var(--ts) var(--l-920)); color: hsl(var(--th) var(--ts) var(--l-239)); }
+
+/* 上下文压缩的那道横线。压缩是个分界：线以上模型看到的是全部，线以下少了一些。 */
+.compaction-mark { display: grid; gap: 6px; margin: 6px 0; }
+.compaction-mark > button { display: grid; width: 100%; align-items: center; gap: 10px; grid-template-columns: minmax(12px, 1fr) auto minmax(12px, 1fr); padding: 2px 0; background: transparent; cursor: pointer; }
+.compaction-mark > button > i { height: 1px; background: hsl(var(--th) var(--ts) var(--l-882)); }
+.compaction-mark > button > span { display: inline-flex; align-items: center; gap: 6px; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 11px; white-space: nowrap; }
+.compaction-mark > button:hover > span { color: hsl(var(--th) var(--ts) var(--l-380)); }
+.compaction-mark .compaction-caret { transition: transform .15s ease; }
+.compaction-mark.open .compaction-caret { transform: rotate(180deg); }
+.compaction-mark.running > button > span { color: var(--c-amber-text); }
+.compaction-mark.failed > button > span { color: var(--c-red-muted); }
+.compaction-mark-panel { display: grid; gap: 7px; padding: 10px 12px; border-radius: var(--radius-xl); background: hsl(var(--th) var(--ts) var(--l-960)); }
+.compaction-mark-panel p { margin: 0; color: hsl(var(--th) var(--ts) var(--l-431)); font-size: 11px; line-height: 1.55; }
+.compaction-mark-panel blockquote { margin: 0; padding-left: 9px; border-left: 2px solid hsl(var(--th) var(--ts) var(--l-861)); color: hsl(var(--th) var(--ts) var(--l-524)); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }

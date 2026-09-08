@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronRight, Copy, ExternalLink, FileText, Folder, FolderOpen, LoaderCircle } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Folder, FolderOpen, Layers, LoaderCircle } from "lucide-react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -26,6 +26,7 @@ import { copyPath, copyText, revealLabel, revealPath } from "../files/pathAction
 import { parseMarkdownFileHref, type MarkdownFileTarget } from "./markdownFileLinks";
 import { useFileLinkKind } from "./fileLinkKinds";
 import { TerminalNoticeCard } from "./TerminalNoticeCard";
+import { compactionMarkDetail, compactionMarkLabel, compactionSummaryPreview, type CompactionMark } from "./compactionMarks";
 import { TERMINAL_NOTIFICATION_TYPE } from "./terminalNotice";
 
 export type TimelineItem =
@@ -36,7 +37,8 @@ export type TimelineItem =
 
 export type ConversationTimelineItem =
   | { kind: "user"; order: number; message: ChatMessage }
-  | { kind: "agent"; order: number; items: TimelineItem[]; model?: ChatMessage["model"] };
+  | { kind: "agent"; order: number; items: TimelineItem[]; model?: ChatMessage["model"] }
+  | { kind: "compaction"; order: number; mark: CompactionMark };
 
 type ActivityEntry =
   | { kind: "thinking"; id: string; text: string }
@@ -480,6 +482,41 @@ function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX
         })}
       </div>
     </details>
+  );
+}
+
+/**
+ * The rule across the transcript where the context was compacted.
+ *
+ * Codex's shape, for the same reason: compaction is a boundary, and a boundary
+ * reads as a line. Above it the model saw everything; below it, less. Closed it
+ * is one short sentence, because most of the time knowing that it happened is
+ * the whole answer; open it says which of the two stages ran and what it cost.
+ *
+ * Everything shown is already on hand — Pi's own compaction record and the
+ * clearing extension's tally. Nothing here spends a request to explain itself.
+ */
+export function CompactionMarkView({ mark }: { mark: CompactionMark }): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const preview = compactionSummaryPreview(mark.summary);
+  return (
+    <div className={`compaction-mark layer-${mark.layer} ${mark.status} ${open ? "open" : ""}`}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+        <i />
+        <span>
+          {mark.status === "running" ? <LoaderCircle className="spin" size={12} /> : <Layers size={12} />}
+          {compactionMarkLabel(mark)}
+          <ChevronDown size={12} className="compaction-caret" />
+        </span>
+        <i />
+      </button>
+      {open ? (
+        <div className="compaction-mark-panel">
+          <p>{compactionMarkDetail(mark)}</p>
+          {preview ? <blockquote>{preview}</blockquote> : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

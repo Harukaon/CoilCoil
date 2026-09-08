@@ -26,7 +26,7 @@ import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { CoilLogo } from "../../ui/CoilLogo";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { BlobsLoader, OrbitLoader } from "../../ui/loaders";
-import { AgentTurnView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
+import { AgentTurnView, CompactionMarkView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
 import { nextScrollDownVisible } from "./scrollDownVisibility";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
@@ -309,7 +309,9 @@ export function ConversationPane({
                   </button>
                 </div>
               ) : null}
-              {visibleTimeline.map((item, index) => item.kind === "user" ? (
+              {visibleTimeline.map((item, index) => item.kind === "compaction" ? (
+                <CompactionMarkView key={`compaction-${item.mark.id}`} mark={item.mark} />
+              ) : item.kind === "user" ? (
                 <MessageView
                   key={`user-${item.message.id}`}
                   message={item.message}

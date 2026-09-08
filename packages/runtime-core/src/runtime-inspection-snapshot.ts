@@ -114,6 +114,7 @@ export function buildRuntimeInspectionSnapshot(active: ActiveSession): RuntimeIn
     tokenBreakdown,
     tools,
     skills,
+    contextClearings: active.contextClearings?.length ? active.contextClearings : undefined,
     mcp: active.mcpStatus,
     memory: memoryStatus ? hydrateProjectMemoryStatus(memoryStatus) : undefined,
     capabilities: {

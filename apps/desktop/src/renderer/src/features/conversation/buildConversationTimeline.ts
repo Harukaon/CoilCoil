@@ -1,4 +1,5 @@
-import type { ChatMessage, PlanApprovalState, SubagentActivity, ToolRun } from "@coilcoil/runtime-protocol";
+import type { ChatMessage, PlanApprovalState, RuntimeInspectionSnapshot, SubagentActivity, ToolRun } from "@coilcoil/runtime-protocol";
+import { buildCompactionMarks } from "./compactionMarks";
 import type { ConversationTimelineItem, TimelineItem } from "./ConversationTimeline";
 
 export function buildConversationTimeline(
@@ -6,7 +7,12 @@ export function buildConversationTimeline(
   tools: ToolRun[],
   subagents: SubagentActivity[] = [],
   planApproval?: PlanApprovalState,
+  // Compaction marks are derived here rather than passed in: they come entirely
+  // from the inspection snapshot the caller already holds, and deriving them
+  // beside the timeline keeps the two orderings from drifting apart.
+  inspection?: Pick<RuntimeInspectionSnapshot, "summaryEvents" | "contextClearings">,
 ): ConversationTimelineItem[] {
+  const compactionMarks = buildCompactionMarks(messages, inspection?.summaryEvents, inspection?.contextClearings);
   const subagentsByParent = new Map<string, SubagentActivity[]>();
   for (const activity of subagents) {
     const parent = activity.parentToolId ?? activity.runId;
@@ -53,7 +59,17 @@ export function buildConversationTimeline(
   }
 
   const turns: ConversationTimelineItem[] = [];
+  // A compaction rule is a divider, never part of a turn: whatever follows it is
+  // a fresh turn, because the model's view of everything above just changed.
+  const pending = [...compactionMarks].sort((left, right) => left.order - right.order);
+  const drainMarksBefore = (order: number): void => {
+    while (pending.length && pending[0].order <= order) {
+      const mark = pending.shift()!;
+      turns.push({ kind: "compaction", order: mark.order, mark });
+    }
+  };
   for (const item of grouped) {
+    drainMarksBefore(item.order);
     if (item.kind === "message" && item.message.role === "user") {
       turns.push({ kind: "user", order: item.order, message: item.message });
       continue;
@@ -65,5 +81,6 @@ export function buildConversationTimeline(
       previous.model ??= model;
     } else turns.push({ kind: "agent", order: item.order, items: [item], model });
   }
+  drainMarksBefore(Number.POSITIVE_INFINITY);
   return turns;
 }
