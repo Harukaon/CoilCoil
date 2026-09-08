@@ -25,6 +25,7 @@ import {
   statSync,
 } from "node:fs";
 import { SessionListingCache } from "./session-listing-cache.js";
+import { listSessionsForCwd, type SessionListEntry } from "./session-index.js";
 import {
   sessionSummary,
   subagentActivitiesFromPayload,
@@ -69,7 +70,7 @@ import { rewriteSessionHeaderCwd } from "./session-relocation.js";
 import { systemPromptLayerFiles } from "./system-prompt-layers.js";
 
 export abstract class RuntimeSessions extends RuntimeMcpConfig {
-  private readonly sessionListings = new SessionListingCache<Awaited<ReturnType<typeof SessionManager.list>>[number]>();
+  private readonly sessionListings = new SessionListingCache<SessionListEntry>();
 
   /**
    * The session list, read from disk only when disk has changed.
@@ -78,13 +79,11 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
    * hundred conversations is most of a second — and opening a workspace asks
    * for it several times over. See `session-listing-cache.ts`.
    */
-  protected listSessionInfos(
-    resolvedCwd: string,
-  ): Promise<Awaited<ReturnType<typeof SessionManager.list>>> {
+  protected listSessionInfos(resolvedCwd: string): Promise<SessionListEntry[]> {
     return this.sessionListings.list(
       resolvedCwd,
       this.sessionDir,
-      () => SessionManager.list(resolvedCwd, this.sessionDir),
+      () => listSessionsForCwd(this.sessionDir, resolvedCwd),
     );
   }
 

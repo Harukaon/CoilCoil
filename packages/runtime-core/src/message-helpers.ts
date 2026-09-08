@@ -341,7 +341,20 @@ export async function preparePromptImages(images: PromptImage[] | undefined): Pr
   return { images: prepared, hints: hints.join("\n") };
 }
 
-export function sessionSummary(info: SessionInfo): SessionSummary {
+/**
+ * Only the fields a session list actually shows.
+ *
+ * Named as a subset rather than the whole of Pi's `SessionInfo` because the
+ * rest of that type is expensive to produce — `allMessagesText` alone is every
+ * message of the conversation concatenated — and nothing here has ever read it.
+ * See `session-index.ts`.
+ */
+export type SessionSummarySource = Pick<
+  SessionInfo,
+  "id" | "path" | "cwd" | "name" | "firstMessage" | "created" | "modified" | "messageCount"
+>;
+
+export function sessionSummary(info: SessionSummarySource): SessionSummary {
   return {
     id: info.id,
     path: info.path,
