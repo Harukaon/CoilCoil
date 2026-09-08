@@ -31,7 +31,7 @@ import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { copyText } from "../files/pathActions";
 import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, visibleRecentSessions } from "./recentSessions";
 import { dropSidebarSection, loadSidebarSectionOrder, saveSidebarSectionOrder, SIDEBAR_SECTION_LABELS, type SidebarSection } from "./sidebarSections";
-import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
+import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, visibleProjectSessions, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
 export interface SessionActivityState {
   runtimeId?: string;
@@ -345,16 +345,16 @@ export function WorkspaceSidebar({
     {projects.length ? projects.map((project) => {
       const expanded = expandedProjects.has(project.path);
       const allSessions = sessionsByProject[project.path] ?? [];
-      const sessions = allSessions.filter((session) => !session.pinned);
       const hasPending = pendingProjectPath === project.path;
       // Collapsed workspaces hide their running conversations; the folder
-      // row carries their state so nothing is forgotten in there.
+      // row carries their state so nothing is forgotten in there. It counts
+      // every conversation the workspace owns, which is only honest because
+      // the list below now shows the pinned ones too.
       const workspaceActivity = summarizeWorkspaceActivity(allSessions, sessionActivity);
       const workspaceActivityText = workspaceActivityLabel(workspaceActivity);
       const collapsedLimit = collapsedSessionLimit(hasPending);
       const visibleLimit = Math.max(collapsedLimit, expandedSessionLimits[project.path] ?? collapsedLimit);
-      const visibleSessions = sessions.slice(0, visibleLimit);
-      const hiddenCount = sessions.length - visibleSessions.length;
+      const { rows: visibleSessions, hiddenCount, plainTotal } = visibleProjectSessions(allSessions, visibleLimit);
       return (
         <div className={`project-tree ${project.path === activeProject?.path ? "active" : ""}`} key={project.path}>
           <ContextMenu.Root>
@@ -537,8 +537,8 @@ export function WorkspaceSidebar({
               })}
               <ConversationListControls
                 hiddenCount={hiddenCount}
-                expandedBy={visibleSessions.length - collapsedLimit}
-                onShowMore={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleSessions.length, sessions.length))}
+                expandedBy={visibleLimit - collapsedLimit}
+                onShowMore={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleLimit, plainTotal))}
                 onCollapse={() => onShowMoreSessions(project.path, collapsedLimit)}
               />
               {!allSessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}

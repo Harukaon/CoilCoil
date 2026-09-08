@@ -108,3 +108,46 @@ export function conversationStatusKind(
   if (activity?.unread) return "unread";
   return pinned ? "pinned" : "none";
 }
+
+export interface ProjectSessionVisibility {
+  /** The rows to render, in the order the listing already put them. */
+  rows: SessionSummary[];
+  /** How many unpinned conversations are still hidden; drives the "more" control. */
+  hiddenCount: number;
+  /** How many unpinned conversations the workspace has in total. */
+  plainTotal: number;
+}
+
+/**
+ * Cut a workspace's conversations down to what its folder shows.
+ *
+ * Pinned conversations are included. They used to be filtered out here because
+ * the pinned strip already lists them, but that made pinning a conversation
+ * remove it from the workspace it belongs to — so the folder could say "1 个对话
+ * 运行中" while every row under it sat still, and the conversation itself looked
+ * lost rather than promoted. `collectRecentSessions` had the identical bug and
+ * was fixed the same way; the project tree kept the old behaviour.
+ *
+ * The limit counts unpinned conversations only, for the same reason it does in
+ * "recent": a pinned conversation is usually the one being worked in, and
+ * letting it take one of four slots would push out the rows the folder exists to
+ * show. The list stops at the last unpinned row that fits.
+ */
+export function visibleProjectSessions(
+  sessions: readonly SessionSummary[],
+  limit: number,
+): ProjectSessionVisibility {
+  const rows: SessionSummary[] = [];
+  let shownPlain = 0;
+  for (const session of sessions) {
+    if (session.pinned) {
+      rows.push(session);
+      continue;
+    }
+    if (shownPlain >= limit) break;
+    shownPlain += 1;
+    rows.push(session);
+  }
+  const plainTotal = sessions.reduce((count, session) => session.pinned ? count : count + 1, 0);
+  return { rows, hiddenCount: plainTotal - shownPlain, plainTotal };
+}
