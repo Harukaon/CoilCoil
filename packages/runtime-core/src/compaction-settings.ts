@@ -16,14 +16,26 @@ const INSTALLED = Symbol.for("coilcoil.compaction-settings.installed");
 const KEEP_RECENT_CEILING_RATIO = 0.5;
 
 /**
+ * How much conversation survives a compaction verbatim.
+ *
+ * Pi keeps 20000. Fifty thousand is CoilCoil's choice: the work in progress is
+ * what the next request is about, and the more of it stays as itself rather than
+ * as a description of itself, the less the model has to reconstruct. It is
+ * affordable now that the compacted stretch is written out in full and can be
+ * read back (see `context-transcript.ts`) — losing detail off the far end is no
+ * longer permanent, so the near end is where the budget belongs.
+ */
+const KEEP_RECENT_TOKENS = 50_000;
+
+/**
  * Keep Pi's compaction budget from silently disabling itself.
  *
  * Pi expresses the budget as two absolute token counts: `reserveTokens` (16384)
  * decides when compaction fires, `keepRecentTokens` (20000) decides how much
- * conversation survives it verbatim. Twenty thousand is a sensible amount to
- * keep and is left exactly as it is — this only ever lowers it, never raises it.
+ * conversation survives it verbatim. CoilCoil raises the survivor to 50000, and
+ * then has to clamp it back down in one case.
  *
- * It has to be lowered in one case. Once `keepRecentTokens` exceeds
+ * The clamp is not tuning, it is a failure to avoid. Once `keepRecentTokens` exceeds
  * `contextWindow - reserveTokens`, the cut point walks past the entire history,
  * `prepareCompaction` finds nothing to summarize and returns undefined, and
  * compaction quietly does nothing at all — every turn, until the request
@@ -45,7 +57,10 @@ export function compactionSettingsForWindow(
 
   const keepRecentTokens = Math.max(
     1,
-    Math.min(settings.keepRecentTokens, Math.floor(summarizable * KEEP_RECENT_CEILING_RATIO)),
+    Math.min(
+      Math.max(settings.keepRecentTokens, KEEP_RECENT_TOKENS),
+      Math.floor(summarizable * KEEP_RECENT_CEILING_RATIO),
+    ),
   );
   return keepRecentTokens === settings.keepRecentTokens ? settings : { ...settings, keepRecentTokens };
 }

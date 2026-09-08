@@ -13,12 +13,12 @@ const PI_DEFAULTS: CompactionSettings = {
   keepRecentTokens: 20_000,
 };
 
-test("一个正常大小的窗口，Pi 自己的 20k 原样保留", () => {
-  // 20k 本身没问题，这里只负责不让它把压缩变成空转，不负责替用户调大。
-  for (const window of [200_000, 128_000, 64_000]) {
+test("窗口够大时保留 5 万，而不是 Pi 的 2 万", () => {
+  // 手上正在做的事就是下一个请求要谈的东西，留得越多、模型要重新拼回来的越少。
+  // 之所以敢留这么多，是因为被压掉的那一段已经完整写在磁盘上、可以读回来了。
+  for (const window of [200_000, 128_000]) {
     const settings = compactionSettingsForWindow(PI_DEFAULTS, window);
-    assert.equal(settings.keepRecentTokens, 20_000, `${window} 的窗口被改动了`);
-    assert.equal(settings, PI_DEFAULTS, "没有变化时应当原样返回");
+    assert.equal(settings.keepRecentTokens, 50_000, `${window} 的窗口没有留够`);
   }
 });
 
@@ -30,9 +30,11 @@ test("窗口小到会让压缩空转时，保留量被压下来", () => {
   assert.equal(settings.keepRecentTokens, 7_808);
 });
 
-test("只会往下压，永远不会替用户调大", () => {
-  const small = compactionSettingsForWindow({ ...PI_DEFAULTS, keepRecentTokens: 4_000 }, 200_000);
-  assert.equal(small.keepRecentTokens, 4_000);
+test("窗口装不下 5 万时，压到压缩还能工作为止", () => {
+  // 64k 的窗口留 5 万就只剩不到 5 万可压，切点会走过整段历史。
+  const settings = compactionSettingsForWindow(PI_DEFAULTS, 64_000);
+  assert.ok(settings.keepRecentTokens < 50_000);
+  assert.ok(settings.keepRecentTokens <= Math.floor((64_000 - PI_DEFAULTS.reserveTokens) / 2));
 });
 
 test("an unknown window changes nothing", () => {
@@ -61,7 +63,7 @@ test("the window is read at each call, so switching models is followed", () => {
   const manager = fakeSettingsManager();
   let contextWindow = 200_000;
   installCompactionSettings(manager, () => contextWindow);
-  assert.equal(manager.getCompactionSettings().keepRecentTokens, 20_000);
+  assert.equal(manager.getCompactionSettings().keepRecentTokens, 50_000);
   contextWindow = 32_000;
   assert.equal(manager.getCompactionSettings().keepRecentTokens, 7_808);
 });

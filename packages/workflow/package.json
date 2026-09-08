@@ -16,6 +16,7 @@
       "./extensions/audit-policy.ts",
       "./extensions/compact-tool-render.ts",
       "./extensions/context-clearing.ts",
+      "./extensions/context-transcript.ts",
       "./extensions/default-tools.ts",
       "./extensions/fast.ts",
       "./extensions/goal.ts",
