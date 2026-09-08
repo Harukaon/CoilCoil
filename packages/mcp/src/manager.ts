@@ -42,6 +42,13 @@ export interface McpAuthStart {
   awaitingCallback: boolean;
   /** Already had a working token; nothing to do. */
   authenticated?: boolean;
+  /**
+   * Whether this picked up an authorization the last check had already reached,
+   * rather than running the handshake again. Reaching a distant server costs
+   * seconds, so resuming is the difference between an instant dialog and one
+   * that sits on 正在准备授权 for as long as the check itself took.
+   */
+  resumed?: boolean;
   error?: string;
 }
 
@@ -325,10 +332,28 @@ export class McpManager {
       return { awaitingCallback: false, error: `MCP Server「${name}」不走浏览器认证。` };
     }
     await this.ensureCallbackServer();
+
+    // Reuse whatever the last check already established. Reaching a server can
+    // cost seconds — two round trips over a slow link is ten of them — and
+    // pressing 认证 right after 检查状态 used to pay that entire bill a second
+    // time to arrive at the identical answer. The authorization page the failed
+    // attempt produced is still good: the SDK persisted its PKCE verifier and
+    // its `state` alongside it, which is exactly what makes it resumable.
+    const existing = this.connections.get(name);
+    const recorded = this.flows.get(name);
+    if (existing?.status === "connected") {
+      this.flows.delete(name);
+      return { awaitingCallback: false, authenticated: true };
+    }
+    if (existing?.status === "needs-auth" && recorded?.authorizationUrl) {
+      return this.armAuthFlow(name, recorded.authorizationUrl, true);
+    }
+
     this.cancelAuth(name);
     this.flows.set(name, { interactive: true });
-    // A stale connection object still holds the transport that failed; the
-    // authorization has to start from a clean one or the SDK will not re-run it.
+    // Nothing to resume, so this has to go and find an authorization page. A
+    // stale connection still holds the transport that failed; the SDK will not
+    // re-run authorization through it.
     await this.drop(name);
     const outcome = await this.connectionFor(name).connect();
     const flow = this.flows.get(name);
@@ -346,6 +371,30 @@ export class McpManager {
       authorizationUrl: flow.authorizationUrl.href,
       awaitingCallback: Boolean(flow.state && flow.waiting),
     };
+  }
+
+  /**
+   * Hold the loopback listener open for one authorization page.
+   *
+   * Always before the caller opens a browser: an approval can come back faster
+   * than the reply reaches the renderer, and arming afterwards is precisely how
+   * a redirect gets dropped.
+   */
+  private async armAuthFlow(name: string, authorizationUrl: URL, resumed: boolean): Promise<McpAuthStart> {
+    const state = authorizationState(authorizationUrl);
+    // A second press must not leave the first press's waiter holding the state.
+    if (state) this.callback.cancel(state);
+    const flow: AuthFlow = { interactive: true, authorizationUrl, state };
+    if (state) {
+      const waiting = this.callback.expect(state, AUTH_TIMEOUT_MS);
+      waiting.catch(() => undefined);
+      flow.waiting = waiting;
+    }
+    this.flows.set(name, flow);
+    // Opened here so both paths behave alike: whether the page was just minted
+    // or resumed from the last check, the caller gets it the same way.
+    await this.options.openAuthorization(authorizationUrl);
+    return { authorizationUrl: authorizationUrl.href, awaitingCallback: Boolean(flow.waiting), resumed };
   }
 
   /** Park until the browser comes back, then finish and reconnect. */

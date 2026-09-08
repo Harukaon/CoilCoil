@@ -109,6 +109,9 @@ test("HTTP 服务器的整条 OAuth 流程，从头到尾不需要任何会话",
   assert.ok(started.authorizationUrl, "没有拿到授权地址");
   assert.equal(started.awaitingCallback, true, "打开浏览器之前就该架好回调监听");
   assert.equal(opened.length, 1);
+  // 刚才那次检查已经把授权页拿到手了，这一步不该再跑一遍握手——远端服务器一个
+  // 来回就是好几秒，白跑一遍就是「正在准备授权」卡在那里的原因。
+  assert.equal(started.resumed, true);
 
   // 3. 浏览器回来，回调被监听接住，令牌换到手，连接自己接上。
   const callbackUrl = await approveInBrowser(started.authorizationUrl as string);
@@ -135,6 +138,44 @@ test("HTTP 服务器的整条 OAuth 流程，从头到尾不需要任何会话",
   await manager.logout("oauth");
   assert.equal(store.get(credentialKey(fixture.ready.mcpServerUrl)), undefined);
   assert.equal((await manager.connect("oauth")).status, "needs-auth");
+});
+
+test("没有先检查过的时候，认证自己去把授权页拿回来", { timeout: 90_000 }, async (t) => {
+  const fixture = await startFixture();
+  t.after(() => fixture.stop());
+  const directory = mkdtempSync(join(tmpdir(), "coilcoil-mcp-oauth-fresh-"));
+  const store = new McpCredentialStore(defaultCredentialFile(join(directory, "agent")));
+  const manager = new McpManager({
+    loadServers: () => [httpServer("oauth", fixture.ready.mcpServerUrl)],
+    store,
+    callback: new McpAuthCallbackServer([0]),
+    openAuthorization: () => undefined,
+  });
+  t.after(() => manager.close());
+
+  const started = await manager.startAuth("oauth");
+  assert.ok(started.authorizationUrl);
+  assert.notEqual(started.resumed, true, "没有可续的东西，就该老老实实握一次手");
+});
+
+test("已经连着的服务器，点认证是立刻回答，不是再连一遍", { timeout: 90_000 }, async (t) => {
+  const fixture = await startFixture();
+  t.after(() => fixture.stop());
+  const directory = mkdtempSync(join(tmpdir(), "coilcoil-mcp-oauth-done-"));
+  const store = new McpCredentialStore(defaultCredentialFile(join(directory, "agent")));
+  const manager = new McpManager({
+    loadServers: () => [httpServer("oauth", fixture.ready.mcpServerUrl)],
+    store,
+    callback: new McpAuthCallbackServer([0]),
+    openAuthorization: () => undefined,
+  });
+  t.after(() => manager.close());
+
+  const started = await manager.startAuth("oauth");
+  await manager.completeAuth("oauth", await approveInBrowser(started.authorizationUrl as string));
+  const again = await manager.startAuth("oauth");
+  assert.equal(again.authenticated, true);
+  assert.equal(again.authorizationUrl, undefined, "已经认证过就不该再把浏览器打开一次");
 });
 
 test("粘贴回调地址这条后路也走得通", { timeout: 90_000 }, async (t) => {
