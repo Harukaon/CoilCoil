@@ -29,6 +29,7 @@ export {
   type McpLaunch,
   type StdioLaunch,
 } from "./definition.js";
+export { createHttpPool, type McpHttpPool } from "./http-pool.js";
 export {
   McpAuthCallbackServer,
   type McpAuthCallback,

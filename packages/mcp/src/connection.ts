@@ -23,6 +23,7 @@ import type { McpServerConfiguration } from "@coilcoil/runtime-protocol";
 import { launchFor, type EnvironmentSource } from "./definition.js";
 import type { McpCredentialStore } from "./credential-store.js";
 import { McpOAuthProvider } from "./oauth-provider.js";
+import { createHttpPool, type McpHttpPool } from "./http-pool.js";
 
 /**
  * Deliberately the same words the runtime protocol already speaks, so nothing
@@ -82,6 +83,8 @@ export class McpConnection {
   private oauth?: McpOAuthProvider;
   /** The last thing a stdio server wrote to stderr, for the failure message. */
   private stderrTail = "";
+  /** Kept-alive HTTP connections for this server; see `http-pool.ts`. */
+  private pool?: McpHttpPool;
   /** One connect at a time; a second press must join the first, not race it. */
   private inFlight?: Promise<McpConnectionStatus>;
 
@@ -138,6 +141,9 @@ export class McpConnection {
       return transport;
     }
     const redirectUrl = this.options.redirectUrl;
+    // One pool per connection, torn down with it. Without this every request
+    // pays a fresh TLS handshake — five seconds each on a proxied machine.
+    this.pool ??= createHttpPool(this.options.environment as Record<string, string | undefined> | undefined);
     this.oauth = launch.oauth
       ? new McpOAuthProvider({
         serverUrl: launch.url,
@@ -150,6 +156,7 @@ export class McpConnection {
     return new StreamableHTTPClientTransport(new URL(launch.url), {
       authProvider: this.oauth,
       requestInit: { headers: launch.headers },
+      fetch: this.pool.fetch,
     });
   }
 
@@ -282,6 +289,9 @@ export class McpConnection {
 
   async close(): Promise<void> {
     await this.dispose();
+    const pool = this.pool;
+    this.pool = undefined;
+    await pool?.close().catch(() => undefined);
     this.state = "not connected";
     this.discoveredTools = [];
     this.discoveredResources = [];
