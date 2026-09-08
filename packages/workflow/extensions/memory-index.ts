@@ -16,10 +16,27 @@ export const MEMORY_INDEX_MARKER = "<!-- coilcoil-memory-index v1 -->";
 export const MEMORY_ENTRIES_DIRNAME = "memories";
 
 const MEMORY_INDEX_TITLE = "# 项目记忆索引";
-const MEMORY_INDEX_HINT = "每行一条记忆：标题、摘要和正文文件；需要细节时用 read 打开对应文件，不要把正文搬回本文件。";
+const MEMORY_INDEX_HINT = "每行一条记忆：标题和一句话说明；要细节就用 read 打开它的正文文件，不要把正文搬回本文件。";
 const ENTRY_LINE = /^\s*[-*]\s*\[([^\]]+)\]\(([^)]+)\)\s*(?:[：:]|—|--|\s-\s)?\s*(.*)$/;
+const BULLET_LINE = /^\s*[-*]\s+(.*\S)\s*$/;
 const SUMMARY_MAX_CHARS = 60;
 const FILE_NAME_MAX_CHARS = 40;
+
+/** The heading above the handful of facts kept in full, rather than as a file. */
+export const MEMORY_FACTS_HEADING = "## 重要事实";
+/** The heading above the index proper. */
+export const MEMORY_ENTRIES_HEADING = "## 记忆索引";
+
+/**
+ * How many facts may live in the index itself.
+ *
+ * Deliberately small. A fact earns its place here by being short, stable and
+ * needed almost every time — a port, an address, a standing convention. The
+ * ceiling is the whole point: anything that does not fit was never a fact, it
+ * was a memory, and memories belong in their own file where they can be as long
+ * as they need to be.
+ */
+export const MEMORY_FACTS_MAX = 8;
 
 export interface MemoryIndexEntry {
   /** 条目标题，也是索引里显示的名字。 */
@@ -54,12 +71,42 @@ export function isMemoryIndex(content: string): boolean {
   return content.includes(MEMORY_INDEX_MARKER) || parseMemoryIndex(content).length > 0;
 }
 
-export function renderMemoryIndex(entries: readonly MemoryIndexEntry[]): string {
+/**
+ * Read back the short facts kept in the index itself.
+ *
+ * Only the bullets under the facts heading, and only plain ones: a bullet that
+ * links to a file is an index entry that happens to sit in the wrong section,
+ * not a fact, and counting it twice would put the same thing in front of the
+ * model in two shapes.
+ */
+export function parseMemoryFacts(content: string): string[] {
+  const facts: string[] = [];
+  let inside = false;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (/^#{1,6}\s/.test(trimmed)) {
+      inside = trimmed.replace(/\s+/g, "") === MEMORY_FACTS_HEADING.replace(/\s+/g, "");
+      continue;
+    }
+    if (!inside) continue;
+    const matched = BULLET_LINE.exec(line);
+    if (matched && !ENTRY_LINE.test(line)) facts.push(matched[1].trim());
+  }
+  return facts.slice(0, MEMORY_FACTS_MAX);
+}
+
+export function renderMemoryIndex(
+  entries: readonly MemoryIndexEntry[],
+  facts: readonly string[] = [],
+): string {
   const lines = entries.map((entry) => {
     const summary = entry.summary.trim();
     return `- [${entry.title}](${entry.file})${summary ? `：${summary}` : ""}`;
   });
-  return `${MEMORY_INDEX_TITLE}\n\n${MEMORY_INDEX_MARKER}\n${MEMORY_INDEX_HINT}\n\n${lines.join("\n")}\n`;
+  const factBlock = facts.length
+    ? `${MEMORY_FACTS_HEADING}\n${facts.slice(0, MEMORY_FACTS_MAX).map((fact) => `- ${fact}`).join("\n")}\n\n`
+    : "";
+  return `${MEMORY_INDEX_TITLE}\n\n${MEMORY_INDEX_MARKER}\n${MEMORY_INDEX_HINT}\n\n${factBlock}${MEMORY_ENTRIES_HEADING}\n${lines.join("\n")}\n`;
 }
 
 /**

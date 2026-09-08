@@ -26,6 +26,7 @@ import {
 import { BROWSER_PARTITION, hardenGuestPreferences } from "./browser-webview-policy";
 import { configureBrowserIdentity } from "./browser-user-agent";
 import { readMountedProjects, writeMountedProjects } from "./mounted-projects";
+import { checkWorkspaceName, memoryBucketName, rememberedMemoryNames, workspaceNamePrompt } from "./workspace-name-guard";
 import { issuesFileFor, readIssues, writeIssues } from "./workspace-issues";
 import { proxyEnvironment, refreshProxyEnvironment } from "./system-proxy";
 import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
@@ -914,13 +915,32 @@ app.whenReady().then(async () => {
   ipcMain.handle(MCP_TEST_CHANNEL, async (_event, input: McpConnectionTestInput) => testMcpConnection(input));
   ipcMain.handle(APP_VERSION_CHANNEL, (): string => app.getVersion());
   ipcMain.handle(PROJECT_HOME_CHANNEL, () => homeProject());
-  ipcMain.handle(PROJECT_SELECT_CHANNEL, async (): Promise<ProjectSelection | null> => {
+  ipcMain.handle(PROJECT_SELECT_CHANNEL, async (event): Promise<ProjectSelection | null> => {
     const result = await dialog.showOpenDialog({
       title: "打开项目",
       properties: ["openDirectory"],
     });
     const path = result.filePaths[0];
     if (result.canceled || !path) return null;
+    // Memory is filed by project name alone, so two same-named folders would
+    // share one memory. Rather than give the store an identity of its own, the
+    // person importing the folder decides. See workspace-name-guard.ts.
+    const open = readMountedProjects(mountedProjectsFile())
+      .map((project) => ({ name: memoryBucketName(project.path), path: project.path }));
+    const verdict = checkWorkspaceName(
+      { name: memoryBucketName(path), path },
+      open,
+      rememberedMemoryNames(join(app.getPath("userData"), "agent", "memory")),
+    );
+    const prompt = workspaceNamePrompt(verdict);
+    if (prompt) {
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = { ...prompt, defaultId: prompt.proceedId ?? 0, cancelId: 0 };
+      const answer = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (prompt.proceedId === undefined || answer.response !== prompt.proceedId) return null;
+    }
     return { name: basename(path), path, kind: "workspace" };
   });
   ipcMain.handle(PICK_DIRECTORY_CHANNEL, async (_event, options?: { title?: string }): Promise<string | null> => {

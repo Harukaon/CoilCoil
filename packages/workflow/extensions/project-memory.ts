@@ -51,8 +51,12 @@ export {
 } from "./memory-settings.ts";
 export {
   MEMORY_ENTRIES_DIRNAME,
+  MEMORY_ENTRIES_HEADING,
+  MEMORY_FACTS_HEADING,
+  MEMORY_FACTS_MAX,
   MEMORY_INDEX_MARKER,
   isMemoryIndex,
+  parseMemoryFacts,
   parseMemoryIndex,
   renderMemoryIndex,
   splitLegacyMemory,

@@ -16,6 +16,7 @@ import test from "node:test";
 import {
   DEFAULT_MEMORY_SUMMARIZE_EVERY_TURNS,
   MEMORY_ENTRIES_DIRNAME,
+  MEMORY_FACTS_MAX,
   MEMORY_INDEX_MARKER,
   PROJECT_MEMORY_MAX_CHARS,
   PROJECT_MEMORY_STATUS_EVENT,
@@ -27,8 +28,10 @@ import {
   ensureProjectMemory,
   isInsidePiDirectory,
   listMemoryEntryFiles,
+  parseMemoryFacts,
   parseMemoryIndex,
   readPersistedMemoryState,
+  renderMemoryIndex,
   resolveProjectMemoryPaths,
   resolveProjectMemoryStorageRoot,
   resolveProjectRoot,
@@ -243,13 +246,13 @@ test("system prompt injects current project memory and soft limit guidance", asy
   const paths = await resolveProjectMemoryPaths(project, memoryRoot);
   const memory = "服".repeat(PROJECT_MEMORY_MAX_CHARS + 80);
   const prompt = buildProjectMemoryPrompt(paths, memory);
-  const injected = prompt.match(/<project_memory_data>\n([\s\S]*?)\n<\/project_memory_data>/)?.[1];
+  const injected = prompt.match(/<project_memory_index>\n([\s\S]*?)\n<\/project_memory_index>/)?.[1];
 
   assert.equal(countCharacters(injected ?? ""), PROJECT_MEMORY_MAX_CHARS);
   assert.match(prompt, /可以使用 read、write、edit/);
-  assert.match(prompt, /常驻上下文里只有索引/);
+  assert.match(prompt, /常驻在你上下文里的只有索引这一层/);
   assert.match(prompt, new RegExp(`${MEMORY_ENTRIES_DIRNAME}/`));
-  assert.match(prompt, /采用软约束/);
+  assert.match(prompt, /是软约束/);
   assert.match(prompt, /\[记忆字数\]/);
   assert.doesNotMatch(prompt, /wc -m/);
   assert.doesNotMatch(prompt, /强制只读|硬上限/);
@@ -272,12 +275,12 @@ test("worker prompt contains paths and policy but never embeds session contents"
 
   assert.match(prompt, new RegExp(sessionFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(prompt, new RegExp(sentinel));
-  assert.ok(prompt.indexOf("先读取 MEMORY.md 索引") < prompt.indexOf("再读取指定的 session JSONL"));
+  assert.ok(prompt.indexOf("先读 MEMORY.md") < prompt.indexOf("再读指定的 session JSONL"));
   assert.match(prompt, /不会有用户|不要向用户提问|无人值守/);
   assert.match(prompt, /严禁读取或修改任何其他文件或目录/);
-  assert.match(prompt, /MEMORY\.md 是索引/);
-  assert.match(prompt, /不要把正文写进 MEMORY\.md/);
-  assert.match(prompt, /采用软约束/);
+  assert.match(prompt, /索引\*\*：MEMORY\.md，只有两样东西/);
+  assert.match(prompt, /正文一律不要写进 MEMORY\.md/);
+  assert.match(prompt, /是软约束/);
   assert.match(prompt, /\[记忆字数\]/);
   assert.doesNotMatch(prompt, /wc -m/);
   assert.doesNotMatch(prompt, /第一行以“索引：”开头|最多 4 个/);
@@ -971,4 +974,44 @@ test("清理残骸失败不会让这次记忆整理算失败", async (t) => {
     .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
     .map((event) => (event.value as { state: string }).state);
   assert.equal(states.at(-1), "succeeded");
+});
+
+test("索引的说明是「要不要打开这个文件」，正文才写细节", async (t) => {
+  // 用户的原话：现在整理出来的记忆「要么太精简，要么没重点」。根子在于两层被
+  // 讲混了——索引有字数上限，于是正文也跟着被压成一句话。
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  await mkdir(project, { recursive: true });
+  const paths = await resolveProjectMemoryPaths(project, join(root, ".pi", "agent", "memory"));
+
+  for (const prompt of [
+    buildProjectMemoryPrompt(paths, "索引内容"),
+    buildMemoryWorkerPrompt(paths, join(root, "session.jsonl")),
+  ]) {
+    assert.match(prompt, /不限字数/, "正文必须明确说不限字数");
+    assert.match(prompt, /不是把正文压缩一遍|不是正文的摘要/, "说明不是摘要");
+    assert.match(prompt, new RegExp(`最多 ${MEMORY_FACTS_MAX} 条`), "重要事实要有硬额度");
+    assert.match(prompt, /重要事实/);
+    assert.match(prompt, /记忆索引/);
+  }
+});
+
+test("重要事实只认事实那一段里的短句，且有上限", () => {
+  const rendered = renderMemoryIndex(
+    [{ title: "部署", file: "memories/部署.md", summary: "要动线上部署时读" }],
+    ["端口 8443", "数据库在腾讯云 PG"],
+  );
+  assert.deepEqual(parseMemoryFacts(rendered), ["端口 8443", "数据库在腾讯云 PG"]);
+  // 索引行长得也像 bullet，但它属于索引，不该被当成事实数第二遍。
+  assert.deepEqual(parseMemoryIndex(rendered).map((entry) => entry.title), ["部署"]);
+  assert.equal(parseMemoryFacts(rendered).includes("[部署](memories/部署.md)：要动线上部署时读"), false);
+
+  const flooded = renderMemoryIndex([], Array.from({ length: 20 }, (_, index) => `事实 ${index}`));
+  assert.equal(parseMemoryFacts(flooded).length, MEMORY_FACTS_MAX);
+});
+
+test("没有重要事实时，索引里不会留一个空的事实段", () => {
+  const rendered = renderMemoryIndex([{ title: "A", file: "memories/a.md", summary: "说明" }]);
+  assert.doesNotMatch(rendered, /重要事实/);
+  assert.deepEqual(parseMemoryFacts(rendered), []);
 });
