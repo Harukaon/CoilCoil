@@ -912,3 +912,63 @@ test("only the index is injected while bodies stay listed for on-demand reads", 
   assert.match(result.systemPrompt, new RegExp(`${MEMORY_ENTRIES_DIRNAME}/部署\\.md`));
   assert.doesNotMatch(result.systemPrompt, /回滚要先停 worker/);
 });
+
+test("每跑完一次记忆整理，就把旧的 worker 会话残骸清掉", async (t) => {
+  // 这些残骸从来没人删过：用户机器上攒了约 1900 份、676MB，比他所有真实对话
+  // 加起来还多，而真正记住的内容只有 200KB。
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  await mkdir(paths.workerSessionsDir, { recursive: true });
+  const leftovers = [
+    "2026-08-01T00-00-00-000Z_a.jsonl",
+    "2026-08-02T00-00-00-000Z_b.jsonl",
+    "2026-08-03T00-00-00-000Z_c.jsonl",
+    "2026-08-04T00-00-00-000Z_d.jsonl",
+    "2026-08-05T00-00-00-000Z_e.jsonl",
+    "2026-08-06T00-00-00-000Z_f.jsonl",
+  ];
+  for (const name of leftovers) await writeFile(join(paths.workerSessionsDir, name), "旧的整理记录", "utf8");
+
+  const child = new FakeWorker();
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+    spawnWorker: () => child,
+  });
+  await harness.commands.get("memory")?.handler("", contextFor(project, sessionFile));
+  child.emit("exit", 0, null);
+  await waitFor(() => pathMissing(paths.workerLockFile));
+
+  // 名字以 ISO 时间开头，排序就是按新旧排；只留最近的几份，够解释一次跑坏了。
+  assert.deepEqual((await readdir(paths.workerSessionsDir)).sort(), leftovers.slice(-3));
+});
+
+test("清理残骸失败不会让这次记忆整理算失败", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, ".pi", "agent", "memory");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  // 目录压根不存在：清理要安静地跳过，而不是把整次整理拖成 failed。
+  const child = new FakeWorker();
+  const harness = createHarness();
+  projectMemoryExtension(harness.pi as any, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+    spawnWorker: () => { void rm(paths.workerSessionsDir, { recursive: true, force: true }); return child; },
+  });
+  await harness.commands.get("memory")?.handler("", contextFor(project, sessionFile));
+  child.emit("exit", 0, null);
+  await waitFor(() => pathMissing(paths.workerLockFile));
+
+  const states = harness.emittedEvents
+    .filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT)
+    .map((event) => (event.value as { state: string }).state);
+  assert.equal(states.at(-1), "succeeded");
+});

@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdir, open, stat, unlink } from "node:fs/promises";
-import { basename } from "node:path";
+import { mkdir, open, readdir, rm, stat, unlink } from "node:fs/promises";
+import { basename, join } from "node:path";
 import type { ProjectMemoryPaths } from "./memory-settings.ts";
 import { buildMemoryWorkerPrompt, expandHome, PROJECT_MEMORY_MAX_CHARS } from "./memory-settings.ts";
 
 const WORKER_LOCK_STALE_MS = 15 * 60_000;
+/** How many finished memory runs keep their transcript, for explaining a bad one. */
+const WORKER_SESSIONS_KEPT = 3;
 const WORKER_TIMEOUT_MS = 5 * 60_000;
 const WORKER_KILL_GRACE_MS = 5_000;
 const WORKER_GUARD_PATH = fileURLToPath(new URL("./memory-worker-guard.ts", import.meta.url));
@@ -43,6 +45,31 @@ export interface MemoryWorkerOptions {
   spawnWorker?: (launch: MemoryWorkerLaunch) => MemoryWorkerChild;
   workerGuardPath?: string;
   workerTimeoutMs?: number;
+}
+
+/**
+ * Delete the transcripts left behind by past memory runs.
+ *
+ * Every run is a whole pi session, and its JSONL was never cleaned up. On the
+ * author's machine that had reached about 1,900 leftover sessions taking 676MB
+ * — more than all their real conversations put together — to hold 200KB of
+ * actual memory. Keeping the newest few still explains a run that went wrong;
+ * everything older is pure residue.
+ *
+ * Called after the worker exits, so the file being written is never the one
+ * removed. Failing to prune must never fail the run itself.
+ */
+async function pruneWorkerSessions(directory: string, keep = WORKER_SESSIONS_KEPT): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(directory);
+  } catch {
+    return;
+  }
+  // Session names begin with an ISO timestamp, so sorting them is sorting by age.
+  const stale = names.sort().slice(0, Math.max(0, names.length - keep));
+  await Promise.all(stale.map((name) =>
+    rm(join(directory, name), { recursive: true, force: true }).catch(() => undefined)));
 }
 
 interface WorkerLease { release(): Promise<void>; }
@@ -182,6 +209,7 @@ export async function launchMemoryWorker(
       } catch (callbackError) {
         console.error("[project-memory] 后台完成回调失败：", callbackError);
       } finally {
+        await pruneWorkerSessions(request.paths.workerSessionsDir);
         try { await lease?.release(); } catch (releaseError) { console.error("[project-memory] 释放后台任务锁失败：", releaseError); }
       }
     };
