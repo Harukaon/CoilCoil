@@ -1,5 +1,6 @@
 import {
   type McpImportConfiguration,
+  type McpServerConfiguration,
 } from "@coilcoil/runtime-protocol";
 import {
   existsSync,
@@ -208,6 +209,57 @@ export function withBundledBrowserMcp(
   } catch {
     return configuration;
   }
+}
+
+/**
+ * The bundled browser server, in the shape the MCP client speaks.
+ *
+ * `withBundledBrowserMcp` above builds the same entry for the raw configuration
+ * document. This is the same server expressed as an `McpServerConfiguration`,
+ * because CoilCoil's own MCP client reads a typed server list rather than that
+ * document — and when the client stopped going through the document, the
+ * built-in browser quietly stopped being offered to the Agent at all.
+ *
+ * A browser server the user configured themselves is dropped for the same
+ * reason it always was: two Chrome DevTools servers fighting over one browser
+ * is worse than either alone. One pointed at a specific browser is left be.
+ */
+export function bundledBrowserServerConfiguration(
+  environment: NodeJS.ProcessEnv = process.env,
+  browserScopeId?: string,
+): McpServerConfiguration | undefined {
+  const built = withBundledBrowserMcp({ mcpServers: {} }, environment, browserScopeId);
+  const entry = built.mcpServers["coilcoil-browser"];
+  if (!entry) return undefined;
+  return {
+    name: "coilcoil-browser",
+    scope: "global",
+    transport: "stdio",
+    command: typeof entry.command === "string" ? entry.command : "",
+    args: Array.isArray(entry.args) ? entry.args.map(String) : [],
+    env: entry.env && typeof entry.env === "object" ? entry.env as Record<string, string> : {},
+    headers: {},
+    lifecycle: "eager",
+    requestTimeoutMs: 300_000,
+    exposeResources: false,
+    directTools: false,
+    excludeTools: [],
+    debug: false,
+    disabled: false,
+    source: "builtin",
+  } as McpServerConfiguration;
+}
+
+/** Drop a user-configured browser server that would fight with the bundled one. */
+export function withoutRivalBrowserConfigurations(
+  servers: readonly McpServerConfiguration[],
+): McpServerConfiguration[] {
+  return servers.filter((server) => {
+    const args = server.args.map(String);
+    const usesDevtoolsMcp = /chrome-devtools-mcp/i.test([server.command ?? "", ...args].join(" "));
+    if (!usesDevtoolsMcp) return true;
+    return args.includes("--wsEndpoint") || args.includes("--browserUrl");
+  });
 }
 
 export let mcpAdapterConfigModule: Promise<McpAdapterConfigModule> | undefined;

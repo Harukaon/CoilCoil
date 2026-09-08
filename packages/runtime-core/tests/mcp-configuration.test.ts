@@ -4,6 +4,7 @@ import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mcpConfigurationForAgent, CoilCoilRuntime, serveMcpManager, withBundledBrowserMcp } from "../src/index.js";
+import { bundledBrowserServerConfiguration, withoutRivalBrowserConfigurations } from "../src/browser-mcp.js";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { requestMcpManager } from "../../workflow/extensions/mcp-tools.js";
 
@@ -232,4 +233,36 @@ test("没人应答就是没有，不是拿一个过期的答案顶上", () => {
   const bus = createEventBus();
   const wrapper = { emit: (channel: string, data: unknown) => bus.emit(channel, data) };
   assert.equal(requestMcpManager(wrapper as never), undefined);
+});
+
+test("内置浏览器 MCP 也要以客户端认得的形状给出来", () => {
+  // 这就是漏掉的那一环：内置浏览器不在工作区的 mcp.json 里，是桌面端用环境
+  // 变量接上去的。旧的适配器从另一条路拿到它，新客户端读的是配置里的服务器
+  // 列表，于是它就这么无声无息地从 Agent 面前消失了。
+  const server = bundledBrowserServerConfiguration({
+    COILCOIL_BROWSER_MCP_COMMAND: "/private/node",
+    COILCOIL_BROWSER_MCP_ARGS: JSON.stringify(["/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools"]),
+    COILCOIL_BROWSER_MCP_ENV: JSON.stringify({ ELECTRON_RUN_AS_NODE: "1" }),
+  }, "会话 A");
+  assert.equal(server?.name, "coilcoil-browser");
+  assert.equal(server?.transport, "stdio");
+  assert.equal(server?.command, "/private/node");
+  assert.equal(server?.lifecycle, "eager", "内置浏览器要在会话一开就连上");
+  assert.equal(server?.disabled, false);
+  // 作用域跟着会话走，两个会话不会抢同一个浏览器。
+  assert.ok(server?.args.some((value) => value.includes("scope=")));
+});
+
+test("没有配好浏览器环境时就当没有这个服务器", () => {
+  assert.equal(bundledBrowserServerConfiguration({}), undefined);
+});
+
+test("用户自己配的 chrome-devtools 会给内置的让路", () => {
+  // 两个 Chrome DevTools 服务器抢同一个浏览器，比只有一个更糟。
+  const kept = withoutRivalBrowserConfigurations([
+    { name: "普通", command: "npx", args: ["some-server"] },
+    { name: "抢的", command: "npx", args: ["-y", "chrome-devtools-mcp@latest"] },
+    { name: "指定浏览器的", command: "npx", args: ["chrome-devtools-mcp", "--browserUrl", "http://127.0.0.1:9222"] },
+  ] as never);
+  assert.deepEqual(kept.map((server) => server.name), ["普通", "指定浏览器的"]);
 });

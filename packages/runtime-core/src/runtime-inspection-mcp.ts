@@ -24,6 +24,10 @@ import {
   defaultCredentialFile,
 } from "@coilcoil/mcp";
 import {
+  bundledBrowserServerConfiguration,
+  withoutRivalBrowserConfigurations,
+} from "./browser-mcp.js";
+import {
   ORIGINAL_SESSION_MUTATION_UNSUPPORTED,
   RUNTIME_BRIDGE_COMMAND_EVENT,
   RUNTIME_BRIDGE_REPLY_PREFIX,
@@ -347,7 +351,15 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
   protected mcpManager(): McpManager {
     if (this.mcpManagerInstance) return this.mcpManagerInstance;
     this.mcpManagerInstance = new McpManager({
-      loadServers: async () => (await this.getMcpConfiguration(this.active?.cwd)).servers,
+      loadServers: async () => {
+        const configured = (await this.getMcpConfiguration(this.active?.cwd)).servers;
+        const browser = bundledBrowserServerConfiguration(process.env, this.browserScopeId);
+        // The built-in browser is not in the workspace's MCP file — it is wired
+        // up by the desktop app — so it has to be added here or the Agent never
+        // sees it. Which is exactly what happened when this client replaced the
+        // old adapter: the adapter got it from a different path.
+        return browser ? [...withoutRivalBrowserConfigurations(configured), browser] : configured;
+      },
       store: new McpCredentialStore(defaultCredentialFile(this.agentDir)),
       // The renderer opens the authorization page itself, so that it can show
       // the dialog and the browser in the right order; the manager only has to
