@@ -1,3 +1,4 @@
+import { toolRunId } from "./tool-run-ids.js";
 import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
@@ -82,8 +83,32 @@ export function globalToolPurposeAuditEnabled(): boolean {
   return state instanceof Map ? state.get("*") !== false : true;
 }
 
-export function restoredToolPurposes(session: AgentSession): Map<string, string> {
-  const purposes = new Map<string, string>();
+export interface RestoredToolPurpose {
+  purpose: string;
+  /** The tool the purpose was written for, used to refuse a mismatched pairing. */
+  toolName: string;
+}
+
+/**
+ * The purpose recorded for each tool call, keyed the way tool runs are keyed.
+ *
+ * The audit trail records the provider's own tool call id, and several providers
+ * reuse those inside one session — `openai-completions` endpoints number their
+ * calls `call_0`, `call_1`, … and restart at zero every assistant turn (see
+ * `tool-run-ids.ts`). Keying this map by the bare id therefore let the last
+ * `call_0` of a conversation overwrite every earlier one, so reopening a session
+ * captioned every one of those cards with the final call's purpose: three
+ * different tool calls, one explanation, and it belonged to none of the first
+ * two.
+ *
+ * Counting occurrences in entry order reproduces exactly the numbering
+ * `ToolRunIds` gives the cards, so each purpose lands back on the call that
+ * wrote it. Providers with genuinely unique ids see no change at all: the first
+ * occurrence of an id keeps that id verbatim.
+ */
+export function restoredToolPurposes(session: AgentSession): Map<string, RestoredToolPurpose> {
+  const purposes = new Map<string, RestoredToolPurpose>();
+  const occurrences = new Map<string, number>();
   for (const entry of session.sessionManager.getEntries()) {
     if (
       entry.type !== "custom" ||
@@ -94,9 +119,32 @@ export function restoredToolPurposes(session: AgentSession): Map<string, string>
     }
     const toolCallId = stringValue(entry.data.toolCallId);
     const purpose = stringValue(entry.data.purpose).trim();
-    if (toolCallId && purpose) purposes.set(toolCallId, purpose);
+    if (!toolCallId || !purpose) continue;
+    const occurrence = (occurrences.get(toolCallId) ?? 0) + 1;
+    occurrences.set(toolCallId, occurrence);
+    purposes.set(toolRunId(toolCallId, occurrence), { purpose, toolName: stringValue(entry.data.toolName) });
   }
   return purposes;
+}
+
+/**
+ * The purpose belonging to one restored card, or nothing when it cannot be sure.
+ *
+ * A call the model announced but never ran leaves a card without ever writing an
+ * audit entry, so the two sequences can drift apart by one. The tool name is the
+ * check that catches that: a purpose written for `bash` must never end up
+ * captioning an `edit`. When they disagree the card simply shows its ordinary
+ * label — no explanation is better than someone else's.
+ */
+export function restoredPurposeFor(
+  purposes: ReadonlyMap<string, RestoredToolPurpose>,
+  runId: string,
+  toolName: string,
+): string | undefined {
+  const found = purposes.get(runId);
+  if (!found) return undefined;
+  if (found.toolName && toolName && found.toolName !== toolName) return undefined;
+  return found.purpose;
 }
 
 export function responseMetricsFromData(data: unknown): ResponseMetrics | undefined {

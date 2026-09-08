@@ -47,6 +47,7 @@ import { ToolRunIds } from "./tool-run-ids.js";
 import {
   liveToolPurpose,
   purposeFromArgs,
+  restoredPurposeFor,
   restoredResponseMetrics,
   restoredToolPurposes,
 } from "./session-values.js";
@@ -128,7 +129,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         id,
         order: call?.order ?? order++,
         name,
-        label: this.toolLabel(name, args, id, purposes.get(id) ?? purposes.get(rawId), session.sessionId),
+        label: this.toolLabel(name, args, id, restoredPurposeFor(purposes, id, name), session.sessionId),
         args,
         output,
         status: failed ? "failed" : "succeeded",
@@ -167,7 +168,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         id: call.id,
         order: call.order,
         name: call.name,
-        label: this.toolLabel(call.name, call.args, call.id, purposes.get(call.id) ?? purposes.get(call.rawId), session.sessionId),
+        label: this.toolLabel(call.name, call.args, call.id, restoredPurposeFor(purposes, call.id, call.name), session.sessionId),
         args: call.args,
         output,
         status: "failed",
