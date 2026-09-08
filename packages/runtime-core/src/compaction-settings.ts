@@ -9,39 +9,31 @@ export interface CompactionSettings {
 
 const INSTALLED = Symbol.for("coilcoil.compaction-settings.installed");
 
-/** Share of the context window kept verbatim on the far side of a compaction. */
-const KEEP_RECENT_RATIO = 0.25;
-
 /**
- * A compaction has to summarize at least as much as it keeps, or the summary
- * costs a model call and buys nothing.
+ * A compaction has to summarize at least as much as it keeps, or the cut point
+ * walks past the whole history and the summary buys nothing.
  */
 const KEEP_RECENT_CEILING_RATIO = 0.5;
 
 /**
- * Scale Pi's compaction budget to the context window actually in force.
+ * Keep Pi's compaction budget from silently disabling itself.
  *
- * Pi expresses the budget as two absolute token counts — `reserveTokens`
- * (16384) decides when compaction fires, `keepRecentTokens` (20000) decides how
- * much conversation survives it verbatim — and neither one looks at the model.
- * Both ends of the model range suffer for it:
+ * Pi expresses the budget as two absolute token counts: `reserveTokens` (16384)
+ * decides when compaction fires, `keepRecentTokens` (20000) decides how much
+ * conversation survives it verbatim. Twenty thousand is a sensible amount to
+ * keep and is left exactly as it is — this only ever lowers it, never raises it.
  *
- * - On a large window the survivor is a fixed 20k. A session that compacts at
- *   184k of a 200k window keeps roughly a tenth of what it had and replaces the
- *   rest with one prose summary. That cliff is the compaction complaint users
- *   actually feel.
- * - On a small window the two constants cross over: once `keepRecentTokens`
- *   exceeds `contextWindow - reserveTokens`, the cut point walks past the whole
- *   history, `prepareCompaction` finds nothing to summarize and returns
- *   undefined, and compaction silently does nothing at all — every turn, until
- *   the request overflows. CoilCoil lets users set `contextWindow` per model in
- *   settings, so this is one number away for anyone on a local model.
+ * It has to be lowered in one case. Once `keepRecentTokens` exceeds
+ * `contextWindow - reserveTokens`, the cut point walks past the entire history,
+ * `prepareCompaction` finds nothing to summarize and returns undefined, and
+ * compaction quietly does nothing at all — every turn, until the request
+ * overflows, at which point overflow recovery takes the same path and also does
+ * nothing. A 32k model is already inside that dead zone with Pi's defaults, and
+ * CoilCoil lets users set `contextWindow` per model in settings, so anyone on a
+ * local model is one number away from it.
  *
- * Deriving the survivor from the window fixes both: a quarter of the window
- * stays verbatim, capped at half of what compaction can reach so there is
- * always a history worth summarizing. An explicitly configured
- * `keepRecentTokens` is left alone — that is a deliberate choice, not the
- * default nobody picked.
+ * An explicitly configured `keepRecentTokens` is left alone even then: that is a
+ * deliberate choice, and silently overriding it would be its own surprise.
  */
 export function compactionSettingsForWindow(
   settings: CompactionSettings,
@@ -53,17 +45,14 @@ export function compactionSettingsForWindow(
 
   const keepRecentTokens = Math.max(
     1,
-    Math.min(
-      Math.max(settings.keepRecentTokens, Math.floor(contextWindow * KEEP_RECENT_RATIO)),
-      Math.floor(summarizable * KEEP_RECENT_CEILING_RATIO),
-    ),
+    Math.min(settings.keepRecentTokens, Math.floor(summarizable * KEEP_RECENT_CEILING_RATIO)),
   );
   return keepRecentTokens === settings.keepRecentTokens ? settings : { ...settings, keepRecentTokens };
 }
 
 /**
  * Wrap `getCompactionSettings` on a settings manager so every caller inside Pi
- * sees the window-aware budget. Wrapping the one accessor is the same trick
+ * sees the clamped budget. Wrapping the one accessor is the same trick
  * `installModelOverrides` uses on the model registry, and for the same reason:
  * Pi reads these settings from several places and a value applied afterwards
  * would have to be re-applied at each of them.
