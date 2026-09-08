@@ -506,35 +506,60 @@ export class McpManager {
   }
 
   /**
-   * Everything the Agent can call, and what stopped the rest from answering.
+   * Which servers exist — without touching the network.
    *
-   * Listing connects the servers it has to. Nothing else does — no server is
-   * started merely because a session began — but an explicit "what is
-   * available?" cannot be answered from a cache that is empty precisely because
-   * nothing has been used yet. Reporting the ones that failed matters as much
-   * as the ones that worked: a tool the model expected and cannot see is
-   * otherwise indistinguishable from a tool that does not exist.
+   * Listing used to connect every server so it could name their tools, which on
+   * a handful of remote servers is most of a minute before the model sees a
+   * word. That was never what progressive disclosure asked for: disclosure is
+   * about what occupies the model's context, and reaching a server to find out
+   * its tool names is a separate cost that listing does not have to pay.
+   *
+   * So the two are split. This answers from configuration and from whatever is
+   * already connected; `serverTools` reaches exactly one server, when the model
+   * has decided which one it wants.
    */
-  async listTools(): Promise<{
-    tools: Array<{ server: string; tool: McpToolSummary }>;
-    unavailable: Array<{ server: string; status: McpConnectionStatus; failure?: string }>;
+  async listServers(): Promise<Array<{
+    server: string;
+    status: McpConnectionStatus | "disabled";
+    tools: McpToolSummary[];
+  }>> {
+    await this.reload();
+    return this.availableDefinitions().map((definition) => {
+      const connection = this.connections.get(definition.name);
+      return {
+        server: definition.name,
+        status: connection?.status ?? "not connected",
+        // Only what is already known. Nothing here goes and asks.
+        tools: connection?.status === "connected" ? connection.tools : [],
+      };
+    });
+  }
+
+  /**
+   * What one server offers, connecting it if that is what it takes.
+   *
+   * The cost lands here, on one server the model asked about, instead of on
+   * every server the moment it wonders what exists.
+   */
+  async serverTools(name: string): Promise<{
+    tools: McpToolSummary[];
+    status: McpConnectionStatus | "disabled";
+    failure?: string;
   }> {
     await this.reload();
-    const tools: Array<{ server: string; tool: McpToolSummary }> = [];
-    const unavailable: Array<{ server: string; status: McpConnectionStatus; failure?: string }> = [];
-    await mapLimited(this.availableDefinitions(), CONNECT_CONCURRENCY, async (definition) => {
-      const connection = this.connectionFor(definition.name);
-      const status = connection.status === "connected" ? "connected" : await this.openConnection(definition.name);
-      if (status !== "connected") {
-        if (status === "failed") this.failedAt.set(definition.name, Date.now());
-        unavailable.push({ server: definition.name, status, failure: connection.failure });
-        return;
-      }
-      this.lastUsedAt.set(definition.name, Date.now());
-      for (const tool of connection.tools) tools.push({ server: definition.name, tool });
-    });
+    const definition = this.definitions.get(name);
+    if (!definition) throw new Error(`没有找到 MCP Server「${name}」。`);
+    if (definition.disabled) return { tools: [], status: "disabled" };
+    if (this.sessionDisabled.has(name)) throw new Error(`MCP Server「${name}」已在当前会话停用。`);
+    const connection = this.connectionFor(name);
+    const status = connection.status === "connected" ? "connected" : await this.openConnection(name);
+    if (status !== "connected") {
+      if (status === "failed") this.failedAt.set(name, Date.now());
+      return { tools: [], status, failure: connection.failure };
+    }
+    this.lastUsedAt.set(name, Date.now());
     this.startIdleSweep();
-    return { tools, unavailable };
+    return { tools: connection.tools, status };
   }
 
   async callTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {

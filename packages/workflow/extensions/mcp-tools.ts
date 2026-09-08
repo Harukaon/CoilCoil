@@ -22,10 +22,10 @@ const TOOL_NAME = "mcp";
 export const MCP_MANAGER_CHANNEL = "coilcoil:mcp:manager:v1";
 
 const McpParams = Type.Object({
-  action: StringEnum(["list", "call"], {
-    description: "list：列出可用的 MCP Server 和它们的工具；call：调用其中一个工具",
+  action: StringEnum(["list", "tools", "call"], {
+    description: "list：列出有哪些 MCP Server（不联网，很快）；tools：连上某一个并列出它的工具；call：调用某个工具",
   }),
-  server: Type.Optional(Type.String({ description: "call 时必填：MCP Server 名称" })),
+  server: Type.Optional(Type.String({ description: "tools 和 call 时必填：MCP Server 名称" })),
   tool: Type.Optional(Type.String({ description: "call 时必填：工具名称" })),
   args: Type.Optional(Type.Object({}, {
     additionalProperties: true,
@@ -69,28 +69,46 @@ function textResult(text: string, details: Record<string, unknown>, isError = fa
  * Names are qualified by server because two servers routinely ship a `search`
  * or a `read`, and an unqualified list is an invitation to call the wrong one.
  */
-export function describeTools(listed: {
-  tools: Array<{ server: string; tool: { name: string; description?: string } }>;
-  unavailable?: Array<{ server: string; status: string; failure?: string }>;
+export function describeServers(servers: Array<{
+  server: string;
+  status: string;
+  tools: Array<{ name: string }>;
+}>): string {
+  if (!servers.length) return "当前没有可用的 MCP Server。可能是还没配置，或者配置的都已停用。";
+  const lines = servers.map((entry) => {
+    if (entry.status === "connected") {
+      return `- ${entry.server}（已连接，${entry.tools.length} 个工具：${entry.tools.map((tool) => tool.name).join("、")}）`;
+    }
+    if (entry.status === "needs-auth") return `- ${entry.server}（需要先在设置里完成认证）`;
+    if (entry.status === "failed") return `- ${entry.server}（上次连接失败）`;
+    return `- ${entry.server}（未连接，用 action="tools" 查看它有哪些工具）`;
+  });
+  return [
+    "已配置的 MCP Server：",
+    ...lines,
+    "",
+    "这一步没有联网。要知道某个 Server 具体有哪些工具，用 action=\"tools\" 加 server 名字——那一步才会真的去连它，可能要几秒。",
+  ].join("\n");
+}
+
+/** One server's tools, once the model has decided it wants that one. */
+export function describeServerTools(server: string, result: {
+  tools: Array<{ name: string; description?: string }>;
+  status: string;
+  failure?: string;
 }): string {
-  const byServer = new Map<string, string[]>();
-  for (const { server, tool } of listed.tools) {
-    const lines = byServer.get(server) ?? [];
-    lines.push(`  - ${tool.name}${tool.description ? `：${tool.description}` : ""}`);
-    byServer.set(server, lines);
+  if (result.status === "needs-auth") return `${server} 需要先在设置里完成认证，然后才能列出工具。`;
+  if (result.status === "disabled") return `${server} 已停用。`;
+  if (result.status !== "connected") {
+    // The server's own words, not a shrug: "Invalid API key" tells the model
+    // what to do next, "failed to connect" does not.
+    return `${server} 连不上：${result.failure?.split("\n")[0] ?? "没有说明原因"}`;
   }
-  const sections = [...byServer].map(([server, lines]) => `${server}\n${lines.join("\n")}`);
-  // A server that could not answer is reported rather than silently omitted: a
-  // tool the model expected and cannot see would otherwise look like a tool
-  // that never existed, and it would keep guessing instead of saying why.
-  for (const entry of listed.unavailable ?? []) {
-    const reason = entry.status === "needs-auth"
-      ? "需要在设置里完成认证"
-      : entry.failure?.split("\n")[0] ?? "连不上";
-    sections.push(`${entry.server}（暂时用不了：${reason}）`);
-  }
-  if (!sections.length) return "当前没有可用的 MCP 工具。可能是还没配置服务器，或者配置的服务器都已停用。";
-  return sections.join("\n\n");
+  if (!result.tools.length) return `${server} 已连接，但没有提供任何工具。`;
+  return [
+    `${server} 提供的工具：`,
+    ...result.tools.map((tool) => `  - ${tool.name}${tool.description ? `：${tool.description}` : ""}`),
+  ].join("\n");
 }
 
 /**
@@ -146,10 +164,10 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
     name: TOOL_NAME,
     label: "MCP",
     description:
-      "访问已配置的 MCP Server。先用 action=\"list\" 看有哪些服务器和工具，再用 action=\"call\" 加上 server、tool 和 args 调用。服务器按需连接，第一次调用可能稍慢。",
+      "访问已配置的 MCP Server。三步：action=\"list\" 看有哪些 Server（不联网，很快）→ action=\"tools\" 加 server 名字看它有哪些工具（这一步才会连接，可能要几秒）→ action=\"call\" 加 server、tool、args 调用。",
     promptSnippet: "mcp: 列出并调用 MCP Server 提供的工具",
     promptGuidelines: [
-      "需要外部系统的能力时先 mcp list 看有什么，不要凭猜测直接 call。",
+      "需要外部系统的能力时先 mcp list 看有哪些 Server；list 不联网所以很快，挑中一个之后再用 tools 去看它的工具，不要一上来就把所有 Server 都问一遍。",
     ],
     parameters: McpParams,
 
@@ -160,15 +178,29 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
       }
 
       if (params.action === "list") {
-        const listed = await manager.listTools();
-        return textResult(describeTools(listed), {
-          servers: [...new Set(listed.tools.map((entry) => entry.server))],
-          toolCount: listed.tools.length,
-          unavailable: listed.unavailable.map((entry) => entry.server),
+        const servers = await manager.listServers();
+        return textResult(describeServers(servers), {
+          servers: servers.map((entry) => entry.server),
+          connected: servers.filter((entry) => entry.status === "connected").map((entry) => entry.server),
         });
       }
 
       const server = params.server?.trim();
+      if (params.action === "tools") {
+        if (!server) return textResult("tools 需要给出 server。", { error: "missing_target" }, true);
+        try {
+          const result = await manager.serverTools(server);
+          return textResult(describeServerTools(server, result), {
+            server,
+            status: result.status,
+            toolCount: result.tools.length,
+          }, result.status !== "connected");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return textResult(message, { error: "tools_failed", message, server }, true);
+        }
+      }
+
       const tool = params.tool?.trim();
       if (!server || !tool) {
         return textResult("call 需要同时给出 server 和 tool。", { error: "missing_target" }, true);

@@ -129,7 +129,7 @@ test("HTTP 服务器的整条 OAuth 流程，从头到尾不需要任何会话",
   assert.equal(Object.keys(onDisk.servers).length, 1);
 
   // 5. 带着令牌真的调得动工具。
-  const called = await manager.callTool("oauth", (await manager.listTools()).tools[0].tool.name, {}) as {
+  const called = await manager.callTool("oauth", (await manager.serverTools("oauth")).tools[0].name, {}) as {
     content?: Array<{ text?: string }>;
   };
   assert.ok(Array.isArray(called.content), `工具调用没有返回内容：${JSON.stringify(called)}`);
@@ -226,7 +226,7 @@ test("两个不同地址的服务器各自认证，凭据互不影响", { timeou
   assert.equal(store.get(credentialKey(second.ready.mcpServerUrl))?.tokens, undefined);
 });
 
-test("Agent 列工具时，需要认证的服务器不会因为回调没起来就报错", { timeout: 90_000 }, async (t) => {
+test("问一个需要认证的 Server 有哪些工具，不会因为回调没起来就报错", { timeout: 90_000 }, async (t) => {
   // 真出过的 bug：只有 connect 和 startAuth 会把回调监听拉起来，而 listTools
   // 直接去连——于是所有需要认证的服务器都在 Agent 面前报「授权回调服务还没有
   // 启动」。那是一句在讲我们自己管道的话，用户对它无能为力。
@@ -243,11 +243,10 @@ test("Agent 列工具时，需要认证的服务器不会因为回调没起来�
   t.after(() => manager.close());
 
   // 全程没有调用过 connect / startAuth。
-  const listed = await manager.listTools();
-  assert.deepEqual(listed.tools, []);
-  assert.deepEqual(listed.unavailable.map((entry) => entry.server), ["oauth"]);
-  assert.equal(listed.unavailable[0]?.status, "needs-auth", "应该是「需要认证」，而不是失败");
-  assert.equal(listed.unavailable[0]?.failure, undefined);
+  const result = await manager.serverTools("oauth");
+  assert.deepEqual(result.tools, []);
+  assert.equal(result.status, "needs-auth", "应该是「需要认证」，而不是失败");
+  assert.equal(result.failure, undefined);
 });
 
 test("认证到一半取消，不会留下一个占着回调的幽灵", { timeout: 60_000 }, async (t) => {
