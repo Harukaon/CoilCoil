@@ -27,7 +27,13 @@
 
 /* 星云本体和右侧的读写面板。 */
 .memory-stage { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; grid-template-columns: minmax(0, 1fr) 360px; }
-.memory-nebula { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.memory-nebula { position: relative; min-width: 0; min-height: 0; overflow: hidden;
+  /* 格线和画板底色的差，明暗两套要分开定：同一个明度令牌在暗色下拉开的差是浅色的
+     两倍多，照搬过去画板就成了一张方格纸。这两个变量传给 <Background color>。 */
+  --nebula-grid-fine: hsl(var(--th) var(--ts) var(--l-969));
+  --nebula-grid-coarse: hsl(var(--th) var(--ts) var(--l-935));
+}
+:root[data-theme="dark"] .memory-nebula { --nebula-grid-fine: hsl(var(--th) var(--ts) var(--l-896)); --nebula-grid-coarse: hsl(var(--th) var(--ts) var(--l-918)); }
 .memory-nebula-tools { position: absolute; z-index: 2; top: 14px; right: 16px; display: flex; align-items: center; overflow: hidden; padding: 3px; border: 1px solid hsl(var(--th) var(--ts) var(--l-884)); border-radius: var(--radius-lg); background: hsl(var(--th) var(--ts) var(--l-1000)); gap: 2px; }
 .memory-nebula-tools button { display: inline-flex; height: 24px; align-items: center; justify-content: center; min-width: 26px; padding: 0 8px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-431)); background: transparent; font-size: 11px; white-space: nowrap; cursor: pointer; }
 .memory-nebula-tools button:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-941)); }
@@ -35,7 +41,7 @@
 .memory-nebula-tools-divider { width: 1px; height: 16px; margin: 0 3px; background: hsl(var(--th) var(--ts) var(--l-905)); }
 
 /* React Flow 的默认皮肤是深色描边的通用样式，压到 CoilCoil 的中性白上面。 */
-.memory-nebula .react-flow { background: hsl(var(--th) var(--ts) var(--l-951)); }
+.memory-nebula .react-flow { background: hsl(var(--th) var(--ts) var(--l-1000)); }
 /* 网格颜色由 <Background color> 逐层给：库把它写进 --xy-background-pattern-color-props，
    那是唯一真正生效的口子——写 .react-flow__background-pattern 会被库自己盖回去。 */
 .memory-nebula .react-flow__node { border: 0; background: transparent; font-size: inherit; }

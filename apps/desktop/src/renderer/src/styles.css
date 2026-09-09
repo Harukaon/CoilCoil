@@ -285,12 +285,14 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .sidebar-footer { display: flex; align-items: center; gap: 10px; height: 64px; margin-top: auto; padding: 10px 14px; border-top: 1px solid hsl(var(--th) var(--ts) var(--l-876)); }
 .brand-mark, .empty-chat-mark { display: grid; place-items: center; color: hsl(var(--th) var(--ts) var(--l-229)); }
 .brand-mark { width: 34px; height: 34px; flex: 0 0 auto; }
-/* 左下角这枚标志用的就是 Dock 里那张应用图标（build/icon-*.png 缩到 128px 的副本，
-   放在 assets/ 下），不再是原来那团墨——用户要求这两处是同一个图标。跟 Dock 一样
-   按明暗各挂一张：浅色那张的白底、暗色那张的深底都贴着侧栏底色，看到的就是那只小
-   幽灵本身。就一张背景图，没有滤镜也没有动画，不吃 CPU。应用图标以后要是换了，这
-   两张副本得跟着重新导出一遍。 */
+/* 左下角和空态顶上这枚标志，用的就是 Dock 里那只小幽灵（build/icon-*.png 缩到
+   128px 的副本，放在 assets/ 下），不再是原来那团墨——用户要求这几处是同一个图标。
+   跟 Dock 不同的是那块圆角底被去掉了：Dock 需要一块图标砖，界面里不需要，一块白
+   底压在侧栏上就是一个突兀的方块。副本按明暗各一张，各自只剩幽灵本身，透明背景，
+   所以放在哪块底色上都贴合。就一张背景图，没有滤镜也没有动画，不吃 CPU。应用图标
+   以后要是换了，这两张副本得跟着重新导出、重新去底。 */
 .brand-icon { width: 26px; height: 26px; background: center / contain no-repeat url("./assets/app-icon-light.png"); }
+.empty-chat-mark .brand-icon { width: 100%; height: 100%; }
 :root[data-theme="dark"] .brand-icon { background-image: url("./assets/app-icon-dark.png"); }
 .brand-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .brand-copy strong { font-size: 13px; font-weight: 600; }
@@ -372,9 +374,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 /* 空态顶上是 CoilCoil 的墨团标志（不是加载动画：这里没有任何东西在加载）。
    标志的墨迹只占方框中间约六成，四周是透明的，所以方框比视觉尺寸大一圈，
    下边距相应收窄，标题看起来才不会被推得太远。 */
-/* 标志的墨迹只占方框中间六成左右，四周是透明的，所以这里的下边距要比看起来
-   需要的小：40px 的方框实际墨迹高度约 24px。 */
-.empty-chat-mark { width: 40px; height: 40px; margin-bottom: 8px; }
+/* 小幽灵在自己那张图里也只占中间八成左右，四周是透明的，所以这里的下边距要比看
+   起来需要的小；方框 56px，画面上的幽灵约 44px，和标题配得住。 */
+.empty-chat-mark { width: 56px; height: 56px; margin-bottom: 8px; }
 .empty-chat h1 { margin: 0; font-size: clamp(24px, 3vw, 34px); font-weight: 500; letter-spacing: -.035em; }
 .empty-chat p { max-width: 420px; margin: 10px 0 0; color: hsl(var(--th) var(--ts) var(--l-504)); font-size: 14px; line-height: 1.5; }
 .loading-state { display: flex; height: 100%; align-items: center; justify-content: center; gap: 9px; color: hsl(var(--th) var(--ts) var(--l-504)); font-size: 13px; }
