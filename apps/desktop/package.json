@@ -13,7 +13,8 @@
     "check": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "package": "npm run build --workspace @coilcoil/openai-responses-ws && npm run build && electron-builder",
-    "package:dir": "npm run build --workspace @coilcoil/openai-responses-ws && npm run build && electron-builder --dir"
+    "package:dir": "npm run build --workspace @coilcoil/openai-responses-ws && npm run build && electron-builder --dir",
+    "preview:ui": "vite build --config scripts/ui-preview/vite.config.ts"
   },
   "dependencies": {
     "@coilcoil/diagnostics": "0.1.0",
@@ -28,6 +29,7 @@
     "@radix-ui/react-tooltip": "^1.2.16",
     "@xterm/addon-fit": "0.12.0-beta.220",
     "@xterm/xterm": "6.1.0-beta.220",
+    "@xyflow/react": "^12.11.6",
     "chrome-devtools-mcp": "1.7.0",
     "jiti": "2.7.0",
     "lucide-react": "1.28.0",

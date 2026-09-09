@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CoilCoil UI 预览</title>
+  </head>
+  <body>
+    <!-- A classic script so it is installed before the module graph evaluates:
+         an import-time throw would otherwise leave a blank page and no clue. -->
+    <script>
+      window.__errors = [];
+      addEventListener("error", (e) => {
+        window.__errors.push(String(e.error && e.error.stack || e.message));
+        document.body.insertAdjacentHTML("beforeend",
+          "<pre style='padding:12px;font:12px/1.5 monospace;color:#b00;white-space:pre-wrap'>" +
+          (e.error && e.error.stack || e.message).replace(/</g, "&lt;") + "</pre>");
+      });
+      addEventListener("unhandledrejection", (e) => {
+        document.body.insertAdjacentHTML("beforeend",
+          "<pre style='padding:12px;font:12px/1.5 monospace;color:#b00;white-space:pre-wrap'>REJECTED: " +
+          String(e.reason && e.reason.stack || e.reason).replace(/</g, "&lt;") + "</pre>");
+      });
+    </script>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

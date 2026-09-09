@@ -18,6 +18,19 @@ function charCount(value: string): number {
 }
 
 /**
+ * A path short enough for the panel, keeping the end that identifies the file.
+ *
+ * CSS ellipsis cuts the tail, which on these paths is the only part worth
+ * reading — every memory file lives under the same long Application Support
+ * prefix. Reversing the text direction to cut the head instead is worse: it
+ * moves the trailing slash to the front and reads as gibberish.
+ */
+function shortPath(path: string, segments = 3): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length <= segments ? path : `…/${parts.slice(-segments).join("/")}`;
+}
+
+/**
  * One editable draft per file the store holds, global included.
  *
  * Keying everything by path lets the map hand back a node and the editor open it
@@ -230,14 +243,15 @@ export function MemoryWorkspace({
             <aside className="memory-inspector">
               {selected ? <>
                 <header>
-                  <strong>{selected.label}</strong>
+                  <strong>{selected.kind === "entry" ? selected.label : `${selected.projectName ?? "全局"} 的索引`}</strong>
                   <small className={selectedLimit > 0 && selectedCount > selectedLimit ? "over" : ""}>
                     {selectedLimit > 0
                       ? `${selectedCount.toLocaleString()} / ${selectedLimit.toLocaleString()} 字`
                       : `${selectedCount.toLocaleString()} 字`}
                   </small>
                 </header>
-                <code title={selected.filePath}>{selected.filePath}</code>
+                {/* 路径从右往左省略：尾巴上的文件名比开头那一长串目录有用得多。 */}
+                <code title={selected.filePath}>{shortPath(selected.filePath)}</code>
                 <textarea
                   className="memory-content-editor"
                   value={selectedDraft}
@@ -248,7 +262,7 @@ export function MemoryWorkspace({
                 <p>{selected.kind === "entry"
                   ? "正文不常驻上下文，也不限字数——模型按索引里的一句话说明决定要不要读它。"
                   : "只有这一层会每轮注入模型，所以它只放索引行和极少数重要事实。"}</p>
-              </> : <p className="memory-empty">在左边的星云里点一个节点，就能在这里读它、改它。</p>}
+              </> : <p className="memory-empty">在左边的星云里点一个节点，<br />就能在这里读它、改它。</p>}
             </aside>
           </div>
         </> : null}
