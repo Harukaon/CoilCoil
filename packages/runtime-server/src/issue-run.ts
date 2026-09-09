@@ -187,6 +187,8 @@ export async function runIssueTask(
       issueAgentExtensionPath(options.workflowDir),
     ],
     modelRuntimePromise: dependencies.modelRuntimePromise,
+    // 自己的浏览器作用域：它在后台开的标签页不该冒到用户正看着的那个浏览器面板里。
+    browserScopeId: `issue-${request.issueId}`,
     onEvent: (event: RuntimeEvent) => {
       if (event.type !== "run_state") return;
       if (event.running) { signals.started = true; return; }

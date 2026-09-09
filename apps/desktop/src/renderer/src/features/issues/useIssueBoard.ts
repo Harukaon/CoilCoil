@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PromptImage } from "@coilcoil/runtime-protocol";
 import type { Issue } from "../../../../shared/desktop-api";
-import { agentNote, issueImages, issuePrompt, nextRunnableIssue, withEvent, withStatus } from "./issueModel";
+import { agentNote, comment, issueImages, issuePrompt, nextRunnableIssue, withEvent, withStatus } from "./issueModel";
 
 /** 「开始」按下去之后，一条 Issue 走到哪一步了。 */
-export type IssueRunPhase = "idle" | "starting" | "running";
+export type IssueRunPhase = "idle" | "running";
 
 export interface IssueRunState {
   phase: IssueRunPhase;
@@ -13,35 +12,33 @@ export interface IssueRunState {
   auto: boolean;
 }
 
-/** 发出去却起不来（最常见的是模型还没配好）时，等多久就认输。 */
-const START_TIMEOUT_MS = 20_000;
+/** 运行时那边跑完一条任务后交回来的东西。 */
+interface IssueRunResult {
+  kind: "reply" | "ask" | "fallback";
+  text: string;
+  verify?: string;
+  turns: number;
+}
 
 /**
  * 面板的数据和那个「开始」按钮背后的东西。
  *
- * 执行是串行的，而且不是后台静默跑：按下开始之后界面会切回对话，你能看着它做，
- * 跟你自己发一条消息没有区别。这是用户定的——「也不考虑做后台静默」。
+ * 执行是串行的，而且和你自己的对话完全没有关系：按下开始不会新建对话、不会跳界
+ * 面、侧栏也不会多出一条记录。那条运行在后台自己跑，跑完只交回一段结论，写进这条
+ * 任务的时间线——「这本来就是完全两个隔离的东西……它只和 issue 相关联」。
  *
- * 怎么知道一条做完了：发出去之后盯着这个对话的运行状态，从「在跑」变成「不跑了」
- * 就算这一轮结束，Issue 移到待验收等人看。agent 说自己做完了不算完成，「完成」
- * 只有用户能点。
+ * 所以这里不再盯着某个对话的运行状态：一次调用从头等到尾，回来什么就记什么。
+ * · 它交了结论 → 待验收
+ * · 它要你拿主意 → 待回复
+ * · 它一句话都没说（催满了）→ 也是待验收，但会说明这是它最后那段话，不是结论
  */
 export function useIssueBoard({
   cwd,
-  activeSessionPath,
-  sessionRunning,
-  startConversation,
-  sendPrompt,
+  runIssue,
 }: {
   cwd?: string;
-  /** 当前打开的对话，用来认出「开始」刚刚新建的那一个。 */
-  activeSessionPath?: string;
-  /** 那个对话现在是不是在跑。 */
-  sessionRunning(sessionPath: string): boolean;
-  /** 在当前工作区起一个新对话。 */
-  startConversation(): void;
-  /** 把这段话（和贴在这条任务上的图）作为一条消息发出去。 */
-  sendPrompt(text: string, images: PromptImage[]): Promise<void>;
+  /** 把一条任务交给后台跑，跑完给结论。 */
+  runIssue(input: { cwd: string; issue: Issue; parent?: Issue }): Promise<IssueRunResult>;
 }): {
   issues: Issue[];
   loading: boolean;
@@ -53,12 +50,11 @@ export function useIssueBoard({
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(false);
   const [run, setRun] = useState<IssueRunState>({ phase: "idle", auto: false });
-  /** 发出去之前当前是哪个对话；换掉的那一刻就知道新对话是哪个了。 */
-  const beforePathRef = useRef<string | undefined>(undefined);
-  const runSessionRef = useRef<string | undefined>(undefined);
-  const sawRunningRef = useRef(false);
   const issuesRef = useRef<Issue[]>([]);
   issuesRef.current = issues;
+  const autoRef = useRef(false);
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
 
   useEffect(() => {
     if (!cwd) { setIssues([]); return; }
@@ -74,75 +70,69 @@ export function useIssueBoard({
   /** 改一次写一次盘。面板的数据量很小，不值得为它做防抖。 */
   const update = useCallback((next: Issue[]): void => {
     setIssues(next);
-    if (cwd) void window.coilcoil.saveIssues(cwd, next).catch(() => undefined);
-  }, [cwd]);
+    if (cwdRef.current) void window.coilcoil.saveIssues(cwdRef.current, next).catch(() => undefined);
+  }, []);
 
-  const launch = useCallback((auto: boolean): void => {
+  const launch = useCallback(async (): Promise<void> => {
+    const workspace = cwdRef.current;
+    if (!workspace) { setRun({ phase: "idle", auto: false }); return; }
     const issue = nextRunnableIssue(issuesRef.current);
-    if (!issue) { setRun({ phase: "idle", auto: false }); return; }
+    if (!issue) { autoRef.current = false; setRun({ phase: "idle", auto: false }); return; }
     const parent = issue.parentId
       ? issuesRef.current.find((item) => item.id === issue.parentId)
       : undefined;
-    beforePathRef.current = activeSessionPath;
-    runSessionRef.current = undefined;
-    sawRunningRef.current = false;
     update(withStatus(issuesRef.current, issue.id, "doing", "agent"));
-    setRun({ phase: "starting", issueId: issue.id, auto });
-    startConversation();
-    void sendPrompt(issuePrompt(issue, parent), issueImages(issue)).catch(() => {
-      update(withStatus(issuesRef.current, issue.id, "ready", "agent"));
-      setRun({ phase: "idle", auto: false });
-    });
-  }, [activeSessionPath, sendPrompt, startConversation, update]);
+    setRun({ phase: "running", issueId: issue.id, auto: autoRef.current });
 
-  // 认出「开始」新建的那个对话：发完之后当前对话就换成它了。
-  useEffect(() => {
-    if (run.phase !== "starting" || !activeSessionPath) return;
-    if (activeSessionPath === beforePathRef.current) return;
-    runSessionRef.current = activeSessionPath;
-    setRun((current) => current.phase === "starting" ? { ...current, phase: "running" } : current);
-  }, [activeSessionPath, run.phase]);
-
-  /* 发出去了却没起来。不管一管，这条就一直挂在「进行中」，面板再也开不了下一条。 */
-  useEffect(() => {
-    if (run.phase !== "starting" || !run.issueId) return;
-    const issueId = run.issueId;
-    const timer = window.setTimeout(() => {
+    try {
+      const result = await runIssue({ cwd: workspace, issue, parent });
+      const finished = result.kind === "ask" ? "reply" : "review";
+      const note = result.kind === "ask"
+        ? comment(result.text, "agent")
+        : comment([
+          result.text,
+          result.verify ? `\n怎么验收：${result.verify}` : "",
+          result.kind === "fallback" ? "\n（它没有主动交结论，这是它最后说的那段话。）" : "",
+        ].filter(Boolean).join(""), "agent");
+      update(withEvent(withStatus(issuesRef.current, issue.id, finished, "agent"), issue.id, note));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
       update(withEvent(
-        withStatus(issuesRef.current, issueId, "ready", "agent"),
-        issueId,
-        agentNote("没能开始——对话没有起来，多半是模型还没配好。退回待处理了。"),
+        withStatus(issuesRef.current, issue.id, "ready", "agent"),
+        issue.id,
+        agentNote(`没能跑起来，退回待处理了：${reason}`),
       ));
-      setRun({ phase: "idle", auto: false });
-    }, START_TIMEOUT_MS);
-    return () => window.clearTimeout(timer);
-  }, [run.issueId, run.phase, update]);
+      autoRef.current = false;
+    }
 
-  // 这一轮跑完了：移到待验收，记一条留言，然后接着做下一条。
-  useEffect(() => {
-    const sessionPath = runSessionRef.current;
-    if (run.phase !== "running" || !run.issueId || !sessionPath) return;
-    if (sessionRunning(sessionPath)) { sawRunningRef.current = true; return; }
-    if (!sawRunningRef.current) return;
-    const issueId = run.issueId;
-    const next = withEvent(
-      withStatus(issuesRef.current, issueId, "review", "agent"),
-      issueId,
-      agentNote("这一轮跑完了，改动在这条对话里，等你验收。"),
-    ).map((issue) => issue.id === issueId ? { ...issue, sessionPath } : issue);
-    update(next);
-    runSessionRef.current = undefined;
-    sawRunningRef.current = false;
-    if (run.auto) launch(true);
+    if (autoRef.current) void launch();
     else setRun({ phase: "idle", auto: false });
-  }, [launch, run, sessionRunning, update]);
+  }, [runIssue, update]);
 
   return {
     issues,
     loading,
     run,
     update,
-    start: useCallback(() => launch(true), [launch]),
-    stop: useCallback(() => setRun((current) => ({ ...current, auto: false })), []),
+    start: useCallback(() => {
+      if (run.phase === "running") return;
+      autoRef.current = true;
+      void launch();
+    }, [launch, run.phase]),
+    stop: useCallback(() => {
+      autoRef.current = false;
+      setRun((current) => ({ ...current, auto: false }));
+    }, []),
   };
+}
+
+/** 把一条任务连同它的图交给后台运行。放在这里，因为提示词就长在 issueModel 里。 */
+export function requestIssueRun(input: { cwd: string; issue: Issue; parent?: Issue }): Promise<IssueRunResult> {
+  return window.coilcoil.request<IssueRunResult>({
+    type: "run_issue",
+    cwd: input.cwd,
+    issueId: input.issue.id,
+    prompt: issuePrompt(input.issue, input.parent),
+    images: issueImages(input.issue),
+  });
 }

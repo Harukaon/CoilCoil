@@ -160,7 +160,7 @@ export function issuePrompt(issue: Issue, parent?: Issue): string {
     }),
     "",
     "这是这个工作区任务面板上的一条，请你把它做完。",
-    "做完之后用一两句话说明你改了什么、怎么验证的；需要我先拿个主意才能往下走，就直接说卡在哪，不要硬做。",
+    "做完之后调用 issue_reply 把结论交给我：改了什么、我怎么验收。需要我先拿个主意才能往下走，就调用 issue_ask 问，别硬做。",
   ].filter((line) => line !== "").join("\n");
 }
 

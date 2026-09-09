@@ -213,8 +213,6 @@ export interface Issue {
   parentId?: string;
   /** 待验收里被标成「以后再验收」的：留在这一列，但不进批阅队列。 */
   deferred?: boolean;
-  /** 这条是在哪个对话里做的，做完之后还能翻回去看。 */
-  sessionPath?: string;
   /** 提这条时贴的图：截图往往比一段描述说得清，做的时候会一并发给 agent。 */
   images?: PromptImage[];
 }

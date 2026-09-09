@@ -111,7 +111,6 @@ function normalizeIssue(value: unknown): Issue | undefined {
   if (!id || !title) return undefined;
   const now = new Date().toISOString();
   const parentId = text(record.parentId, 64);
-  const sessionPath = text(record.sessionPath, 4_096);
   const images = normalizeImages(record.images);
   return {
     id,
@@ -125,7 +124,6 @@ function normalizeIssue(value: unknown): Issue | undefined {
     // 空的键不写出来，磁盘上那份 JSON 直接看也干净。
     ...parentId && parentId !== id ? { parentId } : {},
     ...record.deferred === true ? { deferred: true as const } : {},
-    ...sessionPath ? { sessionPath } : {},
     ...images.length ? { images } : {},
   };
 }

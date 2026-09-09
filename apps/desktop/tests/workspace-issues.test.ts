@@ -175,7 +175,9 @@ test("发给它的那段话带着标题、正文和最近几条来回", () => {
   assert.match(prompt, /正文/);
   assert.match(prompt, /大改造/);
   assert.match(prompt, /注意别动样式/);
-  assert.match(prompt, /说明你改了什么/);
+  // 结论只能通过工具交回来——这条运行是后台的，正文里随口一说用户看不到。
+  assert.match(prompt, /issue_reply/);
+  assert.match(prompt, /issue_ask/);
 });
 
 test("同一条提交两次是覆盖不是加一条", () => {

@@ -24,7 +24,7 @@ import type {
 import { useInAppBrowserLinks } from "./features/browser/useInAppBrowserLinks";
 import { ConversationPane } from "./features/conversation/ConversationPane";
 import { IssueBoard } from "./features/issues/IssueBoard";
-import { useIssueBoard } from "./features/issues/useIssueBoard";
+import { requestIssueRun, useIssueBoard } from "./features/issues/useIssueBoard";
 import { MemoryWorkspace } from "./features/memory/MemoryWorkspace";
 import { SkillsWorkspace } from "./features/settings/SkillsWorkspace";
 import { WorkspaceInspector } from "./features/inspector/WorkspaceInspector";
@@ -140,16 +140,9 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  /* 任务面板。执行器要用的东西（新建对话、发消息、看这个对话跑没跑完）在这一层
-     全都有现成的，所以整块接线放在这里，App 那边只多了一个面板名——它卡在 600 行
-     的模块上限上。 */
-  const board = useIssueBoard({
-    cwd: project?.path,
-    activeSessionPath: snapshot?.session.path,
-    sessionRunning: (sessionPath) => Boolean(sessionActivity[sessionPath]?.running),
-    startConversation: () => { setWorkspaceSurface("conversation"); startNewConversation(project ?? undefined); },
-    sendPrompt: (text, images) => submitPrompt(undefined, "queue", text, images),
-  });
+  /* 任务面板。任务跑在后台自己的运行时里，和这一层的对话没有任何关系——它不新建
+     对话、不发消息、也不看哪个对话跑完没有，所以这里只剩工作区路径这一个输入。 */
+  const board = useIssueBoard({ cwd: project?.path, runIssue: requestIssueRun });
 
   useInAppBrowserLinks({
     scopeId: snapshot?.runtimeId ?? project?.path ?? "default",
@@ -223,11 +216,6 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
           onChange={board.update}
           onStart={board.start}
           onStop={board.stop}
-          onOpenSession={(sessionPath) => {
-            const owner = project;
-            const session = owner ? (sessionsByProject[owner.path] ?? []).find((item) => item.path === sessionPath) : undefined;
-            if (owner && session) void openConversation(owner, session);
-          }}
         />
       ) : workspaceSurface === "skills" ? (
         <SkillsWorkspace

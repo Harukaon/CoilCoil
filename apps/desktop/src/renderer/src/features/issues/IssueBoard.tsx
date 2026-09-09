@@ -59,7 +59,6 @@ export function IssueBoard({
   onChange,
   onStart,
   onStop,
-  onOpenSession,
 }: {
   workspaceName?: string;
   issues: Issue[];
@@ -71,7 +70,6 @@ export function IssueBoard({
   onChange(next: Issue[]): void;
   onStart(): void;
   onStop(): void;
-  onOpenSession(sessionPath: string): void;
 }): React.JSX.Element {
   const [composing, setComposing] = useState(false);
   const [showDone, setShowDone] = useState(false);
@@ -264,7 +262,6 @@ export function IssueBoard({
           onComment={(text, images) => onChange(withComment(issues, open.id, text, images))}
           onAddChild={(childTitle) => onChange(upsertIssue(issues, newIssue(childTitle, "", open.priority, { parentId: open.id })))}
           onDelete={() => { onChange(removeIssue(issues, open.id)); setOpenId(undefined); }}
-          onOpenSession={onOpenSession}
         />
       ) : null}
 

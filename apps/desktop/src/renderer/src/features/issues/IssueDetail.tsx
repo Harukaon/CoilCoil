@@ -22,7 +22,6 @@ export function IssueDetail({
   onComment,
   onAddChild,
   onDelete,
-  onOpenSession,
 }: {
   issue: Issue;
   issues: Issue[];
@@ -33,7 +32,6 @@ export function IssueDetail({
   onComment(text: string, images: PromptImage[]): void;
   onAddChild(title: string): void;
   onDelete(): void;
-  onOpenSession(sessionPath: string): void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState("");
   const [draftImages, setDraftImages] = useState<PromptImage[]>([]);
@@ -75,12 +73,6 @@ export function IssueDetail({
             以后再验收（留在这一列，但批阅时先跳过它）
           </label>
         ) : null}
-        {issue.sessionPath ? (
-          <button className="issue-detail-session" type="button" onClick={() => onOpenSession(issue.sessionPath ?? "")}>
-            打开做这条时的对话
-          </button>
-        ) : null}
-
         <section className="issue-children">
           <h3>子任务{children.length ? <small>{children.length}</small> : null}</h3>
           {children.map((child) => (
