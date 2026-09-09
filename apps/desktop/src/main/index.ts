@@ -272,6 +272,8 @@ function isEventEnvelope(message: RuntimeWireMessage): message is RuntimeEventEn
  * a user clicking the dock a moment later is not blamed on the agent.
  */
 const WINDOW_ACTIVATION_ATTRIBUTION_MS = 3_000;
+/** How long after one of our own reveals its window events still belong to it. */
+const DELIBERATE_REVEAL_WINDOW_MS = 1_000;
 
 /** How much of the runtime child's stderr to keep for its own obituary. */
 const RUNTIME_STDERR_TAIL_LINES = 60;
@@ -772,22 +774,33 @@ async function createWindow(): Promise<void> {
   });
 
   // Diagnostic for the report that an agent driving the browser raises — and even
-  // un-minimizes — the app window. Nothing in main calls focus/show/restore, so
-  // the activation has to come from Chromium promoting a guest. Pair this with
-  // COILCOIL_BROWSER_CDP_LOG=1 and read the last CDP command before the event.
-  // The window coming forward while an agent works in the background is the
-  // symptom; the command that provoked it is the answer. A stack trace cannot
-  // give it — `focus` is a native event with no JS caller, which is why the
-  // stderr-only probe this replaces never settled it — so record what the agent
-  // had just asked the browser to do instead, and keep it where the user can
-  // reach it rather than in a stream a packaged app throws away.
+  // un-minimizes — the app window. Pair this with COILCOIL_BROWSER_CDP_LOG=1 and
+  // read the last CDP command before the event. The window coming forward while
+  // an agent works in the background is the symptom; the command that provoked
+  // it is the answer. A stack trace cannot give it — `focus` is a native event
+  // with no JS caller, which is why the stderr-only probe this replaces never
+  // settled it — so record what the agent had just asked the browser to do
+  // instead, and keep it where the user can reach it rather than in a stream a
+  // packaged app throws away.
+  //
+  // 163 entries in, the record still could not answer the question, because it
+  // counted our own reveals too: startup, and the bubble — which is clicked
+  // precisely while an agent is working, so every one of those looked like the
+  // bug. `markDeliberateReveal` fences them off. What still lands here after
+  // this is Chromium promoting a guest, with nobody in this process asking.
+  let deliberateRevealAt = 0;
+  const markDeliberateReveal = (): void => {
+    deliberateRevealAt = Date.now();
+  };
   const logActivation = (event: string) => () => {
+    if (Date.now() - deliberateRevealAt < DELIBERATE_REVEAL_WINDOW_MS) return;
     const recent = browserRuntime.recentCdpCommands();
     // Nothing from an agent recently means the user raised the window themselves.
     if (!recent.some((entry) => entry.msAgo < WINDOW_ACTIVATION_ATTRIBUTION_MS)) return;
     diagnosticLog().warn("window-activation", "window_activated_during_agent_browsing", {
       event,
       minimized: mainWindow.isMinimized(),
+      visible: mainWindow.isVisible(),
       recentCdp: recent,
     });
   };
@@ -802,7 +815,10 @@ async function createWindow(): Promise<void> {
   // doing. Showing the window is a startup step; it happens exactly once.
   // 透明度在 show() 之前落下去，否则窗口会先按不透明画出来再跳一下。
   mainWindow.setOpacity(readStoredWindowOpacity(windowOpacityFile()));
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.once("ready-to-show", () => {
+    markDeliberateReveal();
+    mainWindow.show();
+  });
   loadRendererInto(mainWindow);
   primaryWindow = mainWindow;
   mainWindow.once("closed", () => {
@@ -822,9 +838,13 @@ async function createWindow(): Promise<void> {
     revealMainWindow: (target) => {
       const window = primaryWindow;
       if (!window || window.isDestroyed()) return;
+      markDeliberateReveal();
+      // Only move what is actually out of place. Calling show() on a window that
+      // is already up still raises it over whatever the user put in front of it,
+      // and still emits the events the activation diagnostic reads.
       if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
+      if (!window.isVisible()) window.show();
+      if (!window.isFocused()) window.focus();
       if (target) window.webContents.send(BUBBLE_OPEN_SESSION_CHANNEL, target);
     },
   });
