@@ -31,7 +31,6 @@ type AgentMessage = ContextEvent["messages"][number];
  * it replaced. Prose in, prose out.
  */
 
-const CONTEXT_MESSAGE_TYPE = "coilcoil-context-transcript";
 const SECTION_MARKER = "<!-- coilcoil:compaction ";
 /** Enough of one tool result to be worth having; the rest is rarely read back. */
 const MAX_RESULT_CHARS = 20_000;
@@ -176,7 +175,21 @@ export function readSections(path: string): TranscriptSection[] {
   return sections;
 }
 
-/** The note handed to the model: where the history went, and what is in it. */
+/** Wraps the note so it can be recognised and not appended twice. */
+export const TRANSCRIPT_NOTE_MARKER = "<compacted_transcript>";
+
+/**
+ * The note handed to the model: where the history went, and what is in it.
+ *
+ * Worded as a reference card, not as a task. The first version ended with
+ * "只有在当前问题确实需要更早的细节时才去读", which asks the model to make a
+ * judgement — and a judgement asked for on every single request gets reported
+ * on every single request. Sessions filled up with "这次问题不需要读取压缩对话
+ * 原文", which is the model dutifully answering a question nobody wanted asked.
+ *
+ * So: state where the archive is and how to page through it, and say plainly
+ * that using it needs no announcement.
+ */
 export function transcriptNote(path: string, sections: readonly TranscriptSection[]): string | undefined {
   if (!sections.length) return undefined;
   const index = sections.map((section, order) => {
@@ -184,13 +197,15 @@ export function transcriptNote(path: string, sections: readonly TranscriptSectio
     return `  ${order + 1}. 第 ${section.fromLine}–${section.toLine} 行 · ${section.messageCount} 条 · 压缩于 ${when}`;
   });
   return [
-    "被压缩掉的对话原文没有丢，完整保存在这个文件里：",
+    TRANSCRIPT_NOTE_MARKER,
+    "这个会话压缩过。被压缩掉的对话原文没有丢，完整存在这个文件里：",
     path,
     "",
     "分段索引（行号可直接用 read 的 offset/limit 翻页，也可以先用 grep 搜关键词）：",
     ...index,
     "",
-    "只有在当前问题确实需要更早的细节时才去读，并且按行段读——一次读回太多会把刚腾出来的上下文重新填满。",
+    "这是一份需要时可查的存档。按行段取，不要一次读回太多；用不上就不用管它，也不必在回复里交代自己读没读。",
+    "</compacted_transcript>",
   ].join("\n");
 }
 
@@ -255,20 +270,20 @@ export default function contextTranscriptExtension(pi: ExtensionAPI): void {
    * It has to be re-stated rather than written once: the note itself would be
    * summarized away by the next compaction, taking the way back with it.
    */
-  pi.on("context", (event) => {
+  /**
+   * Stated once per run in the system prompt, not appended to every request.
+   *
+   * It used to be pushed onto the end of the message list on every `context`
+   * event — the last thing the model saw before answering, every turn. That
+   * reads as a fresh instruction rather than as reference material, and the
+   * model acknowledged it each time. The system prompt is the right home: it is
+   * rebuilt for every run, so it survives compaction without being restated
+   * inside the conversation itself.
+   */
+  pi.on("before_agent_start", (event, ctx) => {
+    locate(ctx);
     const note = transcriptPath ? transcriptNote(transcriptPath, sections) : undefined;
-    if (!note) return undefined;
-    return {
-      messages: [
-        ...event.messages,
-        {
-          role: "custom" as const,
-          customType: CONTEXT_MESSAGE_TYPE,
-          content: note,
-          display: false,
-          timestamp: Date.now(),
-        },
-      ],
-    };
+    if (!note || event.systemPrompt.includes(TRANSCRIPT_NOTE_MARKER)) return undefined;
+    return { systemPrompt: `${event.systemPrompt}\n\n${note}` };
   });
 }

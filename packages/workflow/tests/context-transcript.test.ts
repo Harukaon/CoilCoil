@@ -114,8 +114,20 @@ test("给模型的那段话带着路径、行号，和一句别读太多", () =>
   assert.match(note, /第 1–40 行 · 12 条/);
   assert.match(note, /第 41–90 行 · 8 条/);
   // 能读回来就意味着能把刚腾出来的窗口重新填满，这句提醒是边界的一部分。
-  assert.match(note, /按行段读|填满/);
+  assert.match(note, /按行段取|一次读回太多/);
   assert.match(note, /read|grep/);
+  // 这段是给模型查的资料，不是每轮要它做的判断。前一版让它「判断需不需要读」，
+  // 于是它每一轮都汇报一次判断结果，把会话刷满了「这次不需要读取压缩对话原文」。
+  assert.doesNotMatch(note, /只有在.*才去读/);
+  assert.match(note, /不必在回复里交代/);
+});
+
+test("这段话进系统提示，不是每轮塞到消息末尾", () => {
+  // 挂在 context 上就等于每次请求都追加一条，位置还在最后——那读起来是一条
+  // 刚下达的指令，而不是一份资料，模型会逐轮回应它。
+  const source = readFileSync(new URL("../extensions/context-transcript.ts", import.meta.url), "utf8");
+  assert.match(source, /pi\.on\("before_agent_start"/);
+  assert.doesNotMatch(source, /pi\.on\("context"/);
 });
 
 test("还没压缩过就什么也不说", () => {
