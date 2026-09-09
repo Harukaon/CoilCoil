@@ -577,7 +577,14 @@ export class RuntimeServer {
     this.disposed = true;
     this.desiredSessionPath = undefined;
     for (const runtimeId of this.runtimes.keys()) {
-      this.send({ runtimeId, event: { type: "runtime_released" } });
+      // Telling clients is a courtesy; closing the runtimes is the job. A sink
+      // that fails here (the parent is usually already gone by shutdown) must
+      // not stop the disposal below.
+      try {
+        this.send({ runtimeId, event: { type: "runtime_released" } });
+      } catch (error) {
+        this.log.warn("process", "release_notice_failed", { runtimeId, message: errorMessage(error) });
+      }
     }
     await Promise.allSettled([
       this.runtime.dispose(),
@@ -611,9 +618,32 @@ export function runtimeOptionsFromEnvironment(): CoilCoilRuntimeOptions {
   };
 }
 
+/**
+ * Write to the parent over IPC, tolerating a channel that is already gone.
+ *
+ * Shutdown starts from `disconnect`: by the time we run, the channel is closed —
+ * and `dispose()` still has to tell clients their runtimes were released, so it
+ * writes into it. `process.send()` without a callback reports that failure by
+ * emitting `error` on `process`, which has no listener, so it arrived as an
+ * uncaught exception; with `exitOnUncaught` that killed the process in the
+ * middle of `dispose()`, skipping the very cleanup dispose exists to do. It
+ * happened on every quit — 53 entries in the user's log before this was fixed.
+ *
+ * Passing a callback keeps the failure local to the call, and checking
+ * `connected` first skips the write entirely once the parent is gone.
+ */
+function sendOverProcessIpc(message: RuntimeWireMessage): void {
+  if (!process.connected || typeof process.send !== "function") return;
+  try {
+    process.send(message, undefined, undefined, () => undefined);
+  } catch {
+    // The channel closed between the check and the write; nothing to deliver to.
+  }
+}
+
 export function attachProcessIpc(options = runtimeOptionsFromEnvironment()): RuntimeServer {
   if (typeof process.send !== "function") throw new Error("The runtime process requires an IPC channel.");
-  const server = new RuntimeServer(options, (message) => process.send?.(message));
+  const server = new RuntimeServer(options, sendOverProcessIpc);
   // An uncaught exception here already ended the process and told the user only
   // "runtime exited with code 1"; keep that ending, and add the reason.
   installProcessErrorHandlers(server.log, { exitOnUncaught: true });
@@ -626,7 +656,11 @@ export function attachProcessIpc(options = runtimeOptionsFromEnvironment()): Run
     void server.receive(message);
   });
   const shutdown = (): void => {
-    void server.dispose().finally(() => process.exit(0));
+    // A dispose that throws used to vanish into an unhandled rejection while the
+    // process exited anyway; the runtimes it failed to close left no trace.
+    void server.dispose()
+      .catch((error) => server.log.error("process", "shutdown_failed", error))
+      .finally(() => process.exit(0));
   };
   process.once("disconnect", shutdown);
   process.once("SIGTERM", shutdown);

@@ -765,3 +765,31 @@ test("workspace Memory changes invalidate cached sibling session snapshots", asy
   assert.equal(snapshotCalls.get(firstPath), 1, "same-workspace Memory updates must mark sibling snapshots dirty");
   await server.dispose();
 });
+
+test("shutdown disposes every runtime even when the parent channel is already gone", async () => {
+  const runtimes: FakeRuntime[] = [];
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    (message) => {
+      // What the real IPC sink used to do once the parent had disconnected: the
+      // release notice threw, dispose stopped there, and the runtimes it had not
+      // reached yet were never closed.
+      if ("event" in message && message.event.type === "runtime_released") throw new Error("write EPIPE");
+    },
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options);
+        runtimes.push(runtime);
+        return runtime as unknown as CoilCoilRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  await server.handle({ id: "open-a", command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/a.jsonl" } });
+  await server.handle({ id: "open-b", command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/b.jsonl" } });
+
+  await server.dispose();
+  assert.equal(runtimes.every((runtime) => runtime.disposed), true, "a failing release notice must not abort the cleanup");
+});
