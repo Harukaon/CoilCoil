@@ -209,7 +209,17 @@ export function planToolResultClearing(
   usage: { tokens: number | null; contextWindow: number },
 ): ClearingPlan {
   if (usage.tokens === null || usage.contextWindow <= 0) return NOTHING_TO_CLEAR;
-  if (usage.tokens < clearingThreshold(usage.contextWindow)) return NOTHING_TO_CLEAR;
+  // Measure what this request will actually carry, not what the session holds.
+  //
+  // Pi's `getContextUsage()` estimates the raw message list, and clearing never
+  // touches that list — it rewrites only the copy handed to the provider. So the
+  // number Pi reports cannot go down no matter how much has been cleared: the
+  // threshold is crossed once and never uncrossed, and this stage then runs on
+  // every single request for the rest of the session. That is the "why is it
+  // still firing constantly" this was reported as.
+  const outgoing = applyToolResultClearing(messages, cleared) ?? messages;
+  const carried = outgoing.reduce((sum, message) => sum + messageTokens(message), 0);
+  if (carried < clearingThreshold(usage.contextWindow)) return NOTHING_TO_CLEAR;
 
   const toolCallIds: string[] = [];
   let freedTokens = 0;

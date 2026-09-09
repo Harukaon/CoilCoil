@@ -48,12 +48,32 @@ function conversation(count: number, chars = 40_000, name = "read"): AgentMessag
   return messages;
 }
 
-test("a roomy window is left alone", () => {
-  const plan = planToolResultClearing(conversation(30), new Set(), {
-    tokens: 40_000,
+test("窗口还宽裕的时候一条都不动", () => {
+  // 三条 40,000 字符的结果 ≈ 30,000 token，离 272k 窗口的清理线还远得很。
+  const plan = planToolResultClearing(conversation(3), new Set(), {
+    tokens: 30_000,
     contextWindow: CONTEXT_WINDOW,
   });
   assert.deepEqual(plan.toolCallIds, []);
+});
+
+test("看的是这次请求真正要发出去的大小，不是会话里存了多少", () => {
+  // Pi 的 getContextUsage() 估的是原始消息列表，而清理只改写发给模型的那一份
+  // 副本——所以它报的数字永远不会因为清理而变小。拿它当阈值，越过一次就再也
+  // 回不来，这一级从此每个请求都跑一遍。这正是「怎么还在频繁触发」的原因。
+  const messages = conversation(30);           // ≈ 300,000 token，已过线
+  const first = planToolResultClearing(messages, new Set(), {
+    tokens: 40_000,                            // Pi 说才 4 万，但那不作数
+    contextWindow: CONTEXT_WINDOW,
+  });
+  assert.ok(first.toolCallIds.length > 0, "真实体积已经过线，就该动手");
+
+  // 清过之后，同一批消息发出去的体积降下来了，就不该再清。
+  const after = planToolResultClearing(messages, new Set(first.toolCallIds), {
+    tokens: 400_000,                           // Pi 这次说很大，同样不作数
+    contextWindow: CONTEXT_WINDOW,
+  });
+  assert.deepEqual(after.toolCallIds, [], "已经清干净了还继续清，就是无穷无尽的那个 bug");
 });
 
 test("最近这一段对话原封不动，动的只有它前面的", () => {
@@ -143,19 +163,22 @@ test("nothing cleared means the context is handed on untouched", () => {
 });
 
 test("清理是压缩的第一级，只在压缩线附近才动手", () => {
-  // 这一层原来从半满就开始清，还每 8000 token 补一次。拿真实会话模拟，
-  // 一个会话里触发 289 次——平均每 16 次工具调用一次，而那时候窗口还空着
-  // 一半。删得早没有任何好处，只是让工具结果更早消失。
-  const results = Array.from({ length: 20 }, (_, index) => [
-    toolCall(`c${index}`, "read"),
-    toolResult(`c${index}`, "read", 40_000),
-  ]).flat();
+  // 这一层原来从半满就开始清，还每 8000 token 补一次。拿真实会话模拟，一个
+  // 会话触发 289 次——平均每 16 次工具调用一次，而那时候窗口还空着一半。
+  const roomy = conversation(15);   // ≈ 150,000 token，未过 231,616 的线
+  const tight = conversation(30);   // ≈ 300,000 token，已过线
+  assert.deepEqual(
+    planToolResultClearing(roomy, new Set(), FULL).toolCallIds, [],
+    "半数窗口都没用到，不该动手",
+  );
+  assert.ok(planToolResultClearing(tight, new Set(), FULL).toolCallIds.length > 0);
+});
 
-  const half = planToolResultClearing(results, new Set(), { tokens: 100_000, contextWindow: CONTEXT_WINDOW });
-  assert.deepEqual(half.toolCallIds, [], "半满时一条都不该清");
-  const threeQuarters = planToolResultClearing(results, new Set(), { tokens: 150_000, contextWindow: CONTEXT_WINDOW });
-  assert.deepEqual(threeQuarters.toolCallIds, [], "四分之三满也还早");
-  assert.ok(planToolResultClearing(results, new Set(), FULL).toolCallIds.length > 0, "逼近压缩线才动手");
+test("刚压缩完体积未知时什么也不做", () => {
+  assert.deepEqual(
+    planToolResultClearing(conversation(30), new Set(), { tokens: null, contextWindow: CONTEXT_WINDOW }).toolCallIds,
+    [],
+  );
 });
 
 test("动手的时候一次清干净，而不是每次挤一点", () => {
