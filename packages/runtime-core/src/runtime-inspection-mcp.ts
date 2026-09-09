@@ -471,10 +471,35 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     }
   }
 
+  /**
+   * Wait for the browser to come back, and say so out loud either way.
+   *
+   * The outcome used to be visible only inside the dialog that started it. A
+   * login takes as long as the identity provider takes, the dialog is a status
+   * view the user is free to close, and a result nobody sees is the same as no
+   * result — the user concluded the callback had never arrived when in fact it
+   * had, twice.
+   */
   async awaitMcpAuth(name: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
     const server = name.trim();
-    return this.mcpAction("auth-await", server, () => this.mcpManager().awaitAuth(server), () => `${server} 已完成认证。`);
+    try {
+      const result = await this.mcpAction(
+        "auth-await",
+        server,
+        () => this.mcpManager().awaitAuth(server),
+        () => `${server} 已完成认证。`,
+      );
+      this.emitEvent({ type: "runtime_notice", level: "success", message: `${server} 已完成认证。` });
+      return result;
+    } catch (error) {
+      this.emitEvent({
+        type: "runtime_notice",
+        level: "error",
+        message: `${server} 认证未完成：${errorMessage(error)}`,
+      });
+      throw error;
+    }
   }
 
   /** Give up on a browser authorization the user walked away from. */

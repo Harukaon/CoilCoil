@@ -53,7 +53,15 @@ export interface McpAuthStart {
 }
 
 /** pi's listener gave five minutes; a person logging in deserves at least that. */
-const AUTH_TIMEOUT_MS = 5 * 60_000;
+/**
+ * How long a browser login is held open.
+ *
+ * Five minutes was the old value and it is not a login, it is a password
+ * manager plus a second factor plus an SSO redirect chain, on a machine whose
+ * owner may have wandered off to read the consent screen. The listener costs
+ * nothing while it waits.
+ */
+const AUTH_TIMEOUT_MS = 15 * 60_000;
 /** How often idle connections are swept. Coarse on purpose — this is housekeeping. */
 const IDLE_SWEEP_MS = 30_000;
 /**

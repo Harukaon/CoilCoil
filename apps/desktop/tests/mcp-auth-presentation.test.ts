@@ -93,3 +93,18 @@ test("成功后用扩展返回的说明覆盖描述", () => {
   assert.equal(done.phase, "succeeded");
   assert.equal(mcpAuthDescription(done), "linear 已完成认证并重新连接。");
 });
+
+test("关掉状态弹窗不会掐死浏览器里正在进行的登录", () => {
+  // 关闭曾经等同于取消：等待被删掉后，一分钟后回来的回调没有落点，回调服务
+  // answers 400、浏览器显示失败页、授权码被丢掉。用户那边看到的就是
+  // 「我登录了，回调根本没发回来」——用户的 beeswax 有三次死在这里。
+  const started = mcpAuthFlowStarted("beeswax");
+  assert.equal(started.authorizationUrl, undefined, "还没拿到授权页，此时关闭应当释放等待");
+
+  const waiting = mcpAuthFlowFromStart(started, {
+    text: "",
+    details: { mode: "auth-start", server: "beeswax", authorizationUrl: "https://example.com/authorize", awaitingCallback: true },
+  } as never);
+  assert.equal(waiting.phase, "waiting");
+  assert.ok(waiting.authorizationUrl, "浏览器已经被送去授权页，登录在那边进行");
+});

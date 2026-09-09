@@ -415,11 +415,25 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
     }
   };
 
-  /** Closing an unfinished flow releases the runtime's waiter for that server. */
+  /**
+   * Closing the dialog puts the status view away; it does not abandon the login.
+   *
+   * It used to cancel the runtime's waiter on every close. Once the browser has
+   * been sent to the authorization page the login is happening over there, and
+   * deleting the waiter leaves the redirect with nothing to land on a minute
+   * later — the callback server answers 400, the browser shows a failure page,
+   * and the authorization code is thrown away. From the user's side that reads
+   * exactly as "I logged in and the callback never came back", which is what
+   * this did to three of their beeswax logins.
+   *
+   * A flow that never reached the browser has nothing in flight and is still
+   * released here.
+   */
   const closeAuth = (): void => {
     const flow = authFlow;
     setAuthFlow(undefined);
     if (!flow || flow.phase === "succeeded" || flow.phase === "failed") return;
+    if (flow.authorizationUrl) return;
     void window.coilcoil.request({ type: "cancel_mcp_auth", name: flow.server }, runtimeId).catch(() => undefined);
   };
 
