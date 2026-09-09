@@ -189,16 +189,21 @@ export function issuePrompt(issue: Issue, parent?: Issue): string {
  * 一条任务的后台运行是接着上一次跑的——同一个会话，它记得自己上次做了什么——所以
  * 这里只需要把「你上次交完之后我又说了什么」递过去，不必把整条任务再念一遍。
  */
-export function issueFollowUp(issue: Issue): string {
+export function issueFollowUp(issue: Issue): { text: string; images: PromptImage[] } {
   const said = saidOn(issue);
   const lastAgent = said.map((event) => event.by).lastIndexOf("agent");
   const since = said.slice(lastAgent + 1).filter((event) => event.by === "user");
-  if (!since.length) return "接着做这条任务，做完调用 issue_reply 交结论。";
-  return [
-    ...since.map(speak),
-    "",
-    "按上面这些接着做，做完调用 issue_reply 交结论；需要我拿主意就调用 issue_ask。",
-  ].join("\n").trim();
+  if (!since.length) return { text: "接着做这条任务，做完调用 issue_reply 交结论。", images: [] };
+  return {
+    text: [
+      ...since.map(speak),
+      "",
+      "按上面这些接着做，做完调用 issue_reply 交结论；需要我拿主意就调用 issue_ask。",
+    ].join("\n").trim(),
+    // 只发新贴的图。上一轮的图它自己那条对话里还留着，再发一遍既费钱又容易让它
+    // 分不清哪张是这次说的。
+    images: dedupeImages(since.flatMap((event) => event.images ?? [])),
+  };
 }
 
 /**
@@ -208,9 +213,13 @@ export function issueFollowUp(issue: Issue): string {
  * 哪张图是哪句话在说。同一张图（同一个 id）只发一次。
  */
 export function issueImages(issue: Issue): PromptImage[] {
-  const all = [...issue.images ?? [], ...saidOn(issue).slice(-10).flatMap((event) => event.images ?? [])];
+  return dedupeImages([...issue.images ?? [], ...saidOn(issue).slice(-10).flatMap((event) => event.images ?? [])]);
+}
+
+/** 同一张图（同一个 id）只发一次。 */
+function dedupeImages(images: readonly PromptImage[]): PromptImage[] {
   const seen = new Set<string>();
-  return all.filter((image) => {
+  return images.filter((image) => {
     const key = image.id ?? image.data.slice(0, 64);
     if (seen.has(key)) return false;
     seen.add(key);

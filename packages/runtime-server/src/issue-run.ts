@@ -59,6 +59,8 @@ export interface IssueRunRequest {
   prompt: string;
   /** 再跑一次时说的话：只有「你上次交完之后我又说了什么」。 */
   followUp?: string;
+  /** 跟 followUp 配套的图：只有新贴的那些。 */
+  followUpImages?: PromptImage[];
   images?: PromptImage[];
   maxTurns?: number;
 }
@@ -253,15 +255,15 @@ export async function runIssueTask(
       }
     }
     if (!resumed) await runtime.createSession(request.cwd);
-    const opening = resumed
-      ? `${RUN_PREAMBLE}${request.followUp ?? request.prompt}`
-      : `${RUN_PREAMBLE}${request.prompt}`;
+    const opening = resumed && request.followUp
+      ? { text: `${RUN_PREAMBLE}${request.followUp}`, images: request.followUpImages ?? [] }
+      : { text: `${RUN_PREAMBLE}${request.prompt}`, images: request.images ?? [] };
     const maxTurns = Math.max(1, request.maxTurns ?? DEFAULT_MAX_TURNS);
     for (let turn = 1; turn <= maxTurns; turn += 1) {
       signals.started = false;
       signals.settled = false;
       const first = turn === 1;
-      await runtime.prompt(first ? opening : NUDGE_PROMPT, first ? request.images ?? [] : []);
+      await runtime.prompt(first ? opening.text : NUDGE_PROMPT, first ? opening.images : []);
       const outcome = await waitForTurn(signals, startTimeoutMs, turnTimeoutMs);
       const reply = readIssueReply(runDir);
       if (reply) return { ...reply, turns: turn };

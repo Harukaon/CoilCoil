@@ -128,12 +128,14 @@ export function useIssueBoard({
 
 /** 把一条任务连同它的图交给后台运行。放在这里，因为提示词就长在 issueModel 里。 */
 export function requestIssueRun(input: { cwd: string; issue: Issue; parent?: Issue }): Promise<IssueRunResult> {
+  const followUp = issueFollowUp(input.issue);
   return window.coilcoil.request<IssueRunResult>({
     type: "run_issue",
     cwd: input.cwd,
     issueId: input.issue.id,
     prompt: issuePrompt(input.issue, input.parent),
-    followUp: issueFollowUp(input.issue),
     images: issueImages(input.issue),
+    followUp: followUp.text,
+    followUpImages: followUp.images,
   });
 }

@@ -1226,6 +1226,8 @@ export type RuntimeCommand =
     prompt: string;
     /** 再跑一次时说的话：同一条对话接着说，所以只说新增的那几句。 */
     followUp?: string;
+    /** 跟 followUp 配套：只有新贴的图，上一轮那些它自己的对话里还留着。 */
+    followUpImages?: PromptImage[];
     images?: PromptImage[];
     maxTurns?: number;
   }

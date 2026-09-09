@@ -203,10 +203,10 @@ test("再跑一次只说新说的那几句，不把整条任务再念一遍", ()
   };
   const rejected = rejectIssue([withHistory], issue.id, "再看看边框")[0];
   const followUp = issueFollowUp(rejected);
-  assert.match(followUp, /再看看边框/);
-  assert.doesNotMatch(followUp, /先做这个/, "上一轮之前说过的话，它自己的对话里还留着");
-  assert.doesNotMatch(followUp, /正文/);
-  assert.match(issueFollowUp(withHistory), /接着做/, "没有新说的话时也要有一句能发出去的");
+  assert.match(followUp.text, /再看看边框/);
+  assert.doesNotMatch(followUp.text, /先做这个/, "上一轮之前说过的话，它自己的对话里还留着");
+  assert.doesNotMatch(followUp.text, /正文/);
+  assert.match(issueFollowUp(withHistory).text, /接着做/, "没有新说的话时也要有一句能发出去的");
 });
 
 test("同一条提交两次是覆盖不是加一条", () => {
@@ -291,4 +291,21 @@ test("打回重做的理由也能配图", () => {
   const [after] = rejectIssue([issue], "rework", "这里还是不对", [shot("d")]);
   assert.equal(after.status, "ready");
   assert.deepEqual(after.events.at(-1)?.images?.map((image) => image.id), ["d"]);
+});
+
+test("打回重做时贴的图跟着那句话一起发，而且只发新贴的这张", () => {
+  const shot = (id: string) => ({ id, data: `data-${id}`, mimeType: "image/png" });
+  const issue = {
+    ...newIssue("看看这个", "正文", "high", { images: [shot("body")] }),
+    events: [
+      { at: "2026-01-01T00:00:00.000Z", by: "user" as const, kind: "comment" as const, text: "先看这张", images: [shot("old")] },
+      { at: "2026-01-01T00:01:00.000Z", by: "agent" as const, kind: "comment" as const, text: "看完了" },
+    ],
+  };
+  const rejected = rejectIssue([issue], issue.id, "对齐还是不对", [shot("new")])[0];
+
+  // 第一次跑：正文和留言里的图都要发过去。
+  assert.deepEqual(issueImages(rejected).map((image) => image.id), ["body", "old", "new"]);
+  // 再跑一次：它自己那条对话里已经有前两张了，只发新贴的这张。
+  assert.deepEqual(issueFollowUp(rejected).images.map((image) => image.id), ["new"]);
 });
