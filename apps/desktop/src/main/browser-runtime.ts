@@ -5,7 +5,7 @@ import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
-import { normalizeBrowserUrl } from "./browser-navigation";
+import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
 import { applyGuestUserAgent } from "./browser-user-agent";
 import {
   DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
@@ -268,7 +268,7 @@ export class BrowserRuntimeManager {
     const tab = this.createTabRecord(activate, scopeId, implicit);
     try {
       await this.attachGuest(tab);
-      await tab.guest!.loadURL(url);
+      await loadGuestUrl(tab.guest!, url);
       await this.finishTabCreation(tab);
     } catch (error) {
       this.closeTabRecord(tab);
@@ -337,7 +337,7 @@ export class BrowserRuntimeManager {
 
   async navigate(rawUrl: string, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
     const tab = await this.ensureActiveTab(scopeId);
-    await this.guestOf(tab).loadURL(normalizeBrowserUrl(rawUrl));
+    await loadGuestUrl(this.guestOf(tab), normalizeBrowserUrl(rawUrl));
     return this.state(scopeId);
   }
 

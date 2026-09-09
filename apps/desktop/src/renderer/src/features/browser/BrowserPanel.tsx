@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, RotateCw } from "lucide-re
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
+import { toastError } from "../../ui/toast";
 import { BrowserDataMenu } from "./BrowserDataMenu";
 import { setGuestPlacement } from "./guestLayer";
 
@@ -99,23 +100,34 @@ export function BrowserPanel({ active, scopeId, state, onState }: {
     };
   }, [active, activeTabId, mobile]);
 
+  /**
+   * Every toolbar action ends in a state refresh, so a failed one has to say so.
+   * Without this the rejection had nowhere to go and became an unhandled promise
+   * error in the log that the user never saw.
+   */
+  const apply = (action: Promise<BrowserStateSnapshot>): void => {
+    void action.then(onState).catch((error: unknown) => {
+      toastError(error instanceof Error ? error.message : String(error));
+    });
+  };
+
   const submitAddress = (event: React.FormEvent): void => {
     event.preventDefault();
-    void window.coilcoil.navigateBrowser(scopeId, address).then(onState);
+    apply(window.coilcoil.navigateBrowser(scopeId, address));
   };
 
   return (
     <section className="browser-panel">
       <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
-        <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => void window.coilcoil.browserBack(scopeId).then(onState)}><ArrowLeft size={13} /></button>
-        <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => void window.coilcoil.browserForward(scopeId).then(onState)}><ArrowRight size={13} /></button>
-        <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => void window.coilcoil.reloadBrowser(scopeId).then(onState)}><RotateCw size={12} /></button>
+        <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => apply(window.coilcoil.browserBack(scopeId))}><ArrowLeft size={13} /></button>
+        <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => apply(window.coilcoil.browserForward(scopeId))}><ArrowRight size={13} /></button>
+        <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => apply(window.coilcoil.reloadBrowser(scopeId))}><RotateCw size={12} /></button>
         <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} onChange={(event) => setAddress(event.target.value)} />
         {/* Importing reads this Mac's keychain, so it stays on the Mac's own window. */}
         {mobile ? null : <BrowserDataMenu />}
       </form>
       <div className={`browser-native-host ${mobile ? "browser-remote-host" : ""}`} ref={hostRef}>
-        {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => void window.coilcoil.createBrowserTab(scopeId).then(onState)}>新建标签页</button></div> : null}
+        {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => apply(window.coilcoil.createBrowserTab(scopeId))}>新建标签页</button></div> : null}
         {mobile && activeTab ? (
           frame
             ? <img className="browser-remote-frame" src={frame} alt={activeTab.title} />

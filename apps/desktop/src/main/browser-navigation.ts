@@ -32,3 +32,32 @@ export function normalizeBrowserUrl(raw: string | undefined): string {
     : `https://www.google.com/search?q=${encodeURIComponent(value)}`;
   return new URL(candidate).toString();
 }
+
+/** The part of a guest this module needs, so the behaviour is testable without Electron. */
+interface LoadableGuest {
+  loadURL(url: string): Promise<void>;
+  isDestroyed(): boolean;
+}
+
+/**
+ * Navigate a guest, treating a rejected load as a finished navigation.
+ *
+ * `loadURL` rejects for outcomes nobody can act on. ERR_ABORTED is what a
+ * redirect, a download, or the next navigation looks like from here; a page that
+ * genuinely failed already shows Chromium's own error page inside the guest,
+ * exactly as any browser would. Turning either into a thrown error cost us twice:
+ * the address bar's promise came back rejected and nothing caught it (twelve
+ * unhandled rejections in the user's log, every one of them `browser:navigate`),
+ * and at tab creation it destroyed a tab whose error page was perfectly readable.
+ *
+ * A destroyed guest is different — the page is gone, so the failure is real and
+ * still travels.
+ */
+export async function loadGuestUrl(guest: LoadableGuest, url: string): Promise<void> {
+  try {
+    await guest.loadURL(url);
+  } catch (error) {
+    if (guest.isDestroyed()) throw error;
+    console.error("[browser] 页面没有加载完成", url, error);
+  }
+}

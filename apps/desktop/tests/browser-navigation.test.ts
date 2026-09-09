@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import { normalizeBrowserUrl } from "../src/main/browser-navigation.ts";
+import { loadGuestUrl, normalizeBrowserUrl } from "../src/main/browser-navigation.ts";
 import { isReusableBlankTab } from "../src/main/browser-runtime-types.ts";
 
 test("browser navigation keeps ordinary web URLs", () => {
@@ -46,4 +46,23 @@ test("桥垫出来的那张空白页会被 agent 的新标签页接管，不再�
   assert.equal(isReusableBlankTab({ implicit: false, phase: "ready" }, "about:blank"), false);
   // 还没就绪的没有 WebContents 可导航。
   assert.equal(isReusableBlankTab({ implicit: true, phase: "loading" }, "about:blank"), false);
+});
+
+test("a load that ends in an error page is a finished navigation, not a failure", async () => {
+  // ERR_ABORTED is what a redirect or a superseded navigation looks like from
+  // here, and a failed page is already showing Chromium's error page: both used
+  // to reject, and the address bar's promise had nobody to catch it.
+  const guest = {
+    loadURL: async () => { throw new Error("ERR_ABORTED (-3) loading 'https://www.google.com/search?q=x'"); },
+    isDestroyed: () => false,
+  };
+  await loadGuestUrl(guest, "https://www.google.com/search?q=x");
+});
+
+test("a load into a destroyed guest still fails", async () => {
+  const guest = {
+    loadURL: async () => { throw new Error("Object has been destroyed"); },
+    isDestroyed: () => true,
+  };
+  await assert.rejects(() => loadGuestUrl(guest, "https://example.com"));
 });
