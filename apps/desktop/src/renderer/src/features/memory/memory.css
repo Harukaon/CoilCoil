@@ -35,12 +35,13 @@
 .memory-nebula-tools-divider { width: 1px; height: 16px; margin: 0 3px; background: hsl(var(--th) var(--ts) var(--l-905)); }
 
 /* React Flow 的默认皮肤是深色描边的通用样式，压到 CoilCoil 的中性白上面。 */
-.memory-nebula .react-flow { background: transparent; }
+.memory-nebula .react-flow { background: hsl(var(--th) var(--ts) var(--l-951)); }
+/* 网格颜色由 <Background color> 逐层给：库把它写进 --xy-background-pattern-color-props，
+   那是唯一真正生效的口子——写 .react-flow__background-pattern 会被库自己盖回去。 */
 .memory-nebula .react-flow__node { border: 0; background: transparent; font-size: inherit; }
 .memory-nebula .react-flow__handle { top: 50%; left: 50%; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; background: transparent; opacity: 0; transform: translate(-50%, -50%); }
 .memory-nebula .react-flow__edge-path { stroke: hsl(var(--th) var(--ts) var(--l-884)); stroke-width: 1.25; }
 .memory-nebula .react-flow__edge.to-block .react-flow__edge-path { stroke-dasharray: 3 4; }
-.memory-nebula .react-flow__background pattern circle { fill: hsl(var(--th) var(--ts) var(--l-925)); }
 .memory-nebula .react-flow__controls { margin: 12px; overflow: hidden; border-radius: var(--radius-lg); box-shadow: 0 1px 3px rgb(0 0 0 / 8%), 0 6px 18px rgb(0 0 0 / 6%); }
 .memory-nebula .react-flow__controls-button { width: 26px; height: 26px; border: 0; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-922)); background: hsl(var(--th) var(--ts) var(--l-1000)); fill: hsl(var(--th) var(--ts) var(--l-455)); }
 .memory-nebula .react-flow__controls-button:hover { background: hsl(var(--th) var(--ts) var(--l-941)); }

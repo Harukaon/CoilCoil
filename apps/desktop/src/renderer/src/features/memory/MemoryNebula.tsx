@@ -1,5 +1,6 @@
 import {
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   ReactFlow,
@@ -237,7 +238,11 @@ function NebulaCanvas({
           onSelect(data);
         }}
       >
-        <Background gap={22} size={1} />
+        {/* 画板得看得出是画板。默认那层点阵在当前缩放下半径不到半个像素，
+            而且颜色被库自己的变量盖掉了，等于没有——改成两层网格：细格给出
+            质感，粗格给出尺度感。颜色走 --xy-* 变量，这是库认的那个口子。 */}
+        <Background variant={BackgroundVariant.Lines} gap={26} lineWidth={1} color="hsl(var(--th) var(--ts) var(--l-918))" />
+        <Background id="coarse" variant={BackgroundVariant.Lines} gap={130} lineWidth={1} color="hsl(var(--th) var(--ts) var(--l-865))" />
         <MiniMap pannable zoomable nodeStrokeWidth={2} style={{ width: 150, height: 104 }} />
         <Controls showInteractive={false} />
       </ReactFlow>
