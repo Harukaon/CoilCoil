@@ -4,97 +4,43 @@ type AgentMessage = ContextEvent["messages"][number];
 type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
 
 /**
- * Drop the bodies of old tool results before they reach the model.
+ * Drop the bodies of old tool results instead of summarizing them.
  *
- * Pi has exactly one answer to a context window filling up: compaction, which
- * replaces everything older than the recent window with a single prose summary.
- * That is the most destructive tool available, and it is also the only one, so
- * a session pays the full price the first time it crosses the threshold —
- * including for whatever filled the window, which in a coding agent is almost
- * always bulk tool output (file reads, greps, terminal logs) rather than the
- * conversation itself.
+ * This is the cheap first stage of Pi's own compaction, not a mechanism beside
+ * it. When Pi decides the context is full it prepares a compaction and asks its
+ * extensions first; this hook clears the tool output from exactly the stretch
+ * Pi was about to discard, and cancels the summary when that frees enough. The
+ * tool call stays, so the model still knows which file it read and with which
+ * arguments and can read it again if it turns out to matter.
  *
- * Clearing those bodies is the cheap lever that belongs before compaction. The
- * tool call stays in the history, so the model still knows which file it read
- * and with which arguments and can read it again if it turns out to matter.
- * Nothing is lost from the session file either: this rewrites only the copy
- * handed to the provider for one request, which is what `context` hands us.
+ * Extending Pi's compaction rather than running alongside it is the whole
+ * design, and getting that wrong cost three rounds of fixes. As a separate
+ * mechanism it needed its own trigger, its own idea of how much recent
+ * conversation to protect, and its own measurement of the context — and each of
+ * those was a way to be wrong. Its trigger fired 289 times in one session; its
+ * "keep the newest twelve results" left half of all turns clearing their own
+ * output; its measurement read a number that clearing could never lower, so it
+ * ran on every request forever.
  *
- * Two rules keep it from being disruptive:
+ * Here all three come from Pi: the trigger is Pi deciding to compact, the
+ * protected span is whatever Pi kept out of `messagesToSummarize`, and there is
+ * nothing to measure — Pi already did.
  *
- * - The newest results are never touched, so the work in progress stays intact.
- * - Clearing happens in batches that must free a worthwhile amount at once.
- *   Rewriting a message invalidates the prompt cache from that point on, so
- *   moving the boundary forward one result per turn would cost more than it
- *   saves. A cleared result stays cleared, which keeps the prefix stable
- *   between batches.
+ * Nothing is lost from the session file either: the `context` hook rewrites
+ * only the copy handed to the provider for one request.
  */
-
-/**
- * Pi compacts once the context passes `contextWindow - reserveTokens`; this
- * mirrors its default reserve so clearing can be timed against that line.
- */
-const PI_RESERVE_TOKENS = 16_384;
-
-/**
- * How far ahead of Pi's compaction line clearing goes to work.
- *
- * It has to be ahead of it, not level with it: Pi decides to compact from the
- * usage the provider reported for the request that just finished, and clearing
- * only affects the request after that. Level with the line, Pi always wins the
- * race and the cheap stage never gets to run.
- */
-const HEADROOM_TOKENS = 24_000;
-
-/**
- * Clearing is the first stage of compaction, not a background chore.
- *
- * It used to start at half the context window and top itself up every 8,000
- * tokens. Simulated against a real 4,700-tool-call session that fired 289
- * times — roughly every sixteen tool calls — and it was throwing away tool
- * output while a hundred thousand tokens of headroom sat unused. Nothing was
- * gained by being early; the results were merely destroyed sooner.
- *
- * So it waits for the same pressure that would otherwise trigger a summary, and
- * then clears everything it is allowed to touch in one pass. If that is enough,
- * the expensive lossy stage never runs at all.
- */
-export function clearingThreshold(contextWindow: number): number {
-  // Never sillier than half the window: on a small model Pi's line sits below
-  // this one, and clearing from the first turn is worse than just compacting.
-  return Math.max(contextWindow * 0.5, contextWindow - PI_RESERVE_TOKENS - HEADROOM_TOKENS);
-}
-
-/**
- * How much of the recent conversation keeps its tool output no matter what.
- *
- * Measured in tokens, and deliberately the same number compaction keeps
- * verbatim, so both stages draw one line: whatever is recent enough to survive
- * a summary is recent enough to keep its tool output.
- *
- * It used to be a count — the newest twelve results. A count is not a span. In
- * this user's real sessions the median turn issues thirteen tool calls and half
- * of all turns issue more than twelve, so half the time the model had its own
- * earlier output cleared while it was still working inside that turn. That is
- * the one thing this stage must never do.
- */
-const KEEP_RECENT_TOKENS = 50_000;
-
-/** A floor under the token guard, so a tiny window still protects something. */
-const KEEP_RECENT_RESULTS = 8;
 
 /** A result smaller than this is not worth the cache invalidation. */
 const MIN_RESULT_TOKENS = 400;
 
 /**
- * A pass has to free a worthwhile share of the window, or it is not worth doing.
+ * How much clearing has to free before it is worth cancelling the summary.
  *
- * Expressed against the window rather than as a flat count so it means the same
- * thing on a 200k model and a 1M one. Below it, clearing cannot relieve the
- * pressure anyway and the summary is the honest answer.
+ * Against the window rather than a flat count, so it means the same thing on a
+ * 200k model and a 1M one.
  */
-const MIN_BATCH_RATIO = 0.05;
-const MIN_BATCH_FLOOR = 8_000;
+const MIN_RELIEF_RATIO = 0.05;
+const MIN_RELIEF_FLOOR = 8_000;
 
 /**
  * Tools whose result *is* live state rather than a lookup: the model has to
@@ -143,51 +89,6 @@ function clearedText(message: ToolResultMessage): string {
   return `${CLEARED_PREFIX} ${message.toolName} 的这次输出（约 ${resultChars(message)} 字符）已从上下文中移除以腾出窗口。调用参数仍在上面，需要内容就重新调用一次。`;
 }
 
-/** Rough size of any message, for measuring how far back the protected span reaches. */
-function messageTokens(message: AgentMessage): number {
-  const content = (message as { content?: unknown }).content;
-  if (typeof content === "string") return Math.ceil(content.length / CHARS_PER_TOKEN);
-  if (!Array.isArray(content)) return 0;
-  let chars = 0;
-  for (const block of content) {
-    if (!block || typeof block !== "object") continue;
-    const record = block as { type?: string; text?: string; arguments?: unknown };
-    if (record.type === "text") chars += (record.text ?? "").length;
-    else if (record.type === "toolCall") chars += JSON.stringify(record.arguments ?? {}).length;
-    else chars += IMAGE_CHARS;
-  }
-  return Math.ceil(chars / CHARS_PER_TOKEN);
-}
-
-/**
- * Tool results old enough to be eligible, oldest first.
- *
- * Everything inside the protected span at the end of the conversation is off
- * limits, and the span is measured by walking backwards adding up messages —
- * all of them, not just the tool results, because the span is a stretch of
- * conversation rather than a number of lookups.
- */
-function clearableResults(messages: readonly AgentMessage[]): ToolResultMessage[] {
-  let budget = KEEP_RECENT_TOKENS;
-  let boundary = messages.length;
-  let protectedResults = 0;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index];
-    if (message.role === "toolResult") protectedResults += 1;
-    // The floor keeps a handful of results safe even when they are individually
-    // larger than the whole budget.
-    if (budget <= 0 && protectedResults > KEEP_RECENT_RESULTS) break;
-    budget -= messageTokens(message);
-    boundary = index;
-  }
-  const results: ToolResultMessage[] = [];
-  for (let index = 0; index < boundary; index++) {
-    const message = messages[index];
-    if (message.role === "toolResult") results.push(message);
-  }
-  return results;
-}
-
 export interface ClearingPlan {
   /** Tool call ids whose results this batch removes. */
   toolCallIds: string[];
@@ -204,26 +105,14 @@ const NOTHING_TO_CLEAR: ClearingPlan = { toolCallIds: [], freedTokens: 0 };
  * would be too small to pay for the cache write it costs.
  */
 export function planToolResultClearing(
-  messages: readonly AgentMessage[],
+  discardable: readonly AgentMessage[],
   cleared: ReadonlySet<string>,
-  usage: { tokens: number | null; contextWindow: number },
 ): ClearingPlan {
-  if (usage.tokens === null || usage.contextWindow <= 0) return NOTHING_TO_CLEAR;
-  // Measure what this request will actually carry, not what the session holds.
-  //
-  // Pi's `getContextUsage()` estimates the raw message list, and clearing never
-  // touches that list — it rewrites only the copy handed to the provider. So the
-  // number Pi reports cannot go down no matter how much has been cleared: the
-  // threshold is crossed once and never uncrossed, and this stage then runs on
-  // every single request for the rest of the session. That is the "why is it
-  // still firing constantly" this was reported as.
-  const outgoing = applyToolResultClearing(messages, cleared) ?? messages;
-  const carried = outgoing.reduce((sum, message) => sum + messageTokens(message), 0);
-  if (carried < clearingThreshold(usage.contextWindow)) return NOTHING_TO_CLEAR;
-
   const toolCallIds: string[] = [];
   let freedTokens = 0;
-  for (const result of clearableResults(messages)) {
+  for (const message of discardable) {
+    if (message.role !== "toolResult") continue;
+    const result = message as ToolResultMessage;
     if (cleared.has(result.toolCallId)) continue;
     if (STATE_TOOLS.has(result.toolName)) continue;
     const tokens = resultTokens(result);
@@ -231,9 +120,17 @@ export function planToolResultClearing(
     toolCallIds.push(result.toolCallId);
     freedTokens += tokens;
   }
+  return { toolCallIds, freedTokens };
+}
 
-  const minimum = Math.max(MIN_BATCH_FLOOR, usage.contextWindow * MIN_BATCH_RATIO);
-  return freedTokens >= minimum ? { toolCallIds, freedTokens } : NOTHING_TO_CLEAR;
+/**
+ * Whether clearing has bought enough to be worth skipping the summary for.
+ *
+ * Freeing a few thousand tokens only defers the same compaction by a turn while
+ * costing a cache write, so below this the honest answer is to let Pi summarize.
+ */
+export function clearingRelievesPressure(plan: ClearingPlan, contextWindow: number): boolean {
+  return plan.freedTokens >= Math.max(MIN_RELIEF_FLOOR, contextWindow * MIN_RELIEF_RATIO);
 }
 
 /**
@@ -268,19 +165,34 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
   pi.on("session_tree", reset);
   pi.on("session_shutdown", reset);
 
-  pi.on("context", (event, ctx) => {
-    const usage = ctx.getContextUsage();
-    if (usage) {
-      const plan = planToolResultClearing(event.messages, cleared, usage);
-      for (const toolCallId of plan.toolCallIds) cleared.add(toolCallId);
-      if (plan.toolCallIds.length) {
-        pi.events.emit(CONTEXT_CLEARING_EVENT, {
-          at: Date.now(),
-          clearedResults: plan.toolCallIds.length,
-          freedTokens: plan.freedTokens,
-        } satisfies ContextClearingRecord);
-      }
-    }
+  /**
+   * Pi is about to summarize. Try the cheap stage first.
+   *
+   * Only for the automatic threshold: a manual `/compact` is someone asking for
+   * a summary and should get one, and overflow recovery is already past the
+   * point where a cheaper stage helps.
+   *
+   * Cancelling short-circuits the remaining handlers, which is why this
+   * extension is registered ahead of `context-transcript` — a cancelled
+   * compaction must not leave an archive claiming it happened.
+   */
+  pi.on("session_before_compact", (event, ctx) => {
+    if (event.reason !== "threshold") return undefined;
+    const discardable = event.preparation?.messagesToSummarize ?? [];
+    const plan = planToolResultClearing(discardable, cleared);
+    const contextWindow = ctx.getContextUsage()?.contextWindow ?? 0;
+    if (!plan.toolCallIds.length || !clearingRelievesPressure(plan, contextWindow)) return undefined;
+    for (const toolCallId of plan.toolCallIds) cleared.add(toolCallId);
+    pi.events.emit(CONTEXT_CLEARING_EVENT, {
+      at: Date.now(),
+      clearedResults: plan.toolCallIds.length,
+      freedTokens: plan.freedTokens,
+    } satisfies ContextClearingRecord);
+    return { cancel: true };
+  });
+
+  // Where the clearing actually takes effect: the outgoing copy of one request.
+  pi.on("context", (event) => {
     const messages = applyToolResultClearing(event.messages, cleared);
     return messages ? { messages } : undefined;
   });
