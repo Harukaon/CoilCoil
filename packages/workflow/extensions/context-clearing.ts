@@ -30,8 +30,40 @@ type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
  *   between batches.
  */
 
-/** Fraction of the context window that has to be in use before clearing starts. */
-const TRIGGER_RATIO = 0.5;
+/**
+ * Pi compacts once the context passes `contextWindow - reserveTokens`; this
+ * mirrors its default reserve so clearing can be timed against that line.
+ */
+const PI_RESERVE_TOKENS = 16_384;
+
+/**
+ * How far ahead of Pi's compaction line clearing goes to work.
+ *
+ * It has to be ahead of it, not level with it: Pi decides to compact from the
+ * usage the provider reported for the request that just finished, and clearing
+ * only affects the request after that. Level with the line, Pi always wins the
+ * race and the cheap stage never gets to run.
+ */
+const HEADROOM_TOKENS = 24_000;
+
+/**
+ * Clearing is the first stage of compaction, not a background chore.
+ *
+ * It used to start at half the context window and top itself up every 8,000
+ * tokens. Simulated against a real 4,700-tool-call session that fired 289
+ * times — roughly every sixteen tool calls — and it was throwing away tool
+ * output while a hundred thousand tokens of headroom sat unused. Nothing was
+ * gained by being early; the results were merely destroyed sooner.
+ *
+ * So it waits for the same pressure that would otherwise trigger a summary, and
+ * then clears everything it is allowed to touch in one pass. If that is enough,
+ * the expensive lossy stage never runs at all.
+ */
+export function clearingThreshold(contextWindow: number): number {
+  // Never sillier than half the window: on a small model Pi's line sits below
+  // this one, and clearing from the first turn is worse than just compacting.
+  return Math.max(contextWindow * 0.5, contextWindow - PI_RESERVE_TOKENS - HEADROOM_TOKENS);
+}
 
 /** Newest tool results kept verbatim no matter how full the window is. */
 const KEEP_RECENT_RESULTS = 12;
@@ -39,8 +71,15 @@ const KEEP_RECENT_RESULTS = 12;
 /** A result smaller than this is not worth the cache invalidation. */
 const MIN_RESULT_TOKENS = 400;
 
-/** A batch has to free at least this much, or it waits for more candidates. */
-const MIN_BATCH_TOKENS = 8_000;
+/**
+ * A pass has to free a worthwhile share of the window, or it is not worth doing.
+ *
+ * Expressed against the window rather than as a flat count so it means the same
+ * thing on a 200k model and a 1M one. Below it, clearing cannot relieve the
+ * pressure anyway and the summary is the honest answer.
+ */
+const MIN_BATCH_RATIO = 0.05;
+const MIN_BATCH_FLOOR = 8_000;
 
 /**
  * Tools whose result *is* live state rather than a lookup: the model has to
@@ -119,7 +158,7 @@ export function planToolResultClearing(
   usage: { tokens: number | null; contextWindow: number },
 ): ClearingPlan {
   if (usage.tokens === null || usage.contextWindow <= 0) return NOTHING_TO_CLEAR;
-  if (usage.tokens < usage.contextWindow * TRIGGER_RATIO) return NOTHING_TO_CLEAR;
+  if (usage.tokens < clearingThreshold(usage.contextWindow)) return NOTHING_TO_CLEAR;
 
   const toolCallIds: string[] = [];
   let freedTokens = 0;
@@ -132,7 +171,8 @@ export function planToolResultClearing(
     freedTokens += tokens;
   }
 
-  return freedTokens >= MIN_BATCH_TOKENS ? { toolCallIds, freedTokens } : NOTHING_TO_CLEAR;
+  const minimum = Math.max(MIN_BATCH_FLOOR, usage.contextWindow * MIN_BATCH_RATIO);
+  return freedTokens >= minimum ? { toolCallIds, freedTokens } : NOTHING_TO_CLEAR;
 }
 
 /**

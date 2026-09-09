@@ -32,6 +32,8 @@ export interface CompactionMark {
   /** Layer 1 only. */
   clearedResults?: number;
   freedTokens?: number;
+  /** How many clearing passes this one rule stands for. */
+  passes?: number;
   /** Layer 2 only. */
   tokensBefore?: number;
   tokensAfter?: number;
@@ -103,7 +105,24 @@ export function buildCompactionMarks(
     });
   }
 
-  return marks.sort((left, right) => left.order - right.order || left.at - right.at);
+  marks.sort((left, right) => left.order - right.order || left.at - right.at);
+
+  // Several clearings can land between the same two messages. Drawing a rule for
+  // each turns a long session into a ladder of near-identical lines, so they
+  // become one line that says how many passes it took.
+  const merged: CompactionMark[] = [];
+  for (const mark of marks) {
+    const previous = merged.at(-1);
+    if (previous && previous.layer === 1 && mark.layer === 1 && previous.order === mark.order) {
+      previous.clearedResults = (previous.clearedResults ?? 0) + (mark.clearedResults ?? 0);
+      previous.freedTokens = (previous.freedTokens ?? 0) + (mark.freedTokens ?? 0);
+      previous.passes = (previous.passes ?? 1) + 1;
+      previous.at = mark.at;
+      continue;
+    }
+    merged.push({ ...mark });
+  }
+  return merged;
 }
 
 /** The words in the middle of the rule. Short enough to read without stopping. */
@@ -136,7 +155,8 @@ export function compactionSummaryPreview(summary: string | undefined): string | 
 export function compactionMarkDetail(mark: CompactionMark): string {
   if (mark.layer === 1) {
     const freed = mark.freedTokens ? `，约省下 ${mark.freedTokens.toLocaleString()} tokens` : "";
-    return `上面较早的 ${mark.clearedResults ?? 0} 条工具输出已从模型的上下文里移除${freed}。调用参数还留着，需要内容时模型会重新读一次。`;
+    const passes = (mark.passes ?? 1) > 1 ? `（分 ${mark.passes} 次）` : "";
+    return `上面较早的 ${mark.clearedResults ?? 0} 条工具输出已从模型的上下文里移除${passes}${freed}。调用参数还留着，需要内容时模型会重新读一次。`;
   }
   const before = mark.tokensBefore?.toLocaleString();
   const after = mark.tokensAfter?.toLocaleString();
