@@ -131,6 +131,7 @@ const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
+const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
 const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
@@ -568,6 +569,7 @@ function remoteController(): RemoteAccessController {
           case BROWSER_SELECT_TAB_CHANNEL: return browser.selectTab(args[1] as string, scopeId);
           case BROWSER_CLOSE_TAB_CHANNEL: return browser.closeTab(args[1] as string, scopeId);
           case BROWSER_NAVIGATE_CHANNEL: return browser.navigate(args[1] as string, scopeId);
+          case BROWSER_ZOOM_CHANNEL: return browser.setZoom(args[1] as "in" | "out" | "reset", scopeId);
           case BROWSER_BACK_CHANNEL: return browser.back(scopeId);
           case BROWSER_FORWARD_CHANNEL: return browser.forward(scopeId);
           case BROWSER_RELOAD_CHANNEL: return browser.reload(scopeId);
@@ -1078,6 +1080,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).selectTab(id, scopeId));
   ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).closeTab(id, scopeId));
   ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, (event, scopeId: string, url: string) => browserFor(event).navigate(url, scopeId));
+  ipcMain.handle(BROWSER_ZOOM_CHANNEL, (event, scopeId: string, step: "in" | "out" | "reset") => browserFor(event).setZoom(step, scopeId));
   ipcMain.handle(BROWSER_BACK_CHANNEL, (event, scopeId: string) => browserFor(event).back(scopeId));
   ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event, scopeId: string) => browserFor(event).forward(scopeId));
   ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event, scopeId: string) => browserFor(event).reload(scopeId));

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
 
-const EMPTY_STATE = (scopeId: string): BrowserStateSnapshot => ({ scopeId, tabs: [] });
+const EMPTY_STATE = (scopeId: string): BrowserStateSnapshot => ({ scopeId, tabs: [], zoom: 1 });
 
 /**
  * 当前工作区那一份浏览器标签页列表。

@@ -1,4 +1,5 @@
-import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, RotateCw } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
+import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Minus, Plus, RotateCw, Search } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
@@ -23,6 +24,7 @@ export function BrowserPanel({ active, scopeId, state, onState }: {
   onState(next: BrowserStateSnapshot): void;
 }): React.JSX.Element {
   const [address, setAddress] = useState("");
+  const [zoomOpen, setZoomOpen] = useState(false);
   const hostRef = useRef<HTMLDivElement>(null);
   const mobile = useMobileRemote();
   const [frame, setFrame] = useState<string>();
@@ -111,6 +113,9 @@ export function BrowserPanel({ active, scopeId, state, onState }: {
     });
   };
 
+  const zoomPercent = Math.round((state.zoom ?? 1) * 100);
+  const zoomed = zoomPercent !== 100;
+
   const submitAddress = (event: React.FormEvent): void => {
     event.preventDefault();
     apply(window.coilcoil.navigateBrowser(scopeId, address));
@@ -123,6 +128,24 @@ export function BrowserPanel({ active, scopeId, state, onState }: {
         <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => apply(window.coilcoil.browserForward(scopeId))}><ArrowRight size={13} /></button>
         <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => apply(window.coilcoil.reloadBrowser(scopeId))}><RotateCw size={12} /></button>
         <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} onChange={(event) => setAddress(event.target.value)} />
+        {/* 缩放是整个内置浏览器的字号，所以按钮平时只是个图标；调过之后它自己把
+            当前倍数写在旁边，用户一眼知道现在不是 100%，不用点开确认。 */}
+        <Popover.Root open={zoomOpen} onOpenChange={setZoomOpen}>
+          <Popover.Trigger asChild>
+            <button className="browser-zoom" type="button" aria-label="缩放">
+              <Search size={13} />
+              {zoomed ? <span>{zoomPercent}%</span> : null}
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content className="browser-zoom-popover" side="bottom" align="end" sideOffset={6} collisionPadding={12}>
+              <button type="button" aria-label="缩小" disabled={zoomPercent <= 50} onClick={() => apply(window.coilcoil.setBrowserZoom(scopeId, "out"))}><Minus size={13} /></button>
+              <strong>{zoomPercent}%</strong>
+              <button type="button" aria-label="放大" disabled={zoomPercent >= 300} onClick={() => apply(window.coilcoil.setBrowserZoom(scopeId, "in"))}><Plus size={13} /></button>
+              <button type="button" className="browser-zoom-reset" disabled={!zoomed} onClick={() => apply(window.coilcoil.setBrowserZoom(scopeId, "reset"))}>重置</button>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
         {/* Importing reads this Mac's keychain, so it stays on the Mac's own window. */}
         {mobile ? null : <BrowserDataMenu />}
       </form>

@@ -16,6 +16,14 @@ import {
 import { BROWSER_PARTITION } from "./browser-webview-policy";
 
 /**
+ * 缩放挡位，和 Chrome 的一样。
+ *
+ * 用挡位而不是任意小数：每一挡都是设计上站得住的字号，用户按一下就换一挡，不会
+ * 停在 103% 这种既不整齐、字形也发虚的地方。
+ */
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+/**
  * Owns CoilCoil browser tabs, guest WebContents and renderer-facing state.
  * Browser-level CDP protocol adaptation lives in BrowserCdpBridge.
  */
@@ -25,6 +33,8 @@ export class BrowserRuntimeManager {
   private readonly activeTabIds = new Map<string, string>();
   private uiScopeId = DEFAULT_SCOPE_ID;
   private uiViewport = { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height };
+  /** 每个作用域自己的缩放倍数；1 不存，省得到处判断默认值。 */
+  private readonly zoomFactors = new Map<string, number>();
   /** False while the browser panel is hidden, so its tab parks like a background one. */
   private panelVisible = false;
   /** One in-flight creation per scope; see ensureActiveTab. */
@@ -106,6 +116,7 @@ export class BrowserRuntimeManager {
       scopeId,
       tabs: this.tabsForScope(scopeId).map((tab) => this.tabSnapshot(tab)),
       activeTabId: this.activeTabIds.get(scopeId),
+      zoom: this.zoomFor(scopeId),
     };
   }
 
@@ -115,6 +126,41 @@ export class BrowserRuntimeManager {
     const state = this.state();
     this.publishState(state);
     return state;
+  }
+
+  private zoomFor(scopeId: string): number {
+    return this.zoomFactors.get(scopeId) ?? 1;
+  }
+
+  /**
+   * 一次动一挡。
+   *
+   * 缩放是整个内置浏览器的，不是某一个标签页的：这个作用域里现在开着的标签、之后
+   * 新开的标签，看到的都是同一个字号——用户调的是「这个浏览器的字太小了」，不是
+   * 「这一页的字太小了」。
+   */
+  setZoom(step: "in" | "out" | "reset", scopeId = this.uiScopeId): BrowserStateSnapshot {
+    const current = this.zoomFor(scopeId);
+    const index = ZOOM_STEPS.indexOf(current);
+    const next = step === "reset"
+      ? 1
+      : ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, (index < 0 ? ZOOM_STEPS.indexOf(1) : index) + (step === "in" ? 1 : -1)))];
+    if (next === 1) this.zoomFactors.delete(scopeId);
+    else this.zoomFactors.set(scopeId, next);
+    for (const tab of this.tabsForScope(scopeId)) this.applyZoom(tab);
+    const state = this.state(scopeId);
+    if (scopeId === this.uiScopeId) this.publishState(state);
+    return state;
+  }
+
+  /**
+   * Chromium 记的是「这个站点的缩放」，换一个站点就回到默认，所以每次导航完都要
+   * 再落一次；否则用户放大过的浏览器一点链接就变回原样。
+   */
+  private applyZoom(tab: BrowserTab): void {
+    const guest = tab.guest;
+    if (!guest || guest.isDestroyed()) return;
+    guest.setZoomFactor(this.zoomFor(tab.scopeId));
   }
 
   async createTab(rawUrl?: string, activate = true, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
@@ -175,6 +221,7 @@ export class BrowserRuntimeManager {
     this.installGuestTeardown(tab, guest);
     await this.attachDebugger(tab);
     await this.applyViewportOverride(tab);
+    this.applyZoom(tab);
   }
 
   /**
@@ -549,7 +596,10 @@ export class BrowserRuntimeManager {
     contents.on("did-start-loading", update);
     contents.on("did-stop-loading", update);
     contents.on("page-title-updated", update);
-    contents.on("did-navigate", update);
+    contents.on("did-navigate", () => {
+      this.applyZoom(tab);
+      update();
+    });
     contents.on("did-navigate-in-page", update);
     // A login form is only worth filling once the document exists; anything the
     // user has already typed is left alone by the fill itself.

@@ -110,6 +110,8 @@ export interface BrowserStateSnapshot {
   scopeId: string;
   tabs: BrowserTabSnapshot[];
   activeTabId?: string;
+  /** 这个内置浏览器当前的缩放倍数，1 就是 100%。 */
+  zoom: number;
 }
 
 /**
@@ -396,6 +398,8 @@ export interface CoilCoilDesktopApi {
   browserBack(scopeId: string): Promise<BrowserStateSnapshot>;
   browserForward(scopeId: string): Promise<BrowserStateSnapshot>;
   reloadBrowser(scopeId: string): Promise<BrowserStateSnapshot>;
+  /** 内置浏览器的字号：一次一挡，或直接回到 100%。 */
+  setBrowserZoom(scopeId: string, step: "in" | "out" | "reset"): Promise<BrowserStateSnapshot>;
   setBrowserUiViewport(viewport: BrowserUiViewport): Promise<void>;
   /** Browsers installed on this Mac whose signed-in state can be taken over. */
   listImportableBrowsers(): Promise<ImportableProfile[]>;
