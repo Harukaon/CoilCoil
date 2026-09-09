@@ -57,7 +57,10 @@
 
 /* 卡片尺寸由 nebulaLayout.ts 决定，两边必须一致——第一版就是因为算的
    是 34px、画出来是 140px，才有 92 对节点互相压在一起。 */
-.memory-node { display: flex; width: 100%; height: 100%; box-sizing: border-box; align-items: center; gap: 8px; padding: 0 12px; border-radius: var(--radius-xl); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 4%); text-align: left; cursor: pointer; }
+/* 画板改成白底之后，卡片和底色是同一个白，只剩一层很淡的投影撑着，看久了发飘。
+   加一圈浅边框把卡片的边界交代清楚。颜色比一般的分隔线深一档是有原因的：画板通常
+   缩到 0.6 倍左右看全貌，1px 的边到那时不足一个物理像素，再淡就直接看不见了。 */
+.memory-node { display: flex; width: 100%; height: 100%; box-sizing: border-box; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid hsl(var(--th) var(--ts) var(--l-884)); border-radius: var(--radius-xl); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 4%); text-align: left; cursor: pointer; }
 .memory-node:hover { box-shadow: 0 2px 4px rgb(0 0 0 / 8%), 0 8px 20px rgb(0 0 0 / 8%); }
 .memory-node.selected { outline: 2px solid var(--c-green-muted); outline-offset: 2px; }
 .memory-node.empty { opacity: .6; }
@@ -68,7 +71,8 @@
 .memory-node-caret { flex: 0 0 auto; color: hsl(var(--th) var(--ts) var(--l-592)); transition: transform .15s ease; }
 .memory-node-caret.open { transform: rotate(180deg); }
 
-.memory-node.global { padding: 0 16px; background: hsl(var(--th) var(--ts) var(--l-310)); }
+/* 全局记忆是唯一一张深色卡片，自己就和白底分得开，再套一圈浅边框反而像描了个框。 */
+.memory-node.global { padding: 0 16px; border-color: transparent; background: hsl(var(--th) var(--ts) var(--l-310)); }
 .memory-node.global .memory-node-icon { color: hsl(var(--th) var(--ts) var(--l-876)); }
 .memory-node.global .memory-node-label { color: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 14px; font-weight: 600; }
 .memory-node.global .memory-node-meta { color: hsl(var(--th) var(--ts) var(--l-812)); }
