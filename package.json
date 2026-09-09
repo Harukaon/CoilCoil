@@ -42,7 +42,8 @@
     "smoke:desktop:browser-scope": "node scripts/browser-scope-smoke.mjs",
     "smoke:desktop:browser-guest": "node scripts/browser-guest-security-smoke.mjs",
     "smoke:desktop:browser-agent": "node scripts/browser-agent-smoke.mjs",
-    "smoke:desktop:live": "node scripts/desktop-smoke.mjs --live"
+    "smoke:desktop:live": "node scripts/desktop-smoke.mjs --live",
+    "refresh:models": "cd vendor/pi/packages/ai && npm run hydrate-model-data"
   },
   "engines": {
     "node": ">=22.19.0"
