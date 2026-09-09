@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
+import contextClearingExtension, {
   applyToolResultClearing,
   clearingRelievesPressure,
   planToolResultClearing,
@@ -101,4 +101,67 @@ test("清理只换掉输出，调用和参数原样留着", () => {
 
 test("一条都没清就把上下文原样交回去", () => {
   assert.equal(applyToolResultClearing(discardable(2), new Set()), undefined);
+});
+
+/* 上面测的都是纯函数。下面测接线本身——挂没挂对事件、到底返没返回 cancel。
+   这一层没测，正是之前几次问题的共同点：函数都对，接错了地方。 */
+
+function harness() {
+  const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
+  const emitted: Array<{ channel: string; value: unknown }> = [];
+  const pi = {
+    on(event: string, handler: (...args: unknown[]) => unknown) {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    events: { emit: (channel: string, value: unknown) => { emitted.push({ channel, value }); } },
+  };
+  contextClearingExtension(pi as never);
+  const ctx = { getContextUsage: () => ({ tokens: 200_000, contextWindow: CONTEXT_WINDOW, percent: 73 }) };
+  return {
+    emitted,
+    beforeCompact: (reason: string, messagesToSummarize: AgentMessage[]) =>
+      handlers.get("session_before_compact")![0]({ reason, preparation: { messagesToSummarize } }, ctx) as
+        { cancel?: boolean } | undefined,
+    context: (messages: AgentMessage[]) =>
+      handlers.get("context")![0]({ messages }, ctx) as { messages: AgentMessage[] } | undefined,
+  };
+}
+
+test("接在 Pi 的压缩决策上：清得动就取消摘要", () => {
+  const h = harness();
+  const result = h.beforeCompact("threshold", discardable(10));
+  assert.deepEqual(result, { cancel: true }, "清得动就该拦下这次摘要");
+  assert.equal(h.emitted.length, 1, "要报出去，界面上才画得出那条线");
+  assert.equal(h.emitted[0].channel, "coilcoil:context-clearing:v1");
+});
+
+test("清不动就让它照常摘要", () => {
+  const h = harness();
+  // 一条 4k 字符的结果远不到窗口的 5%，拦下来只是把同一次压缩推迟一轮。
+  assert.equal(h.beforeCompact("threshold", discardable(1, 4_000)), undefined);
+  assert.deepEqual(h.emitted, []);
+});
+
+test("手动 /compact 和溢出恢复不拦", () => {
+  // 手动是用户明确要一份摘要；溢出时请求已经炸了，再省这点没有意义。
+  for (const reason of ["manual", "overflow"]) {
+    const h = harness();
+    assert.equal(h.beforeCompact(reason, discardable(10)), undefined, `${reason} 不该被拦`);
+  }
+});
+
+test("拦下来之后，清理真的落在发出去的那一份上", () => {
+  const h = harness();
+  const older = discardable(10);
+  h.beforeCompact("threshold", older);
+  const sent = h.context([...older, ...discardable(2)])!.messages;
+  const first = sent[1] as unknown as { content: Array<{ text: string }> };
+  assert.match(first.content[0].text, /上下文已清理/, "决定了却没落到请求上，等于什么都没做");
+});
+
+test("同一次压缩不会被拦两次", () => {
+  const h = harness();
+  const older = discardable(10);
+  assert.deepEqual(h.beforeCompact("threshold", older), { cancel: true });
+  assert.equal(h.beforeCompact("threshold", older), undefined, "没有新的可清了，就得放它去摘要");
 });
