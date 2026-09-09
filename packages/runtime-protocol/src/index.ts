@@ -1213,6 +1213,19 @@ export type RuntimeCommand =
   | { type: "get_memory_configuration"; cwd?: string }
   | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
   | { type: "get_subagent_configuration" }
+  /**
+   * 跑任务面板上的一条任务。
+   *
+   * 不带 runtimeId：它不属于任何一个会话，服务端会为它单独起一个运行时，用完就扔。
+   */
+  | {
+    type: "run_issue";
+    cwd: string;
+    issueId: string;
+    prompt: string;
+    images?: PromptImage[];
+    maxTurns?: number;
+  }
   | { type: "save_subagent_configuration"; input: SubagentConfigurationInput }
   | { type: "get_skill_configuration"; cwd?: string }
   | { type: "set_skill_enabled"; filePath: string; enabled: boolean; cwd?: string }

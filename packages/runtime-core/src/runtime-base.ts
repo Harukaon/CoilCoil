@@ -122,7 +122,7 @@ export abstract class RuntimeBase {
     this.workflowDir = resolveWorkflowDirectory(options.workflowDir);
     this.browserScopeId = options.browserScopeId;
     const resources = bundledRuntimeResources(this.workflowDir);
-    this.extensionPaths = resources.extensions;
+    this.extensionPaths = [...resources.extensions, ...options.additionalExtensionPaths ?? []];
     this.skillPaths = resources.skills;
     this.promptPaths = resources.prompts;
     this.emitEvent = options.onEvent ?? (() => undefined);

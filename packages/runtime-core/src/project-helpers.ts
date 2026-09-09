@@ -161,6 +161,16 @@ export function resolveWorkflowDirectory(explicit?: string): string {
   return dirname(manifestPath);
 }
 
+/**
+ * 任务面板那条后台运行专用的扩展。
+ *
+ * 它故意不在 workflow 的 pi.extensions 清单里——普通对话不该看到 issue_reply /
+ * issue_ask 这两个工具——所以路径在这里单独给出来，由起那条运行的人挂上去。
+ */
+export function issueAgentExtensionPath(workflowDirectory?: string): string {
+  return join(resolveWorkflowDirectory(workflowDirectory), "extensions", "issue-agent.ts");
+}
+
 export function resourcesFromManifest(directory: string): RuntimeResources {
   const manifestPath = join(directory, "package.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as WorkflowManifest;
