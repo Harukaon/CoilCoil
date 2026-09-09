@@ -8,6 +8,7 @@ import {
   ISSUE_COLUMNS,
   childrenOf,
   issueImages,
+  issueFollowUp,
   issuePrompt,
   issuesInColumn,
   newIssue,
@@ -178,6 +179,34 @@ test("发给它的那段话带着标题、正文和最近几条来回", () => {
   // 结论只能通过工具交回来——这条运行是后台的，正文里随口一说用户看不到。
   assert.match(prompt, /issue_reply/);
   assert.match(prompt, /issue_ask/);
+});
+
+test("我打回重做时写的那句话，必须发给它", () => {
+  // 打回重做记成的是状态事件（它同时把卡片退回待处理），第一版把状态事件全滤掉
+  // 了，于是用户在批阅界面写的要求一次都没送出去，它三轮都回同一句。
+  const issue = newIssue("测试任务", "回复我一个 true 即可", "high");
+  const rejected = rejectIssue([{ ...issue, status: "review" }], issue.id, "回答我你现在有哪些工具，列出来");
+  const prompt = issuePrompt(rejected[0]);
+  assert.match(prompt, /有哪些工具/);
+  assert.match(prompt, /我打回重做了/);
+  assert.doesNotMatch(prompt, /移到/, "列的移动是流水账，不该占提示词");
+});
+
+test("再跑一次只说新说的那几句，不把整条任务再念一遍", () => {
+  const issue = newIssue("测试任务", "正文", "high");
+  const withHistory = {
+    ...issue,
+    events: [
+      { at: "2026-01-01T00:00:00.000Z", by: "user" as const, kind: "comment" as const, text: "先做这个" },
+      { at: "2026-01-01T00:01:00.000Z", by: "agent" as const, kind: "comment" as const, text: "做完了" },
+    ],
+  };
+  const rejected = rejectIssue([withHistory], issue.id, "再看看边框")[0];
+  const followUp = issueFollowUp(rejected);
+  assert.match(followUp, /再看看边框/);
+  assert.doesNotMatch(followUp, /先做这个/, "上一轮之前说过的话，它自己的对话里还留着");
+  assert.doesNotMatch(followUp, /正文/);
+  assert.match(issueFollowUp(withHistory), /接着做/, "没有新说的话时也要有一句能发出去的");
 });
 
 test("同一条提交两次是覆盖不是加一条", () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
@@ -37,7 +37,16 @@ class FakeRuntime {
     this.options.onEvent?.(event);
   }
 
+  readonly openedSessions: string[] = [];
+  createdSessions = 0;
+
   async createSession(): Promise<SessionSnapshot> {
+    this.createdSessions += 1;
+    return {} as SessionSnapshot;
+  }
+
+  async openSession(_cwd: string, sessionPath: string): Promise<SessionSnapshot> {
+    this.openedSessions.push(sessionPath);
     return {} as SessionSnapshot;
   }
 
@@ -206,6 +215,60 @@ test("运行目录的环境变量用完就还原，不会泄给下一条", async
   try {
     await runIssueTask(fixture.options, { cwd: "/project", issueId: "issue-6", prompt: "做完它" }, fixture.dependencies);
     assert.equal(process.env[ISSUE_RUN_DIR_ENV], before);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("同一条任务再跑一次，是接着上次那条对话说，不是从头讲一遍", async () => {
+  const fixture = harness({ replyOnTurn: 1, reply: { kind: "reply", text: "第一遍做完了" } });
+  try {
+    await runIssueTask(fixture.options, {
+      cwd: "/project",
+      issueId: "issue-7",
+      prompt: "把按钮加上",
+      followUp: "我打回重做了：按钮的位置不对",
+    }, fixture.dependencies);
+
+    // 真的运行时会在这里留下一个会话文件；假的不会，所以补一个。
+    const sessionsDir = fixture.runtimes[0].options.sessionDir;
+    writeFileSync(join(sessionsDir, "2026-09-10T00-00-00-000Z_session.jsonl"), "{}\n", "utf8");
+
+    await runIssueTask(fixture.options, {
+      cwd: "/project",
+      issueId: "issue-7",
+      prompt: "把按钮加上",
+      followUp: "我打回重做了：按钮的位置不对",
+    }, fixture.dependencies);
+
+    const second = fixture.runtimes[1];
+    assert.equal(second.createdSessions, 0, "第二次不该另起一条对话");
+    assert.equal(second.openedSessions.length, 1, "第二次应该接着上次那条");
+    assert.match(second.prompts[0], /按钮的位置不对/, "第二次说的是新说的那几句");
+    assert.doesNotMatch(second.prompts[0], /【任务面板】/, "整条任务不必再念一遍");
+    assert.equal(second.options.sessionDir, sessionsDir, "两次跑用的是同一条任务的目录");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("上一次的回复不会被当成这一次的", async () => {
+  const fixture = harness({ replyOnTurn: 1, reply: { kind: "reply", text: "第一遍的结论" } });
+  try {
+    await runIssueTask(fixture.options, { cwd: "/project", issueId: "issue-8", prompt: "做一遍" }, fixture.dependencies);
+
+    // 第二次让它一句都不回：如果上一次那份回复还留在目录里，这里会把它当成新结论。
+    const second = harness({ lastAssistantText: "这一遍我什么都没做成" });
+    const result = await runIssueTask(fixture.options, {
+      cwd: "/project",
+      issueId: "issue-8",
+      prompt: "再做一遍",
+      maxTurns: 1,
+    }, second.dependencies);
+    second.cleanup();
+
+    assert.equal(result.kind, "fallback");
+    assert.equal(result.text, "这一遍我什么都没做成");
   } finally {
     fixture.cleanup();
   }

@@ -146,22 +146,59 @@ export function reviewQueue(issues: readonly Issue[]): Issue[] {
 }
 
 /** 发给 agent 的那段话。要它自己说清楚做了什么，因为验收的是人。 */
+/**
+ * 打回重做那一条。
+ *
+ * 它记成了状态事件（因为它同时把卡片退回待处理），可它带着的是用户真正想说的那句
+ * 话。第一版把状态事件全滤掉了，结果用户在批阅界面写「回答我你有哪些工具」，那句
+ * 话一次都没发给它——它只看见任务正文和自己上一轮的回答，于是三次都回同一句。
+ */
+export function isReworkEvent(event: IssueEvent): boolean {
+  return event.kind === "status" && event.by === "user" && event.text.startsWith("打回重做");
+}
+
+/** 这条任务上说过的话，按时间排。列的移动这种流水不算说话。 */
+function saidOn(issue: Issue): IssueEvent[] {
+  return issue.events.filter((event) => event.kind === "comment" || event.kind === "note" || isReworkEvent(event));
+}
+
+function speak(event: IssueEvent): string {
+  const shot = event.images?.length ? `（附了 ${event.images.length} 张图）` : "";
+  const who = isReworkEvent(event)
+    ? "我打回重做了"
+    : event.by === "user" ? "我说" : "你上一轮交的结论是";
+  return `\n${who}${shot}：${event.text || "（只贴了图）"}`;
+}
+
 export function issuePrompt(issue: Issue, parent?: Issue): string {
-  const said = issue.events.filter((event) => event.kind === "comment" || event.kind === "note").slice(-6);
   return [
     `【任务面板】${issue.title}`,
     parent ? `（这是「${parent.title}」下面的一条子任务）` : "",
     "",
     issue.body || "（这条没有写描述，按标题理解。）",
-    ...said.map((event) => {
-      const who = event.by === "user" ? "我" : "你上一轮";
-      const shot = event.images?.length ? `（附了 ${event.images.length} 张图）` : "";
-      return `\n${who}说${shot}：${event.text || "（只贴了图）"}`;
-    }),
+    ...saidOn(issue).slice(-10).map(speak),
     "",
     "这是这个工作区任务面板上的一条，请你把它做完。",
     "做完之后调用 issue_reply 把结论交给我：改了什么、我怎么验收。需要我先拿个主意才能往下走，就调用 issue_ask 问，别硬做。",
   ].filter((line) => line !== "").join("\n");
+}
+
+/**
+ * 再跑一次时说的话。
+ *
+ * 一条任务的后台运行是接着上一次跑的——同一个会话，它记得自己上次做了什么——所以
+ * 这里只需要把「你上次交完之后我又说了什么」递过去，不必把整条任务再念一遍。
+ */
+export function issueFollowUp(issue: Issue): string {
+  const said = saidOn(issue);
+  const lastAgent = said.map((event) => event.by).lastIndexOf("agent");
+  const since = said.slice(lastAgent + 1).filter((event) => event.by === "user");
+  if (!since.length) return "接着做这条任务，做完调用 issue_reply 交结论。";
+  return [
+    ...since.map(speak),
+    "",
+    "按上面这些接着做，做完调用 issue_reply 交结论；需要我拿主意就调用 issue_ask。",
+  ].join("\n").trim();
 }
 
 /**
@@ -171,8 +208,7 @@ export function issuePrompt(issue: Issue, parent?: Issue): string {
  * 哪张图是哪句话在说。同一张图（同一个 id）只发一次。
  */
 export function issueImages(issue: Issue): PromptImage[] {
-  const said = issue.events.filter((event) => event.kind === "comment" || event.kind === "note").slice(-6);
-  const all = [...issue.images ?? [], ...said.flatMap((event) => event.images ?? [])];
+  const all = [...issue.images ?? [], ...saidOn(issue).slice(-10).flatMap((event) => event.images ?? [])];
   const seen = new Set<string>();
   return all.filter((image) => {
     const key = image.id ?? image.data.slice(0, 64);

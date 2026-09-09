@@ -121,10 +121,35 @@ try {
   assert.deepEqual(readdirSync(sessionDir), [], "这条运行在工作区的会话目录里留下了东西");
   const runs = readdirSync(join(agentDir, "issues", "runs"));
   assert.equal(runs.length, 1, "运行现场应该留在 agent/issues/runs 下");
-  assert.ok(existsSync(join(agentDir, "issues", "runs", runs[0], "reply.json")), "回复文件没写出来");
+  const issueDir = join(agentDir, "issues", "runs", runs[0]);
+  assert.ok(existsSync(join(issueDir, "reply.json")), "回复文件没写出来");
+  const firstSessions = readdirSync(join(issueDir, "sessions"));
+  assert.equal(firstSessions.length, 1);
+
+  // 第二次：模拟「打回重做」。同一条任务接着上次那条对话说，所以它必须记得上一轮
+  // 自己回了什么——用户打回重做时写的那句话，就是这样送到它面前的。
+  const again = await request({
+    type: "run_issue",
+    cwd: projectDir,
+    issueId: "smoke-issue",
+    prompt: "【任务面板】冒烟\n\n什么都不用改。直接调用 issue_reply，summary 写「ok」。",
+    followUp: "我打回重做了：你上一轮回的是什么？原样再说一遍，写进 issue_reply 的 summary。",
+    maxTurns: 3,
+  });
+
+  assert.equal(again.kind, "reply", `第二轮没有交结论：${JSON.stringify(again)}`);
+  assert.match(again.text, /ok/i, `它不记得上一轮说了什么：${again.text}`);
+  assert.deepEqual(readdirSync(sessionDir), [], "第二次也不该在工作区留下会话");
+  assert.deepEqual(
+    readdirSync(join(agentDir, "issues", "runs")),
+    runs,
+    "同一条任务不该每跑一次就多一个目录",
+  );
+  assert.deepEqual(readdirSync(join(issueDir, "sessions")), firstSessions, "第二次应该接着上次那条对话，而不是另起一条");
 
   process.stdout.write(
-    `任务后台运行冒烟通过（${Math.round((Date.now() - started) / 1000)} 秒，${result.turns} 轮）：${result.text.trim().slice(0, 60)}\n`,
+    `任务后台运行冒烟通过（${Math.round((Date.now() - started) / 1000)} 秒）：`
+    + `第一轮「${result.text.trim().slice(0, 30)}」，打回重做后「${again.text.trim().slice(0, 40)}」\n`,
   );
   child.kill("SIGTERM");
   rmSync(temporaryRoot, { recursive: true, force: true });

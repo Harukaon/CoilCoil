@@ -1222,7 +1222,10 @@ export type RuntimeCommand =
     type: "run_issue";
     cwd: string;
     issueId: string;
+    /** 第一次跑这条任务时说的话。 */
     prompt: string;
+    /** 再跑一次时说的话：同一条对话接着说，所以只说新增的那几句。 */
+    followUp?: string;
     images?: PromptImage[];
     maxTurns?: number;
   }

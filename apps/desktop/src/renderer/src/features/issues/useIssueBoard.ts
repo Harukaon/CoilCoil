@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Issue } from "../../../../shared/desktop-api";
-import { agentNote, comment, issueImages, issuePrompt, nextRunnableIssue, withEvent, withStatus } from "./issueModel";
+import { agentNote, comment, issueFollowUp, issueImages, issuePrompt, nextRunnableIssue, withEvent, withStatus } from "./issueModel";
 
 /** 「开始」按下去之后，一条 Issue 走到哪一步了。 */
 export type IssueRunPhase = "idle" | "running";
@@ -133,6 +133,7 @@ export function requestIssueRun(input: { cwd: string; issue: Issue; parent?: Iss
     cwd: input.cwd,
     issueId: input.issue.id,
     prompt: issuePrompt(input.issue, input.parent),
+    followUp: issueFollowUp(input.issue),
     images: issueImages(input.issue),
   });
 }

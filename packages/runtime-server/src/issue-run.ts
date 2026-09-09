@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { CoilCoilRuntime, CoilCoilRuntimeOptions } from "@coilcoil/runtime-core";
 import { issueAgentExtensionPath } from "@coilcoil/runtime-core";
@@ -30,8 +30,8 @@ const DEFAULT_MAX_TURNS = 5;
 const TURN_TIMEOUT_MS = 15 * 60_000;
 /** 发出去多久还没开跑，就认定这条运行起不来（最常见的是模型没配好）。 */
 const START_TIMEOUT_MS = 60_000;
-/** 留几次运行的现场。留着是为了解释一次跑坏了的运行，再老的就是垃圾。 */
-const RUNS_KEPT = 20;
+/** 留几条任务的现场（每条任务一个目录，里面是它自己那条对话）。 */
+const ISSUES_KEPT = 50;
 
 /**
  * 这条运行的开场白，和任务正文一起发出去。
@@ -55,7 +55,10 @@ const NUDGE_PROMPT = [
 export interface IssueRunRequest {
   cwd: string;
   issueId: string;
+  /** 第一次跑这条任务时说的话：完整的任务简报。 */
   prompt: string;
+  /** 再跑一次时说的话：只有「你上次交完之后我又说了什么」。 */
+  followUp?: string;
   images?: PromptImage[];
   maxTurns?: number;
 }
@@ -96,27 +99,60 @@ export function readIssueReply(runDir: string): StoredReply | undefined {
   }
 }
 
-/** 目录名以时间戳开头，所以排序就是排年龄。删不掉不算失败。 */
-function pruneRuns(runsDir: string, keep = RUNS_KEPT): void {
+/**
+ * 留几条任务的现场。
+ *
+ * 按最近改动过的时间留，不是按名字：目录名现在是任务 id，不带时间了。删不掉不算
+ * 失败，也绝不能删到这一条自己头上。
+ */
+function pruneRuns(runsDir: string, keepAlive: string, keep = ISSUES_KEPT): void {
   let names: string[];
   try {
     names = readdirSync(runsDir);
   } catch {
     return;
   }
-  for (const name of names.sort().slice(0, Math.max(0, names.length - keep))) {
+  if (names.length <= keep) return;
+  const byAge = names
+    .map((name) => {
+      try {
+        return { name, at: statSync(join(runsDir, name)).mtimeMs };
+      } catch {
+        return { name, at: 0 };
+      }
+    })
+    .sort((left, right) => left.at - right.at);
+  for (const entry of byAge.slice(0, byAge.length - keep)) {
+    if (entry.name === keepAlive) continue;
     try {
-      rmSync(join(runsDir, name), { recursive: true, force: true });
+      rmSync(join(runsDir, entry.name), { recursive: true, force: true });
     } catch {
       // 清不掉一份旧现场，不该让这次运行失败。
     }
   }
 }
 
-/** 文件名里不能有工作区路径里的斜杠和空格。 */
-function runDirectoryName(issueId: string): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `${stamp}-${issueId.replace(/[^\w.-]/g, "_").slice(0, 40)}`;
+/** 一条任务一个目录，名字就是它的 id（文件名里不能有斜杠和空格）。 */
+function issueDirectoryName(issueId: string): string {
+  return issueId.replace(/[^\w.-]/g, "_").slice(0, 60) || "issue";
+}
+
+/**
+ * 这条任务上一次跑留下的会话，没有就是第一次跑。
+ *
+ * 一条任务的多次运行是同一条对话：你打回重做的时候，它得记得自己上次做了什么，否
+ * 则每次都是一个从零开始、只看得见时间线摘要的新人。
+ */
+function previousSession(sessionsDir: string): string | undefined {
+  let names: string[];
+  try {
+    names = readdirSync(sessionsDir).filter((name) => name.endsWith(".jsonl"));
+  } catch {
+    return undefined;
+  }
+  // 会话名以 ISO 时间戳开头，排序就是排年龄。
+  const newest = names.sort().at(-1);
+  return newest ? join(sessionsDir, newest) : undefined;
 }
 
 /**
@@ -173,15 +209,20 @@ export async function runIssueTask(
   dependencies: IssueRunDependencies,
 ): Promise<IssueRunResult> {
   const runsDir = join(options.agentDir, "issues", "runs");
-  const runDir = join(runsDir, runDirectoryName(request.issueId));
-  mkdirSync(runDir, { recursive: true });
+  const issueDirName = issueDirectoryName(request.issueId);
+  const runDir = join(runsDir, issueDirName);
+  const sessionsDir = join(runDir, "sessions");
+  mkdirSync(sessionsDir, { recursive: true });
+  // 上一次的回复留在原地会被当成这一次的：目录是按任务留的，不是按次。
+  rmSync(join(runDir, ISSUE_REPLY_FILENAME), { force: true });
+  const resumeFrom = previousSession(sessionsDir);
   const signals: TurnSignals = { started: false, settled: false };
   const previousRunDir = process.env[ISSUE_RUN_DIR_ENV];
   // 扩展在加载的那一刻读它，而加载就发生在下面 createSession 的过程里。
   process.env[ISSUE_RUN_DIR_ENV] = runDir;
   const runtime = dependencies.createRuntime({
     ...options,
-    sessionDir: join(runDir, "sessions"),
+    sessionDir: sessionsDir,
     additionalExtensionPaths: [
       ...options.additionalExtensionPaths ?? [],
       issueAgentExtensionPath(options.workflowDir),
@@ -201,13 +242,26 @@ export async function runIssueTask(
   const startTimeoutMs = dependencies.startTimeoutMs ?? START_TIMEOUT_MS;
   const turnTimeoutMs = dependencies.turnTimeoutMs ?? TURN_TIMEOUT_MS;
   try {
-    await runtime.createSession(request.cwd);
+    // 接着上次那条对话跑；它不在了（第一次跑，或者现场被清过）就重新开一条。
+    let resumed = false;
+    if (resumeFrom) {
+      try {
+        await runtime.openSession(request.cwd, resumeFrom);
+        resumed = true;
+      } catch {
+        resumed = false;
+      }
+    }
+    if (!resumed) await runtime.createSession(request.cwd);
+    const opening = resumed
+      ? `${RUN_PREAMBLE}${request.followUp ?? request.prompt}`
+      : `${RUN_PREAMBLE}${request.prompt}`;
     const maxTurns = Math.max(1, request.maxTurns ?? DEFAULT_MAX_TURNS);
     for (let turn = 1; turn <= maxTurns; turn += 1) {
       signals.started = false;
       signals.settled = false;
       const first = turn === 1;
-      await runtime.prompt(first ? `${RUN_PREAMBLE}${request.prompt}` : NUDGE_PROMPT, first ? request.images ?? [] : []);
+      await runtime.prompt(first ? opening : NUDGE_PROMPT, first ? request.images ?? [] : []);
       const outcome = await waitForTurn(signals, startTimeoutMs, turnTimeoutMs);
       const reply = readIssueReply(runDir);
       if (reply) return { ...reply, turns: turn };
@@ -234,6 +288,6 @@ export async function runIssueTask(
     if (previousRunDir === undefined) delete process.env[ISSUE_RUN_DIR_ENV];
     else process.env[ISSUE_RUN_DIR_ENV] = previousRunDir;
     await runtime.dispose().catch(() => undefined);
-    pruneRuns(runsDir);
+    pruneRuns(runsDir, issueDirName);
   }
 }
