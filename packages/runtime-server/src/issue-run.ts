@@ -34,10 +34,13 @@ const START_TIMEOUT_MS = 60_000;
 const ISSUES_KEPT = 50;
 
 /**
- * 这条运行的开场白，和任务正文一起发出去。
+ * 这条对话的开场白，只在它第一次开口时说一次。
  *
  * 放在这里而不是界面那边：这段话说的是「你现在是一条后台任务、只有这两个工具能
  * 说话」，和 issue-agent 那两个工具是一件事的两面，分开写迟早会对不上。
+ *
+ * 接着上次跑的时候不再说一遍——一条任务就是一条对话，规矩它开头就听过了，每次重
+ * 复只是在同一条会话里堆废话。
  */
 const RUN_PREAMBLE = [
   "你现在在处理任务面板上的一条任务，不是在跟用户对话。",
@@ -256,7 +259,7 @@ export async function runIssueTask(
     }
     if (!resumed) await runtime.createSession(request.cwd);
     const opening = resumed && request.followUp
-      ? { text: `${RUN_PREAMBLE}${request.followUp}`, images: request.followUpImages ?? [] }
+      ? { text: request.followUp, images: request.followUpImages ?? [] }
       : { text: `${RUN_PREAMBLE}${request.prompt}`, images: request.images ?? [] };
     const maxTurns = Math.max(1, request.maxTurns ?? DEFAULT_MAX_TURNS);
     for (let turn = 1; turn <= maxTurns; turn += 1) {

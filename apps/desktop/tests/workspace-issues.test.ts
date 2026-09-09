@@ -176,6 +176,9 @@ test("发给它的那段话带着标题、正文和最近几条来回", () => {
   assert.match(prompt, /正文/);
   assert.match(prompt, /大改造/);
   assert.match(prompt, /注意别动样式/);
+  // 它自己上一轮的回答不复述：那句话就在这条任务自己的对话里。
+  const answered = { ...child, events: [...child.events, { at: "2026-01-02T00:00:00.000Z", by: "agent" as const, kind: "comment" as const, text: "我把按钮挪好了" }] };
+  assert.doesNotMatch(issuePrompt(answered, parent), /我把按钮挪好了/);
   // 结论只能通过工具交回来——这条运行是后台的，正文里随口一说用户看不到。
   assert.match(prompt, /issue_reply/);
   assert.match(prompt, /issue_ask/);

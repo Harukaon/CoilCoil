@@ -162,21 +162,32 @@ function saidOn(issue: Issue): IssueEvent[] {
   return issue.events.filter((event) => event.kind === "comment" || event.kind === "note" || isReworkEvent(event));
 }
 
+/** 其中我说的那些：留言，和打回重做时写的理由。 */
+function userSaidOn(issue: Issue): IssueEvent[] {
+  return saidOn(issue).filter((event) => event.by === "user");
+}
+
 function speak(event: IssueEvent): string {
   const shot = event.images?.length ? `（附了 ${event.images.length} 张图）` : "";
-  const who = isReworkEvent(event)
-    ? "我打回重做了"
-    : event.by === "user" ? "我说" : "你上一轮交的结论是";
+  const who = isReworkEvent(event) ? "我打回重做了" : "我说";
   return `\n${who}${shot}：${event.text || "（只贴了图）"}`;
 }
 
+/**
+ * 第一次把这条任务交给它时说的话。
+ *
+ * 一条任务就是一条对话，所以这里只说任务本身，加上到目前为止我说过的话（这条任务
+ * 可能在待办池里躺过一阵，期间的留言也是任务的一部分）。它自己上一轮回了什么不必
+ * 复述——那句话就在它自己的对话里；每跑一次都把整条时间线再念一遍，是把一条会话当
+ * 成一次性的提示词在用。
+ */
 export function issuePrompt(issue: Issue, parent?: Issue): string {
   return [
     `【任务面板】${issue.title}`,
     parent ? `（这是「${parent.title}」下面的一条子任务）` : "",
     "",
     issue.body || "（这条没有写描述，按标题理解。）",
-    ...saidOn(issue).slice(-10).map(speak),
+    ...userSaidOn(issue).slice(-10).map(speak),
     "",
     "这是这个工作区任务面板上的一条，请你把它做完。",
     "做完之后调用 issue_reply 把结论交给我：改了什么、我怎么验收。需要我先拿个主意才能往下走，就调用 issue_ask 问，别硬做。",
@@ -186,8 +197,8 @@ export function issuePrompt(issue: Issue, parent?: Issue): string {
 /**
  * 再跑一次时说的话。
  *
- * 一条任务的后台运行是接着上一次跑的——同一个会话，它记得自己上次做了什么——所以
- * 这里只需要把「你上次交完之后我又说了什么」递过去，不必把整条任务再念一遍。
+ * 这是同一条对话里我接着说的下一句，所以只有「你上次交完之后我又说了什么」：任务
+ * 正文、之前的留言、它自己的回答，全都还在那条对话里躺着。
  */
 export function issueFollowUp(issue: Issue): { text: string; images: PromptImage[] } {
   const said = saidOn(issue);
@@ -213,7 +224,7 @@ export function issueFollowUp(issue: Issue): { text: string; images: PromptImage
  * 哪张图是哪句话在说。同一张图（同一个 id）只发一次。
  */
 export function issueImages(issue: Issue): PromptImage[] {
-  return dedupeImages([...issue.images ?? [], ...saidOn(issue).slice(-10).flatMap((event) => event.images ?? [])]);
+  return dedupeImages([...issue.images ?? [], ...userSaidOn(issue).slice(-10).flatMap((event) => event.images ?? [])]);
 }
 
 /** 同一张图（同一个 id）只发一次。 */
