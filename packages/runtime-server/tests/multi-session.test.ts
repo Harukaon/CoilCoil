@@ -68,6 +68,10 @@ class FakeRuntime {
 
   refreshSessionModelFromRegistry(): void {}
 
+  async getSkillConfiguration(cwd: string): Promise<{ cwd: string; ordinal: number }> {
+    return { cwd, ordinal: this.ordinal };
+  }
+
   async createSession(cwd: string, model?: SessionModelSelection): Promise<SessionSnapshot> {
     this.createdWithModels.push(model);
     return this.install(cwd, `${cwd}/session-${this.ordinal}.jsonl`);
@@ -792,4 +796,43 @@ test("shutdown disposes every runtime even when the parent channel is already go
 
   await server.dispose();
   assert.equal(runtimes.every((runtime) => runtime.disposed), true, "a failing release notice must not abort the cleanup");
+});
+
+test("workspace configuration reads survive a session runtime retired for idleness", async () => {
+  const runtimes: FakeRuntime[] = [];
+  let runtimeId = 0;
+  const server = new RuntimeServer(
+    { agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" },
+    () => undefined,
+    {
+      createRuntime: (options) => {
+        const runtime = new FakeRuntime(runtimes.length, options);
+        runtimes.push(runtime);
+        return runtime as unknown as CoilCoilRuntime;
+      },
+      createRuntimeId: () => `runtime-${++runtimeId}`,
+    },
+  );
+
+  await server.handle({ id: "open", command: { type: "open_session", cwd: "/project", sessionPath: "/sessions/a.jsonl" } });
+
+  // The panels keep the runtime id they were opened with, and an idle runtime is
+  // retired without telling them. Reading the workspace's skills must not depend
+  // on that conversation still being in memory.
+  const skills = await server.handle({
+    id: "skills",
+    runtimeId: "runtime-retired",
+    command: { type: "get_skill_configuration", cwd: "/project" },
+  });
+  assert.equal(skills.ok, true);
+  assert.deepEqual(skills.result, { cwd: "/project", ordinal: 0 }, "the control runtime answers workspace reads");
+
+  const prompt = await server.handle({
+    id: "prompt",
+    runtimeId: "runtime-retired",
+    command: { type: "prompt", text: "继续", images: [], clientMessageId: "client-retired" },
+  });
+  assert.equal(prompt.ok, false, "session-scoped commands still refuse a runtime that is gone");
+
+  await server.dispose();
 });

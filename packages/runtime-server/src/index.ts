@@ -55,6 +55,29 @@ function normalizeSessionPath(path: string): string {
   }
 }
 
+/**
+ * Reads that answer from the workspace's own configuration files.
+ *
+ * They name their `cwd` and read it off disk, so the runtime they are addressed
+ * to is only a host — any live one gives the same answer. That matters because
+ * an idle session runtime is retired behind the renderer's back, and the panels
+ * keep the id they were opened with: opening 技能 or MCP after that produced
+ * 「所选会话运行时已失效，请重新打开会话」 (74 times in the user's log), asking
+ * them to reopen a conversation to read a setting that never belonged to it.
+ *
+ * Session-scoped commands keep the error. Their answers and their events belong
+ * to one conversation, so silently serving them from another runtime would put
+ * the renderer on a session it is not showing.
+ */
+function answersFromWorkspaceConfiguration(command: RuntimeCommand): boolean {
+  return command.type === "get_mcp_configuration"
+    || command.type === "get_mcp_json"
+    || command.type === "get_mcp_status"
+    || command.type === "get_memory_configuration"
+    || command.type === "get_subagent_configuration"
+    || command.type === "get_skill_configuration";
+}
+
 function eventChangesSnapshot(event: RuntimeEvent): boolean {
   return event.type === "message_started"
     || event.type === "prompt_queue_updated"
@@ -378,7 +401,10 @@ export class RuntimeServer {
     if ((command.type === "set_session_model" || command.type === "set_session_fast") && !runtimeId) {
       throw new Error("修改当前会话模型参数时缺少会话标识，请重新打开会话后再试。");
     }
-    const runtime = alwaysControl ? this.runtime : this.selectedRuntime(runtimeId);
+    const addressedRuntimeGone = runtimeId !== undefined && !this.runtimes.has(runtimeId);
+    const useControlRuntime = alwaysControl
+      || (addressedRuntimeGone && answersFromWorkspaceConfiguration(command));
+    const runtime = useControlRuntime ? this.runtime : this.selectedRuntime(runtimeId);
     const result = await this.dispatchTo(runtime, command);
     if (command.type === "archive_session") await this.releaseSession(command.sessionPath);
     if (
