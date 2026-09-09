@@ -56,19 +56,32 @@ test("a roomy window is left alone", () => {
   assert.deepEqual(plan.toolCallIds, []);
 });
 
-test("the newest tool results are never cleared", () => {
+test("最近这一段对话原封不动，动的只有它前面的", () => {
+  // 每条结果 40,000 字符 ≈ 10,000 token，保护额度 50,000，所以最新 5 条一定
+  // 安全；不足 8 条时由下限兜底。总之最新的那几条必须一条都不动。
   const plan = planToolResultClearing(conversation(30), new Set(), FULL);
   const cleared = new Set(plan.toolCallIds);
-  for (let index = 18; index < 30; index++) {
-    assert.equal(cleared.has(`call-${index}`), false, `call-${index} 属于最近 12 条，不该被清理`);
+  for (let index = 25; index < 30; index++) {
+    assert.equal(cleared.has(`call-${index}`), false, `call-${index} 在受保护的那一段里`);
   }
-  assert.equal(cleared.has("call-0"), true);
-  assert.equal(cleared.size, 18);
+  assert.equal(cleared.has("call-0"), true, "最老的那条就是要清的");
+  assert.ok(cleared.size > 0 && cleared.size < 30);
 });
 
-test("a batch too small to pay for the cache write waits", () => {
-  // Twelve results are kept, so only the first one is a candidate, and one
-  // 4k-character read is nowhere near the batch minimum.
+test("保护范围按 token 算，不是按条数", () => {
+  // 条数不是跨度：用户真实会话里每轮工具调用的中位数是 13，一半的轮次超过
+  // 12 条。按「最新 12 条」保护，就等于一半的时间里模型正在做的这一轮，
+  // 自己前面的输出被删掉了。
+  const small = planToolResultClearing(conversation(40, 1_600), new Set(), FULL);
+  const large = planToolResultClearing(conversation(40, 40_000), new Set(), FULL);
+  const keptSmall = 40 - small.toolCallIds.length;
+  const keptLarge = 40 - large.toolCallIds.length;
+  assert.ok(keptSmall > keptLarge,
+    `结果越小，同样的 token 额度应当保住越多条（小 ${keptSmall} 条 vs 大 ${keptLarge} 条）`);
+});
+
+test("腾不出多少就干脆不动手", () => {
+  // 十三条 4k 字符的读取加起来也远不到窗口的 5%，清了只是白打断缓存。
   const plan = planToolResultClearing(conversation(13, 4_000), new Set(), FULL);
   assert.deepEqual(plan.toolCallIds, []);
 });
@@ -146,12 +159,12 @@ test("清理是压缩的第一级，只在压缩线附近才动手", () => {
 });
 
 test("动手的时候一次清干净，而不是每次挤一点", () => {
-  const results = Array.from({ length: 20 }, (_, index) => [
-    toolCall(`c${index}`, "read"),
-    toolResult(`c${index}`, "read", 40_000),
-  ]).flat();
-  // 20 条里最新的 12 条留着，其余 8 条应当在同一批里全部清掉。
-  assert.equal(planToolResultClearing(results, new Set(), FULL).toolCallIds.length, 8);
+  const messages = conversation(20);
+  const first = planToolResultClearing(messages, new Set(), FULL);
+  // 一次就把当时所有够格的都清掉；再问一次，没有新的可清。
+  const again = planToolResultClearing(messages, new Set(first.toolCallIds), FULL);
+  assert.ok(first.toolCallIds.length > 1, "一批不能只清一条");
+  assert.deepEqual(again.toolCallIds, [], "同样的输入不该还剩下可清的");
 });
 
 test("清理线必须赶在 Pi 决定摘要之前", () => {

@@ -65,8 +65,23 @@ export function clearingThreshold(contextWindow: number): number {
   return Math.max(contextWindow * 0.5, contextWindow - PI_RESERVE_TOKENS - HEADROOM_TOKENS);
 }
 
-/** Newest tool results kept verbatim no matter how full the window is. */
-const KEEP_RECENT_RESULTS = 12;
+/**
+ * How much of the recent conversation keeps its tool output no matter what.
+ *
+ * Measured in tokens, and deliberately the same number compaction keeps
+ * verbatim, so both stages draw one line: whatever is recent enough to survive
+ * a summary is recent enough to keep its tool output.
+ *
+ * It used to be a count — the newest twelve results. A count is not a span. In
+ * this user's real sessions the median turn issues thirteen tool calls and half
+ * of all turns issue more than twelve, so half the time the model had its own
+ * earlier output cleared while it was still working inside that turn. That is
+ * the one thing this stage must never do.
+ */
+const KEEP_RECENT_TOKENS = 50_000;
+
+/** A floor under the token guard, so a tiny window still protects something. */
+const KEEP_RECENT_RESULTS = 8;
 
 /** A result smaller than this is not worth the cache invalidation. */
 const MIN_RESULT_TOKENS = 400;
@@ -128,13 +143,49 @@ function clearedText(message: ToolResultMessage): string {
   return `${CLEARED_PREFIX} ${message.toolName} 的这次输出（约 ${resultChars(message)} 字符）已从上下文中移除以腾出窗口。调用参数仍在上面，需要内容就重新调用一次。`;
 }
 
-/** Tool results old enough to be eligible, oldest first. */
+/** Rough size of any message, for measuring how far back the protected span reaches. */
+function messageTokens(message: AgentMessage): number {
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === "string") return Math.ceil(content.length / CHARS_PER_TOKEN);
+  if (!Array.isArray(content)) return 0;
+  let chars = 0;
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const record = block as { type?: string; text?: string; arguments?: unknown };
+    if (record.type === "text") chars += (record.text ?? "").length;
+    else if (record.type === "toolCall") chars += JSON.stringify(record.arguments ?? {}).length;
+    else chars += IMAGE_CHARS;
+  }
+  return Math.ceil(chars / CHARS_PER_TOKEN);
+}
+
+/**
+ * Tool results old enough to be eligible, oldest first.
+ *
+ * Everything inside the protected span at the end of the conversation is off
+ * limits, and the span is measured by walking backwards adding up messages —
+ * all of them, not just the tool results, because the span is a stretch of
+ * conversation rather than a number of lookups.
+ */
 function clearableResults(messages: readonly AgentMessage[]): ToolResultMessage[] {
+  let budget = KEEP_RECENT_TOKENS;
+  let boundary = messages.length;
+  let protectedResults = 0;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role === "toolResult") protectedResults += 1;
+    // The floor keeps a handful of results safe even when they are individually
+    // larger than the whole budget.
+    if (budget <= 0 && protectedResults > KEEP_RECENT_RESULTS) break;
+    budget -= messageTokens(message);
+    boundary = index;
+  }
   const results: ToolResultMessage[] = [];
-  for (const message of messages) {
+  for (let index = 0; index < boundary; index++) {
+    const message = messages[index];
     if (message.role === "toolResult") results.push(message);
   }
-  return results.slice(0, Math.max(0, results.length - KEEP_RECENT_RESULTS));
+  return results;
 }
 
 export interface ClearingPlan {
