@@ -114,8 +114,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           break;
         case "compaction_end": {
           const leaf = active.session.sessionManager.getLeafEntry();
-          const activeIds = new Set(active.session.sessionManager.getBranch().map((entry) => entry.id));
-          const persisted = leaf ? summaryEventFromEntry(leaf, activeIds) : undefined;
+          const branch = active.session.sessionManager.getBranch();
+          const activeIds = new Set(branch.map((entry) => entry.id));
+          const persisted = leaf ? summaryEventFromEntry(leaf, activeIds, branch) : undefined;
           if (event.result) {
             active.summaryActivity = {
               ...(persisted ?? active.summaryActivity ?? {
@@ -245,8 +246,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           }
           if (event.entry.type === "compaction" || event.entry.type === "branch_summary") {
             active.sessionRevision += 1;
-            const activeIds = new Set(active.session.sessionManager.getBranch().map((entry) => entry.id));
-            active.summaryActivity = summaryEventFromEntry(event.entry, activeIds);
+            const entryBranch = active.session.sessionManager.getBranch();
+            const activeIds = new Set(entryBranch.map((entry) => entry.id));
+            active.summaryActivity = summaryEventFromEntry(event.entry, activeIds, entryBranch);
             this.publishRuntimeInspection(active);
           }
           break;

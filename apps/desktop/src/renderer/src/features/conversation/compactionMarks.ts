@@ -34,7 +34,13 @@ export interface CompactionMark {
   freedTokens?: number;
   /** How many clearing passes this one rule stands for. */
   passes?: number;
-  /** Layer 2 only. */
+  /**
+   * Layer 2 only: whether the rule really sits at the cut point.
+   *
+   * False when the kept entry could not be found among the messages, in which
+   * case the rule is placed by time and says nothing about "above the line".
+   */
+  atCutPoint?: boolean;
   tokensBefore?: number;
   tokensAfter?: number;
   summary?: string;
@@ -77,16 +83,17 @@ export function buildCompactionMarks(
     // Only compactions of the branch being shown. A summary from an abandoned
     // branch describes messages this transcript never contained.
     if (event.kind !== "compaction" || !event.active) continue;
-    const anchor = event.firstKeptEntryId
+    const kept = event.firstKeptEntryId
       ? messages.find((message) => message.entryId === event.firstKeptEntryId)
-        ?? firstMessageAfter(messages, event.timestamp)
-      : firstMessageAfter(messages, event.timestamp);
+      : undefined;
+    const anchor = kept ?? firstMessageAfter(messages, event.timestamp);
     marks.push({
       id: event.id,
       layer: 2,
       order: orderBefore(messages, anchor),
       at: event.timestamp,
       status: summaryStatus(event.status),
+      atCutPoint: Boolean(kept),
       tokensBefore: event.tokensBefore,
       tokensAfter: event.estimatedTokensAfter,
       summary: event.summary,
@@ -161,5 +168,11 @@ export function compactionMarkDetail(mark: CompactionMark): string {
   const before = mark.tokensBefore?.toLocaleString();
   const after = mark.tokensAfter?.toLocaleString();
   const change = before && after ? `上下文从约 ${before} tokens 压到约 ${after} tokens。` : "";
-  return `${change}这条线以上的对话已被折叠成一段摘要，模型之后看到的是摘要而不是原文；原文仍留在会话文件里。`.trim();
+  // 「以上」这两个字只有当线确实落在切分点上才成立。落不上去的时候（保留的第一条
+  // 是一条不显示的元数据，找不到对应消息），线是按时间放的，就不能声称它上面的都
+  // 被折叠了——最近那几万 token 的原文其实照常发给模型。
+  const scope = mark.atCutPoint
+    ? "这条线以上的对话已折叠成一段摘要发给模型，线以下的原文照常。"
+    : "较早的对话已折叠成一段摘要发给模型，最近的原文照常。";
+  return `${change}${scope}原文都还在会话文件里，往上翻看得到。`.trim();
 }

@@ -39,9 +39,37 @@ function projectFiles(details: unknown): Pick<RuntimeSummaryEvent, "readFiles" |
   };
 }
 
+/**
+ * The first entry the compaction kept that the transcript actually draws.
+ *
+ * Pi's `firstKeptEntryId` is the first *entry* it kept, and that is routinely a
+ * metadata entry — response metrics, a tool-purpose audit — which the chat never
+ * renders. The renderer looks the id up among its messages, finds nothing, and
+ * falls back to placing the rule by timestamp, i.e. at the end of the
+ * conversation. The rule then sits below the fifty thousand tokens that were
+ * kept verbatim while saying everything above it had been folded into a summary,
+ * which is the opposite of what happened.
+ *
+ * Resolving it here rather than in the renderer because only this side has the
+ * branch: the chat holds messages, not entries.
+ */
+function firstKeptMessageId(
+  branch: ReturnType<SessionManager["getBranch"]> | undefined,
+  firstKeptEntryId: string | undefined,
+): string | undefined {
+  if (!branch || !firstKeptEntryId) return firstKeptEntryId;
+  const index = branch.findIndex((entry) => entry.id === firstKeptEntryId);
+  if (index < 0) return firstKeptEntryId;
+  for (let cursor = index; cursor < branch.length; cursor += 1) {
+    if (branch[cursor].type === "message") return branch[cursor].id;
+  }
+  return undefined;
+}
+
 export function summaryEventFromEntry(
   entry: ReturnType<SessionManager["getEntries"]>[number],
   activeIds: ReadonlySet<string>,
+  branch?: ReturnType<SessionManager["getBranch"]>,
 ): RuntimeSummaryEvent | undefined {
   if (entry.type === "compaction") {
     return {
@@ -52,7 +80,7 @@ export function summaryEventFromEntry(
       active: activeIds.has(entry.id),
       summary: entry.summary,
       tokensBefore: entry.tokensBefore,
-      firstKeptEntryId: entry.firstKeptEntryId,
+      firstKeptEntryId: firstKeptMessageId(branch, entry.firstKeptEntryId),
       usage: projectUsage(entry.usage),
       ...projectFiles(entry.details),
     };
@@ -78,9 +106,10 @@ export function buildRuntimeInspection(
   sessionRevision: number,
   liveSummary?: RuntimeSummaryEvent,
 ): RuntimeInspectionSnapshot {
-  const activeIds = new Set(manager.getBranch().map((entry) => entry.id));
+  const branch = manager.getBranch();
+  const activeIds = new Set(branch.map((entry) => entry.id));
   const projected = manager.getEntries()
-    .map((entry) => summaryEventFromEntry(entry, activeIds))
+    .map((entry) => summaryEventFromEntry(entry, activeIds, branch))
     .filter((event): event is RuntimeSummaryEvent => Boolean(event));
 
   if (liveSummary) {

@@ -45,10 +45,24 @@ test("压缩的横线落在它保留的第一条消息前面", () => {
   assert.equal(marks[0].layer, 2);
 });
 
-test("认不出保留点时退回按时间放", () => {
-  // 老会话没有 firstKeptEntryId，横线还是得有个合理的位置。
+test("认不出保留点时退回按时间放，说法也跟着改", () => {
+  // 老会话没有 firstKeptEntryId，横线还是得有个合理的位置——但这时线的位置只代表
+  // 「压缩发生在这一刻」，不代表切分点，所以那句话不能说「这条线以上都折叠了」：
+  // 保留下来的最近几万 token 原文，恰恰就在线的上面。
   const marks = buildCompactionMarks(messages, [compaction({ timestamp: 2_500 })]);
   assert.ok(marks[0].order > 2 && marks[0].order < 3);
+  assert.equal(marks[0].atCutPoint, false);
+  const detail = compactionMarkDetail(marks[0]);
+  assert.doesNotMatch(detail, /这条线以上/);
+  assert.match(detail, /较早的对话/);
+});
+
+test("落在切分点上时，才说得出「这条线以上」", () => {
+  const marks = buildCompactionMarks(messages, [compaction({ firstKeptEntryId: "e-c" })]);
+  assert.equal(marks[0].atCutPoint, true);
+  const detail = compactionMarkDetail(marks[0]);
+  assert.match(detail, /这条线以上/);
+  assert.match(detail, /线以下的原文照常/, "线下面那一段是原样发给模型的，得说清楚");
 });
 
 test("别的分支上的压缩不画进这条对话", () => {
