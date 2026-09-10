@@ -79,17 +79,34 @@ test("todo 和 goal 的结果是当前状态，永远不清", () => {
   assert.equal(cleared.size, 3);
 });
 
-test("腾不出够多就别取消摘要——只推迟一轮不值得", () => {
-  const small = planToolResultClearing(discardable(1, 4_000), new Set());
-  assert.equal(clearingRelievesPressure(small, CONTEXT_WINDOW), false);
-  const big = planToolResultClearing(discardable(10), new Set());
-  assert.equal(clearingRelievesPressure(big, CONTEXT_WINDOW), true);
+test("放行的条件是「清完还塞得下」，不是「清出了一点」", () => {
+  // 出事故的就是这一条：上下文已经顶到天花板，清出一点点也算数，于是放行，下一个
+  // 请求直接被服务商拒收。窗口 40 万、预留 1.6 万，线在 38.36 万，我们的线再低
+  // 1 万 = 37.36 万。
+  const line = 400_000 - 16_384;
+  const small = planToolResultClearing(discardable(1, 4_000), new Set());   // 1,000 token
+  assert.equal(
+    clearingRelievesPressure(small, 400_000, 390_000),
+    false,
+    "还在天花板上面，清这一点等于没清",
+  );
+  const big = planToolResultClearing(discardable(3), new Set());            // 30,000 token
+  assert.equal(clearingRelievesPressure(big, 400_000, 390_000), true, "落到线下 1 万以内才算数");
+  assert.equal(
+    clearingRelievesPressure(big, 400_000, line + 25_000),
+    false,
+    "差一点点也不放行——放行了下一轮就又回来了",
+  );
 });
 
-test("够不够按窗口比例算，同一个数字在两种模型上说的不是一回事", () => {
-  const plan = planToolResultClearing(discardable(3), new Set());   // 30,000 token
-  assert.equal(clearingRelievesPressure(plan, 272_000), true, "272k 的 5% 是 13,600，够了");
-  assert.equal(clearingRelievesPressure(plan, 1_050_000), false, "1M 的 5% 是 52,500，不够");
+test("我们的线比 pi 的低 1 万，两层不会在同一条线上互相顶", () => {
+  const plan = planToolResultClearing(discardable(1, 40_000), new Set());   // 10,000 token
+  const window = 200_000;
+  const line = window - 16_384;
+  // 清完正好落在 pi 的线上：不放行，因为下一轮立刻又到阈值。
+  assert.equal(clearingRelievesPressure(plan, window, line + 10_000), false);
+  // 清完落到线下一万：放行。
+  assert.equal(clearingRelievesPressure(plan, window, line), true);
 });
 
 test("清理只换掉输出，调用和参数原样留着", () => {
@@ -122,7 +139,9 @@ function harness() {
     events: { emit: (channel: string, value: unknown) => { emitted.push({ channel, value }); } },
   };
   contextClearingExtension(pi as never);
-  const ctx = { getContextUsage: () => ({ tokens: 200_000, contextWindow: CONTEXT_WINDOW, percent: 73 }) };
+  // Pi 只在越过它那条线之后才会走到这个钩子，所以这里就是那一刻的状态：窗口 27.2 万、
+  // 线在 25.56 万，当前 26.2 万，已经在线上面了。
+  const ctx = { getContextUsage: () => ({ tokens: 262_000, contextWindow: CONTEXT_WINDOW, percent: 96 }) };
   return {
     emitted,
     beforeCompact: (

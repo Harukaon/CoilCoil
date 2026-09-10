@@ -9,9 +9,18 @@ type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
  * This is the cheap first stage of Pi's own compaction, not a mechanism beside
  * it. When Pi decides the context is full it prepares a compaction and asks its
  * extensions first; this hook clears the tool output from exactly the stretch
- * Pi was about to discard, and cancels the summary when that frees enough. The
- * tool call stays, so the model still knows which file it read and with which
- * arguments and can read it again if it turns out to matter.
+ * Pi was about to discard, and — if that alone brings the conversation back
+ * under the line with room to keep going — cancels the summary. The tool call
+ * stays, so the model still knows which file it read and with which arguments
+ * and can read it again if it turns out to matter.
+ *
+ * Why bother, when Pi would summarize anyway: summarizing is lossy and it costs
+ * the whole prompt cache, while dropping a web page's HTML costs nothing anyone
+ * will miss. A conversation of forty ordinary turns fits easily; what fills the
+ * window is a handful of huge tool results inside it. Take those out and the
+ * same conversation runs for another forty turns with its chain intact. That is
+ * the point of this stage — buying rounds before the lossy step, not saving
+ * tokens for their own sake.
  *
  * Extending Pi's compaction rather than running alongside it is the whole
  * design, and getting that wrong cost three rounds of fixes. As a separate
@@ -43,13 +52,23 @@ type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
 const MIN_RESULT_TOKENS = 120;
 
 /**
- * How much clearing has to free before it is worth cancelling the summary.
- *
- * Against the window rather than a flat count, so it means the same thing on a
- * 200k model and a 1M one.
+ * Pi's own reserve: the room it keeps free for the answer, and so the line it
+ * compacts at. Taken from the preparation when Pi hands it over; this is the
+ * default every model starts from.
  */
-const MIN_RELIEF_RATIO = 0.05;
-const MIN_RELIEF_FLOOR = 8_000;
+const DEFAULT_RESERVE_TOKENS = 16_384;
+
+/**
+ * Our line sits ten thousand tokens below Pi's.
+ *
+ * Two stages deciding on the same line push against each other: clear just
+ * enough to slip under it and the next request is back at the threshold, paying
+ * another cache write for a single turn of relief. Landing a fixed distance
+ * below it is what makes this stage buy rounds — and a fixed distance rather
+ * than a share of the window because a number you can predict on every model is
+ * worth more here than one that scales.
+ */
+const CLEARING_HEADROOM_TOKENS = 10_000;
 
 /**
  * Tools whose result *is* live state rather than a lookup: the model has to
@@ -81,6 +100,9 @@ export interface ContextClearingRecord {
   candidates: number;
   /** Pi was splitting a turn: most of what it meant to drop is the live turn's prefix. */
   splitTurn: boolean;
+  /** What Pi measured when it decided to compact, and against which window. */
+  contextTokens: number;
+  contextWindow: number;
 }
 
 /** Pi's own chars/4 heuristic, with the same allowance for an inline image. */
@@ -155,13 +177,28 @@ export function planToolResultClearing(
 }
 
 /**
- * Whether clearing has bought enough to be worth skipping the summary for.
+ * Whether the conversation fits again once this batch is gone.
  *
- * Freeing a few thousand tokens only defers the same compaction by a turn while
- * costing a cache write, so below this the honest answer is to let Pi summarize.
+ * This is the whole ladder in one line, and the old version asked the wrong
+ * question. It asked "did this free at least 5% of the window" — so with the
+ * context already over the ceiling, freeing a sliver still counted as success,
+ * the summary was cancelled, and the next request was refused by the provider.
+ * That is how a real session ended up in overflow recovery.
+ *
+ * The question is the user's own: 清理完之后，还能不能接着聊。`contextTokens` is
+ * what Pi just measured — the size that made it decide to compact — so
+ * subtracting the batch gives the size of the next request. It has to come back
+ * under Pi's line, with a margin, or clearing has not bought any rounds.
  */
-export function clearingRelievesPressure(plan: ClearingPlan, contextWindow: number): boolean {
-  return plan.freedTokens >= Math.max(MIN_RELIEF_FLOOR, contextWindow * MIN_RELIEF_RATIO);
+export function clearingRelievesPressure(
+  plan: ClearingPlan,
+  contextWindow: number,
+  contextTokens: number,
+  reserveTokens = DEFAULT_RESERVE_TOKENS,
+): boolean {
+  if (contextWindow <= 0 || contextTokens <= 0) return false;
+  const line = contextWindow - reserveTokens;
+  return contextTokens - plan.freedTokens <= line - CLEARING_HEADROOM_TOKENS;
 }
 
 /**
@@ -229,8 +266,11 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
       ...preparation?.isSplitTurn ? preparation.turnPrefixMessages ?? [] : [],
     ];
     const plan = planToolResultClearing(discardable, cleared);
-    const contextWindow = ctx.getContextUsage()?.contextWindow ?? 0;
-    const enough = plan.toolCallIds.length > 0 && clearingRelievesPressure(plan, contextWindow);
+    const usage = ctx.getContextUsage();
+    const contextWindow = usage?.contextWindow ?? 0;
+    const contextTokens = usage?.tokens ?? 0;
+    const enough = plan.toolCallIds.length > 0
+      && clearingRelievesPressure(plan, contextWindow, contextTokens, preparation?.settings?.reserveTokens);
     // Reported either way. This stage used to leave no trace at all: nobody
     // could tell a session where clearing carried the load from one where it
     // never fired, which is how a session ran twenty hours at 24% over the
@@ -242,6 +282,8 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
       cancelledCompaction: enough,
       candidates: plan.toolCallIds.length,
       splitTurn: Boolean(preparation?.isSplitTurn),
+      contextTokens,
+      contextWindow,
     } satisfies ContextClearingRecord);
     if (!enough) return undefined;
     for (const toolCallId of plan.toolCallIds) cleared.add(toolCallId);
