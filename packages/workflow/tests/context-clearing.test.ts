@@ -4,6 +4,7 @@ import contextClearingExtension, {
   applyToolResultClearing,
   clearingRelievesPressure,
   planToolResultClearing,
+  resultKey,
 } from "../extensions/context-clearing.ts";
 
 type AgentMessage = Parameters<typeof planToolResultClearing>[0][number];
@@ -18,13 +19,14 @@ function toolCall(id: string, name: string): AgentMessage {
   } as unknown as AgentMessage;
 }
 
-function toolResult(id: string, name: string, chars: number): AgentMessage {
+let clock = 0;
+function toolResult(id: string, name: string, chars: number, timestamp = ++clock): AgentMessage {
   return {
     role: "toolResult",
     toolName: name,
     toolCallId: id,
     content: [{ type: "text", text: "x".repeat(chars) }],
-    timestamp: 0,
+    timestamp,
   } as unknown as AgentMessage;
 }
 
@@ -58,7 +60,11 @@ test("已经清过的不会再算一遍", () => {
 });
 
 test("太小的结果不值得动，动了只是白打断缓存", () => {
-  assert.deepEqual(planToolResultClearing(discardable(10, 1_000), new Set()).toolCallIds, []);
+  // 门槛按「换上去的那句说明」定：比说明还短的结果，清了反而更长。
+  assert.deepEqual(planToolResultClearing(discardable(10, 300), new Set()).toolCallIds, []);
+  // 几百 token 的浏览器/终端输出是这类会话的大头，必须清得动——门槛 400 的时候，
+  // 用户那条真实会话 979 条结果里只够得着 31 条。
+  assert.equal(planToolResultClearing(discardable(10, 1_000), new Set()).toolCallIds.length, 10);
 });
 
 test("todo 和 goal 的结果是当前状态，永远不清", () => {
@@ -88,7 +94,7 @@ test("够不够按窗口比例算，同一个数字在两种模型上说的不�
 
 test("清理只换掉输出，调用和参数原样留着", () => {
   const messages = discardable(2);
-  const next = applyToolResultClearing(messages, new Set(["call-0"]))!;
+  const next = applyToolResultClearing(messages, new Set([resultKey(messages[1] as never)]))!;
   const call = next[0] as unknown as { content: Array<{ type: string; name?: string; arguments?: unknown }> };
   assert.equal(call.content[0].name, "read", "调用本身不能动");
   assert.deepEqual(call.content[0].arguments, { path: "/src/call-0.ts" }, "参数是模型重读的依据");
@@ -119,9 +125,15 @@ function harness() {
   const ctx = { getContextUsage: () => ({ tokens: 200_000, contextWindow: CONTEXT_WINDOW, percent: 73 }) };
   return {
     emitted,
-    beforeCompact: (reason: string, messagesToSummarize: AgentMessage[]) =>
-      handlers.get("session_before_compact")![0]({ reason, preparation: { messagesToSummarize } }, ctx) as
-        { cancel?: boolean } | undefined,
+    beforeCompact: (
+      reason: string,
+      messagesToSummarize: AgentMessage[],
+      preparation: { isSplitTurn?: boolean; turnPrefixMessages?: AgentMessage[] } = {},
+    ) =>
+      handlers.get("session_before_compact")![0](
+        { reason, preparation: { messagesToSummarize, ...preparation } },
+        ctx,
+      ) as { cancel?: boolean } | undefined,
     context: (messages: AgentMessage[]) =>
       handlers.get("context")![0]({ messages }, ctx) as { messages: AgentMessage[] } | undefined,
   };
@@ -135,11 +147,34 @@ test("接在 Pi 的压缩决策上：清得动就取消摘要", () => {
   assert.equal(h.emitted[0].channel, "coilcoil:context-clearing:v1");
 });
 
-test("清不动就让它照常摘要", () => {
+test("清不动就让它照常摘要，但也要留一句话说自己没清", () => {
   const h = harness();
   // 一条 4k 字符的结果远不到窗口的 5%，拦下来只是把同一次压缩推迟一轮。
   assert.equal(h.beforeCompact("threshold", discardable(1, 4_000)), undefined);
-  assert.deepEqual(h.emitted, []);
+  assert.equal(h.emitted.length, 1, "没清也要报，否则日志里分不出「没清」和「没跑」");
+  const record = h.emitted[0].value as { clearedResults: number; cancelledCompaction: boolean; candidates: number };
+  assert.equal(record.clearedResults, 0);
+  assert.equal(record.cancelledCompaction, false);
+  assert.equal(record.candidates, 1);
+});
+
+test("Pi 在切一个大回合时，前半段也要清——那正是最需要清的时候", () => {
+  // 用户那条会话就是这样：二十小时的浏览器操作压在几个回合里，Pi 要丢的几乎全在
+  // 当前这个回合的前半段。以前这一段不碰，于是清理在最该出力的场合一点忙都没帮上，
+  // 而 Pi 那边的「回合前缀摘要」又一直失败，上下文一路涨到超窗 24%。
+  const h = harness();
+  const result = h.beforeCompact("threshold", [], { isSplitTurn: true, turnPrefixMessages: discardable(10) });
+  assert.deepEqual(result, { cancel: true });
+  const record = h.emitted[0].value as { clearedResults: number; splitTurn: boolean };
+  assert.equal(record.clearedResults, 10);
+  assert.equal(record.splitTurn, true);
+});
+
+test("没在切回合时，回合前缀不存在，也就不会被误清", () => {
+  const h = harness();
+  assert.equal(h.beforeCompact("threshold", [], { isSplitTurn: false, turnPrefixMessages: discardable(10) }), undefined);
+  const record = h.emitted[0].value as { candidates: number };
+  assert.equal(record.candidates, 0, "Pi 没打算丢它，我们也不动");
 });
 
 test("手动 /compact 和溢出恢复不拦", () => {
@@ -164,4 +199,29 @@ test("同一次压缩不会被拦两次", () => {
   const older = discardable(10);
   assert.deepEqual(h.beforeCompact("threshold", older), { cancel: true });
   assert.equal(h.beforeCompact("threshold", older), undefined, "没有新的可清了，就得放它去摘要");
+});
+
+test("服务商把 tool call id 从 call_0 重新编号，也不能连累后面的结果", () => {
+  // 真实事故：pierce/GLM 每轮从 call_0 开始编号，一条会话 996 条结果里 990 条都叫
+  // call_0。按 id 记「清过谁」，清掉一条老的等于把这条会话此后所有工具输出全部替换
+  // 成那句说明——模型当场变瞎，而磁盘上的会话文件一字不少。
+  const older = [toolCall("call_0", "mcp"), toolResult("call_0", "mcp", 40_000)];
+  const h = harness();
+  assert.deepEqual(h.beforeCompact("threshold", [...older, ...discardable(9)]), { cancel: true });
+
+  const fresh = [toolCall("call_0", "mcp"), toolResult("call_0", "mcp", 53)];
+  const sent = h.context([...older, ...fresh])!.messages;
+  const clearedOne = sent[1] as unknown as { content: Array<{ text: string }> };
+  const freshOne = sent[3] as unknown as { content: Array<{ text: string }> };
+  assert.match(clearedOne.content[0].text, /上下文已清理/, "那条老的还是该清");
+  assert.equal(freshOne.content[0].text, "x".repeat(53), "刚拿到的这条一个字都不能动");
+});
+
+test("同一个 id、同一个大小，只要不是同一条消息就不算清过", () => {
+  const h = harness();
+  const old = toolResult("call_0", "read", 40_000, 100);
+  h.beforeCompact("threshold", [toolCall("call_0", "read"), old, ...discardable(9)]);
+  // 换一条时间戳不同的同名结果：没人决定清它，所以这一份请求原样交出去。
+  const again = toolResult("call_0", "read", 40_000, 200);
+  assert.equal(h.context([toolCall("call_0", "read"), again]), undefined, "新的那条没被任何人决定清掉");
 });

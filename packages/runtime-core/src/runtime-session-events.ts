@@ -146,7 +146,12 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
               willRetry: event.willRetry,
             };
           }
-          this.log.info("compaction", "compaction_end", {
+          // A threshold compaction that does not land is not a detail. It is the
+          // one thing standing between a long session and a context past the
+          // model's window, and it used to fail in silence: one session ran
+          // twenty hours and reached 24% over the window with nothing said.
+          const missed = event.reason === "threshold" && !event.result;
+          this.log.log(missed ? "error" : "info", "compaction", "compaction_end", {
             reason: event.reason,
             succeeded: Boolean(event.result),
             aborted: event.aborted,
@@ -155,6 +160,15 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             estimatedTokensAfter: event.result?.estimatedTokensAfter,
             error: event.errorMessage,
           });
+          if (missed && !event.willRetry) {
+            this.emitEvent({
+              type: "runtime_notice",
+              level: "error",
+              message: event.aborted
+                ? "上下文压缩被中断，这轮没压成。会话会继续变长，必要时手动 /compact。"
+                : `上下文压缩失败，会话会继续变长：${event.errorMessage ?? "未知原因"}`,
+            });
+          }
           this.publishRuntimeInspection(active);
           void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
           break;

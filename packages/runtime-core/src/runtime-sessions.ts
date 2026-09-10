@@ -48,6 +48,7 @@ import {
   projectMemoryStatusByCwd,
 } from "./runtime-constants.js";
 import { contextClearingRecord } from "./runtime-state.js";
+import { isRecord } from "./runtime-utils.js";
 import { installCompactionSettings } from "./compaction-settings.js";
 import { RuntimeMcpConfig } from "./runtime-mcp-config.js";
 import {
@@ -309,6 +310,18 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       this.emitEvent({ type: "session_fast_updated", fast: next.enabled });
     });
     eventBus.on(CONTEXT_CLEARING_EVENT, (value) => {
+      // Every decision is logged, including the ones that cleared nothing: this
+      // stage is invisible in the UI by design, so the log is the only place it
+      // can be told apart from "never fired".
+      if (isRecord(value)) {
+        this.log.info("compaction", "context_clearing", {
+          candidates: value.candidates,
+          clearedResults: value.clearedResults,
+          freedTokens: value.freedTokens,
+          cancelledCompaction: value.cancelledCompaction,
+          splitTurn: value.splitTurn,
+        });
+      }
       // Clearing runs while a request is being built, which can be before the
       // active session is installed, so the record is held until it is.
       const next = contextClearingRecord(value);

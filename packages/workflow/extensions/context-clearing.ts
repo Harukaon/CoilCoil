@@ -30,8 +30,17 @@ type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
  * only the copy handed to the provider for one request.
  */
 
-/** A result smaller than this is not worth the cache invalidation. */
-const MIN_RESULT_TOKENS = 400;
+/**
+ * A result smaller than this is not worth replacing.
+ *
+ * It was 400, and a real session showed how wrong that is: 979 tool results,
+ * 124k tokens of output, and only 31 of them were big enough to touch — 37% of
+ * the output, while the browser and terminal work that filled the window came in
+ * hundreds of results of a few hundred tokens each. The cache write is paid once
+ * per batch, not per result, so the floor only has to be above the placeholder
+ * that takes the result's place; at 120 the same session becomes 80% clearable.
+ */
+const MIN_RESULT_TOKENS = 120;
 
 /**
  * How much clearing has to free before it is worth cancelling the summary.
@@ -66,6 +75,12 @@ export interface ContextClearingRecord {
   clearedResults: number;
   /** Roughly how many tokens that freed. */
   freedTokens: number;
+  /** Whether this batch was enough to skip Pi's summary this time. */
+  cancelledCompaction: boolean;
+  /** Results this stage could have taken, before the "is it worth it" test. */
+  candidates: number;
+  /** Pi was splitting a turn: most of what it meant to drop is the live turn's prefix. */
+  splitTurn: boolean;
 }
 
 /** Pi's own chars/4 heuristic, with the same allowance for an inline image. */
@@ -89,8 +104,23 @@ function clearedText(message: ToolResultMessage): string {
   return `${CLEARED_PREFIX} ${message.toolName} 的这次输出（约 ${resultChars(message)} 字符）已从上下文中移除以腾出窗口。调用参数仍在上面，需要内容就重新调用一次。`;
 }
 
+/**
+ * How one tool result is identified for clearing.
+ *
+ * Not the tool call id on its own, and this is the whole lesson of the bug this
+ * exists to prevent: one provider hands out `call_0`, `call_1`, `call_2` and
+ * restarts the numbering every turn. In a real session 990 of 996 results were
+ * called `call_0`. Keyed by id alone, clearing one old result silently replaced
+ * every result the session would ever produce — the model went blind mid-task
+ * while the transcript on disk still held every byte. The timestamp is what
+ * makes the key the *message* rather than the name of a slot.
+ */
+export function resultKey(message: Pick<ToolResultMessage, "toolCallId" | "timestamp">): string {
+  return `${message.toolCallId}@${message.timestamp ?? 0}`;
+}
+
 export interface ClearingPlan {
-  /** Tool call ids whose results this batch removes. */
+  /** Keys of the results this batch removes; see `resultKey`. */
   toolCallIds: string[];
   /** Estimated tokens the batch frees. */
   freedTokens: number;
@@ -113,11 +143,12 @@ export function planToolResultClearing(
   for (const message of discardable) {
     if (message.role !== "toolResult") continue;
     const result = message as ToolResultMessage;
-    if (cleared.has(result.toolCallId)) continue;
+    const key = resultKey(result);
+    if (cleared.has(key)) continue;
     if (STATE_TOOLS.has(result.toolName)) continue;
     const tokens = resultTokens(result);
     if (tokens < MIN_RESULT_TOKENS) continue;
-    toolCallIds.push(result.toolCallId);
+    toolCallIds.push(key);
     freedTokens += tokens;
   }
   return { toolCallIds, freedTokens };
@@ -144,9 +175,16 @@ export function applyToolResultClearing(
   if (cleared.size === 0) return undefined;
   let changed = false;
   const next = messages.map((message) => {
-    if (message.role !== "toolResult" || !cleared.has(message.toolCallId)) return message;
+    if (message.role !== "toolResult") return message;
+    const result = message as ToolResultMessage;
+    if (!cleared.has(resultKey(result))) return message;
+    // Belt and braces after the `call_0` disaster: this stage only ever chooses
+    // results above the floor, so a small one matching a remembered key is a
+    // key collision, not a decision anyone made. Leave it alone — replacing a
+    // short result with a longer notice never made the context smaller anyway.
+    if (resultTokens(result) < MIN_RESULT_TOKENS) return message;
     changed = true;
-    return { ...message, content: [{ type: "text" as const, text: clearedText(message) }] };
+    return { ...result, content: [{ type: "text" as const, text: clearedText(result) }] };
   });
   return changed ? next : undefined;
 }
@@ -178,16 +216,35 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
    */
   pi.on("session_before_compact", (event, ctx) => {
     if (event.reason !== "threshold") return undefined;
-    const discardable = event.preparation?.messagesToSummarize ?? [];
+    const preparation = event.preparation;
+    // Both halves of what Pi is about to drop. The prefix half only exists when
+    // Pi is splitting a turn — the current turn has grown too big to keep whole
+    // — and skipping it is what made this stage useless in exactly the session
+    // that needed it most: twenty hours of browser work in a handful of turns,
+    // where nearly everything Pi wanted to summarize was inside the live turn.
+    // Pi is going to summarize that prefix either way; dropping its tool output
+    // first is the cheaper half of the same decision.
+    const discardable = [
+      ...preparation?.messagesToSummarize ?? [],
+      ...preparation?.isSplitTurn ? preparation.turnPrefixMessages ?? [] : [],
+    ];
     const plan = planToolResultClearing(discardable, cleared);
     const contextWindow = ctx.getContextUsage()?.contextWindow ?? 0;
-    if (!plan.toolCallIds.length || !clearingRelievesPressure(plan, contextWindow)) return undefined;
-    for (const toolCallId of plan.toolCallIds) cleared.add(toolCallId);
+    const enough = plan.toolCallIds.length > 0 && clearingRelievesPressure(plan, contextWindow);
+    // Reported either way. This stage used to leave no trace at all: nobody
+    // could tell a session where clearing carried the load from one where it
+    // never fired, which is how a session ran twenty hours at 24% over the
+    // window with nothing in the log to say why.
     pi.events.emit(CONTEXT_CLEARING_EVENT, {
       at: Date.now(),
-      clearedResults: plan.toolCallIds.length,
-      freedTokens: plan.freedTokens,
+      clearedResults: enough ? plan.toolCallIds.length : 0,
+      freedTokens: enough ? plan.freedTokens : 0,
+      cancelledCompaction: enough,
+      candidates: plan.toolCallIds.length,
+      splitTurn: Boolean(preparation?.isSplitTurn),
     } satisfies ContextClearingRecord);
+    if (!enough) return undefined;
+    for (const toolCallId of plan.toolCallIds) cleared.add(toolCallId);
     return { cancel: true };
   });
 
