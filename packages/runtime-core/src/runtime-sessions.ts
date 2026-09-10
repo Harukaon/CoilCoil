@@ -315,11 +315,13 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       // can be told apart from "never fired".
       if (isRecord(value)) {
         this.log.info("compaction", "context_clearing", {
-          candidates: value.candidates,
           clearedResults: value.clearedResults,
           freedTokens: value.freedTokens,
-          cancelledCompaction: value.cancelledCompaction,
-          splitTurn: value.splitTurn,
+          contextTokens: value.contextTokens,
+          contextWindow: value.contextWindow,
+          // 这一条是长会话唯一要看的：清完还落在我们的线下面吗？落不回去，
+          // 下一步就是 pi 的有损摘要。
+          fitsAgain: value.fitsAgain,
         });
       }
       // Clearing runs while a request is being built, which can be before the
