@@ -15,7 +15,12 @@ const EMPTY_STATE = (scopeId: string): BrowserStateSnapshot => ({ scopeId, tabs:
  * 标签页时补建一个，而且只在挂载/切 scope/开合时判断一次：如果每次快照更新都判断，
  * agent 用 MCP 关掉最后一个标签页，这里就会立刻又给它建一个。
  */
-export function useBrowserTabs({ scopeId, open }: { scopeId: string; open: boolean }): {
+export function useBrowserTabs({ scopeId, workspacePath, open }: {
+  scopeId: string;
+  /** 决定用哪一份 cookie：一个工作区一份登录状态。 */
+  workspacePath?: string;
+  open: boolean;
+}): {
   state: BrowserStateSnapshot;
   setState: (next: BrowserStateSnapshot) => void;
 } {
@@ -30,13 +35,13 @@ export function useBrowserTabs({ scopeId, open }: { scopeId: string; open: boole
   useEffect(() => {
     let cancelled = false;
     setState(EMPTY_STATE(scopeId));
-    void window.coilcoil.setBrowserScope(scopeId).then(async (current) => {
+    void window.coilcoil.setBrowserScope(scopeId, workspacePath).then(async (current) => {
       if (cancelled) return;
       const next = open && current.tabs.length === 0 ? await window.coilcoil.createBrowserTab(scopeId) : current;
       if (!cancelled) setState(next);
     });
     return () => { cancelled = true; };
-  }, [open, scopeId]);
+  }, [open, scopeId, workspacePath]);
 
   return { state, setState };
 }

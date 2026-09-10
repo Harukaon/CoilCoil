@@ -724,6 +724,7 @@ async function createWindow(): Promise<void> {
     const allowed = hardenGuestPreferences(
       webPreferences as unknown as Record<string, unknown>,
       params as unknown as Record<string, unknown>,
+      browserRuntime.partitionName(),
     );
     if (!allowed) event.preventDefault();
   });
@@ -1073,7 +1074,8 @@ app.whenReady().then(async () => {
     if (!value) throw new Error("内置浏览器运行时不可用。");
     return value;
   };
-  ipcMain.handle(BROWSER_SET_SCOPE_CHANNEL, (event, scopeId: string) => browserFor(event).setUiScope(scopeId));
+  ipcMain.handle(BROWSER_SET_SCOPE_CHANNEL, (event, scopeId: string, workspacePath?: string) =>
+    browserFor(event).setUiScope(scopeId, workspacePath));
   ipcMain.handle(BROWSER_GET_STATE_CHANNEL, (event, scopeId: string) => browserFor(event).state(scopeId));
   ipcMain.handle(BROWSER_CAPTURE_CHANNEL, (event, scopeId: string) => browserFor(event).captureTab(scopeId));
   ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string) => browserFor(event).createTab(url, true, scopeId));
@@ -1085,11 +1087,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event, scopeId: string) => browserFor(event).forward(scopeId));
   ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event, scopeId: string) => browserFor(event).reload(scopeId));
   ipcMain.handle(BROWSER_IMPORT_LIST_CHANNEL, () => listImportableProfiles());
-  ipcMain.handle(BROWSER_IMPORT_COOKIES_CHANNEL, (_event, input: ImportBrowserCookiesInput) => importBrowserCookies(input));
-  ipcMain.handle(BROWSER_DATA_STATS_CHANNEL, () => browserDataStats());
+  // 登录状态是按工作区存的，所以导入、统计、清空都冲当前这个窗口的那一份去。
+  ipcMain.handle(BROWSER_IMPORT_COOKIES_CHANNEL, (event, input: ImportBrowserCookiesInput) =>
+    importBrowserCookies(input, browserFor(event).partitionName()));
+  ipcMain.handle(BROWSER_DATA_STATS_CHANNEL, (event) => browserDataStats(browserFor(event).partitionName()));
   ipcMain.handle(BROWSER_SAVED_LOGINS_CHANNEL, () => savedLogins());
-  ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, () => clearBrowserData(
-    (event, data) => diagnosticLog().info("browser-data", event, data),
+  ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, (event) => clearBrowserData(
+    (name, data) => diagnosticLog().info("browser-data", name, data),
+    browserFor(event).partitionName(),
   ));
   ipcMain.handle(BROWSER_GUEST_LAYER_READY_CHANNEL, (event) => browserFor(event).markGuestLayerReady());
   ipcMain.handle(BROWSER_REGISTER_GUEST_CHANNEL, (event, tabId: string, nonce: string, webContentsId: number): void => {

@@ -137,7 +137,7 @@ export function BrowserDataMenu(): React.JSX.Element {
                 <small>多是浏览器用新版加密写的、或本机浏览器拒绝的记录；这些网站需要在内置浏览器里重新登录一次。</small>
               </div>
             ) : (
-              <p className="browser-identity-lead">从这台电脑上已有的浏览器复制一份登录状态，原浏览器不受影响。</p>
+              <p className="browser-identity-lead">从这台电脑上已有的浏览器复制一份登录状态，原浏览器不受影响。登录状态按工作区分开存，这里导入的只属于当前工作区。</p>
             )}
 
             {profiles === undefined ? (

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWSER_PARTITION, hardenGuestPreferences, isAllowedGuestSrc } from "../src/main/browser-webview-policy.ts";
+import { BROWSER_PARTITION, browserPartitionFor, hardenGuestPreferences, isAllowedGuestSrc } from "../src/main/browser-webview-policy.ts";
 
 const params = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   partition: BROWSER_PARTITION,
@@ -104,4 +104,24 @@ test("webview policy hardens preferences even on a rejected attachment", () => {
   assert.equal("preload" in preferences, false);
   assert.equal(preferences.nodeIntegration, false);
   assert.equal(preferences.sandbox, true);
+});
+
+test("每个工作区一份 cookie，换文件夹就换一个 jar", () => {
+  const one = browserPartitionFor("/Users/hao/work/alpha");
+  const other = browserPartitionFor("/Users/hao/work/beta");
+  assert.notEqual(one, other, "两个工作区不能共用一份登录状态");
+  assert.equal(browserPartitionFor("/Users/hao/work/alpha/"), one, "同一个文件夹就是同一份");
+  assert.match(one, /^persist:coilcoil-browser-[0-9a-f]{12}$/, "名字里不出现路径本身");
+  assert.equal(browserPartitionFor(undefined), BROWSER_PARTITION, "没有工作区时用默认那份");
+  assert.equal(browserPartitionFor("   "), BROWSER_PARTITION);
+});
+
+test("guest 必须落在主进程指定的那份 jar 里", () => {
+  const workspace = browserPartitionFor("/Users/hao/work/alpha");
+  const preferences: Record<string, unknown> = {};
+  assert.equal(hardenGuestPreferences(preferences, params({ partition: workspace }), workspace), true);
+  assert.equal(preferences.partition, workspace, "分区由主进程写死，元素说了不算");
+  // 换了工作区之后，还挂在旧 jar 上的元素必须被拒——否则一个工作区能读到另一个的登录。
+  assert.equal(hardenGuestPreferences({}, params({ partition: BROWSER_PARTITION }), workspace), false);
+  assert.equal(hardenGuestPreferences({}, params({ partition: workspace }), BROWSER_PARTITION), false);
 });

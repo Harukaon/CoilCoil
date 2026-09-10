@@ -92,12 +92,15 @@ async function harvestLogins(input: ImportBrowserCookiesInput): Promise<{ saved:
   return { saved: saveLogins(logins), unreadable };
 }
 
-export async function importBrowserCookies(input: ImportBrowserCookiesInput): Promise<BrowserImportSummary> {
+export async function importBrowserCookies(
+  input: ImportBrowserCookiesInput,
+  partition?: string,
+): Promise<BrowserImportSummary> {
   const empty = { imported: 0, skipped: 0, failed: 0, unreadable: 0, hosts: 0, passwords: 0, problemHosts: [] };
   if (!importSupported()) return { ...empty, error: "目前只支持在 macOS 上导入。" };
   try {
     const { cookies, unreadable, unreadableHosts } = await harvestCookies(input);
-    const written = await writeCookies(cookies);
+    const written = await writeCookies(cookies, partition);
     // The keychain has already been unlocked for the cookies by this point, so
     // the passwords cost the user no second prompt.
     const logins = input.includePasswords ? await harvestLogins(input) : { saved: 0, unreadable: 0, note: undefined };
@@ -119,8 +122,8 @@ export async function importBrowserCookies(input: ImportBrowserCookiesInput): Pr
   }
 }
 
-export async function browserDataStats(): Promise<BrowserDataStats> {
-  const cookies = await browserSession().cookies.get({});
+export async function browserDataStats(partition?: string): Promise<BrowserDataStats> {
+  const cookies = await browserSession(partition).cookies.get({});
   const hosts = new Set(cookies.map((cookie) => (cookie.domain ?? "").replace(/^\./, "")));
   return { cookies: cookies.length, hosts: hosts.size, savedLogins: listSavedLogins().length };
 }
@@ -174,8 +177,8 @@ async function clearStep(label: string, work: () => Promise<unknown>, log?: Clea
  * after a "clear". The four steps together are what "signed out of everything"
  * actually takes.
  */
-export async function clearBrowserData(log?: ClearStepLogger): Promise<BrowserDataStats> {
-  const store = browserSession();
+export async function clearBrowserData(log?: ClearStepLogger, partition?: string): Promise<BrowserDataStats> {
+  const store = browserSession(partition);
   log?.("browser_clear_started", {});
   const stuck: string[] = [];
   for (const [label, work] of [
@@ -188,7 +191,7 @@ export async function clearBrowserData(log?: ClearStepLogger): Promise<BrowserDa
     if (failed) stuck.push(failed);
   }
   clearSavedLogins();
-  const stats = await browserDataStats();
+  const stats = await browserDataStats(partition);
   log?.("browser_clear_finished", { ...stats, stuck });
   if (stuck.length > 0 && stats.cookies > 0) {
     throw new Error(`清空没有完成：${stuck.join("、")} 这一步没有响应，浏览器里还剩 ${stats.cookies} 条 Cookie。`);

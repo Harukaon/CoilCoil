@@ -15,7 +15,8 @@ import type { BrowserGuestRoster } from "../../../../shared/desktop-api";
  * viewport from `Emulation.setDeviceMetricsOverride` in main.
  */
 
-const PARTITION = "persist:coilcoil-browser";
+// 分区（cookie jar）由主进程按工作区决定，随 roster 一起发下来——这边不再自己写死
+// 一个名字，否则换工作区时元素还挂在旧的 jar 上，主进程会拒收这个 guest。
 
 interface GuestElement extends HTMLElement {
   getWebContentsId(): number;
@@ -59,9 +60,9 @@ function applyPlacement(tabId: string, entry: GuestEntry): void {
   style.height = "";
 }
 
-function createGuest(tabId: string, nonce: string): GuestEntry {
+function createGuest(tabId: string, nonce: string, partition: string): GuestEntry {
   const element = document.createElement("webview") as GuestElement;
-  element.setAttribute("partition", PARTITION);
+  element.setAttribute("partition", partition);
   // A guest with no src never fires did-attach, so it can never be registered.
   element.setAttribute("src", "about:blank");
   // window.open is converted into an in-app tab by the guest's own handler in main.
@@ -113,7 +114,7 @@ function reconcile(roster: BrowserGuestRoster): void {
 
   for (const [tabId, nonce] of wanted) {
     if (guests.has(tabId)) continue;
-    const entry = createGuest(tabId, nonce);
+    const entry = createGuest(tabId, nonce, roster.partition);
     guests.set(tabId, entry);
     layer.appendChild(entry.element);
     applyPlacement(tabId, entry);

@@ -3,9 +3,14 @@ import type { Session } from "electron";
 import { BROWSER_PARTITION } from "../browser-webview-policy";
 import { toElectronCookie, type ImportedCookie } from "./cookie-record";
 
-/** Everything here targets the built-in browser's jar, never the app's own. */
-export function browserSession(): Session {
-  return session.fromPartition(BROWSER_PARTITION);
+/**
+ * The jar everything here writes to: the built-in browser's, never the app's own.
+ *
+ * Takes the partition because there is one jar per workspace now — the caller
+ * (main, which knows which folder the window has open) says which.
+ */
+export function browserSession(partition: string = BROWSER_PARTITION): Session {
+  return session.fromPartition(partition);
 }
 
 export interface CookieWriteResult {
@@ -25,8 +30,11 @@ export interface CookieWriteResult {
  * extensions, `__Host-` prefixes whose attributes no longer satisfy the rule),
  * and losing the other several thousand over them would be absurd.
  */
-export async function writeCookies(cookies: readonly ImportedCookie[]): Promise<CookieWriteResult> {
-  const store = browserSession().cookies;
+export async function writeCookies(
+  cookies: readonly ImportedCookie[],
+  partition?: string,
+): Promise<CookieWriteResult> {
+  const store = browserSession(partition).cookies;
   const now = Math.floor(Date.now() / 1000);
   const hosts = new Set<string>();
   const failedHosts = new Set<string>();

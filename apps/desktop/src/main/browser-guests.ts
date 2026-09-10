@@ -30,7 +30,8 @@ export interface GuestRegistryOptions {
   inspect: (webContentsId: number) => GuestCandidate | undefined;
   /** The renderer that is allowed to nominate guests. */
   hostWebContentsId: () => number;
-  expectedPartition: string;
+  /** 每个工作区一个 jar，换工作区时会变，所以这里取函数不取值。 */
+  expectedPartition: () => string;
   layerTimeoutMs?: number;
   guestTimeoutMs?: number;
   setTimer?: (callback: () => void, ms: number) => unknown;
@@ -57,7 +58,7 @@ export class BrowserGuestRegistry {
 
   private readonly inspect: GuestRegistryOptions["inspect"];
   private readonly hostWebContentsId: GuestRegistryOptions["hostWebContentsId"];
-  private readonly expectedPartition: string;
+  private readonly expectedPartition: () => string;
   private readonly layerTimeoutMs: number;
   private readonly guestTimeoutMs: number;
   private readonly setTimer: (callback: () => void, ms: number) => unknown;
@@ -157,7 +158,7 @@ export class BrowserGuestRegistry {
     if (candidate.hostWebContentsId !== this.hostWebContentsId()) {
       throw new Error(`浏览器视图 ${webContentsId} 不属于当前窗口。`);
     }
-    if (candidate.partition !== this.expectedPartition) {
+    if (candidate.partition !== this.expectedPartition()) {
       throw new Error(`浏览器视图 ${webContentsId} 会话分区不符。`);
     }
 

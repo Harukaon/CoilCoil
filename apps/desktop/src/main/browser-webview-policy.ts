@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { resolve } from "node:path";
+
 /**
  * Hardening for the `<webview>` guests that render the built-in browser.
  *
@@ -10,7 +13,28 @@
  * The functions are pure so the policy can be tested without launching Electron.
  */
 
+/** The jar used before any workspace is known, and by a window with none. */
 export const BROWSER_PARTITION = "persist:coilcoil-browser";
+
+/**
+ * One cookie jar per workspace.
+ *
+ * The built-in browser already keeps each session's tabs apart, but every one of
+ * them drank from the same jar: signing in to a site for one project signed you
+ * in for all of them, and importing a second account meant overwriting the
+ * first. Keying the jar on the workspace folder makes "which account is this"
+ * a property of the project you opened, which is how the user thinks about it.
+ *
+ * Hashed rather than spelled out: partition strings end up in Electron's session
+ * cache and on disk, and a workspace path can hold spaces, Chinese, or someone's
+ * name. The leading segment stays readable so a jar on disk is recognisable as
+ * CoilCoil's.
+ */
+export function browserPartitionFor(workspacePath?: string): string {
+  const path = workspacePath?.trim();
+  if (!path) return BROWSER_PARTITION;
+  return `${BROWSER_PARTITION}-${createHash("sha256").update(resolve(path)).digest("hex").slice(0, 12)}`;
+}
 
 /** Everything the element may point at before main performs the real navigation. */
 const ALLOWED_SRC = new Set(["", "about:blank"]);
@@ -35,6 +59,7 @@ export function isAllowedGuestSrc(src: string | undefined): boolean {
 export function hardenGuestPreferences(
   webPreferences: Record<string, unknown>,
   params: Record<string, unknown>,
+  partition: string = BROWSER_PARTITION,
 ): boolean {
   // A preload runs with privileges the guest page must never reach. The element's
   // `preload` attribute surfaces here as `preloadURL`, so drop every spelling.
@@ -54,7 +79,9 @@ export function hardenGuestPreferences(
   webPreferences.webviewTag = false;
   // Background tabs must keep rendering: agents drive them while the user looks elsewhere.
   webPreferences.backgroundThrottling = false;
-  webPreferences.partition = BROWSER_PARTITION;
+  // The renderer never picks the jar: main computes it from the workspace and
+  // overwrites whatever the element asked for.
+  webPreferences.partition = partition;
 
   // The attribute strings are attacker-controlled in the threat model this guards
   // against, so overwrite them rather than inspecting what they happen to contain.
@@ -65,6 +92,6 @@ export function hardenGuestPreferences(
   params.plugins = "off";
   delete params.preload;
 
-  if (params.partition !== BROWSER_PARTITION) return false;
+  if (params.partition !== partition) return false;
   return isAllowedGuestSrc(typeof params.src === "string" ? params.src : undefined);
 }

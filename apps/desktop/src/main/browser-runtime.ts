@@ -1,19 +1,19 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { BrowserWindow, session, webContents as webContentsRegistry, type WebContents } from "electron";
+import { BrowserWindow, session, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
 import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
-import { applyGuestUserAgent } from "./browser-user-agent";
+import { applyGuestUserAgent, browserIdentityEnvironment, configureBrowserIdentity } from "./browser-user-agent";
 import {
   DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
   DEFAULT_BROWSER_URL as DEFAULT_URL,
   DEFAULT_BROWSER_VIEWPORT as DEFAULT_VIEWPORT,
   type BrowserTab,
 } from "./browser-runtime-types";
-import { BROWSER_PARTITION } from "./browser-webview-policy";
+import { BROWSER_PARTITION, browserPartitionFor } from "./browser-webview-policy";
 
 /**
  * 缩放挡位，和 Chrome 的一样。
@@ -37,23 +37,31 @@ export class BrowserRuntimeManager {
   private readonly zoomFactors = new Map<string, number>();
   /** False while the browser panel is hidden, so its tab parks like a background one. */
   private panelVisible = false;
+  /**
+   * This window's cookie jar: one per workspace.
+   *
+   * Held here rather than passed around because a guest's partition is fixed at
+   * creation — switching workspaces means dropping every guest and minting new
+   * ones in the new jar, and this is the value they are minted with.
+   */
+  private partition = BROWSER_PARTITION;
   /** One in-flight creation per scope; see ensureActiveTab. */
   private readonly pendingEnsure = new Map<string, Promise<BrowserTab>>();
   private disposed = false;
   /** Correlates renderer-created <webview> guests with tab records. Unused until the switch. */
   private readonly guests = new BrowserGuestRegistry({
-    expectedPartition: BROWSER_PARTITION,
+    expectedPartition: () => this.partition,
     hostWebContentsId: () => this.window.webContents.id,
     inspect: (webContentsId) => {
       const contents = webContentsRegistry.fromId(webContentsId);
       if (!contents) return undefined;
       // Sessions are cached per partition string, so identity is an exact test
       // that the guest really was created in the browser's own session.
-      const expected = session.fromPartition(BROWSER_PARTITION);
+      const expected = session.fromPartition(this.partition);
       return {
         hostWebContentsId: contents.hostWebContents?.id,
         type: contents.getType(),
-        partition: contents.session === expected ? BROWSER_PARTITION : undefined,
+        partition: contents.session === expected ? this.partition : undefined,
         destroyed: contents.isDestroyed(),
       };
     },
@@ -120,7 +128,34 @@ export class BrowserRuntimeManager {
     };
   }
 
-  setUiScope(scopeId: string): BrowserStateSnapshot {
+  /** 当前这个窗口用的 cookie jar，供主进程给 guest 定分区、给导入/清除定目标。 */
+  partitionName(): string {
+    return this.partition;
+  }
+
+  /** 这个 jar 的 session：登录状态的导入、统计和清除都冲它去。 */
+  browserSession(): Session {
+    return session.fromPartition(this.partition);
+  }
+
+  /**
+   * 换工作区就是换一整个浏览器身份。
+   *
+   * guest 的分区在创建时就定死了，改不了，所以换 jar 只能把现在开着的页面全部丢
+   * 掉重建——这也正是用户要的：另一个工作区不该看见这个工作区登录的账号。
+   */
+  setWorkspace(workspacePath?: string): void {
+    const next = browserPartitionFor(workspacePath);
+    if (next === this.partition) return;
+    this.dropAllGuests();
+    this.partition = next;
+    configureBrowserIdentity(session.fromPartition(next), browserIdentityEnvironment());
+    this.publish();
+    this.publishRoster();
+  }
+
+  setUiScope(scopeId: string, workspacePath?: string): BrowserStateSnapshot {
+    this.setWorkspace(workspacePath);
     this.uiScopeId = scopeId.trim() || DEFAULT_SCOPE_ID;
     this.refreshViewportOverrides();
     const state = this.state();
@@ -442,6 +477,7 @@ export class BrowserRuntimeManager {
       tabs: [...this.tabs.values()]
         .filter((tab) => tab.phase !== "closing")
         .map((tab) => ({ tabId: tab.id, nonce: tab.guestNonce })),
+      partition: this.partition,
     };
   }
 

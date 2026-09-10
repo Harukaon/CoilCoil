@@ -126,6 +126,12 @@ export interface BrowserGuestSlot {
 
 export interface BrowserGuestRoster {
   tabs: BrowserGuestSlot[];
+  /**
+   * The session partition every guest must be created in — one cookie jar per
+   * workspace. Main decides it; the renderer only copies it onto the element,
+   * and main rejects any guest that arrives in a different one.
+   */
+  partition: string;
 }
 
 /** Visible size of the browser panel, so agents see the viewport the user sees. */
@@ -381,7 +387,8 @@ export interface CoilCoilDesktopApi {
   /** The main window listens for a conversation handed over from the bubble. */
   onOpenBubbleSession(listener: (target: BubbleSessionTarget) => void): () => void;
   listProjectDirectory(root: string, path?: string): Promise<FileNode[]>;
-  setBrowserScope(scopeId: string): Promise<BrowserStateSnapshot>;
+  /** `workspacePath` picks the cookie jar: one per mounted folder. */
+  setBrowserScope(scopeId: string, workspacePath?: string): Promise<BrowserStateSnapshot>;
   getBrowserState(scopeId: string): Promise<BrowserStateSnapshot>;
   /**
    * A JPEG data URL of the built-in browser's current page, or undefined when

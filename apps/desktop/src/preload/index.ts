@@ -184,7 +184,8 @@ const api: CoilCoilDesktopApi = {
     return () => ipcRenderer.removeListener(PREVIEW_UPDATED_CHANNEL, handler);
   },
   listProjectDirectory: (root: string, path?: string) => ipcRenderer.invoke(PROJECT_DIRECTORY_LIST_CHANNEL, root, path) as Promise<FileNode[]>,
-  setBrowserScope: (scopeId: string) => ipcRenderer.invoke(BROWSER_SET_SCOPE_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
+  setBrowserScope: (scopeId: string, workspacePath?: string) =>
+    ipcRenderer.invoke(BROWSER_SET_SCOPE_CHANNEL, scopeId, workspacePath) as Promise<BrowserStateSnapshot>,
   getBrowserState: (scopeId: string) => ipcRenderer.invoke(BROWSER_GET_STATE_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   captureBrowserTab: (scopeId: string) => ipcRenderer.invoke(BROWSER_CAPTURE_CHANNEL, scopeId) as Promise<string | undefined>,
   createBrowserTab: (scopeId: string, url?: string) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, scopeId, url) as Promise<BrowserStateSnapshot>,

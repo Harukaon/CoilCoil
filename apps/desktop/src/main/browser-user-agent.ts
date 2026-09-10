@@ -154,6 +154,20 @@ export function configureBrowserIdentity(ses: UserAgentSession, runtime: {
   return configured;
 }
 
+/**
+ * 这台机器的身份参数。
+ *
+ * 抽出来是因为现在有两个地方要配身份：启动时配一次，换工作区换 cookie jar 时再
+ * 配一次——两边取的必须是同一套值。
+ */
+export function browserIdentityEnvironment(): { platform: string; platformVersion: string; architecture: string } {
+  return {
+    platform: process.platform,
+    platformVersion: process.getSystemVersion(),
+    architecture: process.arch,
+  };
+}
+
 /** 当前身份；没配置过就是 undefined（测试和早期启动阶段）。 */
 export function browserIdentity(): UserAgentOverride | undefined {
   return configured;

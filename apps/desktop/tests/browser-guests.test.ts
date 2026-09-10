@@ -10,7 +10,8 @@ function harness(candidates: Record<number, Partial<GuestCandidate>> = {}) {
   const timers = new Map<number, () => void>();
   let nextTimer = 1;
   const registry = new BrowserGuestRegistry({
-    expectedPartition: PARTITION,
+    // 一个工作区一份 cookie，分区会随工作区变，所以注册表取的是函数不是值。
+    expectedPartition: () => PARTITION,
     hostWebContentsId: () => HOST_ID,
     inspect: (id) => {
       const override = candidates[id];
