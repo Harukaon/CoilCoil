@@ -103,3 +103,12 @@ test("循环引用不会让日志卡死", () => {
   value.self = value;
   assert.deepEqual(redact(value), { name: "loop", self: "[循环引用]" });
 });
+
+test("token 数量不是凭据，别把它也脱敏了", () => {
+  // 压缩日志里的 tokensBefore / estimatedTokensAfter 就是因为键名里有 token 被抹
+  // 掉的，等到真要查「压缩到底在多大的时候触发的」，日志里只剩「已脱敏」。
+  const data = redact({ tokensBefore: 384198, estimatedTokensAfter: 229081, accessToken: "sk-live-123" });
+  assert.equal(data?.tokensBefore, 384198);
+  assert.equal(data?.estimatedTokensAfter, 229081);
+  assert.equal(data?.accessToken, REDACTED, "字符串的凭据照旧不能出现");
+});

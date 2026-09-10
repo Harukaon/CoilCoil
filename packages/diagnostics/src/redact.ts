@@ -41,7 +41,11 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
   }
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (SECRET_KEY_PATTERN.test(key)) {
+    // A credential is never a number. `tokensBefore`, `estimatedTokensAfter`,
+    // `outputTokens` all match the key pattern on the word "token", and losing
+    // them cost a whole afternoon: the compaction entries that would have said
+    // how big the context was when it fired read 「已脱敏」 instead.
+    if (SECRET_KEY_PATTERN.test(key) && typeof item !== "number") {
       result[key] = REDACTED;
       continue;
     }
