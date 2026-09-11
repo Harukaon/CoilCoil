@@ -34,22 +34,27 @@ type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
  * the copy this stage already trimmed, so clearing genuinely keeps Pi's line out
  * of reach — and when it cannot, Pi acts on its own schedule.
  *
- * The tool call itself always stays, with its arguments, so the model knows what
- * it read and can read it again. And nothing is lost from the session file: the
- * `context` hook rewrites only the copy handed to the provider for one request.
+ * What stays is the *fact* of the call — this tool ran, then that one. The
+ * arguments go with the output: a grep pattern is small, five hundred of them
+ * are not, and 「不要看它小就不删……积少成多也会很大」. Nothing is lost from the
+ * session file either: the `context` hook rewrites only the copy handed to the
+ * provider for one request, and the transcript keeps every byte.
  */
 
 /**
- * A result smaller than this is not worth replacing.
+ * No result is too small to clear.
  *
- * It was 400, and a real session showed how wrong that is: 979 tool results,
- * 124k tokens of output, and only 31 of them were big enough to touch — 37% of
- * the output, while the browser and terminal work that filled the window came in
- * hundreds of results of a few hundred tokens each. The cache write is paid once
- * per batch, not per result, so the floor only has to be above the placeholder
- * that takes the result's place; at 120 the same session becomes 80% clearable.
+ * There used to be a per-result floor — 400 tokens, then 120 — and both were
+ * wrong for the same reason: what fills a window is not one huge result, it is
+ * hundreds of ordinary ones. A session of browser work produced 979 results
+ * averaging 127 tokens; a floor of 400 could touch 31 of them. 「不要看它小就不
+ * 删，它有可能几百次、成千次调用，积少成多也会很大」.
+ *
+ * What is still worth a floor is the *batch*: rewriting the middle of the prompt
+ * costs the provider's cache, so a pass that frees a few hundred tokens buys one
+ * turn and pays for it twice. Small results are cleared — just not one at a time.
  */
-const MIN_RESULT_TOKENS = 120;
+const MIN_BATCH_TOKENS = 2_000;
 
 /** Pi's own reserve — its line is `contextWindow - reserveTokens`. */
 const PI_RESERVE_TOKENS = 16_384;
@@ -71,7 +76,7 @@ const CLEARING_LEAD_TOKENS = 10_000;
  * agree on what "recent" means: whatever this one clears, Pi would have
  * summarized away anyway.
  */
-const KEEP_RECENT_TOKENS = 50_000;
+const KEEP_RECENT_TOKENS = 20_000;
 
 /**
  * Tools whose result *is* live state rather than a lookup: the model has to
@@ -80,6 +85,8 @@ const KEEP_RECENT_TOKENS = 50_000;
 const STATE_TOOLS = new Set(["todo", "goal"]);
 
 const CLEARED_PREFIX = "[上下文已清理]";
+/** 参数清掉之后留在原地的东西：调用本身还在，参数没了。 */
+const CLEARED_ARGUMENTS = { note: CLEARED_PREFIX };
 
 /**
  * Channel this extension announces its batches on.
@@ -137,7 +144,7 @@ function messageTokens(message: AgentMessage): number {
 }
 
 function clearedText(message: ToolResultMessage): string {
-  return `${CLEARED_PREFIX} ${message.toolName} 的这次输出（约 ${resultChars(message)} 字符）已从上下文中移除以腾出窗口。调用参数仍在上面，需要内容就重新调用一次。`;
+  return `${CLEARED_PREFIX} ${message.toolName} 的这次输出（约 ${resultChars(message)} 字符）已移除以腾出窗口，参数也一并清掉了。需要就重新调用一次。`;
 }
 
 /**
@@ -155,9 +162,28 @@ export function resultKey(message: Pick<ToolResultMessage, "toolCallId" | "times
   return `${message.toolCallId}@${message.timestamp ?? 0}`;
 }
 
+/** 调用参数用同一个集合记，加个前缀免得和结果撞上。 */
+function callKey(id: string): string {
+  return `call:${id}`;
+}
+
+interface CallBlock { id?: unknown; name?: unknown; arguments?: unknown; type?: unknown }
+
+/** 一条助手消息里的工具调用块。 */
+function callBlocks(message: AgentMessage): CallBlock[] {
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+  return (content as CallBlock[]).filter((block) => block?.type === "toolCall");
+}
+
+/** 参数被清掉之后留下的那一点点，算大小时按它扣。 */
+const CLEARED_ARGUMENTS_TOKENS = 12;
+
 export interface ClearingPlan {
   /** Keys of the results this batch removes; see `resultKey`. */
   toolCallIds: string[];
+  /** Ids of the calls whose arguments go with them. */
+  callIds: string[];
   /** Estimated tokens the batch frees. */
   freedTokens: number;
 }
@@ -193,20 +219,32 @@ export function planToolResultClearing(
   }
 
   const toolCallIds: string[] = [];
+  const callIds: string[] = [];
   let freedTokens = 0;
   for (let index = 0; index < firstClearableIndex; index += 1) {
     const message = messages[index];
-    if (message.role !== "toolResult") continue;
-    const result = message as ToolResultMessage;
-    const key = resultKey(result);
-    if (cleared.has(key)) continue;
-    if (STATE_TOOLS.has(result.toolName)) continue;
-    const tokens = resultTokens(result);
-    if (tokens < MIN_RESULT_TOKENS) continue;
-    toolCallIds.push(key);
-    freedTokens += tokens;
+    if (message.role === "toolResult") {
+      const result = message as ToolResultMessage;
+      const key = resultKey(result);
+      if (cleared.has(key)) continue;
+      // todo / goal 是「当前状态」，不是查阅内容：清掉它模型就不知道自己在做什么了。
+      if (STATE_TOOLS.has(result.toolName)) continue;
+      toolCallIds.push(key);
+      freedTokens += resultTokens(result);
+      continue;
+    }
+    // 调用参数也是内容：一条 grep 的正则不大，几百条就不小了。留下的只有「调用过
+    // 什么工具」这件事本身，那是摘要接不住、模型又必须知道的。
+    for (const block of callBlocks(message)) {
+      const id = String(block.id ?? "");
+      if (!id || cleared.has(callKey(id)) || STATE_TOOLS.has(String(block.name ?? ""))) continue;
+      const size = Math.ceil(JSON.stringify(block.arguments ?? {}).length / CHARS_PER_TOKEN);
+      if (size <= CLEARED_ARGUMENTS_TOKENS) continue;
+      callIds.push(callKey(id));
+      freedTokens += size - CLEARED_ARGUMENTS_TOKENS;
+    }
   }
-  return { toolCallIds, freedTokens };
+  return { toolCallIds, callIds, freedTokens };
 }
 
 /**
@@ -220,16 +258,24 @@ export function applyToolResultClearing(
   if (cleared.size === 0) return undefined;
   let changed = false;
   const next = messages.map((message) => {
-    if (message.role !== "toolResult") return message;
-    const result = message as ToolResultMessage;
-    if (!cleared.has(resultKey(result))) return message;
-    // Belt and braces after the `call_0` disaster: this stage only ever chooses
-    // results above the floor, so a small one matching a remembered key is a key
-    // collision, not a decision anyone made. Leave it alone — replacing a short
-    // result with a longer notice never made the context smaller anyway.
-    if (resultTokens(result) < MIN_RESULT_TOKENS) return message;
+    if (message.role === "toolResult") {
+      const result = message as ToolResultMessage;
+      if (!cleared.has(resultKey(result))) return message;
+      const replacement = clearedText(result);
+      // 换上去的说明比原文还长，就别换——那只会让上下文更大。这条也是 `call_0`
+      // 那次事故留下的护栏：万一键撞上了，最坏也只是什么都没发生。
+      if (replacement.length >= resultChars(result)) return message;
+      changed = true;
+      return { ...result, content: [{ type: "text" as const, text: replacement }] };
+    }
+    const calls = callBlocks(message);
+    if (!calls.some((block) => cleared.has(callKey(String(block.id ?? ""))))) return message;
     changed = true;
-    return { ...result, content: [{ type: "text" as const, text: clearedText(result) }] };
+    const content = ((message as { content: CallBlock[] }).content).map((block) => {
+      if (block?.type !== "toolCall" || !cleared.has(callKey(String(block.id ?? "")))) return block;
+      return { ...block, arguments: CLEARED_ARGUMENTS };
+    });
+    return { ...message, content } as AgentMessage;
   });
   return changed ? next : undefined;
 }
@@ -265,11 +311,13 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
 
     if (contextWindow > 0 && contextTokens > line) {
       const plan = planToolResultClearing(event.messages, cleared);
-      if (plan.toolCallIds.length > 0) {
-        for (const key of plan.toolCallIds) cleared.add(key);
+      // 单条不设门槛（几百次小调用加起来才是大头），但一批腾不出一定量就先不动：
+      // 每清一次都要重写一遍提示词、打碎服务商的缓存。
+      if (plan.freedTokens >= MIN_BATCH_TOKENS) {
+        for (const key of [...plan.toolCallIds, ...plan.callIds]) cleared.add(key);
         pi.events.emit(CONTEXT_CLEARING_EVENT, {
           at: Date.now(),
-          clearedResults: plan.toolCallIds.length,
+          clearedResults: plan.toolCallIds.length + plan.callIds.length,
           freedTokens: plan.freedTokens,
           contextTokens,
           contextWindow,

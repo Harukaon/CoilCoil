@@ -16,29 +16,35 @@ const INSTALLED = Symbol.for("coilcoil.compaction-settings.installed");
 const KEEP_RECENT_CEILING_RATIO = 0.5;
 
 /**
- * How much conversation survives a compaction verbatim.
+ * How much conversation survives a compaction verbatim: Pi's own 20000.
  *
- * Pi keeps 20000. Fifty thousand is CoilCoil's choice: the work in progress is
- * what the next request is about, and the more of it stays as itself rather than
- * as a description of itself, the less the model has to reconstruct. It is
- * affordable now that the compacted stretch is written out in full and can be
- * read back (see `context-transcript.ts`) — losing detail off the far end is no
- * longer permanent, so the near end is where the budget belongs.
+ * CoilCoil used to raise this to 50000, and that number is what made a real
+ * session compact every twenty minutes. Pi counts this budget with chars/4,
+ * which is about right for English and four times short for Chinese — one
+ * character is one token. In a Chinese session "keep 50000" kept 126000 real
+ * tokens; with 11000 of fixed prompt and a 20000-token summary on top, a
+ * compaction left only 26000 free out of a 200000 window, so the next one was
+ * minutes away.
+ *
+ * The lesson is not "20000 is the right number", it is that this budget is
+ * denominated in a unit that lies. Until it is measured in real tokens, the
+ * honest thing is to leave Pi's default alone rather than to multiply the lie.
  */
-const KEEP_RECENT_TOKENS = 50_000;
+const KEEP_RECENT_TOKENS = 20_000;
 
 /**
  * Keep Pi's compaction budget from silently disabling itself.
  *
  * Pi expresses the budget as two absolute token counts: `reserveTokens` (16384)
  * decides when compaction fires, `keepRecentTokens` (20000) decides how much
- * conversation survives it verbatim. CoilCoil raises the survivor to 50000, and
- * then has to clamp it back down in one case.
+ * conversation survives it verbatim. Both are Pi's now — this function no longer
+ * raises either one, it only clamps the survivor down in the one case where
+ * leaving it alone breaks compaction outright.
  *
- * The clamp is not tuning, it is a failure to avoid. Once `keepRecentTokens` exceeds
- * `contextWindow - reserveTokens`, the cut point walks past the entire history,
- * `prepareCompaction` finds nothing to summarize and returns undefined, and
- * compaction quietly does nothing at all — every turn, until the request
+ * That case is not tuning, it is a failure to avoid. Once `keepRecentTokens`
+ * exceeds `contextWindow - reserveTokens`, the cut point walks past the entire
+ * history, `prepareCompaction` finds nothing to summarize and returns undefined,
+ * and compaction quietly does nothing at all — every turn, until the request
  * overflows, at which point overflow recovery takes the same path and also does
  * nothing. A 32k model is already inside that dead zone with Pi's defaults, and
  * CoilCoil lets users set `contextWindow` per model in settings, so anyone on a
@@ -58,7 +64,7 @@ export function compactionSettingsForWindow(
   const keepRecentTokens = Math.max(
     1,
     Math.min(
-      Math.max(settings.keepRecentTokens, KEEP_RECENT_TOKENS),
+      settings.keepRecentTokens || KEEP_RECENT_TOKENS,
       Math.floor(summarizable * KEEP_RECENT_CEILING_RATIO),
     ),
   );

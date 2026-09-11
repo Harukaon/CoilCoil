@@ -14,10 +14,10 @@ const CONTEXT_WINDOW = 400_000;
 const OUR_LINE = clearingLine(CONTEXT_WINDOW);
 const PI_LINE = CONTEXT_WINDOW - 16_384;
 
-function toolCall(id: string, name: string): AgentMessage {
+function toolCall(id: string, name: string, args: unknown = { path: `/src/${id}.ts` }): AgentMessage {
   return {
     role: "assistant",
-    content: [{ type: "toolCall", id, name, arguments: { path: `/src/${id}.ts` } }],
+    content: [{ type: "toolCall", id, name, arguments: args }],
     timestamp: 0,
   } as unknown as AgentMessage;
 }
@@ -45,13 +45,13 @@ function history(count: number, chars = 40_000, name = "read"): AgentMessage[] {
   ]).flat();
 }
 
-/** 尾巴：把最近这一段撑过 5 万 token，代表「正在进行的对话」。 */
+/** 尾巴：把最近这一段撑过 2 万 token，代表「正在进行的对话」。 */
 function recentTail(): AgentMessage[] {
-  return [said("x".repeat(220_000))];
+  return [said("x".repeat(100_000))];
 }
 
-test("清的是老的那一段，最近 5 万一个字都不动", () => {
-  // 这一层自己划线、自己保护最近一段：pi 摘要时留最近 5 万，我们也留最近 5 万，
+test("清的是老的那一段，最近 2 万一个字都不动", () => {
+  // 这一层自己划线、自己保护最近一段：pi 摘要时留最近 2 万，我们也留最近 2 万，
   // 两边对「最近」的理解一致，我们清掉的正是 pi 本来也要摘要掉的。
   const messages = [...history(10), ...recentTail()];
   const plan = planToolResultClearing(messages, new Set());
@@ -69,12 +69,33 @@ test("已经清过的不会再算一遍", () => {
   assert.deepEqual(again.toolCallIds, [], "第二次没有新的可清");
 });
 
-test("太小的结果不值得动，动了只是白打断缓存", () => {
-  // 门槛按「换上去的那句说明」定：比说明还短的结果，清了反而更长。
-  assert.deepEqual(planToolResultClearing([...history(10, 300), ...recentTail()], new Set()).toolCallIds, []);
-  // 几百 token 的浏览器/终端输出是这类会话的大头，必须清得动——门槛 400 的时候，
-  // 用户那条真实会话 979 条结果里只够得着 31 条。
-  assert.equal(planToolResultClearing([...history(10, 1_000), ...recentTail()], new Set()).toolCallIds.length, 10);
+test("再小的结果也清，单条没有门槛", () => {
+  // 「不要看它小就不删，它有可能几百次、成千次调用，积少成多也会很大」。曾经的
+  // 单条门槛是 400 token，用户那条真实会话 979 条结果平均 127 token，够得着的只有
+  // 31 条——剩下那 948 条才是把窗口填满的东西。
+  const plan = planToolResultClearing([...history(10, 300), ...recentTail()], new Set());
+  assert.equal(plan.toolCallIds.length, 10);
+  assert.equal(plan.freedTokens, 10 * 75);
+});
+
+test("大参数跟着输出一起清，留下的只有「调过这个工具」", () => {
+  // 一条 grep 的正则不大，几百条就不小了。清完之后调用块还在、名字还在，参数换成
+  // 一句占位。
+  const big = { pattern: "x".repeat(40_000) };
+  const messages = [toolCall("c1", "grep", big), toolResult("c1", "grep", 40_000), ...recentTail()];
+  const plan = planToolResultClearing(messages, new Set());
+  assert.equal(plan.callIds.length, 1, "参数该进这一批");
+  assert.ok(plan.freedTokens > 19_000, "参数和输出都算进腾出来的量");
+
+  const next = applyToolResultClearing(messages, new Set([...plan.toolCallIds, ...plan.callIds]))!;
+  const call = next[0] as unknown as { content: Array<{ name?: string; arguments?: unknown }> };
+  assert.equal(call.content[0].name, "grep", "调过什么工具还得看得见");
+  assert.deepEqual(call.content[0].arguments, { note: "[上下文已清理]" });
+});
+
+test("参数小到还不如占位句，就别动它", () => {
+  const messages = [...history(2), ...recentTail()];
+  assert.deepEqual(planToolResultClearing(messages, new Set()).callIds, []);
 });
 
 test("todo 和 goal 的结果是当前状态，永远不清", () => {
@@ -89,12 +110,12 @@ test("todo 和 goal 的结果是当前状态，永远不清", () => {
   for (const key of cleared) assert.match(key, /^call-/);
 });
 
-test("清理只换掉输出，调用和参数原样留着", () => {
+test("只清被点名的那几条，别的原样留着", () => {
   const messages = history(2);
   const next = applyToolResultClearing(messages, new Set([resultKey(messages[1] as never)]))!;
   const call = next[0] as unknown as { content: Array<{ type: string; name?: string; arguments?: unknown }> };
   assert.equal(call.content[0].name, "read", "调用本身不能动");
-  assert.deepEqual(call.content[0].arguments, { path: "/src/call-0.ts" }, "参数是模型重读的依据");
+  assert.deepEqual(call.content[0].arguments, { path: "/src/call-0.ts" }, "没被点名的参数不动");
   const cleared = next[1] as unknown as { content: Array<{ type: string; text: string }> };
   assert.match(cleared.content[0].text, /上下文已清理/);
   assert.match(cleared.content[0].text, /重新调用/);
@@ -127,6 +148,16 @@ function harness(contextTokens: number) {
       handlers.get("context")![0]({ messages }, ctx) as { messages: AgentMessage[] } | undefined,
   };
 }
+
+test("一批腾不出 2000 token 就先不动，免得白打断缓存", () => {
+  // 单条不设门槛，但每清一次都要重写一遍提示词、打碎服务商的缓存——一次只腾出
+  // 几百 token 的「碎屑」清理，买一轮对话要付两次钱。
+  const h = harness(OUR_LINE + 5_000);
+  assert.equal(h.context([...history(4, 300), ...recentTail()]), undefined, "1200 token，不值得动");
+  assert.deepEqual(h.emitted, []);
+  h.context([...history(30, 300), ...recentTail()]);
+  assert.equal(h.emitted.length, 1, "凑够一批就该动手");
+});
 
 test("没到我们的线，什么都不清", () => {
   const h = harness(OUR_LINE - 1);
