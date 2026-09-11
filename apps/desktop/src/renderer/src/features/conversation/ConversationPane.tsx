@@ -332,6 +332,7 @@ export function ConversationPane({
                 <AgentTurnView
                   key={`agent-${item.order}`}
                   items={item.items}
+                  continuation={item.continuation}
                   running={running && index === visibleTimeline.length - 1}
                   modelName={turnModelName(item.model, configuration, snapshot?.model?.name ?? "Agent")}
                   renderSubagent={(activity) => <SubagentCard activity={activity} onOpen={(selected) => setSelectedSubagentId(selected.id)} />}

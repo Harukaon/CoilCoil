@@ -387,6 +387,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .timeline-history-loader span { color: hsl(var(--th) var(--ts) var(--l-588)); }
 .timeline-message { position: relative; margin: 0 0 28px; }
 .agent-turn { margin: 0 0 30px; }
+/* 被压缩横线切开的下半截：没有模型名那一行，自己补回那点上边距。 */
+.agent-turn.continued { margin-top: 10px; }
 .agent-turn > .message-label { margin-bottom: 10px; }
 .agent-turn, .agent-turn-content, .assistant-segment { width: 100%; min-width: 0; max-width: 100%; }
 .agent-turn-content { display: block; }

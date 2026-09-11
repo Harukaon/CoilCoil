@@ -120,6 +120,40 @@ test("横线在时间线里是独立一段，不会被塞进某一轮回复", ()
   assert.deepEqual(kinds, ["user", "agent", "compaction", "user"]);
 });
 
+test("横线落在一段回答中间时，下半截不再报一遍模型名", () => {
+  // 用户截图里的样子：一段回答说到一半，横线画下来，紧接着又出现一行
+  // 「Claude Opus 5」，看上去像模型重新答了一遍。线还是要画在它发生的地方，但线
+  // 下面那半截是同一轮在接着说。
+  const turn: ChatMessage[] = [
+    { id: "m1", entryId: "e1", role: "user", text: "帮我看看", order: 1, timestamp: 1 },
+    { id: "m2", entryId: "e2", role: "assistant", text: "先看表结构", order: 2, timestamp: 2 },
+    { id: "m3", entryId: "e3", role: "assistant", text: "改好了", order: 3, timestamp: 4 },
+  ] as unknown as ChatMessage[];
+  const timeline = buildConversationTimeline(turn, [], [], undefined, {
+    summaryEvents: [],
+    contextClearings: [{ at: 3, clearedResults: 5, freedTokens: 9_000 }],
+  });
+  assert.deepEqual(timeline.map((item) => item.kind), ["user", "agent", "compaction", "agent"]);
+  const [, first, , second] = timeline;
+  assert.equal(first.kind === "agent" && first.continuation, undefined, "上半截照常报模型名");
+  assert.equal(second.kind === "agent" && second.continuation, true, "下半截是接着说，不是新的一轮");
+});
+
+test("用户插话之后的那一轮，还是要报模型名", () => {
+  // 线后面确实开了新的一轮：这时候模型名该出现，不能被上一条的修法顺手吞掉。
+  const talk: ChatMessage[] = [
+    { id: "m1", entryId: "e1", role: "assistant", text: "好了", order: 1, timestamp: 1 },
+    { id: "m2", entryId: "e2", role: "user", text: "再来一次", order: 2, timestamp: 4 },
+    { id: "m3", entryId: "e3", role: "assistant", text: "这就来", order: 3, timestamp: 5 },
+  ] as unknown as ChatMessage[];
+  const timeline = buildConversationTimeline(talk, [], [], undefined, {
+    summaryEvents: [],
+    contextClearings: [{ at: 3, clearedResults: 5, freedTokens: 9_000 }],
+  });
+  const last = timeline.at(-1)!;
+  assert.equal(last.kind === "agent" && last.continuation, undefined);
+});
+
 test("比所有消息都新的压缩，线画在最后面", () => {
   const timeline = buildConversationTimeline([...messages], [], [], undefined, {
     summaryEvents: [],

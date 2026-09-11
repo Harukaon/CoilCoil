@@ -37,7 +37,7 @@ export type TimelineItem =
 
 export type ConversationTimelineItem =
   | { kind: "user"; order: number; message: ChatMessage }
-  | { kind: "agent"; order: number; items: TimelineItem[]; model?: ChatMessage["model"] }
+  | { kind: "agent"; order: number; items: TimelineItem[]; model?: ChatMessage["model"]; continuation?: boolean }
   | { kind: "compaction"; order: number; mark: CompactionMark };
 
 type ActivityEntry =
@@ -524,12 +524,15 @@ export function AgentTurnView({
   items,
   modelName,
   running,
+  continuation,
   renderSubagent,
   renderPlan,
 }: {
   items: TimelineItem[];
   modelName: string;
   running: boolean;
+  /** 这一段是被压缩横线切开的下半截，不是新的一轮回复。 */
+  continuation?: boolean;
   renderSubagent?: (activity: SubagentActivity) => ReactNode;
   renderPlan?: (plan: PlanApprovalState) => ReactNode;
 }): React.JSX.Element {
@@ -593,8 +596,10 @@ export function AgentTurnView({
   }
   flushActivity();
   return (
-    <article className="agent-turn">
-      <div className="message-label">{modelName}</div>
+    <article className={continuation ? "agent-turn continued" : "agent-turn"}>
+      {/* 横线可以落在一段回答中间。它照旧是条分界线，但线下面那半截是同一轮回答
+          接着说，再报一次模型名就成了「又开始答了一遍」。 */}
+      {continuation ? null : <div className="message-label">{modelName}</div>}
       <div className="agent-turn-content">{rendered}</div>
       {!running ? (
         <button className="assistant-copy-button" type="button" aria-label={copied ? "已复制" : "复制回复"} onClick={() => { void copyTurn(); }}>

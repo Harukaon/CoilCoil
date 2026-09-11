@@ -61,6 +61,11 @@ export function buildConversationTimeline(
   const turns: ConversationTimelineItem[] = [];
   // A compaction rule is a divider, never part of a turn: whatever follows it is
   // a fresh turn, because the model's view of everything above just changed.
+  //
+  // 但「新的一段」不等于「新的一轮回答」。压缩常常正好落在一轮回答中间，下半截
+  // 还是同一轮在接着说；它要是再报一次模型名，看上去就像模型又答了一遍。所以这
+  // 里记一笔，让下半截知道自己是被切开的，而不是新起的。
+  let lastTurn: ConversationTimelineItem | undefined;
   const pending = [...compactionMarks].sort((left, right) => left.order - right.order);
   const drainMarksBefore = (order: number): void => {
     while (pending.length && pending[0].order <= order) {
@@ -71,7 +76,8 @@ export function buildConversationTimeline(
   for (const item of grouped) {
     drainMarksBefore(item.order);
     if (item.kind === "message" && item.message.role === "user") {
-      turns.push({ kind: "user", order: item.order, message: item.message });
+      lastTurn = { kind: "user", order: item.order, message: item.message };
+      turns.push(lastTurn);
       continue;
     }
     const model = item.kind === "message" && item.message.role === "assistant" ? item.message.model : undefined;
@@ -79,7 +85,11 @@ export function buildConversationTimeline(
     if (previous?.kind === "agent") {
       previous.items.push(item);
       previous.model ??= model;
-    } else turns.push({ kind: "agent", order: item.order, items: [item], model });
+      continue;
+    }
+    const continuation = previous?.kind === "compaction" && lastTurn?.kind === "agent";
+    lastTurn = { kind: "agent", order: item.order, items: [item], model, ...(continuation ? { continuation } : {}) };
+    turns.push(lastTurn);
   }
   drainMarksBefore(Number.POSITIVE_INFINITY);
   return turns;
