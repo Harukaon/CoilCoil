@@ -20,10 +20,14 @@ type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
  * conversation runs on with its chain intact, in order, unsummarized. Every
  * round bought here is a round that never has to be compressed.
  *
- * Three outcomes, one rule. Clearing lands the request below this line: carry
- * on. It lands between the two lines: also carry on — Pi's line is what forces a
+ * One pass per cycle. Clearing sweeps everything it is eligible to touch, once,
+ * and then stands down until a compaction has actually happened — 「这反复清理
+ * 还不如直接压缩呢」. Three outcomes follow from that one pass. It lands the
+ * request below this line: carry on, and the cycle has been bought outright. It
+ * lands between the two lines: also carry on — Pi's line is what forces a
  * summary, and it has not been reached. It stays above Pi's line: Pi summarizes,
- * and that is this stage stepping aside, not failing.
+ * and that is this stage stepping aside, not failing. In every case the next
+ * pass is handed back by `session_compact`, never by the context climbing again.
  *
  * Owning a line ahead of Pi's is what makes that work without a cancel. The
  * previous version hooked Pi's own decision and cancelled the summary when it
@@ -283,31 +287,43 @@ export function applyToolResultClearing(
 export default function contextClearingExtension(pi: ExtensionAPI): void {
   let cleared = new Set<string>();
   /**
-   * What this stage has freed that the dial has not caught up with yet.
+   * One pass, then stand down until a compaction has actually happened.
    *
-   * `getContextUsage` is anchored on what the provider charged for the last
-   * request, so a batch cleared moments ago is invisible until a reply comes
-   * back. One real session cleared twice in seventeen seconds for exactly that
-   * reason: the second pass read a number that still counted everything the
-   * first had just taken out. Subtracting what is already in flight is what
-   * keeps one decision from being made twice — and every extra pass rewrites
-   * the prompt and costs another cache write.
+   * 「这反复清理还不如直接压缩呢」. A live session cleared nine times in
+   * forty-five minutes, each pass buying ten or fifteen minutes before the
+   * conversation climbed back to the line — and each one rewriting the middle of
+   * the prompt and paying for a fresh cache write. A stage that has to keep
+   * firing to hold the line is not postponing the summary, it is charging rent
+   * for the delay.
+   *
+   * So the allowance is one. Spend it, and this stage is done until Pi
+   * summarizes; `session_compact` is what hands back the next one. Clearing
+   * still goes first every cycle — it is still the cheap layer, and the cycle
+   * that starts with a clean sweep of old tool records is a cycle that reaches
+   * Pi's line later.
    */
-  let freedInFlight = 0;
-  let lastReading = 0;
+  let passesLeft = 1;
 
   // A cleared result keeps its entry while the branch that produced it is the
   // one being sent; a different branch starts over, because its messages were
   // never seen here.
   const reset = (): void => {
     cleared = new Set<string>();
-    freedInFlight = 0;
-    lastReading = 0;
+    passesLeft = 1;
   };
 
   pi.on("session_start", reset);
   pi.on("session_tree", reset);
   pi.on("session_shutdown", reset);
+
+  // A compaction has happened: the history behind the cut is a summary now, and
+  // whatever tool records survived it are fair game for the one pass of the new
+  // cycle. Only a compaction that succeeded counts — a cancelled or failed one
+  // leaves the context exactly as it was, and handing back a pass there would
+  // be the old repeat-clearing under another name.
+  pi.on("session_compact", () => {
+    passesLeft = 1;
+  });
 
   /**
    * Before every request: at this stage's line, clear what can be cleared, then
@@ -324,19 +340,13 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
     const contextTokens = usage?.tokens ?? 0;
     const line = clearingLine(contextWindow);
 
-    // Within one turn the estimate only grows, message by message. A reading
-    // that comes back *lower* is a fresh anchor — the provider has now charged
-    // for a request this stage already trimmed — so the credit is spent.
-    if (contextTokens < lastReading) freedInFlight = 0;
-    lastReading = contextTokens;
-
-    if (contextWindow > 0 && contextTokens - freedInFlight > line) {
+    if (passesLeft > 0 && contextWindow > 0 && contextTokens > line) {
       const plan = planToolResultClearing(event.messages, cleared);
       // 单条不设门槛（几百次小调用加起来才是大头），但一批腾不出一定量就先不动：
       // 每清一次都要重写一遍提示词、打碎服务商的缓存。
       if (plan.freedTokens >= MIN_BATCH_TOKENS) {
         for (const key of [...plan.toolCallIds, ...plan.callIds]) cleared.add(key);
-        freedInFlight += plan.freedTokens;
+        passesLeft -= 1;
         pi.events.emit(CONTEXT_CLEARING_EVENT, {
           at: Date.now(),
           clearedResults: plan.toolCallIds.length + plan.callIds.length,
@@ -345,7 +355,7 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
           contextWindow,
           // Said plainly, because it is the only question that matters as a
           // session grows: did this stage keep up, or is Pi about to summarize?
-          fitsAgain: contextTokens - freedInFlight <= line,
+          fitsAgain: contextTokens - plan.freedTokens <= line,
         } satisfies ContextClearingRecord);
       }
     }

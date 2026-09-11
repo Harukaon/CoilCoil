@@ -144,6 +144,7 @@ function harness(contextTokens: number) {
   return {
     emitted,
     setTokens: (next: number) => { tokens = next; },
+    compacted: () => { for (const h of handlers.get("session_compact") ?? []) h({}, ctx); },
     context: (messages: AgentMessage[]) =>
       handlers.get("context")![0]({ messages }, ctx) as { messages: AgentMessage[] } | undefined,
   };
@@ -198,26 +199,32 @@ test("清完还在 pi 的线上面：我们放手，交给 pi 去摘要", () => 
   // 关键：这一层不拦 pi，也没有「取消压缩」这回事。
 });
 
-test("刚清完、读数还没跟上来，不会当场再清一次", () => {
-  // 真实会话里 17 秒内连清了两次：读的那个数是按上一次服务商回的算的，刚清掉的
-  // 东西还没反映进去，于是同一个决定做了两遍，白白多打断一次缓存。
+test("一轮只清一次：清完再涨回线上，也不再动手", () => {
+  // 「这反复清理还不如直接压缩呢」。一条真实会话四十五分钟里清了九次，每次买来
+  // 十几分钟，代价是又重写一遍提示词、又打碎一次缓存。清一次就够了，再涨回线上
+  // 是 pi 该出手的时候。
   const h = harness(OUR_LINE + 5_000);
-  const messages = [...history(10), ...recentTail()];
-  h.context(messages);
+  h.context([...history(10), ...recentTail()]);
   assert.equal(h.emitted.length, 1);
 
-  // 下一次读数比上次还涨了一点（这一轮又加了几条消息），但刚腾出来的 10 万还没
-  // 算进去——扣掉它就在线下面，这一轮就不该再动手。
-  h.setTokens(OUR_LINE + 5_500);
-  h.context([...messages, ...history(10)]);
-  assert.equal(h.emitted.length, 1, "读数没刷新之前不能重复决定");
+  h.setTokens(OUR_LINE + 40_000);
+  h.context([...history(10), ...history(10, 40_000, "grep"), ...recentTail()]);
+  assert.equal(h.emitted.length, 1, "这一轮的额度已经用掉了");
+});
 
-  // 服务商那边回来了，读数掉下来：额度用掉了，涨回线上就该照常再清。
-  h.setTokens(OUR_LINE - 60_000);
-  h.context([...messages, ...history(10)]);
-  h.setTokens(OUR_LINE + 5_000);
-  h.context([...messages, ...history(10)]);
-  assert.equal(h.emitted.length, 2, "读数刷新之后又涨到线上，就该再清一次");
+test("pi 压缩过一次，就再给一次清理的机会", () => {
+  // 压缩之后切点前面变成一段摘要，后面幸存下来的那些工具记录是新一轮的可清对象。
+  const h = harness(OUR_LINE + 5_000);
+  h.context([...history(10), ...recentTail()]);
+  assert.equal(h.emitted.length, 1);
+
+  h.compacted();
+  h.context([...history(10), ...history(10, 40_000, "grep"), ...recentTail()]);
+  assert.equal(h.emitted.length, 2, "压缩之后该有新的一次机会");
+
+  // 而且只有一次：压缩一次换一次，不是换一个可以反复清的状态。
+  h.context([...history(10), ...history(20, 40_000, "grep"), ...recentTail()]);
+  assert.equal(h.emitted.length, 2, "一次压缩只换一次清理");
 });
 
 test("清干净之后不再重复动手，也不再报", () => {
