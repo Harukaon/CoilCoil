@@ -12,7 +12,9 @@ export function buildConversationTimeline(
   // beside the timeline keeps the two orderings from drifting apart.
   inspection?: Pick<RuntimeInspectionSnapshot, "summaryEvents" | "contextClearings">,
 ): ConversationTimelineItem[] {
-  const compactionMarks = buildCompactionMarks(messages, inspection?.summaryEvents, inspection?.contextClearings);
+  // 工具调用和消息共用一套序号，所以横线也必须同时对着这两样放。只对着消息放，
+  // 一次还在跑的压缩就会把它之前跑完的命令甩到线下面去。
+  const compactionMarks = buildCompactionMarks(messages, inspection?.summaryEvents, inspection?.contextClearings, tools);
   const subagentsByParent = new Map<string, SubagentActivity[]>();
   for (const activity of subagents) {
     const parent = activity.parentToolId ?? activity.runId;

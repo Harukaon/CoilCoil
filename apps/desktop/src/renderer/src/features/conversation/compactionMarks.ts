@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   ContextClearingRecord,
   RuntimeSummaryEvent,
+  ToolRun,
 } from "@coilcoil/runtime-protocol";
 
 /**
@@ -46,25 +47,50 @@ export interface CompactionMark {
   summary?: string;
 }
 
-/** Half a step before a message, so the mark lands between two turns. */
+/** Half a step before an entry, so the mark lands between two of them. */
 const BEFORE = 0.5;
+
+/**
+ * One place in the transcript: what its counter says, and when it happened.
+ *
+ * Messages and tool runs share a single counter, and a mark has to be placed
+ * against both. Placing it against messages alone is what put a command *below*
+ * a compaction that was still running — the model cannot be running anything
+ * while its context is being summarized, and it was not: the command had run
+ * before, and the rule landed on top of it because the last message was older
+ * still. 「怎么可能会有模型继续在运行命令呢」.
+ */
+interface Anchor { order: number; timestamp: number }
+
+/** Everything a mark can be placed against, in transcript order. */
+export function timelineAnchors(
+  messages: readonly ChatMessage[],
+  tools: readonly ToolRun[] = [],
+): Anchor[] {
+  const anchors: Anchor[] = [
+    ...messages.map((message) => ({ order: message.order, timestamp: message.timestamp })),
+    ...tools.map((tool) => ({ order: tool.order, timestamp: tool.startedAt })),
+  ];
+  return anchors.sort((left, right) => left.order - right.order);
+}
 
 /**
  * The order a mark should take to sit immediately before `anchor`.
  *
- * Messages are ordered by a monotonic counter rather than by time, so a mark is
- * placed relative to a message rather than at its timestamp; the fallback for a
- * mark with no message after it is the end of the transcript.
+ * Entries are ordered by a monotonic counter rather than by time, so a mark is
+ * placed relative to an entry rather than at its timestamp; the fallback for a
+ * mark with nothing after it is the end of the transcript — past the tool runs
+ * as well as the messages.
  */
-function orderBefore(messages: readonly ChatMessage[], anchor: ChatMessage | undefined): number {
+function orderBefore(anchors: readonly Anchor[], anchor: Anchor | undefined): number {
   if (anchor) return anchor.order - BEFORE;
-  const last = messages.at(-1);
+  const last = anchors.at(-1);
   return last ? last.order + BEFORE : 0;
 }
 
-/** The first message at or after a moment in time. */
-function firstMessageAfter(messages: readonly ChatMessage[], at: number): ChatMessage | undefined {
-  return messages.find((message) => message.timestamp >= at);
+/** The first entry at or after a moment in time. */
+function firstAfter(anchors: readonly Anchor[], at: number): Anchor | undefined {
+  return anchors.find((entry) => entry.timestamp >= at);
 }
 
 function summaryStatus(status: RuntimeSummaryEvent["status"]): CompactionMark["status"] {
@@ -76,21 +102,24 @@ export function buildCompactionMarks(
   messages: readonly ChatMessage[],
   summaryEvents: readonly RuntimeSummaryEvent[] = [],
   clearings: readonly ContextClearingRecord[] = [],
+  tools: readonly ToolRun[] = [],
 ): CompactionMark[] {
   const marks: CompactionMark[] = [];
+  const anchors = timelineAnchors(messages, tools);
 
   for (const event of summaryEvents) {
     // Only compactions of the branch being shown. A summary from an abandoned
     // branch describes messages this transcript never contained.
     if (event.kind !== "compaction" || !event.active) continue;
-    const kept = event.firstKeptEntryId
+    const keptMessage = event.firstKeptEntryId
       ? messages.find((message) => message.entryId === event.firstKeptEntryId)
       : undefined;
-    const anchor = kept ?? firstMessageAfter(messages, event.timestamp);
+    const kept = keptMessage ? { order: keptMessage.order, timestamp: keptMessage.timestamp } : undefined;
+    const anchor = kept ?? firstAfter(anchors, event.timestamp);
     marks.push({
       id: event.id,
       layer: 2,
-      order: orderBefore(messages, anchor),
+      order: orderBefore(anchors, anchor),
       at: event.timestamp,
       status: summaryStatus(event.status),
       atCutPoint: Boolean(kept),
@@ -104,7 +133,7 @@ export function buildCompactionMarks(
     marks.push({
       id: `clearing:${clearing.at}`,
       layer: 1,
-      order: orderBefore(messages, firstMessageAfter(messages, clearing.at)),
+      order: orderBefore(anchors, firstAfter(anchors, clearing.at)),
       at: clearing.at,
       status: "done",
       clearedResults: clearing.clearedResults,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChatMessage, RuntimeSummaryEvent } from "@coilcoil/runtime-protocol";
+import type { ChatMessage, RuntimeSummaryEvent, ToolRun } from "@coilcoil/runtime-protocol";
 import {
   buildCompactionMarks,
   compactionMarkDetail,
@@ -118,6 +118,28 @@ test("横线在时间线里是独立一段，不会被塞进某一轮回复", ()
   const timeline = buildConversationTimeline([...messages], [], [], undefined, { summaryEvents: [compaction({ firstKeptEntryId: "e-c" })] });
   const kinds = timeline.map((item) => item.kind);
   assert.deepEqual(kinds, ["user", "agent", "compaction", "user"]);
+});
+
+test("压缩还在跑的时候，它之前跑完的命令不能被甩到线下面", () => {
+  // 用户的原话：「怎么可能会有模型继续在运行命令呢」。压缩期间模型不干活，所以
+  // 线下面出现一条命令只有一种解释——那条命令是压缩之前跑的，被放错了地方。
+  // 根子在工具调用和消息共用一套序号，而横线只对着消息放：压缩还在跑，后面还没
+  // 有新消息，横线就落到「最后一条消息之后」，而那之后的工具序号更大。
+  const said: ChatMessage[] = [
+    { id: "m1", entryId: "e1", role: "user", text: "改一下", order: 1, timestamp: 1 },
+    { id: "m2", entryId: "e2", role: "assistant", text: "先看表结构", order: 2, timestamp: 2 },
+  ] as unknown as ChatMessage[];
+  const ran = [{
+    id: "t1", order: 3, name: "bash", label: "运行了 1 个命令", args: {}, output: "",
+    status: "succeeded", startedAt: 3, endedAt: 4,
+  }] as unknown as ToolRun[];
+
+  const timeline = buildConversationTimeline(said, ran, [], undefined, {
+    summaryEvents: [compaction({ status: "running", timestamp: 5 })],
+  });
+  assert.deepEqual(timeline.map((item) => item.kind), ["user", "agent", "compaction"], "线该在最后面");
+  const agent = timeline[1];
+  assert.equal(agent.kind === "agent" && agent.items.some((item) => item.kind === "tools"), true, "命令留在线上面");
 });
 
 test("横线落在一段回答中间时，下半截不再报一遍模型名", () => {
