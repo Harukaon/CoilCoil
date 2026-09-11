@@ -45,6 +45,17 @@ export interface CompactionMark {
   tokensBefore?: number;
   tokensAfter?: number;
   summary?: string;
+  /**
+   * Why a failed compaction failed.
+   *
+   * The runtime has always had this — it logs the text and flashes it in a
+   * toast — but the rule, which is the part that stays on screen, said only
+   * 「上下文整理失败」. 「失败为啥我看不到报错？」. A failure that leaves no
+   * reason behind is the one kind of failure the user cannot act on.
+   */
+  error?: string;
+  /** Whether the runtime is going to try this compaction again by itself. */
+  willRetry?: boolean;
 }
 
 /** Half a step before an entry, so the mark lands between two of them. */
@@ -122,6 +133,8 @@ export function buildCompactionMarks(
       order: orderBefore(anchors, anchor),
       at: event.timestamp,
       status: summaryStatus(event.status),
+      error: event.error,
+      willRetry: event.willRetry,
       atCutPoint: Boolean(kept),
       tokensBefore: event.tokensBefore,
       tokensAfter: event.estimatedTokensAfter,
@@ -194,6 +207,14 @@ export function compactionMarkDetail(mark: CompactionMark): string {
     const passes = (mark.passes ?? 1) > 1 ? `（分 ${mark.passes} 次）` : "";
     return `上面较早的 ${mark.clearedResults ?? 0} 条工具调用，内容已从模型的上下文里移除${passes}${freed}。调过哪些工具还看得见，需要内容时模型会重新读一次。`;
   }
+  if (mark.status === "failed") {
+    // 说清楚三件事：没压成、因此会怎样、现在能做什么。原因是用户唯一能据此行动
+    // 的东西，所以它必须在这儿，而不是只在一个几秒钟就消失的提示里。
+    const because = mark.error ? `原因：${mark.error}` : "运行时没有给出原因";
+    const next = mark.willRetry ? "系统会自己再试一次。" : "会话会继续变长，必要时手动 /compact 压一次。";
+    return `这次压缩没做成，上下文原样发给了模型。${because}。${next}`;
+  }
+  if (mark.status === "running") return "正在把较早的对话折叠成一段摘要，这一步要向模型发一次请求，通常要等上十几秒。";
   const before = mark.tokensBefore?.toLocaleString();
   const after = mark.tokensAfter?.toLocaleString();
   const change = before && after ? `上下文从约 ${before} tokens 压到约 ${after} tokens。` : "";

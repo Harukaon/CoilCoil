@@ -309,7 +309,7 @@ export function ConversationPane({
                 </div>
               ) : null}
               {visibleTimeline.map((item, index) => item.kind === "compaction" ? (
-                <CompactionMarkView key={`compaction-${item.mark.id}`} mark={item.mark} />
+                <CompactionMarkView key={`compaction-${item.marks[0].id}`} marks={item.marks} />
               ) : item.kind === "user" ? (
                 <MessageView
                   key={`user-${item.message.id}`}

@@ -176,6 +176,36 @@ test("用户插话之后的那一轮，还是要报模型名", () => {
   assert.equal(last.kind === "agent" && last.continuation, undefined);
 });
 
+test("压缩失败时，线上说得出为什么失败", () => {
+  // 「失败为啥我看不到报错？」——运行时一直有这句话，它写进日志、闪过一个几秒钟
+  // 的提示，而留在屏幕上的那道线只说「上下文整理失败」。原因是用户唯一能据此行动
+  // 的东西，必须留在线上。
+  const marks = buildCompactionMarks(messages, [compaction({
+    status: "failed",
+    error: "Summarization failed: 502 Upstream request failed",
+  })]);
+  const detail = compactionMarkDetail(marks[0]);
+  assert.match(detail, /502 Upstream request failed/);
+  assert.match(detail, /没做成/);
+  assert.doesNotMatch(detail, /折叠成一段摘要发给模型/, "没压成就不能说压成了");
+  assert.match(detail, /compact/, "得告诉用户现在能做什么");
+
+  const retrying = buildCompactionMarks(messages, [compaction({ status: "failed", error: "502", willRetry: true })]);
+  assert.match(compactionMarkDetail(retrying[0]), /自己再试/);
+});
+
+test("落在同一处的几条共用一道线，不画成两道", () => {
+  // 清理刚跑完、压缩紧接着失败，在长会话里是常态。各画一道线，读起来就是两道挨着
+  // 的横线在打架，而它们说的是同一个位置上发生的事。
+  const timeline = buildConversationTimeline([...messages], [], [], undefined, {
+    summaryEvents: [compaction({ status: "failed", error: "502", timestamp: 3_000 })],
+    contextClearings: [{ at: 3_000, clearedResults: 4, freedTokens: 9_000 }],
+  });
+  const marks = timeline.filter((item) => item.kind === "compaction");
+  assert.equal(marks.length, 1, "只该有一道线");
+  assert.equal(marks[0].kind === "compaction" && marks[0].marks.length, 2, "两件事都还在这道线上");
+});
+
 test("比所有消息都新的压缩，线画在最后面", () => {
   const timeline = buildConversationTimeline([...messages], [], [], undefined, {
     summaryEvents: [],

@@ -72,7 +72,11 @@ export function buildConversationTimeline(
   const drainMarksBefore = (order: number): void => {
     while (pending.length && pending[0].order <= order) {
       const mark = pending.shift()!;
-      turns.push({ kind: "compaction", order: mark.order, mark });
+      // 落在同一处的几条合成一段，共用一道线：一次清理紧跟着一次压缩失败是长会话
+      // 的常态，画成两道挨着的横线只是看着乱。
+      const previous = turns.at(-1);
+      if (previous?.kind === "compaction") previous.marks.push(mark);
+      else turns.push({ kind: "compaction", order: mark.order, marks: [mark] });
     }
   };
   for (const item of grouped) {

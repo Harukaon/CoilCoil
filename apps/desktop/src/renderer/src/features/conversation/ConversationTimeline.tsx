@@ -38,7 +38,7 @@ export type TimelineItem =
 export type ConversationTimelineItem =
   | { kind: "user"; order: number; message: ChatMessage }
   | { kind: "agent"; order: number; items: TimelineItem[]; model?: ChatMessage["model"]; continuation?: boolean }
-  | { kind: "compaction"; order: number; mark: CompactionMark };
+  | { kind: "compaction"; order: number; marks: CompactionMark[] };
 
 type ActivityEntry =
   | { kind: "thinking"; id: string; text: string }
@@ -496,24 +496,38 @@ function ActivityGroupView({ entries }: { entries: ActivityEntry[] }): React.JSX
  * Everything shown is already on hand — Pi's own compaction record and the
  * clearing extension's tally. Nothing here spends a request to explain itself.
  */
-export function CompactionMarkView({ mark }: { mark: CompactionMark }): React.JSX.Element {
+export function CompactionMarkView({ marks }: { marks: CompactionMark[] }): React.JSX.Element {
   const [open, setOpen] = useState(false);
-  const preview = compactionSummaryPreview(mark.summary);
+  // 落在同一处的几件事共用一道线。清理刚跑完、压缩紧接着失败，这在长会话里是常
+  // 态；给每件事各画一道线，读起来就是两道挨着的横线互相打架，而它们说的其实是
+  // 同一个位置上发生的事。
+  const leading = marks.find((mark) => mark.status === "failed") ?? marks.find((mark) => mark.status === "running") ?? marks[0];
   return (
-    <div className={`compaction-mark layer-${mark.layer} ${mark.status} ${open ? "open" : ""}`}>
+    <div className={`compaction-mark layer-${leading.layer} ${leading.status} ${open ? "open" : ""}`}>
       <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
         <i />
         <span>
-          {mark.status === "running" ? <LoaderCircle className="spin" size={12} /> : <Layers size={12} />}
-          {compactionMarkLabel(mark)}
+          {marks.map((mark) => (
+            <em key={mark.id} className={`compaction-mark-label ${mark.status}`}>
+              {mark.status === "running" ? <LoaderCircle className="spin" size={12} /> : <Layers size={12} />}
+              {compactionMarkLabel(mark)}
+            </em>
+          ))}
           <ChevronDown size={12} className="compaction-caret" />
         </span>
         <i />
       </button>
       {open ? (
         <div className="compaction-mark-panel">
-          <p>{compactionMarkDetail(mark)}</p>
-          {preview ? <blockquote>{preview}</blockquote> : null}
+          {marks.map((mark) => {
+            const preview = compactionSummaryPreview(mark.summary);
+            return (
+              <Fragment key={mark.id}>
+                <p>{compactionMarkDetail(mark)}</p>
+                {preview ? <blockquote>{preview}</blockquote> : null}
+              </Fragment>
+            );
+          })}
         </div>
       ) : null}
     </div>

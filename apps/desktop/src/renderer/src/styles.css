@@ -1170,8 +1170,12 @@ button.runtime-chip:hover:not(:disabled), .runtime-chip.mcp:hover { border-color
 .compaction-mark > button:hover > span { color: hsl(var(--th) var(--ts) var(--l-380)); }
 .compaction-mark .compaction-caret { transition: transform .15s ease; }
 .compaction-mark.open .compaction-caret { transform: rotate(180deg); }
-.compaction-mark.running > button > span { color: var(--c-amber-text); }
-.compaction-mark.failed > button > span { color: var(--c-red-muted); }
+/* 同一处的几件事共用一道线，但各说各的：颜色跟着每一条自己的状态走，
+   不能因为其中一条失败了就把旁边那条「已清理」也染红。 */
+.compaction-mark-label { display: inline-flex; align-items: center; gap: 6px; font-style: normal; }
+.compaction-mark-label + .compaction-mark-label::before { content: "·"; margin-right: 2px; color: hsl(var(--th) var(--ts) var(--l-741)); }
+.compaction-mark-label.running { color: var(--c-amber-text); }
+.compaction-mark-label.failed { color: var(--c-red-muted); }
 .compaction-mark-panel { display: grid; gap: 7px; padding: 10px 12px; border-radius: var(--radius-xl); background: hsl(var(--th) var(--ts) var(--l-960)); }
 .compaction-mark-panel p { margin: 0; color: hsl(var(--th) var(--ts) var(--l-431)); font-size: 11px; line-height: 1.55; }
 .compaction-mark-panel blockquote { margin: 0; padding-left: 9px; border-left: 2px solid hsl(var(--th) var(--ts) var(--l-861)); color: hsl(var(--th) var(--ts) var(--l-524)); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
