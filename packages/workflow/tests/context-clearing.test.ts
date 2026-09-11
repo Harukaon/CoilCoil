@@ -145,6 +145,9 @@ function harness(contextTokens: number) {
     emitted,
     setTokens: (next: number) => { tokens = next; },
     compacted: () => { for (const h of handlers.get("session_compact") ?? []) h({}, ctx); },
+    compactionFailed: (aborted = false) => {
+      for (const h of handlers.get("session_compact_failed") ?? []) h({ aborted }, ctx);
+    },
     context: (messages: AgentMessage[]) =>
       handlers.get("context")![0]({ messages }, ctx) as { messages: AgentMessage[] } | undefined,
   };
@@ -224,6 +227,26 @@ test("一轮只清一次：清完再涨回线上，也不再动手", () => {
   h.setTokens(OUR_LINE + 40_000);
   h.context([...history(10), ...history(10, 40_000, "grep"), ...recentTail()]);
   assert.equal(h.emitted.length, 1, "这一轮的额度已经用掉了");
+});
+
+test("压缩没做成，清理的机会也还回来——不然两道闸门一起关死", () => {
+  // 真实处境：服务商连着 502，压缩八次重试全废。上下文一点没少，而清理的额度早就
+  // 用掉了。这时候再守着「一轮只清一次」，就只剩一路涨到溢出这一条路。
+  const h = harness(OUR_LINE + 5_000);
+  h.context([...history(10), ...recentTail()]);
+  assert.equal(h.emitted.length, 1);
+
+  h.compactionFailed();
+  h.context([...history(10), ...history(10, 40_000, "grep"), ...recentTail()]);
+  assert.equal(h.emitted.length, 2, "压缩没成，清理得接着顶上");
+});
+
+test("用户自己按停的那次，不算机会用掉了也不算还回来", () => {
+  const h = harness(OUR_LINE + 5_000);
+  h.context([...history(10), ...recentTail()]);
+  h.compactionFailed(true);
+  h.context([...history(10), ...history(10, 40_000, "grep"), ...recentTail()]);
+  assert.equal(h.emitted.length, 1, "人按的停，不该当成压缩失败");
 });
 
 test("pi 压缩过一次，就再给一次清理的机会", () => {

@@ -326,6 +326,22 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
   });
 
   /**
+   * 压缩没做成，也把机会还回来。
+   *
+   * 「一轮只清一次」这条规矩，说的是别抢在压缩前面反复出手——压缩能跑的时候，清理
+   * 买来的那点时间不值它打碎一次缓存。可压缩要是压根跑不起来（服务商连着 502，这
+   * 是真发生过的），那条规矩就把两道闸门一起关死了：上下文一点没少，清理又没机会
+   * 动手，只能一路涨到溢出。
+   *
+   * 这种时候清理是仅剩的那一根杠杆，多清几次也比什么都不做强。被用户中断的那种不
+   * 算——那是人自己按的停，不是没做成。
+   */
+  pi.on("session_compact_failed", (event) => {
+    if ((event as { aborted?: boolean }).aborted) return;
+    passesLeft = 1;
+  });
+
+  /**
    * Before every request: at this stage's line, clear what can be cleared, then
    * hand over the rewritten copy.
    *
