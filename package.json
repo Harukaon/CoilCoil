@@ -42,6 +42,7 @@
     "smoke:desktop:timeline": "node scripts/desktop-timeline-smoke.mjs",
     "smoke:desktop:browser-scope": "node scripts/browser-scope-smoke.mjs",
     "smoke:desktop:browser-guest": "node scripts/browser-guest-security-smoke.mjs",
+    "smoke:desktop:browser-workspace": "node scripts/browser-workspace-smoke.mjs",
     "smoke:desktop:browser-agent": "node scripts/browser-agent-smoke.mjs",
     "smoke:desktop:live": "node scripts/desktop-smoke.mjs --live",
     "refresh:models": "cd vendor/pi/packages/ai && npm run hydrate-model-data"

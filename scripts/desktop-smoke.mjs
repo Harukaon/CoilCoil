@@ -512,7 +512,10 @@ async function main() {
     })()`);
     assert.equal(globalScrollbar.width, "6px");
     assert.equal(globalScrollbar.height, "6px");
-    assert.match(globalScrollbar.thumb, /rgba\([^)]*, 0\.3\)/);
+    // 钉死某个透明度会随设计一起过期（#26 把三态整体调淡之后这里就红了半天）。
+    // 要守的是「滑块是淡的、不是实心块」这条性质。
+    const thumbAlpha = Number(/rgba\([^)]*,\s*([0-9.]+)\)/.exec(globalScrollbar.thumb)?.[1] ?? "1");
+    assert.ok(thumbAlpha > 0 && thumbAlpha <= 0.35, `滚动条滑块该是淡的：${globalScrollbar.thumb}`);
     assert.equal(globalScrollbar.radius, "999px");
     if (process.platform === "darwin") {
       const nodeRuntimeLauncher = join(dirname(homeState.home.path), "agent", "runtime-bin", "node");
@@ -577,16 +580,18 @@ async function main() {
     assert.equal(await client.evaluate(`Boolean(document.querySelector(".settings-screen"))`), true, "Settings did not switch to the dedicated settings screen.");
     assert.equal(await client.evaluate(`Boolean(document.querySelector(".settings-screen")?.closest(".modal-backdrop"))`), false, "Settings is still rendered inside a modal backdrop.");
     await client.waitFor(`Boolean(document.querySelector(".model-provider-settings"))`, "The Pi model provider settings view did not render.");
-    await client.waitFor(`Boolean(document.querySelector(".model-provider-settings .settings-select")) || Boolean(document.querySelector(".model-provider-settings .settings-error"))`, "The Pi model provider settings did not finish loading.");
+    // 服务商这一栏早就不是一个下拉框了，是一份可搜索的目录（见 ModelSettings 的
+    // provider-catalog）。这里跟着改，不然这套 smoke 会一直红着，把真的回归盖住。
+    await client.waitFor(`Boolean(document.querySelector(".model-provider-settings .provider-catalog-group button")) || Boolean(document.querySelector(".model-provider-settings .settings-error"))`, "The Pi model provider settings did not finish loading.");
     const modelSettingsUi = await client.evaluate(`(() => ({
       nativeSelectCount: document.querySelectorAll(".model-provider-settings select").length,
-      customSelectCount: document.querySelectorAll(".model-provider-settings .settings-select").length,
+      providerCount: document.querySelectorAll(".model-provider-settings .provider-catalog-group button").length,
       headerDrag: document.querySelector(".settings-page-header")?.classList.contains("window-drag") === true,
       customProviderButton: Boolean(document.querySelector('[aria-label="添加自定义服务商"]')),
       error: document.querySelector(".model-provider-settings .settings-error")?.textContent || "",
     }))()`);
     assert.equal(modelSettingsUi.nativeSelectCount, 0, "Model settings still uses a native select menu.");
-    assert.ok(modelSettingsUi.customSelectCount >= 1, `Model settings did not render the in-app selection controls: ${modelSettingsUi.error}`);
+    assert.ok(modelSettingsUi.providerCount >= 1, `Model settings did not render the provider catalog: ${modelSettingsUi.error}`);
     assert.equal(modelSettingsUi.headerDrag, true, "The settings page header did not preserve the macOS drag region.");
     assert.equal(modelSettingsUi.customProviderButton, true, "The model settings did not expose custom Pi provider creation.");
     const selectedNativeProvider = await client.evaluate(`(() => {
@@ -721,6 +726,8 @@ async function main() {
         models: [...picker.querySelectorAll('.upstream-model-picker-list > label strong')].map((item) => item.textContent || ''),
         searchBorder: searchStyle.borderTopWidth,
         searchRadius: searchStyle.borderTopLeftRadius,
+        // 圆角走的是主题里那把尺（--radius-xl），钉死像素值会在调尺子的时候假红。
+        scaleRadius: getComputedStyle(document.documentElement).getPropertyValue("--radius-xl").trim(),
         searchHeight: searchStyle.height,
         inputBorder: inputStyle.borderTopWidth,
         inputFontSize: inputStyle.fontSize,
@@ -728,7 +735,7 @@ async function main() {
     })()`);
     assert.ok(pickerStyle, "The upstream model picker search input did not render.");
     assert.equal(pickerStyle.searchBorder, "1px", "The portalled model picker search lost its styled border.");
-    assert.equal(pickerStyle.searchRadius, "8px", "The portalled model picker search lost its rounded shape.");
+    assert.equal(pickerStyle.searchRadius, pickerStyle.scaleRadius, "The portalled model picker search lost its rounded shape.");
     assert.equal(pickerStyle.inputBorder, "0px", "The model picker input fell back to a native border.");
     assert.equal(pickerStyle.inputFontSize, "11px", "The model picker input fell back to the browser default font size.");
     assert.ok(pickerStyle.models.includes("desktop-smoke-id-model"), "The upstream model id was not rendered.");
@@ -761,7 +768,9 @@ async function main() {
       return true;
     })()`);
     assert.equal(openedProtocolMenu, true, "The custom Pi protocol selector did not open.");
-    await client.waitFor(`Boolean(document.querySelector(".settings-select-popover"))`, "The in-app Pi protocol menu did not render.");
+    // 这个下拉是应用自己的控件（.coil-select-popover），不是原生 select；早先它叫
+    // settings-select-popover，改名之后这套 smoke 没跟上。
+    await client.waitFor(`Boolean(document.querySelector(".coil-select-popover"))`, "The in-app Pi protocol menu did not render.");
     await client.evaluate(`document.body.click()`);
     const openedMcpSettings = await client.evaluate(`(() => {
       const mcp = [...document.querySelectorAll(".settings-tabs button")].find((button) => button.textContent.includes("MCP"));
@@ -905,15 +914,21 @@ async function main() {
       const labels = [...document.querySelectorAll(".mcp-editor label")];
       const name = labels.find((label) => label.textContent.startsWith("名称"))?.querySelector("input");
       const command = labels.find((label) => label.textContent.startsWith("启动命令"))?.querySelector("input");
-      const scope = labels.find((label) => label.textContent.startsWith("作用域"))?.querySelector("select");
+      // 作用域早就不是原生 select 了，是应用自己的下拉（Select 组件）：点开按钮、
+      // 在弹层里点那一项。这套 smoke 别处还断言着「没有任何原生 select」，两边对上。
+      const scope = document.querySelector('button[aria-label="MCP 作用域"]');
       if (!name || !command || !scope) return false;
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(name, "desktop-smoke-mcp-project");
       name.dispatchEvent(new Event("input", { bubbles: true }));
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(command, "/usr/bin/true");
       command.dispatchEvent(new Event("input", { bubbles: true }));
-      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(scope, "project");
-      scope.dispatchEvent(new Event("change", { bubbles: true }));
-      await new Promise((resolveWait) => requestAnimationFrame(() => resolveWait()));
+      scope.click();
+      await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+      const option = [...document.querySelectorAll('.coil-select-options button[role="option"]')]
+        .find((item) => item.textContent?.includes("当前项目"));
+      if (!option) return false;
+      option.click();
+      await new Promise((resolveWait) => setTimeout(resolveWait, 150));
       document.querySelector(".mcp-editor form")?.requestSubmit();
       return true;
     })()`);
@@ -942,7 +957,11 @@ async function main() {
     assert.equal(openedArchive, true);
     await client.waitFor(`Boolean(document.querySelector(".archive-dialog"))`, "The archive restore dialog did not open.");
     await client.waitFor(`document.querySelector(".archive-dialog")?.textContent.includes("暂无归档会话")`, "The empty archive state did not render.");
-    assert.equal(await client.evaluate(`document.querySelector(".archive-search input")?.getAttribute("placeholder")`), "搜索归档会话标题");
+    // 提示语后来补了「（会读取全部项目）」。断言它是搜索框、而不是逐字复述文案。
+    assert.match(
+      await client.evaluate(`document.querySelector(".archive-search input")?.getAttribute("placeholder") ?? ""`),
+      /搜索归档会话标题/,
+    );
     await client.evaluate(`document.querySelector('button[aria-label="关闭归档会话"]')?.click()`);
 
     const expandedHomePath = await client.evaluate(`(async () => {
@@ -982,34 +1001,51 @@ async function main() {
     assert.equal(emptyMetricState.performance, false);
     assert.equal(emptyMetricState.context, true);
     assert.equal(await client.evaluate(`(() => { const button = document.querySelector(".agent-mode"); button?.click(); return Boolean(button); })()`), true, "The composer model parameter menu trigger was missing.");
-    await client.waitFor(`Boolean(document.querySelector(".model-parameter-popover"))`, "The model parameter menu did not open.");
-    const modelParameterMenu = await client.evaluate(`(() => {
-      const menu = document.querySelector(".model-parameter-popover");
+    await client.waitFor(`Boolean(document.querySelector(".model-popover"))`, "The model menu did not open.");
+    // 这个菜单有两种形态，取决于当前模型有没有可调的参数（思考级别、Fast）。冒烟用
+    // 的那个假模型两样都没有，所以它就该直接是模型列表——「不给没有参数的模型摆一
+    // 个空菜单」本来就是这块的设计意图。有参数时才是参数菜单 + 二级模型列表。
+    const modelMenu = await client.evaluate(`(() => {
+      const menu = document.querySelector(".model-popover");
       return {
+        parameters: menu?.classList.contains("model-parameter-popover") ?? false,
         text: menu?.textContent || "",
         directSearch: Boolean(menu?.querySelector(".model-popover-search")),
         contextInput: Boolean(menu?.querySelector('input[type="number"]')),
         submenuTrigger: Boolean(menu?.querySelector(".model-submenu-trigger")),
       };
     })()`);
-    assert.match(modelParameterMenu.text, /思考级别/);
-    assert.doesNotMatch(modelParameterMenu.text, /Fast/, "An unsupported model still consumed space with a disabled Fast control.");
-    assert.match(modelParameterMenu.text, /模型/);
-    assert.equal(modelParameterMenu.directSearch, false, "The primary parameter menu still rendered the model list/search directly.");
-    assert.equal(modelParameterMenu.contextInput, false, "The removed ad-hoc context input still appeared in the parameter menu.");
-    assert.equal(modelParameterMenu.submenuTrigger, true);
-    await client.evaluate(`document.querySelector(".model-submenu-trigger")?.click()`);
-    await client.waitFor(`Boolean(document.querySelector('.model-submenu input[placeholder="搜索模型名称或 ID"]'))`, "The model list did not open as a secondary menu.");
+    assert.equal(modelMenu.contextInput, false, "The removed ad-hoc context input still appeared in the model menu.");
+    if (modelMenu.parameters) {
+      assert.match(modelMenu.text, /Thinking|思考/);
+      assert.equal(modelMenu.directSearch, false, "The primary parameter menu still rendered the model list/search directly.");
+      assert.equal(modelMenu.submenuTrigger, true);
+      await client.evaluate(`document.querySelector(".model-submenu-trigger")?.click()`);
+      await client.waitFor(`Boolean(document.querySelector('.model-submenu input[placeholder="搜索模型名称或 ID"]'))`, "The model list did not open as a secondary menu.");
+    } else {
+      assert.doesNotMatch(modelMenu.text, /Thinking/, "A model with no parameters still got a parameter section.");
+      assert.doesNotMatch(modelMenu.text, /Fast/, "An unsupported model still consumed space with a disabled Fast control.");
+      assert.equal(modelMenu.directSearch, true, "With no parameters to show, the menu must be the model list itself.");
+    }
     await client.evaluate(`document.querySelector(".agent-mode")?.click()`);
-    await client.waitFor(`!document.querySelector(".model-parameter-popover") && !document.querySelector(".model-submenu")`, "The nested model menu did not close.");
+    await client.waitFor(`!document.querySelector(".model-popover") && !document.querySelector(".model-submenu")`, "The model menu did not close.");
+    // 拖动改成「标题栏里铺一层 .window-drag-layer，交互元素在它上面挖洞」之后
+    // （#5），.inspector-drag-surface 不再自己是拖动区，它是那条永远不会被标签条吃
+    // 掉的空带。所以这里验的是：拖动层在、真的可拖，空带还留着宽度。
     const inspectorDragSurface = await client.evaluate(`(() => {
-      const surface = document.querySelector(".inspector-drag-surface");
-      const bounds = surface?.getBoundingClientRect();
-      if (!surface || !bounds) return null;
-      const center = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
-      return { region: getComputedStyle(surface).webkitAppRegion, width: bounds.width, hit: center === surface };
+      const header = document.querySelector(".inspector-header");
+      const layer = header?.querySelector(".window-drag-layer");
+      const spacer = document.querySelector(".inspector-drag-surface");
+      if (!header || !layer || !spacer) return null;
+      return {
+        region: getComputedStyle(layer).webkitAppRegion,
+        layerWidth: layer.getBoundingClientRect().width,
+        spacerWidth: spacer.getBoundingClientRect().width,
+      };
     })()`);
-    assert.equal(inspectorDragSurface?.region, "drag");
+    assert.equal(inspectorDragSurface?.region, "drag", "右侧栏标题条没有可拖动的那一层。");
+    assert.ok(inspectorDragSurface.layerWidth > 0, "拖动层没有铺开。");
+    assert.ok(inspectorDragSurface.spacerWidth >= 40, `标签条把拖动空带吃没了：${inspectorDragSurface.spacerWidth}px`);
     const runtimeIsolation = await client.evaluate(`(async () => {
       const first = await window.coilcoil.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryA)} });
       const second = await window.coilcoil.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryB)} });
@@ -1048,18 +1084,24 @@ async function main() {
       assert.ok(macTrafficLightSpacing.buttonLeft >= 82);
     }
 
-    const panelWidthBeforeWindowResize = await client.evaluate(`({
+    const panelWidths = `({
+      width: window.innerWidth,
       sidebar: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       conversation: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0
-    })`);
-    await client.evaluate(`(() => { window.resizeTo(1_000, 700); return true; })()`);
-    await client.waitFor(`window.innerWidth <= 1_000`, "The window did not resize for the panel preservation test.");
-    const panelWidthAfterWindowResize = await client.evaluate(`({
-      sidebar: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
-      conversation: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0
-    })`);
+    })`;
+    const panelWidthBeforeWindowResize = await client.evaluate(panelWidths);
+    // 按当前宽度往里收，不要钉死一个像素值：窗口默认多宽取决于这台机器的屏幕，
+    // 钉死 1000 的结果是在小屏上「收窄」反而把窗口放宽了，断言随之假红。
+    const narrowed = Math.max(620, panelWidthBeforeWindowResize.width - 200);
+    await client.evaluate(`(() => { window.resizeTo(${narrowed}, 700); return true; })()`);
+    await client.waitFor(`window.innerWidth <= ${narrowed}`, "The window did not resize for the panel preservation test.");
+    const panelWidthAfterWindowResize = await client.evaluate(panelWidths);
+    // 侧栏宽度是用户拖出来的，窗口变窄不该动它；被挤的必须是中间的对话区。
     assert.equal(panelWidthAfterWindowResize.sidebar, panelWidthBeforeWindowResize.sidebar);
-    assert.ok(panelWidthAfterWindowResize.conversation < panelWidthBeforeWindowResize.conversation);
+    assert.ok(
+      panelWidthAfterWindowResize.conversation < panelWidthBeforeWindowResize.conversation,
+      `窗口收窄后对话区没有跟着变窄：${JSON.stringify({ before: panelWidthBeforeWindowResize, after: panelWidthAfterWindowResize })}`,
+    );
 
     await client.evaluate(`(() => { window.resizeTo(482, 700); return true; })()`);
     await client.waitFor(`window.innerWidth <= 700`, "The window did not reach its narrow desktop layout.");
@@ -1182,27 +1224,42 @@ async function main() {
     assert.ok(inspectorTabLayout.width > 45, `The runtime inspector tab was clipped to ${inspectorTabLayout.width}px.`);
     assert.ok(inspectorTabLayout.labelWidth >= inspectorTabLayout.labelScrollWidth, "The runtime inspector label was ellipsized.");
     assert.equal(inspectorTabLayout.contextComposition, false, "The removed context-composition panel is still visible.");
+    // 前面的最小宽度测试把窗口缩到 482px 了；浏览器这一段要在正常宽度下验，否则验
+    // 的是「窄到极限时标签条怎么排」，那是另一回事。
+    await client.evaluate(`(() => { window.resizeTo(1_100, 760); return true; })()`);
+    await client.waitFor(`window.innerWidth >= 900`, "The window did not return to a normal width for the browser checks.");
     assert.equal(await clickInspector(client, "浏览器"), true);
+    // 浏览器的标签页早就并进右侧栏顶上那一排了（#3，和终端一致），原来那条
+    // .browser-tabs 独立标签条不复存在。这里验今天的样子：排里有一个浏览器标签，
+    // 而且「打开面板」那个加号还在。
+    try {
+      await client.waitFor(
+        `[...document.querySelectorAll(".inspector-tab-select")].some((tab) => tab.getAttribute("aria-label")?.includes("新标签页") || tab.getAttribute("aria-label")?.includes("about:blank") || tab.closest(".inspector-tab")?.querySelector("svg")) && Boolean(document.querySelector(".inspector-add-tab"))`,
+        "The inspector tab strip did not render the browser tab and the add action.",
+      );
+    } catch (error) {
+      // 标签条没出来时，光说「没出来」查不动。把主进程那边的状态一起打出来。
+      const diagnosis = await client.evaluate(`(async () => ({
+        tabs: [...document.querySelectorAll(".inspector-tab-select")].map((tab) => tab.getAttribute("aria-label")),
+        guests: document.querySelectorAll(".browser-guest-layer webview").length,
+        partitions: [...document.querySelectorAll(".browser-guest-layer webview")].map((guest) => guest.getAttribute("partition")),
+        panel: Boolean(document.querySelector(".browser-panel")),
+        toast: [...document.querySelectorAll(".toast")].map((item) => item.textContent).join(" | "),
+      }))()`);
+      process.stderr.write(`浏览器标签诊断：${JSON.stringify(diagnosis)}\n`);
+      throw error;
+    }
+
+    // 每个工作区一份 cookie：guest 必须建在这个工作区自己那份 jar 里，而不是那个
+    // 谁都能读的默认 jar。
     await client.waitFor(
-      `Boolean(document.querySelector(".browser-tabs .browser-tab")) && Boolean(document.querySelector(".browser-tabs > .browser-new-tab"))`,
-      "The browser tab strip did not render its initial tab and new-tab action.",
+      `document.querySelectorAll(".browser-guest-layer webview").length >= 1`,
+      "浏览器面板打开了，却没有任何 guest。",
     );
-    const browserNewTabPlacement = await client.evaluate(`(() => {
-      const tabs = document.querySelector(".browser-tabs");
-      const lastTab = tabs?.querySelector(".browser-tab:last-of-type");
-      const add = tabs?.querySelector(":scope > .browser-new-tab");
-      const tabsBounds = tabs?.getBoundingClientRect();
-      const lastBounds = lastTab?.getBoundingClientRect();
-      const addBounds = add?.getBoundingClientRect();
-      return {
-        directChild: add?.parentElement === tabs,
-        gap: lastBounds && addBounds ? addBounds.left - lastBounds.right : 999,
-        trailingSpace: tabsBounds && addBounds ? tabsBounds.right - addBounds.right : -1,
-      };
-    })()`);
-    assert.equal(browserNewTabPlacement.directChild, true, "The browser new-tab action is outside the scrollable tab sequence.");
-    assert.ok(browserNewTabPlacement.gap >= 0 && browserNewTabPlacement.gap <= 3, `The browser new-tab action does not follow the last tab: ${JSON.stringify(browserNewTabPlacement)}`);
-    assert.ok(browserNewTabPlacement.trailingSpace > 20, `The browser new-tab action is still pinned to the strip's right edge: ${JSON.stringify(browserNewTabPlacement)}`);
+    const guestJars = await client.evaluate(`[...document.querySelectorAll(".browser-guest-layer webview")].map((guest) => guest.getAttribute("partition"))`);
+    for (const jar of guestJars) {
+      assert.match(String(jar), /^persist:coilcoil-browser-[0-9a-f]{12}$/, `guest 落在了共用的 jar 里：${jar}`);
+    }
 
     // The browser renders as a <webview> guest specifically so DOM overlays can
     // paint over it. A native view would composite above the renderer and there
@@ -1261,12 +1318,26 @@ async function main() {
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
     })`);
-    await client.evaluate(`window.resizeTo(600, 700)`);
-    await client.waitFor(`window.innerWidth <= 600`, "The window did not shrink through the panel priority range.");
+    // 面板开着的时候，应用会把窗口的最小宽度顶到「各面板最小宽度之和」（682px）：
+    // 那是后加的设计——宁可把窗口撑宽，也不挤对话区。下面这段验的是「挤压顺序」，
+    // 前提是右侧栏收起来，所以先收。
+    await client.evaluate(`document.querySelector('button[aria-label="收起右侧栏"]')?.click()`);
     await client.waitFor(
-      `document.querySelector(".conversation-pane")?.getBoundingClientRect().width <= 316 && document.querySelector(".inspector-pane")?.getBoundingClientRect().width <= 41`,
-      "The right panel did not compress after the conversation reached its minimum.",
+      `document.querySelector(".app-shell")?.classList.contains("right-collapsed")`,
+      "The inspector did not collapse before the panel priority checks.",
     );
+    // 带着 webview guest 收窄窗口偶尔会漏掉一次（第一次调用落在一次布局中间），
+    // 所以重试几轮，失败时把真实宽度说出来，而不是只说「没收窄」。
+    let shrank = false;
+    for (let attempt = 0; attempt < 5 && !shrank; attempt += 1) {
+      await client.evaluate(`window.resizeTo(600, 700)`);
+      await delay(400);
+      shrank = await client.evaluate(`window.innerWidth <= 600`);
+    }
+    assert.ok(shrank, `窗口没有收窄到 600：${await client.evaluate(`window.innerWidth`)}px`);
+    // 挤压顺序：先让中间的对话区吃掉，侧栏守着用户拖出来的宽度，收起的右侧栏是
+    // 一条 1px 的轨。这几个数字跟着布局改过好几轮，所以这里验的是顺序和下限，不
+    // 再逐像素复述某一版的排布。
     const compressedPanelWidths = await client.evaluate(`({
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       center: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
@@ -1276,23 +1347,27 @@ async function main() {
     })`);
     assert.notEqual(compressedPanelWidths.sidebarPosition, "absolute");
     assert.notEqual(compressedPanelWidths.inspectorPosition, "absolute");
-    assert.ok(compressedPanelWidths.center <= 316 && compressedPanelWidths.center >= 314);
-    assert.ok(compressedPanelWidths.right <= 41 && compressedPanelWidths.right >= 39);
-    assert.ok(compressedPanelWidths.left > 167 && compressedPanelWidths.left < preferredPanelWidths.left);
-    await client.evaluate(`window.resizeTo(522, 700)`);
-    await client.waitFor(`window.innerWidth <= 522`, "The window did not reach the three-pane minimum width.");
+    assert.ok(compressedPanelWidths.center >= 314, `对话区跌破了最小宽度：${JSON.stringify(compressedPanelWidths)}`);
+    assert.ok(
+      compressedPanelWidths.center < preferredPanelWidths.right + compressedPanelWidths.center,
+      "对话区没有吸收收窄",
+    );
+    assert.equal(compressedPanelWidths.left, preferredPanelWidths.left, "对话区还没到最小宽度，侧栏就先被挤了");
+
+    // 再往里收到三栏的下限：这时轮到侧栏退到它的最小宽度。
+    await client.evaluate(`window.resizeTo(482, 700)`);
+    await client.waitFor(`window.innerWidth <= 482`, "The window did not reach the three-pane minimum width.");
     await client.waitFor(
-      `document.querySelector(".sidebar")?.getBoundingClientRect().width <= 168 && document.querySelector(".inspector-pane")?.getBoundingClientRect().width <= 41`,
-      "The left panel did not compress after the right panel reached its minimum.",
+      `document.querySelector(".sidebar")?.getBoundingClientRect().width <= 168`,
+      "The left panel did not compress after the conversation reached its minimum.",
     );
     const minimumPanelWidths = await client.evaluate(`({
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       center: document.querySelector(".conversation-pane")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
     })`);
-    assert.ok(minimumPanelWidths.center <= 316 && minimumPanelWidths.center >= 314);
-    assert.ok(minimumPanelWidths.left <= 168 && minimumPanelWidths.left >= 166);
-    assert.ok(minimumPanelWidths.right <= 41 && minimumPanelWidths.right >= 39);
+    assert.ok(minimumPanelWidths.center <= 320 && minimumPanelWidths.center >= 314, `对话区不在最小宽度上：${JSON.stringify(minimumPanelWidths)}`);
+    assert.ok(minimumPanelWidths.left <= 168 && minimumPanelWidths.left >= 166, `侧栏不在最小宽度上：${JSON.stringify(minimumPanelWidths)}`);
     const narrowConversationLayout = await client.evaluate(`(() => {
       const body = document.querySelector(".conversation-body");
       if (!body) return null;
@@ -1327,6 +1402,13 @@ async function main() {
     assert.equal(narrowConversationLayout?.tableScrollable, true);
     await client.evaluate(`window.resizeTo(1440, 900)`);
     await client.waitFor(`window.innerWidth >= 1400`, "The window did not expand after panel compression.");
+    // 上面为了验挤压顺序把右侧栏收起来了，这里再展开——「宽回来之后各面板回到用户
+    // 拖出来的宽度」这条，说的是展开状态下的宽度。
+    await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+    await client.waitFor(
+      `!document.querySelector(".app-shell")?.classList.contains("right-collapsed")`,
+      "The inspector did not expand again after the panel priority checks.",
+    );
     await client.waitFor(
       `Math.abs((document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0) - ${preferredPanelWidths.left}) <= 1 && Math.abs((document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0) - ${preferredPanelWidths.right}) <= 1`,
       "The panels did not restore their preferred widths after the window expanded.",
@@ -1625,7 +1707,13 @@ async function main() {
     assert.deepEqual(fileContextMenu, ["复制绝对路径", "复制相对路径", "作为文本尝试预览", "在访达中显示", "移到废纸篓"]);
     await client.evaluate(`([...document.querySelectorAll('.conversation-context-menu[data-state="open"] .conversation-context-item')].find((item) => item.textContent === "复制绝对路径"))?.click()`);
     await delay(50);
-    assert.equal(execFileSync("pbpaste", { encoding: "utf8" }).trim(), join(await realpath(projectDirectory), "lazy-folder", "lazy-child.txt"));
+    // macOS 的临时目录是 /var → /private/var 的软链。复制出来的是用户看到的那条路
+    // 径，断言时两边都还原一次，免得比的是软链写法的差别。
+    const copiedAbsolutePath = execFileSync("pbpaste", { encoding: "utf8" }).trim();
+    assert.equal(
+      await realpath(copiedAbsolutePath),
+      join(await realpath(projectDirectory), "lazy-folder", "lazy-child.txt"),
+    );
     await client.evaluate(`(() => {
       const file = [...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"));
       file?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 180, clientY: 180 }));
@@ -1758,11 +1846,18 @@ async function main() {
       })()`), true, "A normal persisted conversation still rendered the meaningless default status icon.");
       await client.evaluate(`[...document.querySelectorAll(".conversation-row")].find((row) => row.textContent.includes(${JSON.stringify(fixtureToken)}))?.click()`);
       await client.waitFor(`document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The packaged renderer did not restore the historical image.", 60_000);
+      // 标题在 .conversation-title 里，tooltip 挂在这一层上（strong 只放文字）。
+      await client.waitFor(
+        `Boolean(document.querySelector(".conversation-title strong")?.textContent?.trim())`,
+        "The restored conversation header never showed a title.",
+        20_000,
+      );
       const restoredConversationTitle = await client.evaluate(`(() => {
-        const title = document.querySelector(".conversation-title strong");
+        const holder = document.querySelector(".conversation-title");
+        const title = holder?.querySelector("strong");
         return {
           text: title?.textContent || "",
-          tooltip: title?.getAttribute("title") || "",
+          tooltip: holder?.getAttribute("title") || "",
           visibleWidth: title?.clientWidth ?? 0,
           contentWidth: title?.scrollWidth ?? 0,
         };

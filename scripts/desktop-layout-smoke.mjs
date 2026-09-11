@@ -318,6 +318,17 @@ async function main() {
     await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: targetX, y: preview.handleY, button: "left", buttons: 0, clickCount: 1 });
     await client.waitFor(`Math.abs((document.querySelector(".inline-file-preview")?.getBoundingClientRect().width ?? 0) - ${preview.paneWidth}) > 20`, "Preview divider did not resize panes.");
 
+    // 气泡整个功能是停用状态（见 bubble-window.ts 里的 BUBBLE_ENABLED，用户要求关
+    // 掉、把 Ctrl+E 还给系统）。停用时主进程一个处理器都不挂，所以这里先问一句，
+    // 没有就跳过这一段——而不是让这套 smoke 一直红着，掩盖真正的回归。
+    const bubbleEnabled = await client.evaluate(`
+      window.coilcoil.getBubbleShortcut().then(() => true, () => false)
+    `);
+    if (!bubbleEnabled) {
+      process.stdout.write("CoilCoil desktop layout smoke passed（气泡已停用，跳过那一段）。\n");
+      return;
+    }
+
     // Nothing may claim a global shortcut on its own: the settings page must open
     // with none set, since one taken uninvited breaks whatever already used it.
     const shortcut = await client.evaluate(`window.coilcoil.getBubbleShortcut().then((state) => ({ ...state, accelerator: state.accelerator ?? null }))`);
