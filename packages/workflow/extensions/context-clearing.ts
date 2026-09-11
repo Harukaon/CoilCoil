@@ -335,10 +335,12 @@ export function applyToolResultClearing(
  * 13 万 token，pi 拿去摘要的是 49 万，而窗口只有 20 万。上游一句
  * `upstream_error` 秒拒，八次重试全废，压缩就再也做不成了。
  *
- * 交给 pi 去总结的这一段，按定义整段都在保留窗口之外——它本来就要被折叠成一段散
- * 文。所以这里不留情面，工具的输出和参数全清掉，只留「调过什么工具」。摘要要的是
- * 「发生过什么」，不是某个文件当时的 4 万字内容；原文一个字节也没丢，还在会话文
- * 件里。
+ * 这里不是另一条更狠的规则，是同一条规则。pi 交给我们的两段（历史段，以及切点落
+ * 在一轮中间时那一小段跨轮前缀），按定义整段都排在保留的那 20K 之外——那正是平时
+ * 发给模型时已经在清的那块区域。所以「把这一段全清掉」和「套用平时那条规则」说的
+ * 是同一件事，只是一次做完，而不是分几批攒出来。
+ *
+ * 换句话说，改完之后这两份 JSON 是一份：模型看到什么，pi 拿去总结的就是什么。
  */
 export function clearForSummary(messages: AgentMessage[]): { cleared: number; freedTokens: number } {
   const plan = planToolResultClearing(messages, new Set(), 0);
