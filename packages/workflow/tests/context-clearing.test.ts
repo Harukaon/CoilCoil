@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import contextClearingExtension, {
   applyToolResultClearing,
+  CONTEXT_CLEARING_EVENT,
   clearForSummary,
   clearingLine,
   planToolResultClearing,
@@ -129,13 +130,17 @@ test("一条都没清就把上下文原样交回去", () => {
 function harness(contextTokens: number) {
   const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
   const emitted: Array<{ channel: string; value: Record<string, unknown> }> = [];
+  const logged: Array<{ channel: string; value: Record<string, unknown> }> = [];
   const pi = {
     on(event: string, handler: (...args: unknown[]) => unknown) {
       handlers.set(event, [...(handlers.get(event) ?? []), handler]);
     },
     events: {
       emit: (channel: string, value: unknown) => {
-        emitted.push({ channel, value: value as Record<string, unknown> });
+        // 只收「真的清了一批」那条。另外两条是纯日志（没动手的理由、摘要那一段瘦
+        // 了多少），混进来会让下面每一处 emitted.length 都不再是它字面的意思。
+        if (channel === CONTEXT_CLEARING_EVENT) emitted.push({ channel, value: value as Record<string, unknown> });
+        logged.push({ channel, value: value as Record<string, unknown> });
       },
     },
   };
@@ -144,6 +149,7 @@ function harness(contextTokens: number) {
   const ctx = { getContextUsage: () => ({ tokens, contextWindow: CONTEXT_WINDOW, percent: 0 }) };
   return {
     emitted,
+    logged,
     setTokens: (next: number) => { tokens = next; },
     compacted: () => { for (const h of handlers.get("session_compact") ?? []) h({}, ctx); },
     compactionFailed: (aborted = false) => {
@@ -246,18 +252,20 @@ test("摘要那一段里，todo 和 goal 照样留着", () => {
 
 test("压缩之前先把那一段瘦下来，pi 自己的逻辑一行不动", () => {
   const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
+  const logged: Array<{ channel: string; value: Record<string, unknown> }> = [];
   const pi = {
     on(event: string, handler: (...args: unknown[]) => unknown) {
       handlers.set(event, [...(handlers.get(event) ?? []), handler]);
     },
-    events: { emit: () => {} },
+    events: { emit: (channel: string, value: unknown) => { logged.push({ channel, value: value as Record<string, unknown> }); } },
   };
   contextClearingExtension(pi as never);
 
   const messagesToSummarize = [...history(4)];
   const turnPrefixMessages = [...history(2, 40_000, "grep")];
   const preparation = { messagesToSummarize, turnPrefixMessages };
-  const result = handlers.get("session_before_compact")![0]({ preparation }, {});
+  const ctx = { getContextUsage: () => ({ tokens: 0, contextWindow: CONTEXT_WINDOW, percent: 0 }) };
+  const result = handlers.get("session_before_compact")![0]({ preparation }, ctx);
 
   assert.equal(result, undefined, "什么都不返回，摘要还是 pi 自己做");
   for (const slice of [messagesToSummarize, turnPrefixMessages]) {
@@ -267,6 +275,35 @@ test("压缩之前先把那一段瘦下来，pi 自己的逻辑一行不动", ()
       assert.match(content.content[0].text ?? "", /上下文已清理/, "两段都得清");
     }
   }
+
+  // 这一段的大小要进日志：压缩挂掉的时候，「那一发到底多大、还在不在窗口里」是唯
+  // 一说得清原因的数，界面上又看不到。
+  const trim = logged.find((entry) => entry.channel.includes("summary"))!;
+  assert.equal(trim.value.historyMessages, 8);
+  assert.equal(trim.value.turnPrefixMessages, 4);
+  assert.ok((trim.value.tokensAfter as number) < (trim.value.tokensBefore as number) / 2, "记下来的是真瘦了");
+  assert.equal(trim.value.contextWindow, CONTEXT_WINDOW);
+});
+
+test("到线了却没动手，日志里说得出为什么——同一个理由只报一次", () => {
+  const h = harness(OUR_LINE + 5_000);
+  const messages = [...history(10), ...recentTail()];
+  h.context(messages);
+  h.context(messages);
+  h.context(messages);
+
+  const skipped = h.logged.filter((entry) => entry.channel.includes("skipped"));
+  assert.equal(skipped.length, 1, "额度用光之后每一轮都会走到这儿，不能报满日志");
+  assert.equal(skipped[0].value.reason, "no-pass-left");
+  assert.equal(skipped[0].value.contextTokens, OUR_LINE + 5_000);
+});
+
+test("一批太小而没动手，日志里记下本来能腾多少", () => {
+  const h = harness(OUR_LINE + 5_000);
+  h.context([...history(4, 300), ...recentTail()]);
+  const skipped = h.logged.filter((entry) => entry.channel.includes("skipped"));
+  assert.equal(skipped[0].value.reason, "batch-too-small");
+  assert.equal(skipped[0].value.freedTokens, 4 * 75);
 });
 
 test("一轮只清一次：清完再涨回线上，也不再动手", () => {

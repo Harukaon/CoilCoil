@@ -41,6 +41,8 @@ import {
   HIDDEN_AGENT_TOOLS,
   PLAN_STATE_CHANNEL,
   CONTEXT_CLEARING_EVENT,
+  CONTEXT_CLEARING_SKIPPED_EVENT,
+  CONTEXT_SUMMARY_TRIM_EVENT,
   MAX_CONTEXT_CLEARINGS,
   PROJECT_MEMORY_STATUS_EVENT,
   RUNTIME_BRIDGE_STATE_EVENT,
@@ -332,6 +334,34 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       if (!installedActive) return;
       installedActive.contextClearings = pendingContextClearings;
       this.publishRuntimeInspection(installedActive);
+    });
+    // 只进日志的两条：一条记「交给 pi 去摘要的那一段瘦了多少」，一条记「到线了却
+    // 没动手，为什么」。界面上不画线——它们都没有改变对话本身——可压缩挂掉的时候，
+    // 「那一发到底多大、还在不在窗口里」是唯一说得清原因的数。
+    eventBus.on(CONTEXT_SUMMARY_TRIM_EVENT, (value) => {
+      if (!isRecord(value)) return;
+      const count = (candidate: unknown): number => typeof candidate === "number" && Number.isFinite(candidate) ? candidate : 0;
+      const window = count(value.contextWindow);
+      const after = count(value.tokensAfter);
+      this.log.log(window > 0 && after > window ? "error" : "info", "compaction", "summary_trim", {
+        historyMessages: value.historyMessages,
+        turnPrefixMessages: value.turnPrefixMessages,
+        clearedResults: value.clearedResults,
+        tokensBefore: value.tokensBefore,
+        tokensAfter: value.tokensAfter,
+        contextWindow: value.contextWindow,
+        // 瘦完还超窗口，那这一发注定被上游顶回来——这一条是 error，别埋在 info 里。
+        fitsWindow: window <= 0 ? undefined : after <= window,
+      });
+    });
+    eventBus.on(CONTEXT_CLEARING_SKIPPED_EVENT, (value) => {
+      if (!isRecord(value)) return;
+      this.log.info("compaction", "clearing_skipped", {
+        reason: value.reason,
+        contextTokens: value.contextTokens,
+        contextWindow: value.contextWindow,
+        freedTokens: value.freedTokens,
+      });
     });
     eventBus.on(PROJECT_MEMORY_STATUS_EVENT, (value) => {
       const parsed = projectMemoryStatus(value);

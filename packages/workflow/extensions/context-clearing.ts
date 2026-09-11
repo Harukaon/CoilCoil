@@ -102,6 +102,39 @@ const CLEARED_ARGUMENTS = { note: CLEARED_PREFIX };
  */
 export const CONTEXT_CLEARING_EVENT = "coilcoil:context-clearing:v1";
 
+/**
+ * 两条只进日志的通道：一条记「交给 pi 去摘要的那一段瘦了多少」，一条记「到线了却
+ * 没动手，为什么」。
+ *
+ * 不走上面那条，是因为那条会在对话里画一道横线。这两件事都没有改变对话本身——一
+ * 个只影响那一发摘要请求，一个干脆什么都没做——画出来只会让人以为自己又少了一块
+ * 上下文。但查问题的时候它们是最要紧的两条线索。
+ */
+export const CONTEXT_SUMMARY_TRIM_EVENT = "coilcoil:context-clearing:summary:v1";
+export const CONTEXT_CLEARING_SKIPPED_EVENT = "coilcoil:context-clearing:skipped:v1";
+
+export interface ContextSummaryTrimRecord {
+  at: number;
+  /** 两段各自的消息条数。 */
+  historyMessages: number;
+  turnPrefixMessages: number;
+  /** 清掉的工具记录条数，以及这一段瘦下来的估算。 */
+  clearedResults: number;
+  tokensBefore: number;
+  tokensAfter: number;
+  /** 这个模型的窗口——瘦完到底进没进去，就看这两个数。 */
+  contextWindow: number;
+}
+
+export interface ContextClearingSkippedRecord {
+  at: number;
+  reason: "no-pass-left" | "batch-too-small" | "reading-not-believable";
+  contextTokens: number;
+  contextWindow: number;
+  /** 这一轮本来能腾出多少——门槛没够的时候看这个。 */
+  freedTokens: number;
+}
+
 export interface ContextClearingRecord {
   at: number;
   /** Tool results dropped in this batch. */
@@ -145,6 +178,13 @@ function messageTokens(message: AgentMessage): number {
     else if (block.arguments !== undefined) chars += JSON.stringify(block.arguments).length;
   }
   return Math.ceil(chars / CHARS_PER_TOKEN);
+}
+
+/** 一段消息的粗略大小，中文按一个字一个 token 算——这一条会进日志，得贴近真值。 */
+function estimateTokens(messages: readonly AgentMessage[]): number {
+  const text = JSON.stringify(messages);
+  const han = (text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) ?? []).length;
+  return Math.round(han + (text.length - han) / CHARS_PER_TOKEN);
 }
 
 function clearedText(message: ToolResultMessage): string {
@@ -329,6 +369,8 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
    * Pi's line later.
    */
   let passesLeft = 1;
+  /** 上一次「到线了却没动手」的理由；同一个理由不重复报。 */
+  let lastDeclined: ContextClearingSkippedRecord["reason"] | undefined;
 
   // A cleared result keeps its entry while the branch that produced it is the
   // one being sent; a different branch starts over, because its messages were
@@ -336,6 +378,7 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
   const reset = (): void => {
     cleared = new Set<string>();
     passesLeft = 1;
+    lastDeclined = undefined;
   };
 
   pi.on("session_start", reset);
@@ -349,6 +392,7 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
   // be the old repeat-clearing under another name.
   pi.on("session_compact", () => {
     passesLeft = 1;
+    lastDeclined = undefined;
   });
 
   /**
@@ -368,20 +412,35 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
    * 这一层不返回任何东西，pi 自己的摘要逻辑一行不动——提示词、两段合并、重试、会
    * 话记账全是它的。我们只是让它看到的那份，和模型平时看到的那份一样瘦。
    */
-  pi.on("session_before_compact", (event) => {
+  pi.on("session_before_compact", (event, ctx) => {
     const preparation = (event as { preparation?: { messagesToSummarize?: AgentMessage[]; turnPrefixMessages?: AgentMessage[] } }).preparation;
     if (!preparation) return undefined;
+    const history = Array.isArray(preparation.messagesToSummarize) ? preparation.messagesToSummarize : [];
+    const prefix = Array.isArray(preparation.turnPrefixMessages) ? preparation.turnPrefixMessages : [];
+    const tokensBefore = estimateTokens([...history, ...prefix]);
+    let clearedResults = 0;
     // 不往界面上画线：这一次清理没有改变对话本身，只是让那一发摘要请求发得出去。
-    // 画一条「已清理 N 条」在压缩线旁边，只会让人以为自己的上下文又少了一块。
-    for (const slice of [preparation.messagesToSummarize, preparation.turnPrefixMessages]) {
-      if (Array.isArray(slice) && slice.length) clearForSummary(slice);
+    // 画一条「已清理 N 条」在压缩线旁边，只会让人以为自己的上下文又少了一块。日志
+    // 里要记，因为「那一发到底多大」正是压缩挂掉时唯一说得清原因的数。
+    for (const slice of [history, prefix]) {
+      if (slice.length) clearedResults += clearForSummary(slice).cleared;
     }
+    pi.events.emit(CONTEXT_SUMMARY_TRIM_EVENT, {
+      at: Date.now(),
+      historyMessages: history.length,
+      turnPrefixMessages: prefix.length,
+      clearedResults,
+      tokensBefore,
+      tokensAfter: estimateTokens([...history, ...prefix]),
+      contextWindow: ctx.getContextUsage()?.contextWindow ?? 0,
+    } satisfies ContextSummaryTrimRecord);
     return undefined;
   });
 
   pi.on("session_compact_failed", (event) => {
     if ((event as { aborted?: boolean }).aborted) return;
     passesLeft = 1;
+    lastDeclined = undefined;
   });
 
   /**
@@ -404,13 +463,32 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
     // 一次——网关在重试里把缓存读取重复计，200K 的窗口报回来 433K。照着这种数动
     // 手，一轮仅有的一次清理就白花了。
     const believable = contextWindow > 0 && contextTokens <= contextWindow * 1.5;
+    const overLine = contextWindow > 0 && contextTokens > line;
+    const decline = (reason: ContextClearingSkippedRecord["reason"], freedTokens: number): void => {
+      // 同一个理由只报第一次：额度用光之后每一轮都会走到这儿，报满日志就等于没报。
+      if (lastDeclined === reason) return;
+      lastDeclined = reason;
+      pi.events.emit(CONTEXT_CLEARING_SKIPPED_EVENT, {
+        at: Date.now(),
+        reason,
+        contextTokens,
+        contextWindow,
+        freedTokens,
+      } satisfies ContextClearingSkippedRecord);
+    };
+
+    if (overLine && !believable) decline("reading-not-believable", 0);
+    else if (overLine && passesLeft <= 0) decline("no-pass-left", 0);
+
     if (passesLeft > 0 && believable && contextTokens > line) {
       const plan = planToolResultClearing(event.messages, cleared);
       // 单条不设门槛（几百次小调用加起来才是大头），但一批腾不出一定量就先不动：
       // 每清一次都要重写一遍提示词、打碎服务商的缓存。
+      if (plan.freedTokens < MIN_BATCH_TOKENS) decline("batch-too-small", plan.freedTokens);
       if (plan.freedTokens >= MIN_BATCH_TOKENS) {
         for (const key of [...plan.toolCallIds, ...plan.callIds]) cleared.add(key);
         passesLeft -= 1;
+        lastDeclined = undefined;
         pi.events.emit(CONTEXT_CLEARING_EVENT, {
           at: Date.now(),
           clearedResults: plan.toolCallIds.length + plan.callIds.length,

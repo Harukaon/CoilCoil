@@ -34,6 +34,16 @@ export const CONTEXT_CLEARING_EVENT = "coilcoil:context-clearing:v1";
 /** Clearings kept per session. Old ones scroll out of the transcript anyway. */
 export const MAX_CONTEXT_CLEARINGS = 40;
 
+/**
+ * 两条只进日志、不上界面的通道。
+ *
+ * 上下文这一块出问题的时候，界面上能看到的只有一条「已清理 N 条」和一条「压缩失
+ * 败」，中间的判断全是黑的：到底有没有到线、这一轮还有没有机会、交给 pi 去摘要的
+ * 那一段到底多大。查一次就得去翻会话文件重算一遍——真发生过。
+ */
+export const CONTEXT_SUMMARY_TRIM_EVENT = "coilcoil:context-clearing:summary:v1";
+export const CONTEXT_CLEARING_SKIPPED_EVENT = "coilcoil:context-clearing:skipped:v1";
+
 export const FAST_STATE_EVENT = "coilcoil:fast:state:v1";
 
 export const RUNTIME_BRIDGE_COMMAND_EVENT = "coilcoil:runtime-bridge:command:v1";
