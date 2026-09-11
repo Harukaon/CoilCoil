@@ -179,6 +179,15 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           this.emitEvent(agentRetryRuntimeEvent(event, this.log));
           break;
         case "summarization_retry_scheduled":
+          // 一次压缩会在里面自己重试八次，退避加起来能跑七八分钟。不记下来，外面
+          // 看到的就只有「整理上下文」转了很久，分不清是在重试还是卡死了——用户
+          // 问过一次「是不是挂了，重试几次了」，那时候只能拿耗时倒推。
+          this.log.warn("compaction", "summarization_retry", {
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            delayMs: event.delayMs,
+            error: event.errorMessage,
+          });
           active.summaryActivity = {
             ...(active.summaryActivity ?? {
               id: `summary-retry-${active.sessionRevision}-${Date.now()}`,

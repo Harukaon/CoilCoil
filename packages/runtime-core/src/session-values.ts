@@ -182,10 +182,41 @@ export function restoredResponseMetrics(session: AgentSession): ResponseMetrics[
   return metricsHistory.sort((a, b) => a.timestamp - b.timestamp);
 }
 
+/**
+ * A context reading is only believable up to the window it is measured against.
+ *
+ * Pi derives the reading from the last response's usage — input + cacheRead +
+ * cacheWrite — and takes the provider at its word. One gateway, retrying a
+ * request it had failed, came back with `cacheRead: 433326` against a 200000
+ * window: more than twice a full context read in a single request, which is not
+ * a thing that can happen. The number went straight to the UI as 「434k / 200k」
+ * and to the clearing stage as an emergency.
+ *
+ * Going *somewhat* over the window is real and must stay visible — that is what
+ * overflow is, and the reading is how it gets noticed: an accepted request plus
+ * whatever was appended after it. What cannot be real is half a window of that
+ * tail. One accepted request fits by definition, and a single response's
+ * aftermath does not add another hundred thousand tokens, so a reading past one
+ * and a half windows is the provider's arithmetic, not the conversation's size.
+ *
+ * It is dropped rather than clamped: `null` means "unknown", which is the truth,
+ * and the next real response restores it. A clamped number would look like a
+ * measurement and be believed.
+ */
+const IMPOSSIBLE_CONTEXT_RATIO = 1.5;
+
+export function believableContextUsage(usage: ContextUsage | undefined): ContextUsage | undefined {
+  if (!usage || usage.tokens === null) return usage;
+  const { contextWindow } = usage;
+  if (!contextWindow || contextWindow <= 0) return usage;
+  if (usage.tokens <= contextWindow * IMPOSSIBLE_CONTEXT_RATIO) return usage;
+  return { ...usage, tokens: null, percent: null };
+}
+
 export function sessionUsage(session: AgentSession): { contextUsage?: ContextUsage; tokenUsage: TokenUsage; } {
   const stats = session.getSessionStats();
   return {
-    contextUsage: stats.contextUsage,
+    contextUsage: believableContextUsage(stats.contextUsage),
     tokenUsage: { ...stats.tokens },
   };
 }

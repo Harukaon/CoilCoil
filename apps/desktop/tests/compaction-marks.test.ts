@@ -189,9 +189,20 @@ test("压缩失败时，线上说得出为什么失败", () => {
   assert.match(detail, /没做成/);
   assert.doesNotMatch(detail, /折叠成一段摘要发给模型/, "没压成就不能说压成了");
   assert.match(detail, /compact/, "得告诉用户现在能做什么");
+  // 摘要请求走的是和普通对话同一套退避重试（临时性错误最多 8 次），所以走到
+  // 「失败」的时候那几次已经试完了，不能让人以为还有得等。
+  assert.match(detail, /重试也用完了/);
+});
 
-  const retrying = buildCompactionMarks(messages, [compaction({ status: "failed", error: "502", willRetry: true })]);
-  assert.match(compactionMarkDetail(retrying[0]), /自己再试/);
+test("还在重试的时候，线上说得出这是第几次", () => {
+  const marks = buildCompactionMarks(messages, [compaction({
+    status: "running",
+    retryAttempt: 3,
+    retryMaxAttempts: 8,
+  })]);
+  const detail = compactionMarkDetail(marks[0]);
+  assert.match(detail, /第 3 次重试/);
+  assert.match(detail, /最多 8 次/);
 });
 
 test("落在同一处的几条共用一道线，不画成两道", () => {

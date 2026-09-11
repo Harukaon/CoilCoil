@@ -54,8 +54,9 @@ export interface CompactionMark {
    * reason behind is the one kind of failure the user cannot act on.
    */
   error?: string;
-  /** Whether the runtime is going to try this compaction again by itself. */
-  willRetry?: boolean;
+  /** Which of Pi's own retries is in flight, while one is. */
+  retryAttempt?: number;
+  retryMaxAttempts?: number;
 }
 
 /** Half a step before an entry, so the mark lands between two of them. */
@@ -134,7 +135,8 @@ export function buildCompactionMarks(
       at: event.timestamp,
       status: summaryStatus(event.status),
       error: event.error,
-      willRetry: event.willRetry,
+      retryAttempt: event.retryAttempt,
+      retryMaxAttempts: event.retryMaxAttempts,
       atCutPoint: Boolean(kept),
       tokensBefore: event.tokensBefore,
       tokensAfter: event.estimatedTokensAfter,
@@ -210,11 +212,19 @@ export function compactionMarkDetail(mark: CompactionMark): string {
   if (mark.status === "failed") {
     // 说清楚三件事：没压成、因此会怎样、现在能做什么。原因是用户唯一能据此行动
     // 的东西，所以它必须在这儿，而不是只在一个几秒钟就消失的提示里。
+    //
+    // 「重试」这两个字也要说准。摘要请求走的是和普通对话同一套退避重试——临时性
+    // 的 429/502/503、超时这些，最多试 8 次。所以一条线走到「失败」，意味着那几
+    // 次都已经试完了，不是还有得等。
     const because = mark.error ? `原因：${mark.error}` : "运行时没有给出原因";
-    const next = mark.willRetry ? "系统会自己再试一次。" : "会话会继续变长，必要时手动 /compact 压一次。";
-    return `这次压缩没做成，上下文原样发给了模型。${because}。${next}`;
+    return `这次压缩没做成，重试也用完了，上下文原样发给了模型。${because}。会话会继续变长，必要时手动 /compact 压一次。`;
   }
-  if (mark.status === "running") return "正在把较早的对话折叠成一段摘要，这一步要向模型发一次请求，通常要等上十几秒。";
+  if (mark.status === "running") {
+    const retry = mark.retryAttempt
+      ? `上游刚才没应答，正在第 ${mark.retryAttempt} 次重试${mark.retryMaxAttempts ? `（最多 ${mark.retryMaxAttempts} 次）` : ""}。`
+      : "";
+    return `${retry}正在把较早的对话折叠成一段摘要，这一步要向模型发一次请求，通常要等上十几秒。`;
+  }
   const before = mark.tokensBefore?.toLocaleString();
   const after = mark.tokensAfter?.toLocaleString();
   const change = before && after ? `上下文从约 ${before} tokens 压到约 ${after} tokens。` : "";

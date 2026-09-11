@@ -340,7 +340,12 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
     const contextTokens = usage?.tokens ?? 0;
     const line = clearingLine(contextWindow);
 
-    if (passesLeft > 0 && contextWindow > 0 && contextTokens > line) {
+    // 读数比窗口还大一半以上的时候，那不是上下文，是服务商算错了：一次被接受的
+    // 请求按定义就装得下窗口，它之后补上的东西也不可能再多出半个窗口。真见过
+    // 一次——网关在重试里把缓存读取重复计，200K 的窗口报回来 433K。照着这种数动
+    // 手，一轮仅有的一次清理就白花了。
+    const believable = contextWindow > 0 && contextTokens <= contextWindow * 1.5;
+    if (passesLeft > 0 && believable && contextTokens > line) {
       const plan = planToolResultClearing(event.messages, cleared);
       // 单条不设门槛（几百次小调用加起来才是大头），但一批腾不出一定量就先不动：
       // 每清一次都要重写一遍提示词、打碎服务商的缓存。

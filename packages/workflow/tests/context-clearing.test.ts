@@ -199,6 +199,20 @@ test("清完还在 pi 的线上面：我们放手，交给 pi 去摘要", () => 
   // 关键：这一层不拦 pi，也没有「取消压缩」这回事。
 });
 
+test("读数大得不可能的时候，不拿这一轮仅有的一次清理去赌", () => {
+  // 真实一次：网关在重试里把缓存读取重复计，200K 的窗口报回来 433K。一个被接受
+  // 的请求按定义装得下窗口，它之后补上的东西也不可能再多出半个窗口——所以这种数
+  // 只说明服务商算错了。
+  const h = harness(CONTEXT_WINDOW * 1.6);
+  assert.equal(h.context([...history(10), ...recentTail()]), undefined);
+  assert.deepEqual(h.emitted, []);
+
+  // 而真的超窗（超出去一点）照常动手，那正是最需要清的时候。
+  h.setTokens(CONTEXT_WINDOW + 10_000);
+  h.context([...history(10), ...recentTail()]);
+  assert.equal(h.emitted.length, 1);
+});
+
 test("一轮只清一次：清完再涨回线上，也不再动手", () => {
   // 「这反复清理还不如直接压缩呢」。一条真实会话四十五分钟里清了九次，每次买来
   // 十几分钟，代价是又重写一遍提示词、又打碎一次缓存。清一次就够了，再涨回线上
