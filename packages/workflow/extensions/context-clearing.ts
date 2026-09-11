@@ -282,12 +282,27 @@ export function applyToolResultClearing(
 
 export default function contextClearingExtension(pi: ExtensionAPI): void {
   let cleared = new Set<string>();
+  /**
+   * What this stage has freed that the dial has not caught up with yet.
+   *
+   * `getContextUsage` is anchored on what the provider charged for the last
+   * request, so a batch cleared moments ago is invisible until a reply comes
+   * back. One real session cleared twice in seventeen seconds for exactly that
+   * reason: the second pass read a number that still counted everything the
+   * first had just taken out. Subtracting what is already in flight is what
+   * keeps one decision from being made twice — and every extra pass rewrites
+   * the prompt and costs another cache write.
+   */
+  let freedInFlight = 0;
+  let lastReading = 0;
 
   // A cleared result keeps its entry while the branch that produced it is the
   // one being sent; a different branch starts over, because its messages were
   // never seen here.
   const reset = (): void => {
     cleared = new Set<string>();
+    freedInFlight = 0;
+    lastReading = 0;
   };
 
   pi.on("session_start", reset);
@@ -309,12 +324,19 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
     const contextTokens = usage?.tokens ?? 0;
     const line = clearingLine(contextWindow);
 
-    if (contextWindow > 0 && contextTokens > line) {
+    // Within one turn the estimate only grows, message by message. A reading
+    // that comes back *lower* is a fresh anchor — the provider has now charged
+    // for a request this stage already trimmed — so the credit is spent.
+    if (contextTokens < lastReading) freedInFlight = 0;
+    lastReading = contextTokens;
+
+    if (contextWindow > 0 && contextTokens - freedInFlight > line) {
       const plan = planToolResultClearing(event.messages, cleared);
       // 单条不设门槛（几百次小调用加起来才是大头），但一批腾不出一定量就先不动：
       // 每清一次都要重写一遍提示词、打碎服务商的缓存。
       if (plan.freedTokens >= MIN_BATCH_TOKENS) {
         for (const key of [...plan.toolCallIds, ...plan.callIds]) cleared.add(key);
+        freedInFlight += plan.freedTokens;
         pi.events.emit(CONTEXT_CLEARING_EVENT, {
           at: Date.now(),
           clearedResults: plan.toolCallIds.length + plan.callIds.length,
@@ -323,7 +345,7 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
           contextWindow,
           // Said plainly, because it is the only question that matters as a
           // session grows: did this stage keep up, or is Pi about to summarize?
-          fitsAgain: contextTokens - plan.freedTokens <= line,
+          fitsAgain: contextTokens - freedInFlight <= line,
         } satisfies ContextClearingRecord);
       }
     }

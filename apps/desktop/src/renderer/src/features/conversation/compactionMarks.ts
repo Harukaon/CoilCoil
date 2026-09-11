@@ -136,7 +136,7 @@ export function buildCompactionMarks(
 export function compactionMarkLabel(mark: CompactionMark): string {
   if (mark.status === "running") return "正在整理上下文…";
   if (mark.status === "failed") return "上下文整理失败";
-  if (mark.layer === 1) return `已清理 ${mark.clearedResults ?? 0} 条工具输出`;
+  if (mark.layer === 1) return `已清理 ${mark.clearedResults ?? 0} 条工具记录`;
   return "上下文已压缩";
 }
 
@@ -163,7 +163,7 @@ export function compactionMarkDetail(mark: CompactionMark): string {
   if (mark.layer === 1) {
     const freed = mark.freedTokens ? `，约省下 ${mark.freedTokens.toLocaleString()} tokens` : "";
     const passes = (mark.passes ?? 1) > 1 ? `（分 ${mark.passes} 次）` : "";
-    return `上面较早的 ${mark.clearedResults ?? 0} 条工具输出已从模型的上下文里移除${passes}${freed}。调用参数还留着，需要内容时模型会重新读一次。`;
+    return `上面较早的 ${mark.clearedResults ?? 0} 条工具调用，内容已从模型的上下文里移除${passes}${freed}。调过哪些工具还看得见，需要内容时模型会重新读一次。`;
   }
   const before = mark.tokensBefore?.toLocaleString();
   const after = mark.tokensAfter?.toLocaleString();

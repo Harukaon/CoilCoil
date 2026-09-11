@@ -74,10 +74,10 @@ test("清理工具输出是第一层，自己单独一条线", () => {
   const marks = buildCompactionMarks(messages, [], [{ at: 2_500, clearedResults: 7, freedTokens: 9_100 }]);
   assert.equal(marks[0].layer, 1);
   assert.equal(marks[0].clearedResults, 7);
-  assert.equal(compactionMarkLabel(marks[0]), "已清理 7 条工具输出");
-  assert.match(compactionMarkDetail(marks[0]), /7 条工具输出/);
+  assert.equal(compactionMarkLabel(marks[0]), "已清理 7 条工具记录");
+  assert.match(compactionMarkDetail(marks[0]), /7 条工具调用/);
   assert.match(compactionMarkDetail(marks[0]), /9,100/);
-  assert.match(compactionMarkDetail(marks[0]), /调用参数还留着/);
+  assert.match(compactionMarkDetail(marks[0]), /调过哪些工具还看得见/);
 });
 
 test("两层的线按先后排好，不会互相盖住", () => {
