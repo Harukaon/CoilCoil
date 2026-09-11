@@ -447,6 +447,13 @@ class RuntimeBridge {
 
   private broadcast = (runtimeId: string | undefined, event: RuntimeEventEnvelope["event"]): void => {
     if (runtimeId && event.type === "runtime_released") primaryBrowserRuntime?.releaseScope(runtimeId);
+    // 每个会话属于哪个工作区，只有快照说得清。记下来，后台会话的 Agent 开的标签页
+    // 才会落在它自己那个工作区的 cookie 里——界面切到别处也不影响。
+    if (runtimeId && event.type === "session_snapshot") {
+      for (const runtime of browserRuntimes.values()) {
+        runtime.noteScopeWorkspace(runtimeId, event.snapshot.session.cwd);
+      }
+    }
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
     }
@@ -724,7 +731,7 @@ async function createWindow(): Promise<void> {
     const allowed = hardenGuestPreferences(
       webPreferences as unknown as Record<string, unknown>,
       params as unknown as Record<string, unknown>,
-      browserRuntime.partitionName(),
+      (partition) => browserRuntime.expectsPartition(partition),
     );
     if (!allowed) event.preventDefault();
   });
@@ -1091,7 +1098,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_IMPORT_COOKIES_CHANNEL, (event, input: ImportBrowserCookiesInput) =>
     importBrowserCookies(input, browserFor(event).partitionName()));
   ipcMain.handle(BROWSER_DATA_STATS_CHANNEL, (event) => browserDataStats(browserFor(event).partitionName()));
-  ipcMain.handle(BROWSER_SAVED_LOGINS_CHANNEL, () => savedLogins());
+  ipcMain.handle(BROWSER_SAVED_LOGINS_CHANNEL, (event) => savedLogins(browserFor(event).partitionName()));
   ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, (event) => clearBrowserData(
     (name, data) => diagnosticLog().info("browser-data", name, data),
     browserFor(event).partitionName(),

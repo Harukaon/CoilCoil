@@ -59,8 +59,12 @@ export function isAllowedGuestSrc(src: string | undefined): boolean {
 export function hardenGuestPreferences(
   webPreferences: Record<string, unknown>,
   params: Record<string, unknown>,
-  partition: string = BROWSER_PARTITION,
+  expects: ((partition: unknown) => boolean) | string = BROWSER_PARTITION,
 ): boolean {
+  // 一个窗口同时认几份 jar：每张标签页带着自己工作区那份，切工作区时老标签页照常
+  // 活着（后台会话的 Agent 还在操作它们）。所以这里问的是「这份是不是我认的其中
+  // 一份」，而不是「是不是那一份」。渲染层能选的只有主进程发给它的那几份。
+  const accepted = typeof expects === "function" ? expects : (value: unknown) => value === expects;
   // A preload runs with privileges the guest page must never reach. The element's
   // `preload` attribute surfaces here as `preloadURL`, so drop every spelling.
   delete webPreferences.preload;
@@ -79,9 +83,8 @@ export function hardenGuestPreferences(
   webPreferences.webviewTag = false;
   // Background tabs must keep rendering: agents drive them while the user looks elsewhere.
   webPreferences.backgroundThrottling = false;
-  // The renderer never picks the jar: main computes it from the workspace and
-  // overwrites whatever the element asked for.
-  webPreferences.partition = partition;
+  if (!accepted(params.partition)) return false;
+  webPreferences.partition = params.partition;
 
   // The attribute strings are attacker-controlled in the threat model this guards
   // against, so overwrite them rather than inspecting what they happen to contain.
@@ -92,6 +95,5 @@ export function hardenGuestPreferences(
   params.plugins = "off";
   delete params.preload;
 
-  if (params.partition !== partition) return false;
   return isAllowedGuestSrc(typeof params.src === "string" ? params.src : undefined);
 }

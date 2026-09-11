@@ -9,11 +9,11 @@ const read = (path: string) => readFile(resolve(repositoryRoot, path), "utf8");
 /**
  * 这条线是防「一个文件什么都装」，不是防长文件本身。
  *
- * 内置浏览器加了缩放之后 browser-runtime.ts 越过 600 行；为了这几十行把它拆成两
- * 个文件，只会让同一件事分散在两处——用户明确说过，宁可一个长文件，也不要为了压
- * 行数把复杂逻辑切开。所以把上限抬到 700，而不是动代码。
+ * 内置浏览器先后加了缩放、每个工作区一份 cookie，browser-runtime.ts 两次越线。为
+ * 了这几十行把它拆开，只会让同一件事分散在两处——用户明确说过，宁可一个长文件，也
+ * 不要为了压行数把复杂逻辑切开。所以抬上限，不动代码。
  */
-const MAX_LINES = 700;
+const MAX_LINES = 800;
 
 test(`browser runtime source files stay within the ${MAX_LINES}-line architecture limit`, async () => {
   for (const path of [

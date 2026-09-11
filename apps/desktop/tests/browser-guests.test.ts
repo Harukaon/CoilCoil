@@ -10,13 +10,12 @@ function harness(candidates: Record<number, Partial<GuestCandidate>> = {}) {
   const timers = new Map<number, () => void>();
   let nextTimer = 1;
   const registry = new BrowserGuestRegistry({
-    // 一个工作区一份 cookie，分区会随工作区变，所以注册表取的是函数不是值。
-    expectedPartition: () => PARTITION,
     hostWebContentsId: () => HOST_ID,
-    inspect: (id) => {
+    // 一个工作区一份 cookie，所以「该在哪份里」是按标签页问的。
+    inspect: (id, expected) => {
       const override = candidates[id];
       if (!override) return undefined;
-      return { hostWebContentsId: HOST_ID, type: "webview", partition: PARTITION, destroyed: false, ...override };
+      return { hostWebContentsId: HOST_ID, type: "webview", partition: expected, destroyed: false, ...override };
     },
     setTimer: (callback) => {
       const handle = nextTimer++;
@@ -39,7 +38,7 @@ const settled = async <T>(promise: Promise<T>): Promise<{ ok: boolean; value?: T
 test("guest registry binds a guest that passes every check", async () => {
   const { registry } = harness({ 7: {} });
   registry.markLayerReady();
-  const pending = registry.expectGuest("tab-1", "nonce-1");
+  const pending = registry.expectGuest("tab-1", "nonce-1", PARTITION);
   registry.register("tab-1", "nonce-1", 7);
   assert.equal(await pending, 7);
   assert.equal(registry.boundGuestId("tab-1"), 7);
@@ -52,7 +51,7 @@ test("guest registry refuses an unknown tab", () => {
 
 test("guest registry refuses a mismatched nonce", async () => {
   const { registry } = harness({ 7: {} });
-  const pending = settled(registry.expectGuest("tab-1", "nonce-1"));
+  const pending = settled(registry.expectGuest("tab-1", "nonce-1", PARTITION));
   assert.throws(() => registry.register("tab-1", "wrong", 7), /校验失败/);
   registry.release("tab-1");
   assert.equal((await pending).ok, false);
@@ -60,7 +59,7 @@ test("guest registry refuses a mismatched nonce", async () => {
 
 test("guest registry refuses a second binding for one tab", async () => {
   const { registry } = harness({ 7: {}, 8: {} });
-  const pending = registry.expectGuest("tab-1", "nonce-1");
+  const pending = registry.expectGuest("tab-1", "nonce-1", PARTITION);
   registry.register("tab-1", "nonce-1", 7);
   await pending;
   assert.throws(() => registry.register("tab-1", "nonce-1", 8), /未在等待标签页/);
@@ -69,11 +68,11 @@ test("guest registry refuses a second binding for one tab", async () => {
 
 test("guest registry refuses one guest backing two tabs across scopes", async () => {
   const { registry } = harness({ 7: {} });
-  const first = registry.expectGuest("tab-scope-a", "nonce-a");
+  const first = registry.expectGuest("tab-scope-a", "nonce-a", PARTITION);
   registry.register("tab-scope-a", "nonce-a", 7);
   await first;
   // A different agent scope must never be pointed at a page that is already bound.
-  const second = settled(registry.expectGuest("tab-scope-b", "nonce-b"));
+  const second = settled(registry.expectGuest("tab-scope-b", "nonce-b", PARTITION));
   assert.throws(() => registry.register("tab-scope-b", "nonce-b", 7), /已绑定到其他标签页/);
   registry.release("tab-scope-b");
   assert.equal((await second).ok, false);
@@ -81,7 +80,7 @@ test("guest registry refuses one guest backing two tabs across scopes", async ()
 
 test("guest registry refuses contents owned by another window", async () => {
   const { registry } = harness({ 7: { hostWebContentsId: 99 } });
-  const pending = settled(registry.expectGuest("tab-1", "nonce-1"));
+  const pending = settled(registry.expectGuest("tab-1", "nonce-1", PARTITION));
   assert.throws(() => registry.register("tab-1", "nonce-1", 7), /不属于当前窗口/);
   registry.release("tab-1");
   await pending;
@@ -89,11 +88,11 @@ test("guest registry refuses contents owned by another window", async () => {
 
 test("guest registry refuses contents that are not a webview", async () => {
   const { registry } = harness({ 7: { type: "window" }, 8: { type: "browserView" } });
-  const a = settled(registry.expectGuest("tab-a", "n"));
+  const a = settled(registry.expectGuest("tab-a", "n", PARTITION));
   assert.throws(() => registry.register("tab-a", "n", 7), /类型不符/);
   registry.release("tab-a");
   await a;
-  const b = settled(registry.expectGuest("tab-b", "n"));
+  const b = settled(registry.expectGuest("tab-b", "n", PARTITION));
   assert.throws(() => registry.register("tab-b", "n", 8), /类型不符/);
   registry.release("tab-b");
   await b;
@@ -101,11 +100,11 @@ test("guest registry refuses contents that are not a webview", async () => {
 
 test("guest registry refuses a guest from another session partition", async () => {
   const { registry } = harness({ 7: { partition: "persist:elsewhere" }, 8: { partition: undefined } });
-  const a = settled(registry.expectGuest("tab-a", "n"));
+  const a = settled(registry.expectGuest("tab-a", "n", PARTITION));
   assert.throws(() => registry.register("tab-a", "n", 7), /会话分区不符/);
   registry.release("tab-a");
   await a;
-  const b = settled(registry.expectGuest("tab-b", "n"));
+  const b = settled(registry.expectGuest("tab-b", "n", PARTITION));
   assert.throws(() => registry.register("tab-b", "n", 8), /会话分区不符/);
   registry.release("tab-b");
   await b;
@@ -124,7 +123,7 @@ test("guest registry refuses missing, destroyed, and nonsense ids", async () => 
 test("guest registry times out and leaves no orphan behind", async () => {
   const { registry, fireAllTimers, pendingTimers } = harness({ 7: {} });
   registry.markLayerReady();
-  const pending = settled(registry.expectGuest("tab-1", "nonce-1"));
+  const pending = settled(registry.expectGuest("tab-1", "nonce-1", PARTITION));
   fireAllTimers();
   const result = await pending;
   assert.equal(result.ok, false);
@@ -137,7 +136,7 @@ test("guest registry times out and leaves no orphan behind", async () => {
 
 test("guest registry rejects registration for a tab closed while in flight", async () => {
   const { registry } = harness({ 7: {} });
-  const pending = settled(registry.expectGuest("tab-1", "nonce-1"));
+  const pending = settled(registry.expectGuest("tab-1", "nonce-1", PARTITION));
   registry.release("tab-1");
   assert.equal((await pending).ok, false);
   assert.throws(() => registry.register("tab-1", "nonce-1", 7), /未在等待标签页/);
@@ -145,18 +144,18 @@ test("guest registry rejects registration for a tab closed while in flight", asy
 
 test("guest registry frees a binding on release so the id can be reused", async () => {
   const { registry } = harness({ 7: {} });
-  const first = registry.expectGuest("tab-1", "n1");
+  const first = registry.expectGuest("tab-1", "n1", PARTITION);
   registry.register("tab-1", "n1", 7);
   await first;
   registry.release("tab-1");
-  const second = registry.expectGuest("tab-2", "n2");
+  const second = registry.expectGuest("tab-2", "n2", PARTITION);
   registry.register("tab-2", "n2", 7);
   assert.equal(await second, 7);
 });
 
 test("guest registry reports renderer-side creation failures", async () => {
   const { registry } = harness();
-  const pending = settled(registry.expectGuest("tab-1", "nonce-1"));
+  const pending = settled(registry.expectGuest("tab-1", "nonce-1", PARTITION));
   registry.fail("tab-1", "wrong-nonce", "ignored");
   registry.fail("tab-1", "nonce-1", "element removed");
   const result = await pending;
@@ -189,12 +188,29 @@ test("guest registry requires the layer to re-announce after a renderer reload",
 
 test("guest registry dispose rejects everything pending", async () => {
   const { registry, pendingTimers } = harness({ 7: {} });
-  const guest = settled(registry.expectGuest("tab-1", "nonce-1"));
+  const guest = settled(registry.expectGuest("tab-1", "nonce-1", PARTITION));
   const layer = settled(registry.waitForLayer());
   registry.dispose();
   assert.equal((await guest).ok, false);
   assert.equal((await layer).ok, false);
   assert.equal(pendingTimers(), 0);
-  assert.equal((await settled(registry.expectGuest("tab-2", "n"))).ok, false);
+  assert.equal((await settled(registry.expectGuest("tab-2", "n", PARTITION))).ok, false);
   assert.equal((await settled(registry.waitForLayer())).ok, false);
+});
+
+test("两个工作区的标签页可以同时等着，各认各的 jar", () => {
+  // 界面切到另一个工作区时，原来那些标签页不会被丢掉——后台会话的 Agent 还在用。
+  // 所以注册表要能同时持有两份期待，而且不能互相认错。
+  const other = "persist:coilcoil-browser-abcdef123456";
+  const { registry } = harness({ 5: {}, 6: { partition: other } });
+  registry.markLayerReady();
+  const a = settled(registry.expectGuest("tab-a", "n", PARTITION));
+  const b = settled(registry.expectGuest("tab-b", "n", other));
+  void a; void b;
+
+  assert.throws(() => registry.register("tab-a", "n", 6), /会话分区不符/, "别的 jar 里的视图不能顶上来");
+  registry.register("tab-a", "n", 5);
+  registry.register("tab-b", "n", 6);
+  registry.release("tab-a");
+  registry.release("tab-b");
 });

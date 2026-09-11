@@ -38,30 +38,38 @@ export class BrowserRuntimeManager {
   /** False while the browser panel is hidden, so its tab parks like a background one. */
   private panelVisible = false;
   /**
-   * This window's cookie jar: one per workspace.
+   * 界面当前所在工作区的 cookie jar：导入、统计、清空都冲它去。
    *
-   * Held here rather than passed around because a guest's partition is fixed at
-   * creation — switching workspaces means dropping every guest and minting new
-   * ones in the new jar, and this is the value they are minted with.
+   * 它只决定「现在新开的标签页用哪份」，不决定已经开着的：那些各自记着自己的
+   * jar（见 BrowserTab.partition），切工作区时一个都不动。
    */
   private partition = BROWSER_PARTITION;
+  /**
+   * 每个作用域（也就是每个会话）属于哪份 jar。
+   *
+   * 后台会话的 Agent 照样在开标签页、点页面，它开出来的标签页必须用它自己那个工作
+   * 区的登录状态，而不是界面此刻正看着的那个工作区的。界面切走不影响它。
+   */
+  private readonly scopePartitions = new Map<string, string>();
+  /** 已经配过身份（UA）的 jar，配一次就够。 */
+  private readonly identityReady = new Set<string>();
   /** One in-flight creation per scope; see ensureActiveTab. */
   private readonly pendingEnsure = new Map<string, Promise<BrowserTab>>();
   private disposed = false;
   /** Correlates renderer-created <webview> guests with tab records. Unused until the switch. */
   private readonly guests = new BrowserGuestRegistry({
-    expectedPartition: () => this.partition,
     hostWebContentsId: () => this.window.webContents.id,
-    inspect: (webContentsId) => {
+    inspect: (webContentsId, expected) => {
       const contents = webContentsRegistry.fromId(webContentsId);
       if (!contents) return undefined;
       // Sessions are cached per partition string, so identity is an exact test
       // that the guest really was created in the browser's own session.
-      const expected = session.fromPartition(this.partition);
+      // Electron 不肯说一个 session 叫什么名字，只能拿「是不是这一份」来问。
+      const expectedSession = session.fromPartition(expected);
       return {
         hostWebContentsId: contents.hostWebContents?.id,
         type: contents.getType(),
-        partition: contents.session === expected ? this.partition : undefined,
+        partition: contents.session === expectedSession ? expected : undefined,
         destroyed: contents.isDestroyed(),
       };
     },
@@ -139,24 +147,54 @@ export class BrowserRuntimeManager {
   }
 
   /**
-   * 换工作区就是换一整个浏览器身份。
+   * 记下某个会话属于哪个工作区，并保证那份 jar 的身份配好了。
    *
-   * guest 的分区在创建时就定死了，改不了，所以换 jar 只能把现在开着的页面全部丢
-   * 掉重建——这也正是用户要的：另一个工作区不该看见这个工作区登录的账号。
+   * 界面切走之后，后台那个会话的 Agent 还在开页面、点东西——它开的标签页要落在它
+   * 自己工作区那份 cookie 里。所以这个对应关系按会话记，跟界面看的是哪个无关。
    */
-  setWorkspace(workspacePath?: string): void {
-    const next = browserPartitionFor(workspacePath);
-    if (next === this.partition) return;
-    this.dropAllGuests();
-    this.partition = next;
-    configureBrowserIdentity(session.fromPartition(next), browserIdentityEnvironment());
-    this.publish();
-    this.publishRoster();
+  noteScopeWorkspace(scopeId: string, workspacePath?: string): void {
+    const scope = scopeId.trim();
+    if (!scope || !workspacePath) return;
+    const partition = browserPartitionFor(workspacePath);
+    this.scopePartitions.set(scope, partition);
+    this.prepareIdentity(partition);
   }
 
+  /** 新标签页该落在哪份 jar：先看它所属的会话，再退回界面当前这个工作区。 */
+  private partitionForScope(scopeId: string): string {
+    return this.scopePartitions.get(scopeId) ?? this.partition;
+  }
+
+  private prepareIdentity(partition: string): void {
+    if (this.identityReady.has(partition)) return;
+    this.identityReady.add(partition);
+    configureBrowserIdentity(session.fromPartition(partition), browserIdentityEnvironment());
+  }
+
+  /** 这个窗口现在认哪些 jar：已经开着的标签页那些，加上界面当前这个工作区的。 */
+  expectsPartition(partition: unknown): boolean {
+    if (typeof partition !== "string" || !partition) return false;
+    if (partition === this.partition) return true;
+    for (const tab of this.tabs.values()) if (tab.partition === partition) return true;
+    for (const value of this.scopePartitions.values()) if (value === partition) return true;
+    return false;
+  }
+
+  /**
+   * 换工作区只换「新标签页用哪份」，不动已经开着的。
+   *
+   * 之前这里把所有页面丢掉重建，理由是 guest 的分区创建时就定死了。丢掉是错的：
+   * 切回来页面全没了，更要命的是后台会话的 Agent 正在操作的页面也一起没了。分区
+   * 定死是真的，但它是「每张标签页定死」，不是「每个窗口定死」——各自带着自己那份
+   * 活着就行。
+   */
   setUiScope(scopeId: string, workspacePath?: string): BrowserStateSnapshot {
-    this.setWorkspace(workspacePath);
     this.uiScopeId = scopeId.trim() || DEFAULT_SCOPE_ID;
+    this.noteScopeWorkspace(this.uiScopeId, workspacePath);
+    if (workspacePath) {
+      this.partition = browserPartitionFor(workspacePath);
+      this.prepareIdentity(this.partition);
+    }
     this.refreshViewportOverrides();
     const state = this.state();
     this.publishState(state);
@@ -218,6 +256,7 @@ export class BrowserRuntimeManager {
     const tab: BrowserTab = {
       id,
       scopeId,
+      partition: this.partitionForScope(scopeId),
       tabTargetId: `tab-${id}`,
       pageTargetId: `pending-page-${id}`,
       guestNonce: randomBytes(16).toString("hex"),
@@ -240,7 +279,7 @@ export class BrowserRuntimeManager {
    * all before the first navigation.
    */
   private async attachGuest(tab: BrowserTab): Promise<void> {
-    const webContentsId = await this.guests.expectGuest(tab.id, tab.guestNonce)
+    const webContentsId = await this.guests.expectGuest(tab.id, tab.guestNonce, tab.partition)
       .catch(async (error: unknown) => {
         // A guest cannot arrive if the layer never mounted; report that instead.
         await this.guests.waitForLayer();
@@ -476,8 +515,7 @@ export class BrowserRuntimeManager {
     return {
       tabs: [...this.tabs.values()]
         .filter((tab) => tab.phase !== "closing")
-        .map((tab) => ({ tabId: tab.id, nonce: tab.guestNonce })),
-      partition: this.partition,
+        .map((tab) => ({ tabId: tab.id, nonce: tab.guestNonce, partition: tab.partition })),
     };
   }
 
@@ -639,7 +677,7 @@ export class BrowserRuntimeManager {
     contents.on("did-navigate-in-page", update);
     // A login form is only worth filling once the document exists; anything the
     // user has already typed is left alone by the fill itself.
-    contents.on("dom-ready", () => fillSavedCredentials(contents));
+    contents.on("dom-ready", () => fillSavedCredentials(contents, tab.partition));
     contents.on("render-process-gone", update);
   }
 

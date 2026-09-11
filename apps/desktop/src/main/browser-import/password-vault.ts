@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { app, safeStorage } from "electron";
 import type { ImportedLogin } from "./chromium-passwords";
+import { BROWSER_PARTITION } from "../browser-webview-policy";
 
 /**
  * Where imported logins live.
@@ -30,12 +31,25 @@ export interface SavedLoginSummary {
   importedAt: number;
 }
 
-function vaultPath(): string {
-  return join(app.getPath("userData"), "browser-credentials.bin");
+/**
+ * One vault per cookie jar, i.e. one per workspace.
+ *
+ * Cookies are already kept apart by workspace; passwords have to follow, or the
+ * separation is a half-measure — an account imported for one project would keep
+ * autofilling in every other, and "清空" in one would empty them all.
+ *
+ * The default jar keeps the original filename, so the logins imported before
+ * this split stay exactly where they were.
+ */
+function vaultPath(partition?: string): string {
+  const suffix = partition && partition !== BROWSER_PARTITION
+    ? `-${partition.slice(partition.lastIndexOf("-") + 1)}`
+    : "";
+  return join(app.getPath("userData"), `browser-credentials${suffix}.bin`);
 }
 
-function readVault(): VaultEntry[] {
-  const path = vaultPath();
+function readVault(partition?: string): VaultEntry[] {
+  const path = vaultPath(partition);
   if (!existsSync(path)) return [];
   try {
     if (!safeStorage.isEncryptionAvailable()) return [];
@@ -47,8 +61,8 @@ function readVault(): VaultEntry[] {
   }
 }
 
-function writeVault(entries: VaultEntry[]): void {
-  const path = vaultPath();
+function writeVault(entries: VaultEntry[], partition?: string): void {
+  const path = vaultPath(partition);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, safeStorage.encryptString(JSON.stringify(entries)), { mode: 0o600 });
 }
@@ -64,9 +78,9 @@ export function vaultAvailable(): boolean {
  * with the new password, so an existing (origin, username) pair is replaced
  * rather than duplicated.
  */
-export function saveLogins(logins: readonly ImportedLogin[]): number {
+export function saveLogins(logins: readonly ImportedLogin[], partition?: string): number {
   if (logins.length === 0) return 0;
-  const byKey = new Map(readVault().map((entry) => [`${entry.origin} ${entry.username}`, entry]));
+  const byKey = new Map(readVault(partition).map((entry) => [`${entry.origin} ${entry.username}`, entry]));
   const now = Date.now();
   for (const login of logins) {
     byKey.set(`${login.origin} ${login.username}`, {
@@ -76,21 +90,21 @@ export function saveLogins(logins: readonly ImportedLogin[]): number {
       importedAt: now,
     });
   }
-  writeVault([...byKey.values()]);
+  writeVault([...byKey.values()], partition);
   return logins.length;
 }
 
-export function listSavedLogins(): SavedLoginSummary[] {
-  return readVault()
+export function listSavedLogins(partition?: string): SavedLoginSummary[] {
+  return readVault(partition)
     .map(({ origin, username, importedAt }) => ({ origin, username, importedAt }))
     .sort((left, right) => left.origin.localeCompare(right.origin));
 }
 
 /** Credentials for one origin, for the autofill only. */
-export function loginsForOrigin(origin: string): VaultEntry[] {
-  return readVault().filter((entry) => entry.origin === origin);
+export function loginsForOrigin(origin: string, partition?: string): VaultEntry[] {
+  return readVault(partition).filter((entry) => entry.origin === origin);
 }
 
-export function clearSavedLogins(): void {
-  rmSync(vaultPath(), { force: true });
+export function clearSavedLogins(partition?: string): void {
+  rmSync(vaultPath(partition), { force: true });
 }

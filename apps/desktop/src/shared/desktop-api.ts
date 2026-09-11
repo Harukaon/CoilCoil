@@ -122,16 +122,12 @@ export interface BrowserStateSnapshot {
 export interface BrowserGuestSlot {
   tabId: string;
   nonce: string;
+  /** 这张标签页要建在哪份 cookie jar 里——一个工作区一份。 */
+  partition: string;
 }
 
 export interface BrowserGuestRoster {
   tabs: BrowserGuestSlot[];
-  /**
-   * The session partition every guest must be created in — one cookie jar per
-   * workspace. Main decides it; the renderer only copies it onto the element,
-   * and main rejects any guest that arrives in a different one.
-   */
-  partition: string;
 }
 
 /** Visible size of the browser panel, so agents see the viewport the user sees. */

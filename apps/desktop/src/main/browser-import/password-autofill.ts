@@ -67,12 +67,13 @@ function originOf(url: string): string | undefined {
   }
 }
 
-export function fillSavedCredentials(contents: WebContents): void {
+export function fillSavedCredentials(contents: WebContents, partition?: string): void {
   const origin = originOf(contents.getURL());
   if (!origin) return;
   let matches;
   try {
-    matches = loginsForOrigin(origin);
+    // 密码和 cookie 一样按工作区分开：填的必须是这个页面所属那份里的。
+    matches = loginsForOrigin(origin, partition);
   } catch {
     return;
   }

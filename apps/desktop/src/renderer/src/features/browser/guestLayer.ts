@@ -103,18 +103,19 @@ function createGuest(tabId: string, nonce: string, partition: string): GuestEntr
 
 function reconcile(roster: BrowserGuestRoster): void {
   if (!layer) return;
-  const wanted = new Map(roster.tabs.map((slot) => [slot.tabId, slot.nonce]));
+  const wanted = new Map(roster.tabs.map((slot) => [slot.tabId, slot]));
 
   for (const [tabId, entry] of [...guests]) {
     // A slot whose nonce changed is a different tab reusing the id; rebuild it.
-    if (wanted.get(tabId) === entry.nonce) continue;
+    if (wanted.get(tabId)?.nonce === entry.nonce) continue;
     guests.delete(tabId);
     entry.element.remove();
   }
 
-  for (const [tabId, nonce] of wanted) {
+  for (const [tabId, slot] of wanted) {
     if (guests.has(tabId)) continue;
-    const entry = createGuest(tabId, nonce, roster.partition);
+    // 分区按标签页给：同一个窗口里，不同工作区的标签页各用各的 cookie。
+    const entry = createGuest(tabId, slot.nonce, slot.partition);
     guests.set(tabId, entry);
     layer.appendChild(entry.element);
     applyPlacement(tabId, entry);

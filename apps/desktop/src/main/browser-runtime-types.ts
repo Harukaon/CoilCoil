@@ -11,6 +11,13 @@ export const DEFAULT_BROWSER_VIEWPORT = { width: 1280, height: 720 };
 export interface BrowserTab {
   id: string;
   scopeId: string;
+  /**
+   * 这张标签页所属的 cookie jar（一个工作区一份）。
+   *
+   * 记在标签页上而不是记在窗口上：guest 的分区创建时就定死了，改不了，所以换工作
+   * 区时不能拿窗口当前那份去套老标签页——各自带着自己那份活着，切回去还在。
+   */
+  partition: string;
   tabTargetId: string;
   pageTargetId: string;
   guest?: WebContents;

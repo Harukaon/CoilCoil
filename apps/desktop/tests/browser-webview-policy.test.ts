@@ -116,12 +116,24 @@ test("每个工作区一份 cookie，换文件夹就换一个 jar", () => {
   assert.equal(browserPartitionFor("   "), BROWSER_PARTITION);
 });
 
-test("guest 必须落在主进程指定的那份 jar 里", () => {
-  const workspace = browserPartitionFor("/Users/hao/work/alpha");
+test("guest 只能落在主进程认的那几份 jar 里", () => {
+  const alpha = browserPartitionFor("/Users/hao/work/alpha");
+  const beta = browserPartitionFor("/Users/hao/work/beta");
   const preferences: Record<string, unknown> = {};
-  assert.equal(hardenGuestPreferences(preferences, params({ partition: workspace }), workspace), true);
-  assert.equal(preferences.partition, workspace, "分区由主进程写死，元素说了不算");
-  // 换了工作区之后，还挂在旧 jar 上的元素必须被拒——否则一个工作区能读到另一个的登录。
-  assert.equal(hardenGuestPreferences({}, params({ partition: BROWSER_PARTITION }), workspace), false);
-  assert.equal(hardenGuestPreferences({}, params({ partition: workspace }), BROWSER_PARTITION), false);
+  assert.equal(hardenGuestPreferences(preferences, params({ partition: alpha }), alpha), true);
+  assert.equal(preferences.partition, alpha, "元素报什么分区，就按什么分区建，但必须是认的");
+  assert.equal(hardenGuestPreferences({}, params({ partition: beta }), alpha), false, "没听说过的 jar 一律拒");
+});
+
+test("一个窗口同时认几份 jar——切工作区时老标签页还活着", () => {
+  // 界面切到 beta 之后，alpha 的标签页照常留着：后台会话的 Agent 还在操作它们。
+  // 所以这里问的是「这份在不在我认的那几份里」，不是「是不是当前那一份」。
+  const alpha = browserPartitionFor("/Users/hao/work/alpha");
+  const beta = browserPartitionFor("/Users/hao/work/beta");
+  const expects = (value: unknown) => value === alpha || value === beta;
+  assert.equal(hardenGuestPreferences({}, params({ partition: alpha }), expects), true);
+  assert.equal(hardenGuestPreferences({}, params({ partition: beta }), expects), true);
+  assert.equal(hardenGuestPreferences({}, params({ partition: BROWSER_PARTITION }), expects), false);
+  assert.equal(hardenGuestPreferences({}, params({ partition: undefined }), expects), false);
+  assert.equal(hardenGuestPreferences({}, params({ partition: "persist:somewhere-else" }), expects), false);
 });

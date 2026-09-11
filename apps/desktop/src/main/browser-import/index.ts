@@ -79,7 +79,10 @@ async function harvestCookies(input: ImportBrowserCookiesInput): Promise<CookieH
  * keychain items, each of which macOS gates behind its own prompt. There is no
  * batch export, so saying so is the only honest answer.
  */
-async function harvestLogins(input: ImportBrowserCookiesInput): Promise<{ saved: number; unreadable: number; note?: string }> {
+async function harvestLogins(
+  input: ImportBrowserCookiesInput,
+  partition?: string,
+): Promise<{ saved: number; unreadable: number; note?: string }> {
   if (input.browser === "safari") {
     return { saved: 0, unreadable: 0, note: "Safari 的密码存在钥匙串里，macOS 不允许整批导出，已跳过。" };
   }
@@ -89,7 +92,7 @@ async function harvestLogins(input: ImportBrowserCookiesInput): Promise<{ saved:
   const browser = browserDescriptor(input.browser);
   if (!browser) return { saved: 0, unreadable: 0 };
   const { logins, unreadable } = await readChromiumLogins(browser, profileDirectory(browser, input.profile));
-  return { saved: saveLogins(logins), unreadable };
+  return { saved: saveLogins(logins, partition), unreadable };
 }
 
 export async function importBrowserCookies(
@@ -103,7 +106,9 @@ export async function importBrowserCookies(
     const written = await writeCookies(cookies, partition);
     // The keychain has already been unlocked for the cookies by this point, so
     // the passwords cost the user no second prompt.
-    const logins = input.includePasswords ? await harvestLogins(input) : { saved: 0, unreadable: 0, note: undefined };
+    const logins = input.includePasswords
+      ? await harvestLogins(input, partition)
+      : { saved: 0, unreadable: 0, note: undefined };
     // Naming the sites is the difference between "19 条读不出来" and knowing
     // whether the one site that mattered came over.
     const problemHosts = [...new Set([...(unreadableHosts ?? []), ...written.failedHosts])]
@@ -125,11 +130,11 @@ export async function importBrowserCookies(
 export async function browserDataStats(partition?: string): Promise<BrowserDataStats> {
   const cookies = await browserSession(partition).cookies.get({});
   const hosts = new Set(cookies.map((cookie) => (cookie.domain ?? "").replace(/^\./, "")));
-  return { cookies: cookies.length, hosts: hosts.size, savedLogins: listSavedLogins().length };
+  return { cookies: cookies.length, hosts: hosts.size, savedLogins: listSavedLogins(partition).length };
 }
 
-export function savedLogins(): SavedLoginSummary[] {
-  return listSavedLogins();
+export function savedLogins(partition?: string): SavedLoginSummary[] {
+  return listSavedLogins(partition);
 }
 
 /** How long any one clearing step may take before it is reported as stuck. */
@@ -190,7 +195,7 @@ export async function clearBrowserData(log?: ClearStepLogger, partition?: string
     const failed = await clearStep(label, work, log);
     if (failed) stuck.push(failed);
   }
-  clearSavedLogins();
+  clearSavedLogins(partition);
   const stats = await browserDataStats(partition);
   log?.("browser_clear_finished", { ...stats, stuck });
   if (stuck.length > 0 && stats.cookies > 0) {
