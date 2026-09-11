@@ -133,33 +133,35 @@ test("the pin only speaks when the conversation is quiet", () => {
   assert.equal(conversationStatusKind(undefined, false), "none");
 });
 
-test("置顶一个对话，不会让它从所属工作区里消失", () => {
-  // 这就是那个 bug：置顶后原来那条被过滤掉了，于是文件夹上转着「运行中」，
-  // 展开却一条都不在跑——看上去像是会话丢了，而不是被提到了顶上。
+test("置顶是把对话挪走，不是复制一份：文件夹里不再有它", () => {
+  // 两种做法都试过。曾经为了不让它「消失」而在文件夹里也留一行，用下来重复的那
+  // 一行才是别扭的：「置顶了，就可以从他们的文件夹里面移除了…体验下来不符合逻
+  // 辑」。顶上那条置顶区会写明它属于哪个工作区，所以它不是没了，是搬走了。
   const pinned = session({ id: "pinned", path: "/sessions/pinned.jsonl", pinned: true });
   const plain = ["a", "b", "c", "d"].map((id) => session({ id, path: `/sessions/${id}.jsonl` }));
   const view = visibleProjectSessions([pinned, ...plain], 4);
-  assert.deepEqual(view.rows.map((item) => item.id), ["pinned", "a", "b", "c", "d"]);
+  assert.deepEqual(view.rows.map((item) => item.id), ["a", "b", "c", "d"]);
   assert.equal(view.hiddenCount, 0);
+  assert.equal(view.plainTotal, 4, "置顶的不算这个文件夹的条数");
 });
 
 test("四行的额度只算没置顶的对话", () => {
-  // 置顶的不占额度，否则一个四行的文件夹会变成上面那条置顶区的副本。
   const pinned = session({ id: "pinned", path: "/sessions/pinned.jsonl", pinned: true });
   const plain = ["a", "b", "c", "d", "e", "f"].map((id) => session({ id, path: `/sessions/${id}.jsonl` }));
   const view = visibleProjectSessions([pinned, ...plain], 4);
-  assert.deepEqual(view.rows.map((item) => item.id), ["pinned", "a", "b", "c", "d"]);
+  assert.deepEqual(view.rows.map((item) => item.id), ["a", "b", "c", "d"]);
   assert.equal(view.hiddenCount, 2);
   assert.equal(view.plainTotal, 6);
 });
 
-test("文件夹上的运行指示和它列出来的行说的是同一件事", () => {
+test("文件夹上的角标不再替已经搬走的对话说话", () => {
+  // 置顶的那条在跑，但它已经不在这个文件夹底下了。文件夹要是还写「1 个对话运行
+  // 中」，展开却一行都不在跑，那就是当初那个 bug 换了个方向又回来了。
   const running = session({ id: "pinned", path: "/sessions/pinned.jsonl", pinned: true });
   const all = [running, ...["a", "b", "c", "d"].map((id) => session({ id, path: `/sessions/${id}.jsonl` }))];
   const activity = { "/sessions/pinned.jsonl": { running: true, unread: false } };
-  assert.equal(summarizeWorkspaceActivity(all, activity).running, 1);
-  const shown = visibleProjectSessions(all, 4).rows;
-  assert.equal(shown.filter((item) => activity[item.path as keyof typeof activity]?.running).length, 1);
+  assert.equal(summarizeWorkspaceActivity(all, activity).running, 0);
+  assert.equal(visibleProjectSessions(all, 4).rows.some((item) => item.pinned), false);
 });
 
 test("没有置顶的时候，行为和原来完全一样", () => {

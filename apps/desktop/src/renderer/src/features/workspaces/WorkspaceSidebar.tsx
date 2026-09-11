@@ -347,9 +347,9 @@ export function WorkspaceSidebar({
       const allSessions = sessionsByProject[project.path] ?? [];
       const hasPending = pendingProjectPath === project.path;
       // Collapsed workspaces hide their running conversations; the folder
-      // row carries their state so nothing is forgotten in there. It counts
-      // every conversation the workspace owns, which is only honest because
-      // the list below now shows the pinned ones too.
+      // row carries their state so nothing is forgotten in there. Pinned ones
+      // are not counted: they are listed in the strip at the top now, not under
+      // this folder, and a badge for a row that is not there is just confusing.
       const workspaceActivity = summarizeWorkspaceActivity(allSessions, sessionActivity);
       const workspaceActivityText = workspaceActivityLabel(workspaceActivity);
       const collapsedLimit = collapsedSessionLimit(hasPending);
@@ -541,7 +541,11 @@ export function WorkspaceSidebar({
                 onShowMore={() => onShowMoreSessions(project.path, nextExpandedSessionLimit(visibleLimit, plainTotal))}
                 onCollapse={() => onShowMoreSessions(project.path, collapsedLimit)}
               />
-              {!allSessions.length && !hasPending ? <p className="empty-conversations">暂无对话</p> : null}
+              {/* 置顶的对话搬到顶上去了，所以「一条都没有」现在得按剩下的算。全被
+                  置顶的工作区展开是空的，那就说清楚它们去哪了，别让人以为丢了。 */}
+              {!plainTotal && !hasPending ? (
+                <p className="empty-conversations">{allSessions.length ? "对话都在上面的置顶区" : "暂无对话"}</p>
+              ) : null}
             </div>
           </div>
         </div>

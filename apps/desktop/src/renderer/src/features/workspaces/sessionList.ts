@@ -52,7 +52,8 @@ export interface WorkspaceActivitySummary {
  *
  * A running conversation inside a collapsed workspace is otherwise invisible,
  * which is how a long job gets forgotten. The folder row carries the same state
- * its conversations do.
+ * its conversations do — the ones it still holds, that is: a pinned conversation
+ * has left for the strip at the top and reports for itself there.
  */
 export function summarizeWorkspaceActivity(
   sessions: readonly SessionSummary[] | undefined,
@@ -61,6 +62,9 @@ export function summarizeWorkspaceActivity(
   let running = 0;
   let unread = 0;
   for (const session of sessions ?? []) {
+    // 置顶的对话已经不在这个文件夹底下了，它自己那一行会说它在跑。再算进文件夹
+    // 的角标，就成了「1 个对话运行中」底下一行都没有。
+    if (session.pinned) continue;
     const state = session.path ? activity[session.path] : undefined;
     if (!state) continue;
     if (state.running) running += 1;
@@ -121,33 +125,20 @@ export interface ProjectSessionVisibility {
 /**
  * Cut a workspace's conversations down to what its folder shows.
  *
- * Pinned conversations are included. They used to be filtered out here because
- * the pinned strip already lists them, but that made pinning a conversation
- * remove it from the workspace it belongs to — so the folder could say "1 个对话
- * 运行中" while every row under it sat still, and the conversation itself looked
- * lost rather than promoted. `collectRecentSessions` had the identical bug and
- * was fixed the same way; the project tree kept the old behaviour.
+ * Pinning moves a conversation out of its folder and into the strip at the top.
+ * It is listed once, in one place, and the strip names the workspace it came
+ * from — which is what makes the move legible rather than a disappearance.
  *
- * The limit counts unpinned conversations only, for the same reason it does in
- * "recent": a pinned conversation is usually the one being worked in, and
- * letting it take one of four slots would push out the rows the folder exists to
- * show. The list stops at the last unpinned row that fits.
+ * This has been both ways. Listing a pinned conversation in the folder as well
+ * was meant to stop it "vanishing" when pinned, but living with it, the
+ * duplicate is what reads as wrong: 「置顶了，就可以从他们的文件夹里面移除了…
+ * 体验下来不符合逻辑」. A pin is a move, not a copy.
  */
 export function visibleProjectSessions(
   sessions: readonly SessionSummary[],
   limit: number,
 ): ProjectSessionVisibility {
-  const rows: SessionSummary[] = [];
-  let shownPlain = 0;
-  for (const session of sessions) {
-    if (session.pinned) {
-      rows.push(session);
-      continue;
-    }
-    if (shownPlain >= limit) break;
-    shownPlain += 1;
-    rows.push(session);
-  }
-  const plainTotal = sessions.reduce((count, session) => session.pinned ? count : count + 1, 0);
-  return { rows, hiddenCount: plainTotal - shownPlain, plainTotal };
+  const plain = sessions.filter((session) => !session.pinned);
+  const rows = plain.slice(0, Math.max(0, limit));
+  return { rows, hiddenCount: plain.length - rows.length, plainTotal: plain.length };
 }
