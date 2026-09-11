@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import contextClearingExtension, {
   applyToolResultClearing,
+  clearForSummary,
   clearingLine,
   planToolResultClearing,
   resultKey,
@@ -214,6 +215,58 @@ test("读数大得不可能的时候，不拿这一轮仅有的一次清理去�
   h.setTokens(CONTEXT_WINDOW + 10_000);
   h.context([...history(10), ...recentTail()]);
   assert.equal(h.emitted.length, 1);
+});
+
+test("交给 pi 去摘要的那一段，工具内容全清掉", () => {
+  // 这是压缩一直失败的真正原因：pi 做摘要读的是磁盘上那份原始会话，不是我们改过
+  // 的拷贝。同一条会话，平时发给模型 13 万 token，pi 拿去摘要 49 万——窗口只有 20
+  // 万，上游秒拒。交给它总结的这一段按定义整段都要被折叠，所以不留情面。
+  const messages = [...history(6), ...history(2, 40_000, "grep")];
+  const before = JSON.stringify(messages).length;
+  const done = clearForSummary(messages as never[]);
+
+  assert.equal(done.cleared, 8, "八条结果全清了");
+  assert.ok(JSON.stringify(messages).length < before / 5, "该瘦掉一大截");
+  // 调过什么工具还看得见，摘要要的正是这个。
+  const call = messages[0] as unknown as { content: Array<{ name?: string }> };
+  assert.equal(call.content[0].name, "read");
+  const result = messages[1] as unknown as { content: Array<{ text: string }> };
+  assert.match(result.content[0].text, /上下文已清理/);
+});
+
+test("摘要那一段里，todo 和 goal 照样留着", () => {
+  const messages = [
+    ...history(2),
+    toolCall("todo-1", "todo"), toolResult("todo-1", "todo", 40_000),
+  ];
+  clearForSummary(messages as never[]);
+  const todo = messages[5] as unknown as { content: Array<{ text: string }> };
+  assert.equal(todo.content[0].text.length, 40_000, "当前状态不能在摘要里丢掉");
+});
+
+test("压缩之前先把那一段瘦下来，pi 自己的逻辑一行不动", () => {
+  const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
+  const pi = {
+    on(event: string, handler: (...args: unknown[]) => unknown) {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    events: { emit: () => {} },
+  };
+  contextClearingExtension(pi as never);
+
+  const messagesToSummarize = [...history(4)];
+  const turnPrefixMessages = [...history(2, 40_000, "grep")];
+  const preparation = { messagesToSummarize, turnPrefixMessages };
+  const result = handlers.get("session_before_compact")![0]({ preparation }, {});
+
+  assert.equal(result, undefined, "什么都不返回，摘要还是 pi 自己做");
+  for (const slice of [messagesToSummarize, turnPrefixMessages]) {
+    for (const message of slice) {
+      const content = (message as unknown as { role: string; content: Array<{ text?: string }> });
+      if (content.role !== "toolResult") continue;
+      assert.match(content.content[0].text ?? "", /上下文已清理/, "两段都得清");
+    }
+  }
 });
 
 test("一轮只清一次：清完再涨回线上，也不再动手", () => {

@@ -213,8 +213,10 @@ export function planToolResultClearing(
   keepRecentTokens = KEEP_RECENT_TOKENS,
 ): ClearingPlan {
   let recent = 0;
-  let firstClearableIndex = 0;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
+  // 留 0 就是「一条都不留」——摘要那条路会这么用：交给 pi 去总结的那一段，按定义
+  // 全都在保留窗口之外了。
+  let firstClearableIndex = keepRecentTokens <= 0 ? messages.length : 0;
+  for (let index = messages.length - 1; keepRecentTokens > 0 && index >= 0; index -= 1) {
     recent += messageTokens(messages[index]);
     if (recent >= keepRecentTokens) {
       firstClearableIndex = index;
@@ -284,6 +286,30 @@ export function applyToolResultClearing(
   return changed ? next : undefined;
 }
 
+/**
+ * 把一段消息里的工具内容全部清掉，原地换成清理后的那一份。
+ *
+ * 给摘要用的。pi 做摘要时读的是磁盘上那份原始会话（`sessionManager.getBranch()`），
+ * 不是我们在 `context` 钩子里改过的拷贝——那是设计如此：磁盘上一字不少，用户才翻
+ * 得回去。可这意味着最该瘦的那一发请求反而是最胖的：同一条会话，平时发给模型的是
+ * 13 万 token，pi 拿去摘要的是 49 万，而窗口只有 20 万。上游一句
+ * `upstream_error` 秒拒，八次重试全废，压缩就再也做不成了。
+ *
+ * 交给 pi 去总结的这一段，按定义整段都在保留窗口之外——它本来就要被折叠成一段散
+ * 文。所以这里不留情面，工具的输出和参数全清掉，只留「调过什么工具」。摘要要的是
+ * 「发生过什么」，不是某个文件当时的 4 万字内容；原文一个字节也没丢，还在会话文
+ * 件里。
+ */
+export function clearForSummary(messages: AgentMessage[]): { cleared: number; freedTokens: number } {
+  const plan = planToolResultClearing(messages, new Set(), 0);
+  if (!plan.toolCallIds.length && !plan.callIds.length) return { cleared: 0, freedTokens: 0 };
+  const next = applyToolResultClearing(messages, new Set([...plan.toolCallIds, ...plan.callIds]));
+  if (!next) return { cleared: 0, freedTokens: 0 };
+  // 就地换掉：pi 把 preparation 按引用交给我们，之后用的还是这同一个数组。
+  messages.splice(0, messages.length, ...next);
+  return { cleared: plan.toolCallIds.length + plan.callIds.length, freedTokens: plan.freedTokens };
+}
+
 export default function contextClearingExtension(pi: ExtensionAPI): void {
   let cleared = new Set<string>();
   /**
@@ -336,6 +362,23 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
    * 这种时候清理是仅剩的那一根杠杆，多清几次也比什么都不做强。被用户中断的那种不
    * 算——那是人自己按的停，不是没做成。
    */
+  /**
+   * 摘要请求也得瘦一遍，不然它是整条链上最胖的那一发。
+   *
+   * 这一层不返回任何东西，pi 自己的摘要逻辑一行不动——提示词、两段合并、重试、会
+   * 话记账全是它的。我们只是让它看到的那份，和模型平时看到的那份一样瘦。
+   */
+  pi.on("session_before_compact", (event) => {
+    const preparation = (event as { preparation?: { messagesToSummarize?: AgentMessage[]; turnPrefixMessages?: AgentMessage[] } }).preparation;
+    if (!preparation) return undefined;
+    // 不往界面上画线：这一次清理没有改变对话本身，只是让那一发摘要请求发得出去。
+    // 画一条「已清理 N 条」在压缩线旁边，只会让人以为自己的上下文又少了一块。
+    for (const slice of [preparation.messagesToSummarize, preparation.turnPrefixMessages]) {
+      if (Array.isArray(slice) && slice.length) clearForSummary(slice);
+    }
+    return undefined;
+  });
+
   pi.on("session_compact_failed", (event) => {
     if ((event as { aborted?: boolean }).aborted) return;
     passesLeft = 1;
