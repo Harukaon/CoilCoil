@@ -44,6 +44,7 @@
     "smoke:desktop:browser-guest": "node scripts/browser-guest-security-smoke.mjs",
     "smoke:desktop:browser-workspace": "node scripts/browser-workspace-smoke.mjs",
     "smoke:desktop:browser-agent": "node scripts/browser-agent-smoke.mjs",
+    "smoke:desktop:browser-fingerprint": "node scripts/browser-fingerprint-smoke.mjs",
     "smoke:desktop:live": "node scripts/desktop-smoke.mjs --live",
     "refresh:models": "cd vendor/pi/packages/ai && npm run hydrate-model-data"
   },

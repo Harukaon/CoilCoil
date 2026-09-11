@@ -927,6 +927,7 @@ app.whenReady().then(async () => {
     platform: process.platform,
     platformVersion: process.getSystemVersion(),
     architecture: process.arch,
+    locale: app.getLocale(),
   });
 
   // Only the main window may host <webview> guests, and only through the handler

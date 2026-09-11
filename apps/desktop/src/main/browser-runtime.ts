@@ -1,12 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { BrowserWindow, session, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
+import { app, BrowserWindow, screen, session, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
 import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
-import { applyGuestUserAgent, browserIdentityEnvironment, configureBrowserIdentity } from "./browser-user-agent";
+import { applyGuestUserAgent, browserIdentityEnvironment, configureBrowserIdentity, installChromeObject } from "./browser-user-agent";
 import {
   DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
   DEFAULT_BROWSER_URL as DEFAULT_URL,
@@ -27,6 +27,23 @@ const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 
  * Owns CoilCoil browser tabs, guest WebContents and renderer-facing state.
  * Browser-level CDP protocol adaptation lives in BrowserCdpBridge.
  */
+/**
+ * 这台机器屏幕的真实尺寸。
+ *
+ * 后台标签页要靠 `setDeviceMetricsOverride` 拿到一个像样的视口才能截图，但那条命令
+ * 会把 `screen` 一起改掉。原来传的是视口自己的尺寸，于是页面看到的是「屏幕正好
+ * 1280×720、像素比 1」——屏幕和视口一模一样，这在真机上不会发生，是自动化最容易被
+ * 认出来的一处。视口照旧，屏幕报真的。
+ */
+function realScreenMetrics(): { screenWidth: number; screenHeight: number } {
+  try {
+    const { width, height } = screen.getPrimaryDisplay().size;
+    return { screenWidth: width, screenHeight: height };
+  } catch {
+    return { screenWidth: 1920, screenHeight: 1080 };
+  }
+}
+
 export class BrowserRuntimeManager {
   private readonly tabs = new Map<string, BrowserTab>();
   private readonly cdp: BrowserCdpBridge;
@@ -168,7 +185,7 @@ export class BrowserRuntimeManager {
   private prepareIdentity(partition: string): void {
     if (this.identityReady.has(partition)) return;
     this.identityReady.add(partition);
-    configureBrowserIdentity(session.fromPartition(partition), browserIdentityEnvironment());
+    configureBrowserIdentity(session.fromPartition(partition), browserIdentityEnvironment(app.getLocale()));
   }
 
   /** 这个窗口现在认哪些 jar：已经开着的标签页那些，加上界面当前这个工作区的。 */
@@ -326,8 +343,7 @@ export class BrowserRuntimeManager {
       await guest.debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
         width: DEFAULT_VIEWPORT.width,
         height: DEFAULT_VIEWPORT.height,
-        screenWidth: DEFAULT_VIEWPORT.width,
-        screenHeight: DEFAULT_VIEWPORT.height,
+        ...realScreenMetrics(),
         deviceScaleFactor: 1,
         mobile: false,
       });
@@ -641,6 +657,10 @@ export class BrowserRuntimeManager {
   private installTabSecurity(tab: BrowserTab): void {
     const contents = this.guestOf(tab);
     contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+    // 权限「有没有」也要和「能不能要」说同一句话。Electron 默认的检查是放行的，于是
+    // 页面读到 Notification.permission === "granted" ——从来没弹过窗却已经授权，真
+    // 浏览器里不可能出现。两边都答「没有」，看上去就是一个拒绝过通知的普通用户。
+    contents.session.setPermissionCheckHandler(() => false);
     contents.setWindowOpenHandler(({ url }) => {
       try {
         normalizeBrowserUrl(url);
@@ -686,7 +706,7 @@ export class BrowserRuntimeManager {
     const debug = this.guestOf(tab).debugger;
     if (debug.isAttached()) return Promise.resolve();
     debug.attach("1.3");
-    return applyGuestUserAgent(debug);
+    return Promise.all([applyGuestUserAgent(debug), installChromeObject(debug)]).then(() => undefined);
   }
 
   private windowBounds(tab: BrowserTab): Record<string, unknown> {
@@ -712,8 +732,7 @@ export class BrowserRuntimeManager {
     await this.guestOf(tab).debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
       width,
       height,
-      screenWidth: width,
-      screenHeight: height,
+      ...realScreenMetrics(),
       deviceScaleFactor: 1,
       mobile: false,
     });
