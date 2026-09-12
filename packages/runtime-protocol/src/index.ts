@@ -1207,6 +1207,8 @@ export type RuntimeCommand =
   | { type: "connect_mcp_server"; name: string }
   | { type: "start_mcp_auth"; name: string }
   | { type: "await_mcp_auth"; name: string }
+  /** 浏览器回调已经到手，换令牌并重连——和上面那步分开，界面才说得出自己在等什么。 */
+  | { type: "finish_mcp_auth"; name: string }
   | { type: "cancel_mcp_auth"; name: string }
   | { type: "complete_mcp_auth"; name: string; input: string }
   | { type: "logout_mcp_server"; name: string }

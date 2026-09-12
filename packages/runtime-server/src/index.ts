@@ -507,7 +507,9 @@ export class RuntimeServer {
       case "start_mcp_auth":
         return runtime.startMcpAuth(command.name);
       case "await_mcp_auth":
-        return runtime.awaitMcpAuth(command.name);
+        return runtime.awaitMcpAuthCallback(command.name);
+      case "finish_mcp_auth":
+        return runtime.finishMcpAuth(command.name);
       case "cancel_mcp_auth":
         return runtime.cancelMcpAuth(command.name);
       case "complete_mcp_auth":

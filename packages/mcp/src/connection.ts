@@ -299,7 +299,13 @@ export class McpConnection {
     return this.connect();
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  /**
+   * @param signal Pi 给工具的中断信号，原样递给 SDK。
+   *
+   * 不接这个信号，界面上的停止按钮就按不停一次 MCP 调用：pi 那边早就放手了，这条
+   * 请求还在跑，人得干等到它自己结束或者撞上超时。
+   */
+  async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     if (this.state !== "connected") {
       const status = await this.connect();
       if (status !== "connected") {
@@ -311,7 +317,7 @@ export class McpConnection {
     return client.callTool(
       { name, arguments: args },
       undefined,
-      { timeout: this.options.definition.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS },
+      { timeout: this.options.definition.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, signal },
     );
   }
 

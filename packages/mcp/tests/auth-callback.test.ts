@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { McpAuthCallbackServer } from "../src/auth-callback.ts";
+import { McpAuthCallbackServer, sharedAuthCallbackServer } from "../src/auth-callback.ts";
 
 async function started(): Promise<{ server: McpAuthCallbackServer; redirect: string }> {
   // 每个用例一个临时端口：端口被回收再用，fetch 的连接池会拿着上一个服务器留下
@@ -102,4 +102,12 @@ test("同时喊五次启动，只会有一个监听", async (t) => {
   const waiting = server.expect("s-concurrent", 5_000);
   await (await fetch(`${urls[0]}?code=abc&state=s-concurrent`)).text();
   assert.deepEqual(await waiting, { code: "abc", iss: undefined });
+});
+
+test("整个进程只有一个监听器，端口不会跟着会话数往后挪", () => {
+  // 之前是一个会话一个：每开一个会话就多一个管理器、多一个监听器，第一个抢到
+  // 7842，第二个只能退到 7843。回调地址于是取决于你在哪个会话里点的授权——而那个
+  // 地址是当初注册给授权服务器的。注册的是 7842、这次在另一个会话发起，服务器还
+  // 是往 7842 回调，那边没人在等，浏览器看到「这次回调没人在等」，得重来一次。
+  assert.equal(sharedAuthCallbackServer(), sharedAuthCallbackServer());
 });

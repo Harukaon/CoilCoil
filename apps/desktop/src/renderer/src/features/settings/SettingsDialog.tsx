@@ -17,6 +17,7 @@ import { ModelSettings } from "./ModelSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { McpAuthDialog } from "./McpAuthDialog";
 import {
+  mcpAuthFlowCallbackReceived,
   mcpAuthFlowFailed,
   mcpAuthFlowFromStart,
   mcpAuthFlowStarted,
@@ -383,7 +384,11 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
       if (waiting.phase !== "waiting" || !waiting.authorizationUrl) return;
       await window.coilcoil.openExternal(waiting.authorizationUrl);
       if (!waiting.awaitingCallback) return;
-      const result = await window.coilcoil.request<McpActionResult>({ type: "await_mcp_auth", name: server }, runtimeId);
+      // 两步，不是一步：浏览器回来就先把话说对，再去换令牌和重连。合成一步的时候，
+      // 这两件事的几秒钟全挂在「等待浏览器完成授权…」下面。
+      await window.coilcoil.request<McpActionResult>({ type: "await_mcp_auth", name: server }, runtimeId);
+      setAuthFlow((current) => current?.server === server ? mcpAuthFlowCallbackReceived(current) : current);
+      const result = await window.coilcoil.request<McpActionResult>({ type: "finish_mcp_auth", name: server }, runtimeId);
       if (result.status) setRuntimeStatus(result.status);
       setAuthFlow((current) => current?.server === server ? mcpAuthFlowSucceeded(current, result) : current);
       void loadStatus();

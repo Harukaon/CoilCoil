@@ -480,6 +480,48 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
    * result — the user concluded the callback had never arrived when in fact it
    * had, twice.
    */
+  /**
+   * 只等浏览器那一半，回来就返回。
+   *
+   * 换令牌和重连由 `finishMcpAuth` 接着做。分开是为了界面：合成一次请求的时候，
+   * 对话框在浏览器早就回调完之后还挂着「等待浏览器完成授权…」，用户盯着一个已经
+   * 结束的步骤发呆。
+   */
+  async awaitMcpAuthCallback(name: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    const server = name.trim();
+    const startedAt = Date.now();
+    await this.mcpManager().awaitAuthCallback(server);
+    this.log.info("mcp", "auth_callback_received", { server, waitedMs: Date.now() - startedAt });
+    return { text: `${server} 的授权码已收到。` };
+  }
+
+  /** 换令牌、重连、列工具——浏览器那一半已经结束了。 */
+  async finishMcpAuth(name: string): Promise<McpActionResult> {
+    if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
+    const server = name.trim();
+    const startedAt = Date.now();
+    try {
+      const result = await this.mcpAction(
+        "auth-finish",
+        server,
+        () => this.mcpManager().finishPendingAuth(server),
+        () => `${server} 已完成认证。`,
+      );
+      this.log.info("mcp", "auth_finished", { server, elapsedMs: Date.now() - startedAt });
+      this.emitEvent({ type: "runtime_notice", level: "success", message: `${server} 已完成认证。` });
+      return result;
+    } catch (error) {
+      this.log.warn("mcp", "auth_finish_failed", { server, elapsedMs: Date.now() - startedAt, error: errorMessage(error) });
+      this.emitEvent({
+        type: "runtime_notice",
+        level: "error",
+        message: `${server} 认证未完成：${errorMessage(error)}`,
+      });
+      throw error;
+    }
+  }
+
   async awaitMcpAuth(name: string): Promise<McpActionResult> {
     if (!name.trim()) throw new Error("缺少 MCP Server 名称。");
     const server = name.trim();

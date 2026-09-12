@@ -45,6 +45,24 @@ const FAILED_PAGE = `<!doctype html><meta charset="utf-8"><title>CoilCoil</title
 <h1 style="font-size:17px;font-weight:600">这次回调没人在等</h1>
 <p style="color:#666">多半是这次授权已经取消或者超时了，回 CoilCoil 重新发起一次。</p>`;
 
+/**
+ * 整个进程共用的那一个监听器。
+ *
+ * 之前是一个会话一个：每开一个会话就多一个 MCP 管理器，每个管理器自己开一个监听
+ * 器，第一个抢到 7842，第二个只能退到 7843。于是「回调地址」取决于你在哪个会话里
+ * 点的授权——而这个地址是当初注册给授权服务器的，注册的是 7842、这次在另一个会话
+ * 发起，服务器还是往 7842 回调，那边没人在等，浏览器看到的是「这次回调没人在等」。
+ * 用户得重来一次，碰上对的那个才成。这就是授权时快时慢、「再试一次又好了」的由来。
+ *
+ * 端口固定这件事只有在全进程唯一的时候才成立，所以监听器必须也是唯一的。
+ */
+let shared: McpAuthCallbackServer | undefined;
+
+export function sharedAuthCallbackServer(): McpAuthCallbackServer {
+  shared ??= new McpAuthCallbackServer();
+  return shared;
+}
+
 export class McpAuthCallbackServer {
   private server?: Server;
   private port?: number;

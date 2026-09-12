@@ -58,6 +58,17 @@ export function mcpAuthFlowFromStart(state: McpAuthFlowState, result: McpActionR
   };
 }
 
+/**
+ * 浏览器那一半结束了，剩下的是换令牌和重连。
+ *
+ * 这一档以前没人切：一次请求从「打开浏览器」一直等到「服务器重连完、工具列完」，
+ * 中途界面一个字不变，于是浏览器早就回调完了，对话框还挂着「等待浏览器完成授权
+ * …」。用户只能猜是不是没收到。
+ */
+export function mcpAuthFlowCallbackReceived(state: McpAuthFlowState): McpAuthFlowState {
+  return { ...state, phase: "completing", message: undefined };
+}
+
 export function mcpAuthFlowFailed(state: McpAuthFlowState, error: unknown): McpAuthFlowState {
   const message = error instanceof Error ? error.message : String(error);
   return { ...state, phase: "failed", message };
@@ -76,7 +87,7 @@ export function mcpAuthTitle(state: McpAuthFlowState): string {
 export function mcpAuthDescription(state: McpAuthFlowState): string {
   if (state.message) return state.message;
   if (state.phase === "starting") return "正在向 MCP 扩展申请授权地址，稍后会自动打开浏览器。";
-  if (state.phase === "completing") return "正在用浏览器返回的授权码换取访问令牌。";
+  if (state.phase === "completing") return "浏览器已经回来了。正在用授权码换取访问令牌，然后重新连接这台服务器并读取它的工具。";
   if (state.phase === "waiting") {
     return state.awaitingCallback
       ? "已经打开浏览器。请在浏览器里登录并同意授权，完成后回到这里——CoilCoil 会自动收到回调并完成认证。"

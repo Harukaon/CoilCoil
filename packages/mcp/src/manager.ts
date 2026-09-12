@@ -20,7 +20,7 @@ import type {
   McpServerConfiguration,
   McpServerRuntimeStatus,
 } from "@coilcoil/runtime-protocol";
-import { McpAuthCallbackServer, type McpAuthCallback } from "./auth-callback.js";
+import { McpAuthCallbackServer, sharedAuthCallbackServer, type McpAuthCallback } from "./auth-callback.js";
 import { McpConnection, type McpConnectionStatus, type McpToolSummary } from "./connection.js";
 import { credentialKey, type McpCredentialStore } from "./credential-store.js";
 import { launchFor, type EnvironmentSource } from "./definition.js";
@@ -81,6 +81,8 @@ interface AuthFlow {
   authorizationUrl?: URL;
   state?: string;
   waiting?: Promise<McpAuthCallback>;
+  /** 浏览器已经把授权码送回来了，就等着换令牌。 */
+  code?: string;
 }
 
 /**
@@ -141,9 +143,13 @@ export class McpManager {
   /** Servers switched off for the current conversation only. */
   private readonly sessionDisabled = new Set<string>();
   private readonly callback: McpAuthCallbackServer;
+  /** 共用的那个监听器不归任何一个管理器关：别的会话还在用。 */
+  private readonly ownsCallback: boolean;
 
   constructor(private readonly options: McpManagerOptions) {
-    this.callback = options.callback ?? new McpAuthCallbackServer();
+    // 全进程一个，不是一个会话一个：端口固定这件事只有在监听器唯一的时候才成立。
+    this.callback = options.callback ?? sharedAuthCallbackServer();
+    this.ownsCallback = !options.callback;
   }
 
   /**
@@ -443,12 +449,34 @@ export class McpManager {
     return { authorizationUrl: authorizationUrl.href, awaitingCallback: Boolean(flow.waiting), resumed };
   }
 
-  /** Park until the browser comes back, then finish and reconnect. */
-  async awaitAuth(name: string): Promise<McpServerRuntimeStatus> {
+  /**
+   * Park until the browser comes back.
+   *
+   * Stops there on purpose. Redeeming the code and reconnecting the server take
+   * their own seconds, and folding them into this wait is what left the dialog
+   * saying 「等待浏览器完成授权…」 long after the browser was done — the user
+   * watched a message about a step that had already finished. The caller gets
+   * the browser half back the moment it lands, switches the label, and asks for
+   * the rest separately.
+   */
+  async awaitAuthCallback(name: string): Promise<void> {
     const flow = this.flows.get(name);
     if (!flow?.waiting) throw new Error(`MCP Server「${name}」当前没有等待中的授权。`);
     const callback = await flow.waiting;
-    return this.finishAuth(name, callback.code);
+    flow.code = callback.code;
+  }
+
+  /** Redeem the code the browser handed back, then reconnect. */
+  async finishPendingAuth(name: string): Promise<McpServerRuntimeStatus> {
+    const code = this.flows.get(name)?.code;
+    if (!code) throw new Error(`MCP Server「${name}」还没有拿到授权码。`);
+    return this.finishAuth(name, code);
+  }
+
+  /** Park until the browser comes back, then finish and reconnect. */
+  async awaitAuth(name: string): Promise<McpServerRuntimeStatus> {
+    await this.awaitAuthCallback(name);
+    return this.finishPendingAuth(name);
   }
 
   /** The paste-the-address fallback, for redirects that never reach the listener. */
@@ -570,7 +598,7 @@ export class McpManager {
     return { tools: connection.tools, status };
   }
 
-  async callTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
+  async callTool(server: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     await this.reload();
     const definition = this.definitions.get(server);
     if (!definition) throw new Error(`没有找到 MCP Server「${server}」。`);
@@ -581,7 +609,7 @@ export class McpManager {
     // `callTool` connects on demand, so the redirect address has to exist first
     // for exactly the same reason as above.
     if (this.supportsOAuth(definition)) await this.ensureCallbackServer();
-    return this.connectionFor(server).callTool(tool, args);
+    return this.connectionFor(server).callTool(tool, args, signal);
   }
 
   /** Connect everything marked `eager`, without letting one failure stop the rest. */
@@ -600,6 +628,9 @@ export class McpManager {
     for (const name of [...this.flows.keys()]) this.cancelAuth(name);
     await Promise.allSettled([...this.connections.values()].map((connection) => connection.close()));
     this.connections.clear();
+    // 共用的那个不关：别的会话还在用它，关掉就把它们的回调地址一起弄没了。自己
+    // 传进来的（测试）该关还是关。
+    if (this.ownsCallback) return;
     await this.callback.close();
   }
 }

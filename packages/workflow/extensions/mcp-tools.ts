@@ -144,9 +144,11 @@ async function registerDirectTools(pi: ExtensionAPI, manager: McpManager): Promi
       label: `${server} · ${tool.name}`,
       description: tool.description ?? `${server} 提供的 ${tool.name} 工具。`,
       parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as never,
-      async execute(_toolCallId, params) {
+      // signal 是 pi 给工具的中断信号。不接它，界面上的停止按钮就按不停一次 MCP
+      // 调用：pi 那边早就放手了，这条请求还在跑，人只能干等它自己结束。
+      async execute(_toolCallId, params, signal) {
         try {
-          const result = await manager.callTool(server, tool.name, (params ?? {}) as Record<string, unknown>);
+          const result = await manager.callTool(server, tool.name, (params ?? {}) as Record<string, unknown>, signal);
           const content = (result as { content?: Array<{ type: string; text?: string }> }).content;
           const text = Array.isArray(content)
             ? content.filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n")
@@ -173,7 +175,7 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
     ],
     parameters: McpParams,
 
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, signal) {
       const manager = requestMcpManager(pi.events);
       if (!manager) {
         return textResult("MCP 客户端当前不可用。", { error: "manager_unavailable" }, true);
@@ -208,7 +210,7 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
         return textResult("call 需要同时给出 server 和 tool。", { error: "missing_target" }, true);
       }
       try {
-        const result = await manager.callTool(server, tool, (params.args ?? {}) as Record<string, unknown>);
+        const result = await manager.callTool(server, tool, (params.args ?? {}) as Record<string, unknown>, signal);
         const content = (result as { content?: Array<{ type: string; text?: string }> }).content;
         const text = Array.isArray(content)
           ? content.filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n")

@@ -11,6 +11,7 @@ import { McpManager, authorizationCode, authorizationState } from "../src/manage
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SMOKE_SERVER = resolve(here, "../../../scripts/fixtures/mcp-smoke-server.mjs");
+const STALL_SERVER = resolve(here, "../../../scripts/fixtures/mcp-stall-server.mjs");
 
 function server(overrides: Partial<McpServerConfiguration> = {}): McpServerConfiguration {
   return {
@@ -300,4 +301,18 @@ test("没设空闲超时就不会被扫掉", async (t) => {
   (mcp as unknown as { sweepIdleConnections(): void }).sweepIdleConnections();
   await new Promise((resolveTick) => setImmediate(resolveTick));
   assert.equal((await mcp.status()).servers[0]?.status, "connected");
+});
+
+test("停止按钮按得停一次 MCP 调用", async (t) => {
+  // 之前按不停：pi 会把中断信号交给工具，而我们的 MCP 工具根本没接这个参数，于是
+  // 请求继续跑，人只能干等它自己结束或者撞上六十秒的超时。
+  const { manager: mcp } = manager([server({ name: "stall", args: [STALL_SERVER] })]);
+  t.after(() => mcp.close());
+  await mcp.connect("stall");
+
+  const controller = new AbortController();
+  const pending = mcp.callTool("stall", "stall", {}, controller.signal);
+  const settled = assert.rejects(() => pending);
+  setTimeout(() => controller.abort(), 50);
+  await settled;
 });
