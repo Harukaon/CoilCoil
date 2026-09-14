@@ -4,7 +4,8 @@ import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ContextEvent } from "@earendil-works/pi-coding-agent";
-import {
+import contextClearingExtension from "../extensions/context-clearing.ts";
+import contextTranscriptExtension, {
   readSections,
   renderTranscript,
   transcriptNote,
@@ -128,6 +129,64 @@ test("这段话进系统提示，不是每轮塞到消息末尾", () => {
   const source = readFileSync(new URL("../extensions/context-transcript.ts", import.meta.url), "utf8");
   assert.match(source, /pi\.on\("before_agent_start"/);
   assert.doesNotMatch(source, /pi\.on\("context"/);
+});
+
+test("两个扩展一起跑，存档里留下的必须是原文", () => {
+  // 光断言清单顺序不够——真正会出事的是「跑完之后存档里写了什么」。这一条按
+  // package.json 的顺序把两个扩展都装上，发一次真的 session_before_compact，然后去
+  // 磁盘上读那份存档。2026-09-11 那条会话就是这里塌的：存档 12 万行里 9,815 行是
+  // 占位符，模型回头去读，读回来满屏「[上下文已清理]」。
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    pi: { extensions: string[] };
+  };
+  const order = manifest.pi.extensions.filter((path) => /context-(clearing|transcript)/.test(path));
+  const factories: Record<string, (pi: unknown) => void> = {
+    "./extensions/context-transcript.ts": contextTranscriptExtension as (pi: unknown) => void,
+    "./extensions/context-clearing.ts": contextClearingExtension as (pi: unknown) => void,
+  };
+
+  // pi 的 runner 就是这么派发的：按扩展清单的顺序，一个一个 await 过去。
+  const handlers: Array<(event: unknown, ctx: unknown) => unknown> = [];
+  const sessionFile = join(mkdtempSync(join(tmpdir(), "coilcoil-order-")), "s.jsonl");
+  for (const path of order) {
+    const pi = {
+      on(event: string, handler: (event: unknown, ctx: unknown) => unknown) {
+        if (event === "session_before_compact") handlers.push(handler);
+      },
+      events: { emit: () => {} },
+    };
+    factories[path](pi);
+  }
+
+  const realArgs = { path: "/src/config.json", purpose: "看超时配置" };
+  const messagesToSummarize: AgentMessage[] = [
+    { role: "assistant", content: [{ type: "toolCall", id: "call_0", name: "read", arguments: realArgs }], timestamp: 1 },
+    {
+      role: "toolResult",
+      toolName: "read",
+      toolCallId: "call_0",
+      content: [{ type: "text", text: "x".repeat(60_000) }],
+      timestamp: 2,
+    },
+  ] as unknown as AgentMessage[];
+  const ctx = {
+    sessionManager: { getSessionFile: () => sessionFile },
+    getContextUsage: () => ({ tokens: 0, contextWindow: 200_000, percent: 0 }),
+  };
+  for (const handler of handlers) {
+    handler({ preparation: { messagesToSummarize, turnPrefixMessages: [] } }, ctx);
+  }
+
+  // 交给 pi 去摘要的那一份，工具内容该清掉——这是另一个 bug 的修复，不能倒回去。
+  const summarized = messagesToSummarize[1] as unknown as { content: Array<{ text: string }> };
+  assert.match(summarized.content[0].text, /上下文已清理/, "摘要那一份还是要瘦");
+
+  // 而存档里必须是原文，一个字不少。
+  const archive = readFileSync(transcriptPathFor(sessionFile), "utf8");
+  assert.match(archive, /\/src\/config\.json/, "存档里要看得见真实参数");
+  assert.match(archive, /看超时配置/);
+  assert.ok(archive.includes("x".repeat(20_000)), "存档里要看得见真实输出");
+  assert.doesNotMatch(archive, /上下文已清理/, "存档里一个占位符都不该有");
 });
 
 test("存档扩展必须排在清理扩展前面", () => {
