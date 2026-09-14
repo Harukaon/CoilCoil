@@ -1,3 +1,4 @@
+import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 import type { ContextEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 type AgentMessage = ContextEvent["messages"][number];
@@ -126,8 +127,9 @@ export interface ContextSummaryTrimRecord {
   /** 两段各自的消息条数。 */
   historyMessages: number;
   turnPrefixMessages: number;
-  /** 清掉的工具记录条数，以及这一段瘦下来的估算。 */
+  /** 清掉的工具记录条数。 */
   clearedResults: number;
+  /** 这一段拍平成 pi 实际要发的那串文本之后，有多少 token——清理前后各一个。 */
   tokensBefore: number;
   tokensAfter: number;
   /** 这个模型的窗口——瘦完到底进没进去，就看这两个数。 */
@@ -188,11 +190,28 @@ function messageTokens(message: AgentMessage): number {
   return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
-/** 一段消息的粗略大小，中文按一个字一个 token 算——这一条会进日志，得贴近真值。 */
-function estimateTokens(messages: readonly AgentMessage[]): number {
-  const text = JSON.stringify(messages);
-  const han = (text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) ?? []).length;
-  return Math.round(han + (text.length - han) / CHARS_PER_TOKEN);
+/**
+ * 这一段交给 pi 去摘要，实际会变成多大的一发请求。
+ *
+ * 用的是 pi 自己那两个函数，不是自己去数 JSON——因为 pi 根本不是把消息一条条发出去
+ * 的。它先 `convertToLlm`，再 `serializeConversation` 把整段拍平成一段文本、塞进一
+ * 条 user 消息；而且拍平的时候**每条工具输出只留 2000 字符**，调用参数和思考则一个
+ * 字不截。这三件事都不是我们能替它猜的。
+ *
+ * 之前这里数的是消息数组的 JSON 全文，还把中文按一字一 token 加权。两头都错：JSON
+ * 里塞着大量根本不会发出去的东西（thinkingSignature、id、时间戳、以及会被 pi 截掉
+ * 的那部分输出），中文的权重也加在了错的地方。拿真实会话量过：同一段消息这里报
+ * 68.8K，pi 实际发出去的只有 6.3K——差十倍，于是日志里两次红着报「装不下窗口」全是
+ * 假警报。一个会撒谎的日志比没有日志更糟，它让人去查一个不存在的问题。
+ */
+function summarizationTokens(messages: readonly AgentMessage[]): number {
+  try {
+    const text = serializeConversation(convertToLlm(messages as never) as never);
+    return Math.ceil(text.length / CHARS_PER_TOKEN);
+  } catch {
+    // 量不到不能把压缩带下水；退回一个粗糙但不会骗人的数。
+    return Math.ceil(JSON.stringify(messages).length / CHARS_PER_TOKEN);
+  }
 }
 
 function clearedText(message: ToolResultMessage): string {
@@ -439,7 +458,7 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
     if (!preparation) return undefined;
     const history = Array.isArray(preparation.messagesToSummarize) ? preparation.messagesToSummarize : [];
     const prefix = Array.isArray(preparation.turnPrefixMessages) ? preparation.turnPrefixMessages : [];
-    const tokensBefore = estimateTokens([...history, ...prefix]);
+    const tokensBefore = summarizationTokens([...history, ...prefix]);
     let clearedResults = 0;
     // 不往界面上画线：这一次清理没有改变对话本身，只是让那一发摘要请求发得出去。
     // 画一条「已清理 N 条」在压缩线旁边，只会让人以为自己的上下文又少了一块。日志
@@ -453,7 +472,7 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
       turnPrefixMessages: prefix.length,
       clearedResults,
       tokensBefore,
-      tokensAfter: estimateTokens([...history, ...prefix]),
+      tokensAfter: summarizationTokens([...history, ...prefix]),
       contextWindow: ctx.getContextUsage()?.contextWindow ?? 0,
     } satisfies ContextSummaryTrimRecord);
     return undefined;

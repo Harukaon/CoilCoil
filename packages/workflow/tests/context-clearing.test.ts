@@ -337,6 +337,33 @@ test("压缩之前先把那一段瘦下来，pi 自己的逻辑一行不动", ()
   assert.equal(trim.value.contextWindow, CONTEXT_WINDOW);
 });
 
+test("日志里那个数，量的是 pi 真要发出去的那串文本", () => {
+  // 这一条盯的是「日志会不会撒谎」。pi 摘要时先把整段拍平成一段文本，拍平时每条工
+  // 具输出只留 2000 字符。所以一条 10 万字符的输出，进不进得了那一发请求，从来只算
+  // 2000 字符——数消息数组的 JSON 全文是错的。真实会话上量过：同一段消息，旧算法报
+  // 68.8K，pi 实际发出去 6.3K，差十倍，于是日志红着报过两次「装不下窗口」，全是假
+  // 警报。
+  const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
+  const logged: Array<{ channel: string; value: Record<string, unknown> }> = [];
+  const pi = {
+    on(event: string, handler: (...args: unknown[]) => unknown) {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    events: { emit: (channel: string, value: unknown) => { logged.push({ channel, value: value as Record<string, unknown> }); } },
+  };
+  contextClearingExtension(pi as never);
+
+  const messagesToSummarize = [toolCall("c1", "read", { path: "/a.ts" }, 1), toolResult("c1", "read", 100_000)];
+  const ctx = { getContextUsage: () => ({ tokens: 0, contextWindow: CONTEXT_WINDOW, percent: 0 }) };
+  handlers.get("session_before_compact")![0]({ preparation: { messagesToSummarize, turnPrefixMessages: [] } }, ctx);
+
+  const trim = logged.find((entry) => entry.channel.includes("summary"))!;
+  const before = trim.value.tokensBefore as number;
+  assert.ok(before < 1_000, `10 万字符的输出，pi 只发 2000 字符，这个数不该上千（现在是 ${before}）`);
+  assert.ok(before > 300, "但也不能报成零——2000 字符是实打实要发的");
+  assert.ok((trim.value.tokensAfter as number) < before / 3, "清完之后确实小了一大截");
+});
+
 test("到线了却没动手，日志里说得出为什么——同一个理由只报一次", () => {
   const h = harness(OUR_LINE + 5_000);
   const messages = [...history(10), ...recentTail()];
