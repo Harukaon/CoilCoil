@@ -16,11 +16,16 @@ const CONTEXT_WINDOW = 400_000;
 const OUR_LINE = clearingLine(CONTEXT_WINDOW);
 const PI_LINE = CONTEXT_WINDOW - 16_384;
 
-function toolCall(id: string, name: string, args: unknown = { path: `/src/${id}.ts` }): AgentMessage {
+function toolCall(
+  id: string,
+  name: string,
+  args: unknown = { path: `/src/${id}.ts` },
+  timestamp = 0,
+): AgentMessage {
   return {
     role: "assistant",
     content: [{ type: "toolCall", id, name, arguments: args }],
-    timestamp: 0,
+    timestamp,
   } as unknown as AgentMessage;
 }
 
@@ -92,7 +97,51 @@ test("大参数跟着输出一起清，留下的只有「调过这个工具」",
   const next = applyToolResultClearing(messages, new Set([...plan.toolCallIds, ...plan.callIds]))!;
   const call = next[0] as unknown as { content: Array<{ name?: string; arguments?: unknown }> };
   assert.equal(call.content[0].name, "grep", "调过什么工具还得看得见");
-  assert.deepEqual(call.content[0].arguments, { note: "[上下文已清理]" });
+  assert.deepEqual(call.content[0].arguments, { "//": "[上下文已清理]" });
+});
+
+test("参数占位不能长得像个真参数，不然模型照着学", () => {
+  // 原来的键名是 `note`——那是任何工具都可能真有的字段。模型在自己的历史里看见几十
+  // 条 `read({note: "[上下文已清理]"})`，就当成一种合法的调用方式照着发，发出去一条
+  // 都过不了校验。2026-09-14 那条会话里，一条助手消息一口气发了六个这样的 read，
+  // 六条全是 “Validation failed for tool read”。
+  const messages = [
+    toolCall("c1", "grep", { pattern: "x".repeat(40_000) }),
+    toolResult("c1", "grep", 40_000),
+    ...recentTail(),
+  ];
+  const plan = planToolResultClearing(messages, new Set());
+  const next = applyToolResultClearing(messages, new Set([...plan.toolCallIds, ...plan.callIds]))!;
+  const call = next[0] as unknown as { content: Array<{ arguments?: Record<string, unknown> }> };
+  assert.deepEqual(
+    Object.keys(call.content[0].arguments ?? {}),
+    ["//"],
+    "键名要一眼看得出是系统写上去的注释，而不是一个可以照抄的参数",
+  );
+});
+
+test("服务商把 call_0 用了一千遍，也不能牵连到最近那一条", () => {
+  // 这一条是整件事里最狠的一个。有的服务商每轮都从 `call_0` 重新编号——真实会话里
+  // 1898 次调用有 1816 次叫 `call_0`。参数只按 id 记的时候，清掉一条老调用，等于把
+  // 这条会话里所有 `call_0` 的参数一起清掉，包括三秒钟前刚发出的那一条。模型回头看
+  // 自己上一轮，看见参数没了，就照着再发一次、再错一次——2026-09-11 那条会话连着
+  // 57 轮发同一个废调用，五分钟一步没走动，最后是用户自己打断的。
+  const liveArgs = { action: "call", server: "coilcoil-browser", tool: "list_pages" };
+  const messages = [
+    toolCall("call_0", "mcp", { pattern: "x".repeat(40_000) }, 1),
+    toolResult("call_0", "mcp", 40_000),
+    ...recentTail(),
+    toolCall("call_0", "mcp", liveArgs, 2),
+  ];
+
+  const plan = planToolResultClearing(messages, new Set());
+  assert.equal(plan.callIds.length, 1, "老的那一条清得到");
+
+  const next = applyToolResultClearing(messages, new Set([...plan.toolCallIds, ...plan.callIds]))!;
+  const live = next[next.length - 1] as unknown as { content: Array<{ arguments?: unknown }> };
+  assert.deepEqual(live.content[0].arguments, liveArgs, "最近那一条的参数一个字都不能动");
+  const old = next[0] as unknown as { content: Array<{ arguments?: unknown }> };
+  assert.deepEqual(old.content[0].arguments, { "//": "[上下文已清理]" }, "老的那一条该清还是清");
 });
 
 test("参数小到还不如占位句，就别动它", () => {

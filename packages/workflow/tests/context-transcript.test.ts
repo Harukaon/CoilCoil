@@ -130,6 +130,22 @@ test("这段话进系统提示，不是每轮塞到消息末尾", () => {
   assert.doesNotMatch(source, /pi\.on\("context"/);
 });
 
+test("存档扩展必须排在清理扩展前面", () => {
+  // 两个扩展挂的是同一个 session_before_compact，拿到的是同一个
+  // preparation.messagesToSummarize 数组，而清理那一层是就地改写它的。排在后面，
+  // 这里写进存档的就是清理后的那一份——而存档的全部意义正是「压缩丢掉的东西还能翻
+  // 回来」。2026-09-11 那条会话的存档 12 万行里有 9,815 行是占位符，模型回头去读存
+  // 档，读回来满屏「[上下文已清理]」。package.json 里的顺序就是执行顺序。
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    pi: { extensions: string[] };
+  };
+  const order = manifest.pi.extensions;
+  const transcript = order.indexOf("./extensions/context-transcript.ts");
+  const clearing = order.indexOf("./extensions/context-clearing.ts");
+  assert.ok(transcript >= 0 && clearing >= 0, "两个扩展都得在清单里");
+  assert.ok(transcript < clearing, "存档要先写，写的必须是没被清理过的原文");
+});
+
 test("还没压缩过就什么也不说", () => {
   // 一个字都不该占：绝大多数会话从头到尾都用不到这段话。
   assert.equal(transcriptNote("/s/abc.transcript.md", []), undefined);

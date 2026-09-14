@@ -89,8 +89,16 @@ const KEEP_RECENT_TOKENS = 20_000;
 const STATE_TOOLS = new Set(["todo", "goal"]);
 
 const CLEARED_PREFIX = "[上下文已清理]";
-/** 参数清掉之后留在原地的东西：调用本身还在，参数没了。 */
-const CLEARED_ARGUMENTS = { note: CLEARED_PREFIX };
+/**
+ * 参数清掉之后留在原地的东西：调用本身还在，参数没了。
+ *
+ * 键名不能长得像个真参数。原来用的是 `note`——那是任何工具都可能真有的字段，模型
+ * 在自己的历史里看见几十条 `read({note: "[上下文已清理]"})`，就照着学了，发出去的
+ * 调用一条都过不了校验。2026-09-14 那条会话里，一条助手消息一口气发了六个这样的
+ * `read`。换成 `//`：哪张 schema 里都没有这个键，一眼就看得出是系统写上去的注释，
+ * 而不是一次可以照抄的调用。
+ */
+const CLEARED_ARGUMENTS = { "//": CLEARED_PREFIX };
 
 /**
  * Channel this extension announces its batches on.
@@ -206,9 +214,21 @@ export function resultKey(message: Pick<ToolResultMessage, "toolCallId" | "times
   return `${message.toolCallId}@${message.timestamp ?? 0}`;
 }
 
-/** 调用参数用同一个集合记，加个前缀免得和结果撞上。 */
-function callKey(id: string): string {
-  return `call:${id}`;
+/**
+ * 调用参数怎么认。和 `resultKey` 是同一条教训，而且这边栽得更深。
+ *
+ * 光用 id 不行：有的服务商每一轮都从 `call_0` 重新编号——真实会话里 1898 次调用有
+ * 1816 次叫 `call_0`。只按 id 记，清掉一条老调用的参数，等于把这条会话里所有
+ * `call_0` 的参数一起清掉，包括三秒钟前刚发出的那一条，最近那段保护窗口形同虚设。
+ * 模型回头看自己上一轮，看见的是 `mcp({...})` 里参数没了，于是照着再发一次，再错
+ * 一次——2026-09-11 那条会话就这么连着 57 轮发同一个废调用，五分钟里一步没走动，
+ * 最后是用户自己打断的。
+ *
+ * 时间戳取的是「这条助手消息」的：同一条消息里的几个调用靠 id 分开，跨消息靠时间
+ * 戳分开。
+ */
+function callKey(message: AgentMessage, id: string): string {
+  return `call:${id}@${(message as { timestamp?: number }).timestamp ?? 0}`;
 }
 
 interface CallBlock { id?: unknown; name?: unknown; arguments?: unknown; type?: unknown }
@@ -283,10 +303,10 @@ export function planToolResultClearing(
     // 什么工具」这件事本身，那是摘要接不住、模型又必须知道的。
     for (const block of callBlocks(message)) {
       const id = String(block.id ?? "");
-      if (!id || cleared.has(callKey(id)) || STATE_TOOLS.has(String(block.name ?? ""))) continue;
+      if (!id || cleared.has(callKey(message, id)) || STATE_TOOLS.has(String(block.name ?? ""))) continue;
       const size = Math.ceil(JSON.stringify(block.arguments ?? {}).length / CHARS_PER_TOKEN);
       if (size <= CLEARED_ARGUMENTS_TOKENS) continue;
-      callIds.push(callKey(id));
+      callIds.push(callKey(message, id));
       freedTokens += size - CLEARED_ARGUMENTS_TOKENS;
     }
   }
@@ -315,10 +335,10 @@ export function applyToolResultClearing(
       return { ...result, content: [{ type: "text" as const, text: replacement }] };
     }
     const calls = callBlocks(message);
-    if (!calls.some((block) => cleared.has(callKey(String(block.id ?? ""))))) return message;
+    if (!calls.some((block) => cleared.has(callKey(message, String(block.id ?? ""))))) return message;
     changed = true;
     const content = ((message as { content: CallBlock[] }).content).map((block) => {
-      if (block?.type !== "toolCall" || !cleared.has(callKey(String(block.id ?? "")))) return block;
+      if (block?.type !== "toolCall" || !cleared.has(callKey(message, String(block.id ?? "")))) return block;
       return { ...block, arguments: CLEARED_ARGUMENTS };
     });
     return { ...message, content } as AgentMessage;
