@@ -10,6 +10,7 @@ import {
   mcpAuthManualFallbackVisible,
   mcpAuthTerminal,
   mcpAuthTitle,
+  failureNeedsReauthorization,
 } from "../src/renderer/src/features/settings/mcpAuthPresentation.ts";
 
 function actionResult(details?: Record<string, unknown>, text = ""): McpActionResult {
@@ -107,4 +108,27 @@ test("关掉状态弹窗不会掐死浏览器里正在进行的登录", () => {
   } as never);
   assert.equal(waiting.phase, "waiting");
   assert.ok(waiting.authorizationUrl, "浏览器已经被送去授权页，登录在那边进行");
+});
+
+test("服务器答了话却连不上，就直接接到重新授权，不管它答的是几", () => {
+  // 这条规则存在的理由：2026-09-14 一台 MCP Server 把过期令牌报成了 500。按状态码
+  // 认，我们只当成「服务器炸了」，界面给一句连不上就没有下文，用户唯一的出路是去
+  // 文件系统里手动删本地凭据。按「答没答话」认就不会被骗。
+  for (const status of [500, 502, 400, 403, 418]) {
+    assert.equal(
+      failureNeedsReauthorization({ failureHttpStatus: status }, true),
+      true,
+      `${status} 也是答了话，该去重新登录`,
+    );
+  }
+});
+
+test("压根没连上就别弹浏览器——服务器不在，登录也登不了", () => {
+  assert.equal(failureNeedsReauthorization({ failureHttpStatus: null }, true), false);
+  assert.equal(failureNeedsReauthorization({}, true), false);
+  assert.equal(failureNeedsReauthorization(undefined, true), false);
+});
+
+test("不走浏览器认证的服务器，永远不问登录", () => {
+  assert.equal(failureNeedsReauthorization({ failureHttpStatus: 500 }, false), false);
 });

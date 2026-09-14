@@ -65,6 +65,31 @@ const requireOAuth = requireBearerAuth({
   resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(mcpServerUrl),
 });
 
+/**
+ * 扮演一台「把过期令牌报成 500」的服务器。
+ *
+ * 真事：2026-09-14 一台 MCP Server 的 OAuth 实现抛的是普通 Error，而 SDK 的
+ * 鉴权中间件只按错误类型决定状态码，认不出来的一律包成 500。于是令牌一过期，客户端
+ * 收到的是「服务器内部故障」，而不是带 WWW-Authenticate 的 401——那个头才是叫客户端
+ * 去重新授权的信号。
+ *
+ * 要紧的是只在**带了令牌**的时候这么干：不带令牌时那台服务器仍然正确回 401，所以把
+ * 本地凭据删掉就又能登录了。照搬这个不对称，测的才是真实情况。
+ */
+const misreportAuthErrors = process.env.MCP_FIXTURE_MISREPORT_AUTH === "1";
+function misreportAs500(request, response, next) {
+  const presentedToken = String(request.headers.authorization ?? "").startsWith("Bearer ");
+  if (!misreportAuthErrors || !presentedToken) return next();
+  const setStatus = response.status.bind(response);
+  response.status = (code) => {
+    if (code !== 401) return setStatus(code);
+    // 500 那条路根本不会设这个头，少了它客户端就更没线索了。
+    response.removeHeader("WWW-Authenticate");
+    return setStatus(500);
+  };
+  next();
+}
+
 function createServer() {
   const server = new McpServer({ name: "coilcoil-oauth-smoke", version: "1.0.0" });
   server.registerTool("oauth-echo", {
@@ -76,7 +101,7 @@ function createServer() {
   return server;
 }
 
-resourceApp.post("/mcp", requireOAuth, async (request, response) => {
+resourceApp.post("/mcp", misreportAs500, requireOAuth, async (request, response) => {
   authorizedMcpRequests += 1;
   const server = createServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

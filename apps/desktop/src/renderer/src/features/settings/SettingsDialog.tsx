@@ -23,6 +23,7 @@ import {
   mcpAuthFlowStarted,
   mcpAuthFlowSucceeded,
   type McpAuthFlowState,
+  failureNeedsReauthorization,
 } from "./mcpAuthPresentation";
 import { McpDiscoveryDialog } from "./McpDiscoveryDialog";
 import { McpJsonEditor } from "./McpJsonEditor";
@@ -481,6 +482,12 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
       }
       const failure = actionErrorMessage(result);
       if (failure) {
+        // 服务器答了话却连不上，而这台是要登录的：那就是登录过期，一路接到重新
+        // 授权，别把用户丢在一句错误前面。判断规则见 failureNeedsReauthorization。
+        if (failureNeedsReauthorization(entry, supportsAuth)) {
+          await runAuth(server);
+          return;
+        }
         setCheckResult({ server, ok: false, text: failure });
         return;
       }

@@ -1,4 +1,26 @@
-import type { McpActionResult } from "@coilcoil/runtime-protocol";
+import type { McpActionResult, McpServerRuntimeStatus } from "@coilcoil/runtime-protocol";
+
+/**
+ * 检查状态失败之后，该不该把用户直接接到重新授权上。
+ *
+ * 判断依据是「服务器有没有答话」，不是它答了什么。答了话就说明它活着，那连不上的
+ * 嫌疑就落在手里这份登录凭据上——这个推理对任何状态码都成立，包括写错的那些。
+ *
+ * 2026-09-14 遇到的那台 MCP Server 就把过期令牌报成了 500。按状态码认，我们只当成
+ * 「服务器炸了」，界面上给一句连不上就没了下文；用户唯一的出路是去文件系统里手动
+ * 删掉本地凭据。按「答没答话」认就不会被骗：500 也好 502 也好，它答了，那就去重新
+ * 登录一次试试。
+ *
+ * 反过来，压根没连上（拒绝连接、DNS、超时）是没有状态码的，那时候弹一个浏览器出来
+ * 毫无意义——服务器不在，登录也登不了。那种情况仍然只报错误。
+ */
+export function failureNeedsReauthorization(
+  entry: Pick<McpServerRuntimeStatus, "failureHttpStatus"> | undefined,
+  supportsAuth: boolean,
+): boolean {
+  if (!supportsAuth) return false;
+  return typeof entry?.failureHttpStatus === "number";
+}
 
 /**
  * Where a single MCP OAuth attempt has got to.

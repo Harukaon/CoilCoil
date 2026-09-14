@@ -29,8 +29,8 @@ interface FixtureReady {
   instanceId: string;
 }
 
-async function startFixture(): Promise<{ ready: FixtureReady; stop: () => void }> {
-  const child: ChildProcess = fork(FIXTURE, [], { stdio: ["ignore", "pipe", "pipe", "ipc"] });
+async function startFixture(env: Record<string, string> = {}): Promise<{ ready: FixtureReady; stop: () => void }> {
+  const child: ChildProcess = fork(FIXTURE, [], { stdio: ["ignore", "pipe", "pipe", "ipc"], env: { ...process.env, ...env } });
   let stderr = "";
   child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
   const ready = await new Promise<FixtureReady>((resolvePromise, rejectPromise) => {
@@ -79,6 +79,57 @@ async function approveInBrowser(authorizationUrl: string): Promise<string> {
   );
   return location as string;
 }
+
+test("服务器把过期令牌报成 500，也得能在应用里重新登录", { timeout: 90_000 }, async (t) => {
+  // 2026-09-14 真遇到的一台 MCP Server：令牌过期了，它的 OAuth 实现抛的是普通
+  // Error，SDK 只认得几种错误类型，认不出来的一律包成 500。于是客户端收到的是
+  // 「服务器内部故障」，而不是带 WWW-Authenticate 的 401——那个头才是叫客户端去
+  // 重新授权的信号。
+  //
+  // 对面怎么错不归我们管，我们要保证的是：CoilCoil 自己不被这种事挡死。在这之前
+  // 它是死路——「检查状态」只会显示一句连不上，用户唯一的出路是去手动删本地凭据
+  // 文件。
+  const fixture = await startFixture({ MCP_FIXTURE_MISREPORT_AUTH: "1" });
+  t.after(() => fixture.stop());
+
+  const directory = mkdtempSync(join(tmpdir(), "coilcoil-mcp-stale-"));
+  const store = new McpCredentialStore(defaultCredentialFile(join(directory, "agent")));
+  // 手里攥着一份已经作废的令牌：服务重启、令牌过期，都是这个局面。
+  store.update(credentialKey(fixture.ready.mcpServerUrl), {
+    tokens: { access_token: "long-dead-token", token_type: "Bearer" },
+  });
+
+  const opened: URL[] = [];
+  const manager = new McpManager({
+    loadServers: () => [httpServer("stale", fixture.ready.mcpServerUrl)],
+    store,
+    callback: new McpAuthCallbackServer([0]),
+    openAuthorization: (url) => { opened.push(url); },
+  });
+  t.after(() => manager.close());
+
+  // 1. 连不上，而且状态不是「需要认证」——服务器压根没说这是认证问题。
+  const failed = await manager.connect("stale");
+  assert.equal(failed.status, "failed");
+
+  // 2. 但它答了话。这就是「令牌坏了」和「服务器死了」之间唯一可靠的分界，而且不
+  //    依赖对面把状态码写对。
+  assert.equal(failed.failureHttpStatus, 500, "服务器答了 500，这个数必须留下来");
+
+  // 3. 于是重新授权必须走得通：坏令牌要被扔掉，授权页要拿得到。留着那份令牌的
+  //    话，SDK 只会拿它再试一次、再 500 一次，永远走不到授权那一步。
+  const started = await manager.startAuth("stale");
+  assert.equal(started.error, undefined, `重新授权不该失败：${started.error}`);
+  assert.ok(started.authorizationUrl, "没拿到授权地址，就等于这个毛病在应用里修不好");
+  assert.equal(opened.length, 1);
+
+  // 4. 浏览器那一半走完，连接自己接上，工具也回来了。
+  const callbackUrl = await approveInBrowser(started.authorizationUrl as string);
+  await fetch(callbackUrl);
+  const authorized = await manager.awaitAuth("stale");
+  assert.equal(authorized.status, "connected");
+  assert.ok(authorized.toolCount >= 1, "重新登录之后应该重新发现得到工具");
+});
 
 test("HTTP 服务器的整条 OAuth 流程，从头到尾不需要任何会话", { timeout: 90_000 }, async (t) => {
   const fixture = await startFixture();

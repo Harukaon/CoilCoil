@@ -535,6 +535,13 @@ export interface McpServerRuntimeStatus {
   toolCount: number;
   resourceCount: number;
   failedAgo: number | null;
+  /**
+   * 上一次连接失败时服务器回的 HTTP 状态码，没答话就是 null。
+   *
+   * 有这个数就说明服务器是活的，连不上多半是登录过期——界面据此把「检查状态」
+   * 直接接到重新授权上，而不是留下一句没有出路的错误。
+   */
+  failureHttpStatus?: number | null;
   disabled: boolean;
   /** Disabled only for this Pi session; the workspace configuration is unchanged. */
   sessionDisabled: boolean;

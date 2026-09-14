@@ -75,6 +75,20 @@ const STDERR_TAIL_LIMIT = 600;
  * the top-level message alone put a sentence in front of the user that could not
  * be acted on, and left the same sentence in the log for us.
  */
+/**
+ * 顺着 `cause` 往下找服务器回的 HTTP 状态码。
+ *
+ * SDK 的两种 HTTP 传输在收到非 2xx 时抛的错误都把状态码放在 `code` 上；网络层的
+ * 错误（拒绝连接、DNS、超时）没有这个字段，或者放的是 `ECONNREFUSED` 这类字符串。
+ * 所以「`code` 是个像 HTTP 状态码的数字」就等于「服务器答了话」。
+ */
+function httpStatusOf(error: unknown, depth = 0): number | undefined {
+  if (!(error instanceof Error) || depth > 4) return undefined;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "number" && code >= 100 && code <= 599) return code;
+  return httpStatusOf((error as { cause?: unknown }).cause, depth + 1);
+}
+
 function errorText(error: unknown, depth = 0): string {
   if (!(error instanceof Error)) return String(error);
   const own = error.message || error.name;
@@ -91,6 +105,17 @@ export class McpConnection {
   private transport?: Transport;
   private state: McpConnectionStatus = "not connected";
   private lastFailure?: string;
+  /**
+   * 上一次失败时，服务器回的 HTTP 状态码——没有就是压根没连上。
+   *
+   * 这是「令牌坏了」和「服务器死了」之间唯一可靠的分界，而且不依赖对面把状态码
+   * 写对。传输层在收到任何非 2xx 时抛的错误自带状态码；连接被拒、DNS 解析不了、
+   * 握手超时则不会有。2026-09-14 真遇到过：一台 MCP Server 的令牌过期了，它却把
+   * 401 报成 500，于是我们只当成「连不上」，界面上就成了一句没有出路的错误——用
+   * 户唯一的办法是去手动删本地凭据文件。看「答没答话」就不会被这种事骗到：答了
+   * 话就说明服务器活着，那把嫌疑落在令牌上永远是对的。
+   */
+  private lastFailureHttpStatus?: number;
   private discoveredTools: McpToolSummary[] = [];
   private discoveredResources: McpResourceSummary[] = [];
   private oauth?: McpOAuthProvider;
@@ -111,6 +136,11 @@ export class McpConnection {
 
   get failure(): string | undefined {
     return this.lastFailure;
+  }
+
+  /** 上一次失败时服务器回的状态码；没答话就是 undefined。 */
+  get failureHttpStatus(): number | undefined {
+    return this.lastFailureHttpStatus;
   }
 
   get tools(): McpToolSummary[] {
@@ -184,6 +214,7 @@ export class McpConnection {
   private async runConnect(): Promise<McpConnectionStatus> {
     this.state = "connecting";
     this.lastFailure = undefined;
+    this.lastFailureHttpStatus = undefined;
     try {
       const client = new Client(
         { name: this.options.clientName ?? "CoilCoil", version: this.options.clientVersion ?? "0.1.0" },
@@ -208,6 +239,7 @@ export class McpConnection {
       }
       this.state = "failed";
       this.lastFailure = this.failureText(error);
+      this.lastFailureHttpStatus = httpStatusOf(error);
       return this.state;
     }
   }

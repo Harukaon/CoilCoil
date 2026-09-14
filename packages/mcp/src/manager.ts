@@ -324,6 +324,7 @@ export class McpManager {
       toolCount: connection?.tools.length ?? 0,
       resourceCount: connection?.resources.length ?? 0,
       failedAgo: failedAt ? Math.round((Date.now() - failedAt) / 1000) : null,
+      failureHttpStatus: connection?.failureHttpStatus ?? null,
       disabled: definition.disabled,
       sessionDisabled: this.sessionDisabled.has(definition.name),
     };
@@ -403,6 +404,17 @@ export class McpManager {
 
     this.cancelAuth(name);
     this.flows.set(name, { interactive: true });
+    // 服务器答过话却连不上，那嫌疑就在手里这份令牌上：留着它，SDK 只会拿它再试
+    // 一次、再失败一次，永远不会去走一遍新的授权，于是重新登录在应用里根本做不
+    // 到——真发生过，用户当时唯一的出路是手动删掉本地凭据文件。丢掉的只有令牌，
+    // 客户端注册留着，所以重新授权不用再注册一次。
+    if (existing?.status === "failed" && existing.failureHttpStatus !== undefined && definition.url) {
+      this.options.store.update(credentialKey(definition.url), {
+        tokens: undefined,
+        codeVerifier: undefined,
+        state: undefined,
+      });
+    }
     // Nothing to resume, so this has to go and find an authorization page. A
     // stale connection still holds the transport that failed; the SDK will not
     // re-run authorization through it.
