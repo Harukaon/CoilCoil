@@ -83,10 +83,15 @@ export function useInAppBrowserLinks({
         return;
       }
       const anchor = target?.closest<HTMLAnchorElement>(".markdown a[href]");
-      const url = markdownBrowserUrl(anchor?.getAttribute("href") ?? null);
-      if (!url) return;
+      if (!anchor) return;
+      // 认不出去向也一样拦住。放行的代价不是「什么都没发生」：浏览器会按默认行为
+      // 导航，而一个空的或者相对的 href 解析出来就是当前页，于是整个应用重新加载
+      // 一遍——2026-09-14 用户点一条 file:// 链接，应用连着重启四次就是这么来的。
+      // 这一层不负责认识所有协议，只负责保证「认不出来 ≠ 让浏览器替我们决定」。
       event.preventDefault();
       event.stopPropagation();
+      const url = markdownBrowserUrl(anchor.getAttribute("href"));
+      if (!url) return;
       openLink(url, wantsInAppBrowser(event));
     };
     document.addEventListener("click", routeMarkdownLink, true);

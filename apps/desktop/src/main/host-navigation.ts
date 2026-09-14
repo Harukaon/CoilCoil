@@ -22,7 +22,9 @@ export function installHostNavigationGuard(
 ): void {
   window.webContents.once("did-finish-load", () => {
     window.webContents.on("will-navigate", (event: Event, rawUrl: string) => {
-      if (rawUrl === window.webContents.getURL()) return;
+      // 跳到「和当前一样的地址」也要拦。这条以前是放行的，可页面自己发起的同址
+      // 导航只有一个来源——一个没人接管的 <a>——而它的效果正是把应用整页重载。真
+      // 正的重载走 webContents.reload()，那条路不经过这里。
       event.preventDefault();
       const url = routableHostUrl(rawUrl);
       if (!url) return;

@@ -23,7 +23,7 @@ import { inAppBrowserModifierLabel, markdownBrowserUrl } from "../browser/useInA
 import { ConfirmDialog } from "../../ui/dialog";
 import { CollapsibleCodeBlock } from "./CollapsibleCodeBlock";
 import { copyPath, copyText, revealLabel, revealPath } from "../files/pathActions";
-import { parseMarkdownFileHref, type MarkdownFileTarget } from "./markdownFileLinks";
+import { markdownUrlTransform, parseMarkdownFileHref, type MarkdownFileTarget } from "./markdownFileLinks";
 import { useFileLinkKind } from "./fileLinkKinds";
 import { TerminalNoticeCard } from "./TerminalNoticeCard";
 import { compactionMarkDetail, compactionMarkLabel, compactionSummaryPreview, type CompactionMark } from "./compactionMarks";
@@ -139,6 +139,38 @@ function MarkdownWebLink({
   );
 }
 
+/**
+ * 一条我们不认识的链接。
+ *
+ * 既不是文件也不是网页——`vscode://`、`slack://` 这类自定义协议都会落到这里。点
+ * 击什么都不做（也绝不能让它去导航，那会把应用自己冲掉），但地址得让人拿得走：
+ * 「右键一定要有一个复制链接地址」是用户对这种链接提的第一条要求。
+ */
+function MarkdownPlainLink({
+  href,
+  className,
+  children,
+  ...props
+}: {
+  href: string;
+  className?: string;
+  children?: ReactNode;
+} & Record<string, unknown>): React.JSX.Element {
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <a {...props} className={className} href={href} title={`${href}
+这种地址打不开，右键可以复制`}>{children}</a>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className="conversation-context-menu" collisionPadding={8}>
+          <ContextMenu.Item className="conversation-context-item" onSelect={() => { void copyText(href, "链接地址"); }}><Copy size={13} /><span>复制链接地址</span></ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  );
+}
+
 const MARKDOWN_COMPONENTS: Components = {
   table: ({ node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props} /></div>,
   pre: ({ node: _node, ...props }) => <CollapsibleCodeBlock {...props} />,
@@ -147,7 +179,11 @@ const MARKDOWN_COMPONENTS: Components = {
     if (file) return <MarkdownFileLink {...props} file={file} className={className} href={href}>{children}</MarkdownFileLink>;
     const url = markdownBrowserUrl(href ?? null);
     if (url) return <MarkdownWebLink {...props} url={url} className={className} href={href}>{children}</MarkdownWebLink>;
-    return <a className={className} href={href} {...props}>{children}</a>;
+    // 地址被挡掉了（危险协议）就别画成链接：没有 href 的 <a> 点下去会重新加载当前
+    // 页，而当前页就是应用自己。不是链接的东西，就不要长得像链接。
+    const raw = href?.trim();
+    if (!raw) return <span className={className}>{children}</span>;
+    return <MarkdownPlainLink {...props} href={raw} className={className}>{children}</MarkdownPlainLink>;
   },
 };
 
@@ -156,7 +192,7 @@ export { imageDataUrl, clipboardImage };
 export const Markdown = memo(function Markdown({ children }: { children: string }): React.JSX.Element {
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
+      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} urlTransform={markdownUrlTransform} components={MARKDOWN_COMPONENTS}>
         {children}
       </ReactMarkdown>
     </div>
