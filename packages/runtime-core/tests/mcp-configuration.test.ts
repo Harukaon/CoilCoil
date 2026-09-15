@@ -4,7 +4,7 @@ import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mcpConfigurationForAgent, CoilCoilRuntime, serveMcpManager, withBundledBrowserMcp } from "../src/index.js";
-import { bundledBrowserServerConfiguration, withoutRivalBrowserConfigurations } from "../src/browser-mcp.js";
+import { BROWSER_IDLE_TIMEOUT_MINUTES, bundledBrowserServerConfiguration, withoutRivalBrowserConfigurations } from "../src/browser-mcp.js";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { requestMcpManager } from "../../workflow/extensions/mcp-tools.js";
 
@@ -49,7 +49,8 @@ test("bundled Chrome DevTools MCP is scoped per session with zero direct tools",
     command: "/private/node",
     args: ["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools?scope=runtime+A%2F%E4%BC%9A%E8%AF%9D"],
     env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", ELECTRON_RUN_AS_NODE: "1" },
-    lifecycle: "eager",
+    lifecycle: "lazy",
+    idleTimeout: BROWSER_IDLE_TIMEOUT_MINUTES,
     requestTimeoutMs: 300_000,
     directTools: false,
     description: "通过 Chrome DevTools MCP 按需控制和调试 CoilCoil 右侧可见网页。",
@@ -247,7 +248,9 @@ test("内置浏览器 MCP 也要以客户端认得的形状给出来", () => {
   assert.equal(server?.name, "coilcoil-browser");
   assert.equal(server?.transport, "stdio");
   assert.equal(server?.command, "/private/node");
-  assert.equal(server?.lifecycle, "eager", "内置浏览器要在会话一开就连上");
+  // 按需连接、闲下来就放手：开机就连会让每个留着的空闲会话各挂一个子进程。
+  assert.equal(server?.lifecycle, "lazy", "内置浏览器要等 Agent 真用到才连");
+  assert.equal(server?.idleTimeout, BROWSER_IDLE_TIMEOUT_MINUTES, "闲置之后要能被回收掉");
   assert.equal(server?.disabled, false);
   // 作用域跟着会话走，两个会话不会抢同一个浏览器。
   assert.ok(server?.args.some((value) => value.includes("scope=")));

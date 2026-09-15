@@ -20,6 +20,20 @@ import {
   isRecord
 } from "./runtime-utils.js";
 
+/**
+ * 内置浏览器的 MCP 闲置多久就放手（分钟）。
+ *
+ * 它以前是 `eager`：每个会话运行时一开就连，而运行时最多留着 6 个空闲的，于是一台
+ * 机器上常年挂着五六个 chrome-devtools-mcp 子进程，各占三十来兆，其中好几个的会话
+ * 用户当天根本没再打开过。`eager` 对它也没换来什么——工具检索本来就会按需连接，
+ * 直接工具面又始终不含浏览器 schema，预连接只是把代价提前付了。
+ *
+ * 改成按需连接之后还需要一个上限：连上的是本机 stdio 子进程，重连很快，所以放手
+ * 得比一般服务器果断些。十五分钟大约是「刚才那一步做完，接着还要点下一步」和
+ * 「这个会话今天不会再用浏览器了」之间的分界。
+ */
+export const BROWSER_IDLE_TIMEOUT_MINUTES = 15;
+
 export interface McpAdapterEffectiveConfig {
   imports?: McpImportConfiguration["kind"][];
   mcpServers: Record<string, Record<string, unknown>>;
@@ -196,9 +210,11 @@ export function withBundledBrowserMcp(
         ...withoutRivalBrowserServers(configuration.mcpServers),
         "coilcoil-browser": {
           ...browser,
-          // Preload Chrome DevTools metadata for gateway search, while keeping
-          // every browser schema off the model's default direct-tool surface.
-          lifecycle: "eager",
+          // Opened when the Agent first reaches for the browser and let go once
+          // it stops — see BROWSER_IDLE_TIMEOUT_MINUTES. Every browser schema
+          // stays off the model's default direct-tool surface either way.
+          lifecycle: "lazy",
+          idleTimeout: BROWSER_IDLE_TIMEOUT_MINUTES,
           requestTimeoutMs: 300_000,
           directTools: false,
           description: "通过 Chrome DevTools MCP 按需控制和调试 CoilCoil 右侧可见网页。",
@@ -239,7 +255,8 @@ export function bundledBrowserServerConfiguration(
     args: Array.isArray(entry.args) ? entry.args.map(String) : [],
     env: entry.env && typeof entry.env === "object" ? entry.env as Record<string, string> : {},
     headers: {},
-    lifecycle: "eager",
+    lifecycle: "lazy",
+    idleTimeout: BROWSER_IDLE_TIMEOUT_MINUTES,
     requestTimeoutMs: 300_000,
     exposeResources: false,
     directTools: false,
