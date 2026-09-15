@@ -100,6 +100,17 @@ function errorText(error: unknown, depth = 0): string {
   return nested && !line.includes(nested) ? `${line}：${nested}` : line;
 }
 
+/**
+ * 「请求根本没发出去，因为连接不在了」——SDK 对这一种失败的说法。
+ *
+ * 只认这一句，是因为只有它保证服务器什么都没做过：传输层在发送前就拒绝了。至于
+ * 「Connection closed」，那是请求已经送出、答案在半路丢了，重试可能让同一个动作
+ * 执行两次，所以不在这里。
+ */
+function isDisconnected(error: unknown): boolean {
+  return error instanceof Error && /^not connected$/i.test(error.message.trim());
+}
+
 export class McpConnection {
   private client?: Client;
   private transport?: Transport;
@@ -227,6 +238,7 @@ export class McpConnection {
       );
       this.client = client;
       this.transport = transport;
+      this.watchForClose(client);
       await this.discover(client);
       this.state = "connected";
       return this.state;
@@ -242,6 +254,40 @@ export class McpConnection {
       this.lastFailureHttpStatus = httpStatusOf(error);
       return this.state;
     }
+  }
+
+  /**
+   * Notice when the connection dies on its own.
+   *
+   * A connection drops without anyone asking: the child process exits, the
+   * socket it was holding goes away, the server decides it is done. The SDK
+   * handles that honestly enough — it lets go of its transport, and every
+   * request after that fails with `Not connected`. This layer did not: `state`
+   * only ever moved when someone called `connect` or `close`, so a dead
+   * connection went on reporting `connected` forever.
+   *
+   * That single stale word was the whole failure. The panel stayed green, the
+   * tool list kept answering from the discovery cache without touching the
+   * server, and `callTool`'s own reconnect was gated on the status not being
+   * `connected` — so the one thing that could have fixed it was the one thing
+   * the lie ruled out. On 2026-09-15 the built-in browser's server dropped
+   * mid-session and the Agent spent two minutes on it: eight calls, all
+   * `Not connected`, a re-list of the tools that returned a cheerful thirty
+   * from cache, and no way out of it short of restarting the app.
+   *
+   * The guard is what keeps our own teardown out of this: `dispose` clears
+   * `client` before closing it, so the close it causes finds a stranger here
+   * and leaves the status `close` and `runConnect` are in the middle of setting.
+   */
+  private watchForClose(client: Client): void {
+    client.onclose = () => {
+      if (this.client !== client) return;
+      this.client = undefined;
+      this.transport = undefined;
+      this.state = "not connected";
+      this.discoveredTools = [];
+      this.discoveredResources = [];
+    };
   }
 
   private get timeoutMs(): number {
@@ -338,6 +384,19 @@ export class McpConnection {
    * 请求还在跑，人得干等到它自己结束或者撞上超时。
    */
   async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    try {
+      return await this.sendCall(name, args, signal);
+    } catch (error) {
+      // 连接是在检查状态和发出请求之间断的。这种时序上的缝隙对调用方没有任何意义
+      // ——它要的是工具的结果，不是我们内部先后顺序的报告——所以重连一次再试。只试
+      // 一次：真连不上的时候，第二次的失败才是要交出去的那条原因。
+      if (signal?.aborted || !isDisconnected(error)) throw error;
+      await this.close();
+      return this.sendCall(name, args, signal);
+    }
+  }
+
+  private async sendCall(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     if (this.state !== "connected") {
       const status = await this.connect();
       if (status !== "connected") {

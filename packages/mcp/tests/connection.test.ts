@@ -156,3 +156,44 @@ test("服务器接了连接却不说话，不会永远挂着", async (t) => {
   assert.ok(Date.now() - started < 8_000, "超时没有生效");
   assert.match(link.failure ?? "", /超时/);
 });
+
+/** 这条连接手上那个子进程；stdio 传输把它自己的 pid 露出来给的就是这种用途。 */
+function childPid(link: McpConnection): number {
+  const pid = (link as unknown as { transport?: { pid?: number | null } }).transport?.pid;
+  assert.ok(typeof pid === "number", "stdio 连接应该有一个子进程");
+  return pid;
+}
+
+async function until(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("等条件成立等超时了");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+test("服务器在背后死掉，状态就说断了，不接着报已连接", async (t) => {
+  // 真实的事故：内置浏览器的 MCP 半路断了，而这一层照旧说「已连接」，工具清单还
+  // 从缓存里照答，于是每一次调用都是 Not connected，自动重连又被这句谎话挡住。
+  const link = connection(server());
+  t.after(() => link.close());
+  assert.equal(await link.connect(), "connected");
+
+  process.kill(childPid(link), "SIGKILL");
+  await until(() => link.status === "not connected");
+  assert.deepEqual(link.tools, [], "连接没了，工具清单也不该再从缓存里端出来");
+});
+
+test("断过之后再调一次工具，它自己会重连", async (t) => {
+  const link = connection(server());
+  t.after(() => link.close());
+  assert.equal(await link.connect(), "connected");
+  const first = childPid(link);
+
+  process.kill(first, "SIGKILL");
+  await until(() => link.status === "not connected");
+
+  const result = await link.callTool("echo", { text: "again" }) as { content: Array<{ text?: string }> };
+  assert.equal(result.content[0]?.text, "MCP_ECHO:again");
+  assert.notEqual(childPid(link), first, "应该是重新连的一条，不是原来那条");
+});
