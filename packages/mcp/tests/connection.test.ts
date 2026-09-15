@@ -10,6 +10,7 @@ import { McpConnection } from "../src/connection.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SMOKE_SERVER = resolve(here, "../../../scripts/fixtures/mcp-smoke-server.mjs");
+const SLOW_SERVER = resolve(here, "../../../scripts/fixtures/mcp-slow-server.mjs");
 
 function server(overrides: Partial<McpServerConfiguration> = {}): McpServerConfiguration {
   return {
@@ -196,4 +197,28 @@ test("断过之后再调一次工具，它自己会重连", async (t) => {
   const result = await link.callTool("echo", { text: "again" }) as { content: Array<{ text?: string }> };
   assert.equal(result.content[0]?.text, "MCP_ECHO:again");
   assert.notEqual(childPid(link), first, "应该是重新连的一条，不是原来那条");
+});
+
+test("调用超时要说清楚那边可能还在跑，而不是只丢一句 Request timed out", async (t) => {
+  // SDK 超时的同时会发 notifications/cancelled，但那只是一句通知：服务器可以当没
+  // 看见。浏览器 MCP 就是这样——页面里的动作照跑，只是结果没人接了。Agent 拿到
+  // 「Request timed out」只能猜，有几次它当成没做成直接重试，把同一个动作做了两遍。
+  const link = connection(server({
+    command: process.execPath,
+    args: [SLOW_SERVER],
+    requestTimeoutMs: 4_000,
+  }));
+  t.after(() => link.close());
+
+  await assert.rejects(
+    () => link.callTool("sleep", {}),
+    (error: Error) => {
+      assert.match(error.message, /等了 4 秒/);
+      assert.match(error.message, /可能仍在继续/);
+      assert.match(error.message, /不要直接重试/);
+      // 原来那句英文的协议错误不该是交给 Agent 的全部内容。
+      assert.doesNotMatch(error.message, /^MCP error/);
+      return true;
+    },
+  );
 });

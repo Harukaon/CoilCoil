@@ -111,6 +111,11 @@ function isDisconnected(error: unknown): boolean {
   return error instanceof Error && /^not connected$/i.test(error.message.trim());
 }
 
+/** The SDK's own words for a request that ran out of time. */
+function isRequestTimeout(error: unknown): boolean {
+  return error instanceof Error && /request timed out|maximum total timeout exceeded/i.test(error.message);
+}
+
 export class McpConnection {
   private client?: Client;
   private transport?: Transport;
@@ -385,15 +390,40 @@ export class McpConnection {
    */
   async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     try {
-      return await this.sendCall(name, args, signal);
+      try {
+        return await this.sendCall(name, args, signal);
+      } catch (error) {
+        // 连接是在检查状态和发出请求之间断的。这种时序上的缝隙对调用方没有任何意义
+        // ——它要的是工具的结果，不是我们内部先后顺序的报告——所以重连一次再试。只试
+        // 一次：真连不上的时候，第二次的失败才是要交出去的那条原因。
+        if (signal?.aborted || !isDisconnected(error)) throw error;
+        await this.close();
+        return await this.sendCall(name, args, signal);
+      }
     } catch (error) {
-      // 连接是在检查状态和发出请求之间断的。这种时序上的缝隙对调用方没有任何意义
-      // ——它要的是工具的结果，不是我们内部先后顺序的报告——所以重连一次再试。只试
-      // 一次：真连不上的时候，第二次的失败才是要交出去的那条原因。
-      if (signal?.aborted || !isDisconnected(error)) throw error;
-      await this.close();
-      return this.sendCall(name, args, signal);
+      if (signal?.aborted || !isRequestTimeout(error)) throw error;
+      throw this.timeoutError(name);
     }
+  }
+
+  /**
+   * 超时说的是「我们不等了」，不是「那边停了」。
+   *
+   * SDK 在超时的同时会发 `notifications/cancelled`，但那只是一句通知：服务器可以
+   * 照办，也可以当没看见。浏览器 MCP 就属于后者——页面里的脚本该跑还是跑，只是
+   * 结果没人接了。原来交给 Agent 的是一句光秃秃的 "Request timed out"，于是它只能
+   * 猜：有几次它当成「没做成」直接重试，把同一个动作在页面上做了两遍。
+   *
+   * 所以这条错误要把三件事一起说清楚：等了多久、那边可能还在跑、下一步该去查状态
+   * 而不是重试。
+   */
+  private timeoutError(tool: string): Error {
+    const seconds = Math.round(this.timeoutMs / 1000);
+    return new Error(
+      `MCP 工具「${tool}」等了 ${seconds} 秒还没有返回，我们这边已经不等了。`
+      + `服务器收到了取消通知，但它不一定照办：这次调用触发的动作可能仍在继续。`
+      + `不要直接重试——先查一次当前状态，确认这一步到底做没做成，再决定下一步。`,
+    );
   }
 
   private async sendCall(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
