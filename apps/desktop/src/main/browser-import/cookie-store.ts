@@ -1,4 +1,6 @@
-import { session } from "electron";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { app, session } from "electron";
 import type { Session } from "electron";
 import { BROWSER_PARTITION } from "../browser-webview-policy";
 import { toElectronCookie, type ImportedCookie } from "./cookie-record";
@@ -11,6 +13,31 @@ import { toElectronCookie, type ImportedCookie } from "./cookie-record";
  */
 export function browserSession(partition: string = BROWSER_PARTITION): Session {
   return session.fromPartition(partition);
+}
+
+/**
+ * 内置浏览器开过的每一份 cookie jar。
+ *
+ * 「清空」只能按一个分区来做的时候，它清的是当前工作区那一份——而登录状态是按
+ * 工作区分开存的，所以用户在别的工作区里登的 Google、GitHub 一条都没动，界面却
+ * 说「已退出全部登录」。按钮承诺的是全部，那就得真的是全部。
+ *
+ * 从磁盘上枚举而不是从内存里的会话列表：要清掉的恰恰是那些当前没开着的工作区，
+ * 它们的分区此刻一个 Session 对象都没有。目录名就是 `persist:` 后面那一截，所以
+ * 前缀一对就能把内置浏览器的分区和应用自己的会话分开。
+ */
+export function browserPartitions(): string[] {
+  const partitions = new Set<string>([BROWSER_PARTITION]);
+  try {
+    for (const entry of readdirSync(join(app.getPath("userData"), "Partitions"), { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const partition = `persist:${entry.name}`;
+      if (partition === BROWSER_PARTITION || partition.startsWith(`${BROWSER_PARTITION}-`)) partitions.add(partition);
+    }
+  } catch {
+    // 还没有任何工作区开过页面，那就只有默认那一份。
+  }
+  return [...partitions];
 }
 
 export interface CookieWriteResult {

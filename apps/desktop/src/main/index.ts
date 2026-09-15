@@ -1100,9 +1100,9 @@ app.whenReady().then(async () => {
     importBrowserCookies(input, browserFor(event).partitionName()));
   ipcMain.handle(BROWSER_DATA_STATS_CHANNEL, (event) => browserDataStats(browserFor(event).partitionName()));
   ipcMain.handle(BROWSER_SAVED_LOGINS_CHANNEL, (event) => savedLogins(browserFor(event).partitionName()));
-  ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, (event) => clearBrowserData(
+  // 清空不带分区：它清的是每一份 cookie jar，不是当前工作区那一份。
+  ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, () => clearBrowserData(
     (name, data) => diagnosticLog().info("browser-data", name, data),
-    browserFor(event).partitionName(),
   ));
   ipcMain.handle(BROWSER_GUEST_LAYER_READY_CHANNEL, (event) => browserFor(event).markGuestLayerReady());
   ipcMain.handle(BROWSER_REGISTER_GUEST_CHANNEL, (event, tabId: string, nonce: string, webContentsId: number): void => {

@@ -10,7 +10,7 @@ import { CHROMIUM_BROWSERS, browserDescriptor, listChromiumProfiles, profileDire
 import { countChromiumCookies, readChromiumCookies } from "./chromium-cookies";
 import { countChromiumLogins, readChromiumLogins } from "./chromium-passwords";
 import type { CookieHarvest } from "./cookie-record";
-import { browserSession, writeCookies } from "./cookie-store";
+import { browserPartitions, browserSession, writeCookies } from "./cookie-store";
 import { clearSavedLogins, listSavedLogins, saveLogins, vaultAvailable } from "./password-vault";
 import { SafariAccessDeniedError, readSafariCookies } from "./safari-cookies";
 
@@ -150,7 +150,7 @@ export type ClearStepLogger = (event: string, data: Record<string, unknown>) => 
  * nothing to act on. A step that overruns is reported by name instead, so the
  * rest of the clearing still happens and the log says which store is at fault.
  */
-async function clearStep(label: string, work: () => Promise<unknown>, log?: ClearStepLogger): Promise<string | undefined> {
+async function clearStep(label: string, work: () => Promise<unknown>, log?: ClearStepLogger, partition?: string): Promise<string | undefined> {
   const started = Date.now();
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -160,11 +160,12 @@ async function clearStep(label: string, work: () => Promise<unknown>, log?: Clea
         timer = setTimeout(() => reject(new Error(`${label} 超时`)), CLEAR_STEP_TIMEOUT_MS);
       }),
     ]);
-    log?.("browser_clear_step", { step: label, elapsedMs: Date.now() - started });
+    log?.("browser_clear_step", { step: label, partition, elapsedMs: Date.now() - started });
     return undefined;
   } catch (error) {
     log?.("browser_clear_step_failed", {
       step: label,
+      partition,
       elapsedMs: Date.now() - started,
       reason: error instanceof Error ? error.message : String(error),
     });
@@ -181,25 +182,38 @@ async function clearStep(label: string, work: () => Promise<unknown>, log?: Clea
  * authenticated proxy behind, and both can keep a site recognising the user
  * after a "clear". The four steps together are what "signed out of everything"
  * actually takes.
+ *
+ * And it takes every jar, not the one the window happens to be looking at.
+ * Logins are stored per workspace, so a clear scoped to the current workspace
+ * left the user signed in everywhere else while the dialog said 全部 — and the
+ * log dutifully reported 0 条 Cookie because it had counted that one jar too.
  */
-export async function clearBrowserData(log?: ClearStepLogger, partition?: string): Promise<BrowserDataStats> {
-  const store = browserSession(partition);
-  log?.("browser_clear_started", {});
-  const stuck: string[] = [];
-  for (const [label, work] of [
-    ["cookies", () => store.clearStorageData({ storages: ["cookies"] })],
-    ["storage", () => store.clearStorageData()],
-    ["cache", () => store.clearCache()],
-    ["auth", () => store.clearAuthCache()],
-  ] as [string, () => Promise<unknown>][]) {
-    const failed = await clearStep(label, work, log);
-    if (failed) stuck.push(failed);
+export async function clearBrowserData(log?: ClearStepLogger): Promise<BrowserDataStats> {
+  const partitions = browserPartitions();
+  log?.("browser_clear_started", { partitions: partitions.length });
+  const stuck = new Set<string>();
+  for (const partition of partitions) {
+    const store = browserSession(partition);
+    for (const [label, work] of [
+      ["cookies", () => store.clearStorageData({ storages: ["cookies"] })],
+      ["storage", () => store.clearStorageData()],
+      ["cache", () => store.clearCache()],
+      ["auth", () => store.clearAuthCache()],
+    ] as [string, () => Promise<unknown>][]) {
+      const failed = await clearStep(label, work, log, partition);
+      if (failed) stuck.add(failed);
+    }
+    clearSavedLogins(partition);
   }
-  clearSavedLogins(partition);
-  const stats = await browserDataStats(partition);
-  log?.("browser_clear_finished", { ...stats, stuck });
-  if (stuck.length > 0 && stats.cookies > 0) {
-    throw new Error(`清空没有完成：${stuck.join("、")} 这一步没有响应，浏览器里还剩 ${stats.cookies} 条 Cookie。`);
+  const stats = (await Promise.all(partitions.map((partition) => browserDataStats(partition))))
+    .reduce((total, one) => ({
+      cookies: total.cookies + one.cookies,
+      hosts: total.hosts + one.hosts,
+      savedLogins: total.savedLogins + one.savedLogins,
+    }), { cookies: 0, hosts: 0, savedLogins: 0 });
+  log?.("browser_clear_finished", { ...stats, partitions: partitions.length, stuck: [...stuck] });
+  if (stuck.size > 0 && stats.cookies > 0) {
+    throw new Error(`清空没有完成：${[...stuck].join("、")} 这一步没有响应，浏览器里还剩 ${stats.cookies} 条 Cookie。`);
   }
   return stats;
 }
