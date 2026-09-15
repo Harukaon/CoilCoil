@@ -58,3 +58,19 @@ test("Chrome DevTools MCP exposes structured results and optional page routing",
   assert.match(main, /"--experimentalStructuredContent"/);
   assert.match(main, /"--experimentalPageIdRouting"/);
 });
+
+test("pageId 是可选的：不传就落到当前选中的页面", async () => {
+  // --experimentalPageIdRouting 会给每个按页面走的工具加上 pageId，上游把它写成必填。
+  // 模型第一次调 take_snapshot / click / navigate_page 时并不知道有这么个参数，于是
+  // 撞一次 "Invalid arguments: Required at pageId" 才学会——一个会话里白撞了八次。
+  // ToolHandler 本来就有「没给 pageId 就用当前选中页」的兜底，挡路的只是 schema。
+  const definition = await read("node_modules/chrome-devtools-mcp/build/src/tools/ToolDefinition.js");
+  assert.match(definition, /pageId: zod[\s\S]{0,40}\.optional\(\)/);
+  assert.match(definition, /Omit to act on the currently selected page/);
+  // 处理器那一侧的兜底还在，否则可选就成了「不传就报错」。
+  const handler = await read("node_modules/chrome-devtools-mcp/build/src/ToolHandler.js");
+  assert.match(handler, /: context\.getSelectedMcpPage\(\)/);
+  // select_page 自己那个 pageId 仍然必填：它的全部意思就是「选这一个」。
+  const pages = await read("node_modules/chrome-devtools-mcp/build/src/tools/pages.js");
+  assert.match(pages, /The ID of the page to select/);
+});

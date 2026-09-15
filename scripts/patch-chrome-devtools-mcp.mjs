@@ -121,6 +121,23 @@ if (patchFile("build/src/McpResponse.js", [{
   after: `            for (const [insightSetId, insightSet] of data.traceSummary.insights?.entries() ?? []) {\n                for (const [insightName, model] of Object.entries(insightSet.model)) {\n                    structuredContent.traceInsights.push({\n                        insightSetId,\n                        insightName,`,
 }])) changedFiles.push("McpResponse.js");
 
+/**
+ * `pageId` is a choice, not a toll gate.
+ *
+ * CoilCoil runs the server with `--experimentalPageIdRouting`, which prepends a
+ * `pageId` to every page-scoped tool. Upstream declares it required, so the Agent
+ * — which has no way of knowing a page list exists before it has called a tool —
+ * gets `Invalid arguments: Required at pageId` on its first `take_snapshot`,
+ * `click` or `navigate_page` and has to discover the argument by failing.
+ * `ToolHandler` already falls back to the selected page when `pageId` is absent,
+ * so the requirement never bought anything: only the schema stood in the way.
+ */
+if (patchFile("build/src/tools/ToolDefinition.js", [{
+  before: `    pageId: zod.number().describe('Targets a specific page by ID.'),`,
+  after: `    // COILCOIL: omitting pageId targets the selected page, as the handler already does.\n    pageId: zod\n        .number()\n        .optional()\n        .describe('Targets a specific page by its numeric id from list_pages. Omit to act on the currently selected page.'),`,
+  marker: "COILCOIL: omitting pageId targets the selected page",
+}])) changedFiles.push("tools/ToolDefinition.js");
+
 if (patchFile("build/src/tools/lighthouse.js", [{
   before: `                url: lhr.mainDocumentUrl,`,
   after: `                url: lhr.mainDocumentUrl ?? lhr.finalDisplayedUrl ?? page.pptrPage.url(),`,
