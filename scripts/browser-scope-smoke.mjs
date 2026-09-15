@@ -97,28 +97,45 @@ async function main() {
     const result = await client.evaluate(`(async () => {
       const a = await window.coilcoil.createBrowserTab("scope-a", "data:text/html,<title>Scope A</title><h1>A</h1>");
       const b = await window.coilcoil.createBrowserTab("scope-b", "data:text/html,<title>Scope B</title><h1>B</h1>");
+      const aOwn = a.tabs.find((tab) => !tab.foreign);
+      const bOwn = b.tabs.find((tab) => !tab.foreign);
       const aState = await window.coilcoil.getBrowserState("scope-a");
       const bState = await window.coilcoil.getBrowserState("scope-b");
-      let crossScopeError = "";
-      try { await window.coilcoil.selectBrowserTab("scope-a", b.tabs[0].id); }
-      catch (error) { crossScopeError = String(error); }
-      await window.coilcoil.closeBrowserTab("scope-a", a.tabs[0].id);
+      // 用户从自己这边点开、关掉别的会话那张标签页——这正是原来做不到的两件事。
+      let foreignSelectError = "";
+      try { await window.coilcoil.selectBrowserTab("scope-a", bOwn.id); }
+      catch (error) { foreignSelectError = String(error); }
+      const afterForeignSelect = await window.coilcoil.getBrowserState("scope-a");
+      await window.coilcoil.closeBrowserTab("scope-a", bOwn.id);
+      const bAfterForeignClose = await window.coilcoil.getBrowserState("scope-b");
+      await window.coilcoil.closeBrowserTab("scope-a", aOwn.id);
       return {
         aState,
         bState,
+        afterForeignSelect,
+        bAfterForeignClose,
+        foreignSelectError,
         aAfterClose: await window.coilcoil.getBrowserState("scope-a"),
-        bAfterClose: await window.coilcoil.getBrowserState("scope-b"),
-        crossScopeError,
       };
     })()`);
+    // 每个会话的标签页照旧各归各的 scope……
     assert.equal(result.aState.scopeId, "scope-a");
     assert.equal(result.bState.scopeId, "scope-b");
-    assert.equal(result.aState.tabs.length, 1);
-    assert.equal(result.bState.tabs.length, 1);
+    // ……但用户看到的是全部：自己的在前，别的会话的跟在后面并标着 foreign。
+    // 按 scope 过滤给界面看，等于应用背着用户开着页面——在加载、在跑脚本、在写
+    // cookie，屏幕上却什么都没有，点不到也关不掉。
+    assert.equal(result.aState.tabs.length, 2);
+    assert.equal(result.aState.tabs[0].foreign, undefined);
+    assert.equal(result.aState.tabs[1].foreign, true);
+    assert.equal(result.bState.tabs.length, 2);
+    assert.equal(result.bState.tabs[1].foreign, true);
     assert.notEqual(result.aState.tabs[0].id, result.bState.tabs[0].id);
-    assert.match(result.crossScopeError, /浏览器标签页不存在/);
+    // 点得开：别的会话那张页面成了用户此刻看着的那一张。
+    assert.equal(result.foreignSelectError, "");
+    assert.equal(result.afterForeignSelect.activeTabId, result.bState.tabs[0].id);
+    // 也关得掉：关掉之后它在它自己那个会话里也确实没了。
+    assert.equal(result.bAfterForeignClose.tabs.filter((tab) => !tab.foreign).length, 0);
     assert.equal(result.aAfterClose.tabs.length, 0);
-    assert.equal(result.bAfterClose.tabs.length, 1);
     process.stdout.write("CoilCoil browser scope smoke passed.\n");
   } finally {
     client?.close();

@@ -33,6 +33,8 @@ export interface BrowserPaneTab {
   id: string;
   label: string;
   loading: boolean;
+  /** 别的会话的 agent 开的那一张：照样列出来，只是图标不同。 */
+  foreign: boolean;
 }
 
 /**
@@ -42,14 +44,30 @@ export interface BrowserPaneTab {
  * 「打开一个面板」的空状态，等第一个网页建好又跳回来，闪一下。
  */
 export function browserPaneTabs(state: BrowserStateSnapshot): BrowserPaneTab[] {
-  if (state.tabs.length === 0) return [{ id: BROWSER_PLACEHOLDER_TAB_ID, label: "浏览器", loading: true }];
-  return state.tabs.map((tab) => ({ id: browserPaneTabId(tab.id), label: tab.title, loading: tab.loading }));
+  if (state.tabs.length === 0) return [{ id: BROWSER_PLACEHOLDER_TAB_ID, label: "浏览器", loading: true, foreign: false }];
+  return state.tabs.map((tab) => ({
+    id: browserPaneTabId(tab.id),
+    label: tab.title,
+    loading: tab.loading,
+    foreign: tab.foreign === true,
+  }));
 }
 
 /** 当前选中的是哪个网页标签。主进程是 activeTabId 的唯一权威，这里只做展示。 */
 export function activeBrowserPaneTabId(state: BrowserStateSnapshot): string {
   const active = state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0];
   return active ? browserPaneTabId(active.id) : BROWSER_PLACEHOLDER_TAB_ID;
+}
+
+/**
+ * 这个会话自己开着几张网页标签。
+ *
+ * 「浏览器开着但一张网页都没有，补建一张」和「最后一张关掉了，浏览器这一项也收
+ * 起来」这两条判断都只能看自己的那几张：别的会话的标签页现在也列在这一排里，拿
+ * 总数去判断的话，用户这边一张页面都没有却以为有。
+ */
+export function ownBrowserTabCount(state: BrowserStateSnapshot): number {
+  return state.tabs.filter((tab) => tab.foreign !== true).length;
 }
 
 /** 中键 = 关闭标签页。 */

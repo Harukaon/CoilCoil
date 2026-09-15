@@ -104,6 +104,13 @@ export interface BrowserTabSnapshot {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /**
+   * 这张标签页是别的会话的 agent 开的，不是当前会话的。
+   *
+   * 它照样要画出来、点得开、关得掉——应用在背后开的页面不能对用户隐形——只是标签
+   * 条上换一个图标，让用户一眼看出这一张不是自己这边开的。
+   */
+  foreign?: boolean;
 }
 
 export interface BrowserStateSnapshot {

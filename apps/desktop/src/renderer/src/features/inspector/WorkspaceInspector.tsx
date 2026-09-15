@@ -1,4 +1,4 @@
-import { BrainCircuit, Files, Globe2, LoaderCircle, Terminal } from "lucide-react";
+import { Bot, BrainCircuit, Files, Globe2, LoaderCircle, Terminal } from "lucide-react";
 import { useCallback } from "react";
 import type { ProjectSnapshot, RuntimeConfiguration, SessionSnapshot } from "@coilcoil/runtime-protocol";
 import { BrowserPanel } from "../browser/BrowserPanel";
@@ -13,6 +13,7 @@ import {
   activeBrowserPaneTabId,
   browserPaneTabs,
   browserTabIdFromPaneId,
+  ownBrowserTabCount,
 } from "./inspectorTabs";
 import {
   fileInspectorTabId,
@@ -138,7 +139,7 @@ export function WorkspaceInspector({
     }
     void window.coilcoil.closeBrowserTab(scopeId, pageId).then((next) => {
       browser.setState(next);
-      if (next.tabs.length === 0) onCloseTab("browser");
+      if (ownBrowserTabCount(next) === 0) onCloseTab("browser");
     }).catch((error: unknown) => {
       toastError(error instanceof Error ? error.message : String(error));
     });
@@ -148,7 +149,9 @@ export function WorkspaceInspector({
     ? browserPaneTabs(browser.state).map((page) => ({
       id: page.id,
       label: page.label,
-      icon: page.loading ? LoaderCircle : Globe2,
+      // 别的会话开的那几张换个图标：它们本来对用户是隐形的，现在既然列出来了，
+      // 就得一眼看出哪几张不是自己这边开的。
+      icon: page.loading ? LoaderCircle : page.foreign ? Bot : Globe2,
       spinning: page.loading,
       closable: true,
     }))

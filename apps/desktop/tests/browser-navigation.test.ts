@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { loadGuestUrl, normalizeBrowserUrl } from "../src/main/browser-navigation.ts";
-import { isReusableBlankTab } from "../src/main/browser-runtime-types.ts";
+import { isReusableBlankTab, orderTabsForUi } from "../src/main/browser-runtime-types.ts";
 
 test("browser navigation keeps ordinary web URLs", () => {
   assert.equal(normalizeBrowserUrl("https://example.com/report"), "https://example.com/report");
@@ -65,4 +65,26 @@ test("a load into a destroyed guest still fails", async () => {
     isDestroyed: () => true,
   };
   await assert.rejects(() => loadGuestUrl(guest, "https://example.com"));
+});
+
+test("界面看到的是全部标签页，别的会话开的那几张排在后面并标出来", () => {
+  // Agent 在别的 scope 里开的页面会加载、会跑脚本、会写 cookie。按 scope 过滤给
+  // 界面看，等于应用背着用户开着几个页面——用户既看不见，也关不掉。
+  const tabs = [
+    { id: "mine-1", scopeId: "会话 A" },
+    { id: "theirs-1", scopeId: "会话 B" },
+    { id: "mine-2", scopeId: "会话 A" },
+    { id: "theirs-2", scopeId: "default" },
+  ];
+
+  assert.deepEqual(orderTabsForUi(tabs, "会话 A"), [
+    { tab: tabs[0], foreign: false },
+    { tab: tabs[2], foreign: false },
+    { tab: tabs[1], foreign: true },
+    { tab: tabs[3], foreign: true },
+  ]);
+  // 自己的保持原来的次序在前：别的会话开一张页面不会把整排标签挤错位。
+  assert.deepEqual(orderTabsForUi(tabs, "会话 A").filter((item) => !item.foreign).map((item) => item.tab.id), ["mine-1", "mine-2"]);
+  // 一张自己的都没有时，看到的就全是别人的——而不是一片空白。
+  assert.equal(orderTabsForUi(tabs, "会话 C").every((item) => item.foreign), true);
 });

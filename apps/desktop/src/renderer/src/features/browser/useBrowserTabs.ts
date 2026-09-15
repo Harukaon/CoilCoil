@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
+import { ownBrowserTabCount } from "../inspector/inspectorTabs";
 
 const EMPTY_STATE = (scopeId: string): BrowserStateSnapshot => ({ scopeId, tabs: [], zoom: 1 });
 
@@ -37,7 +38,9 @@ export function useBrowserTabs({ scopeId, workspacePath, open }: {
     setState(EMPTY_STATE(scopeId));
     void window.coilcoil.setBrowserScope(scopeId, workspacePath).then(async (current) => {
       if (cancelled) return;
-      const next = open && current.tabs.length === 0 ? await window.coilcoil.createBrowserTab(scopeId) : current;
+      // 数的是自己的那几张：快照里现在还带着别的会话开的标签页，拿总数判断的话，
+      // 用户这边一张页面都没有，却因为别人开着而不给他建。
+      const next = open && ownBrowserTabCount(current) === 0 ? await window.coilcoil.createBrowserTab(scopeId) : current;
       if (!cancelled) setState(next);
     });
     return () => { cancelled = true; };

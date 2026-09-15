@@ -11,6 +11,7 @@ import {
   DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
   DEFAULT_BROWSER_URL as DEFAULT_URL,
   DEFAULT_BROWSER_VIEWPORT as DEFAULT_VIEWPORT,
+  orderTabsForUi,
   type BrowserTab,
 } from "./browser-runtime-types";
 import { BROWSER_PARTITION, browserPartitionFor } from "./browser-webview-policy";
@@ -144,10 +145,23 @@ export class BrowserRuntimeManager {
     return this.cdp.endpoint();
   }
 
+  /**
+   * 用户那一侧看到的是全部标签页，不只是这个 scope 自己的那几个。
+   *
+   * 作用域是给 CDP 客户端划的：一个后台会话的 agent 不该发现、更不该操作另一个会话
+   * 的页面。但这条边界被原样套在了界面上，于是 agent 在别的 scope 里开的标签页对用户
+   * 就是隐形的——页面在加载、脚本在跑、cookie 在写，用户屏幕上什么都没有，也没处点、
+   * 没处关。那不是隔离，那是应用背着用户做事。
+   *
+   * 所以这里分成两件事：**发现**仍然按 scope 关（`cdpTabs` 一个字没动），**用户**
+   * 则看得见全部。自己的排在前面，别人的跟在后面并标成 `foreign`，让上面那一排既
+   * 保持原来的顺序，又多出那几个本来看不见的。
+   */
   state(scopeId = this.uiScopeId): BrowserStateSnapshot {
     return {
       scopeId,
-      tabs: this.tabsForScope(scopeId).map((tab) => this.tabSnapshot(tab)),
+      tabs: orderTabsForUi(this.tabs.values(), scopeId)
+        .map(({ tab, foreign }) => foreign ? { ...this.tabSnapshot(tab), foreign } : this.tabSnapshot(tab)),
       activeTabId: this.activeTabIds.get(scopeId),
       zoom: this.zoomFor(scopeId),
     };
@@ -331,9 +345,10 @@ export class BrowserRuntimeManager {
     if (tab.emulatedSize) return;
     const guest = tab.guest;
     if (!guest || guest.isDestroyed()) return;
-    const parked = !this.panelVisible
-      || tab.scopeId !== this.uiScopeId
-      || tab.id !== this.activeTabIds.get(this.uiScopeId);
+    // 停不停靠只看「用户现在是不是正看着它」。这里以前还要求标签页属于界面这个
+    // scope——那是多余的（tab id 全局唯一），而且现在是错的：用户点开别的会话那张
+    // 标签页时，它就是屏幕上那一张，再按 1280x720 铺一遍会画到面板外面去。
+    const parked = !this.panelVisible || tab.id !== this.activeTabIds.get(this.uiScopeId);
     try {
       if (!parked) {
         // Let the element's own box drive layout again.
@@ -438,17 +453,29 @@ export class BrowserRuntimeManager {
     return captureGuestFrame(this.activeTab(scopeId)?.guest);
   }
 
+  /**
+   * scope 不再是这里的门槛——因为进得来的人都已经过了门。
+   *
+   * CDP 那一侧的每一条路径（`Target.activateTarget`、`Target.closeTarget`…）都先用
+   * `findTabByTarget(…, client.scopeId)` 把目标解出来，而它只在 `cdpTabs(scopeId)`
+   * 里找，所以走到这里的标签页一定是这个客户端自己的，再查一遍 scope 什么也拦不住。
+   * 剩下的调用方就是界面，而界面要能点开、关掉它看得见的每一个标签页——包括别的
+   * 会话开的那几个。发现边界在 `cdpTabs`，不在这两个方法里。
+   */
   selectTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
-    if (this.tabs.get(id)?.scopeId !== scopeId) throw new Error("浏览器标签页不存在。");
+    if (!this.tabs.has(id)) throw new Error("浏览器标签页不存在。");
     this.activeTabIds.set(scopeId, id);
     this.refreshViewportOverrides();
     this.publish();
     return this.state(scopeId);
   }
 
+  /** 同 `selectTab`：能点到它的人已经过了发现这一关。 */
   closeTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
     const tab = this.tabs.get(id);
-    if (!tab || tab.scopeId !== scopeId) return this.state(scopeId);
+    if (!tab) return this.state(scopeId);
+    // 接替的那一张只从「自己的」里面挑：关掉的如果是别的会话那张，index 落到 -1，
+    // 于是挑中自己的第一张。绝不能让一个 agent 的当前页变成另一个会话的页面。
     const order = this.tabsForScope(scopeId).map((item) => item.id);
     const index = order.indexOf(id);
     this.closeTabRecord(tab);
@@ -467,9 +494,8 @@ export class BrowserRuntimeManager {
     this.cdp.releaseScope(scopeId);
     for (const tab of this.tabsForScope(scopeId)) this.closeTabRecord(tab);
     this.activeTabIds.delete(scopeId);
-    if (this.uiScopeId === scopeId) {
-      this.publish();
-    }
+    // 无条件发：被回收的会话那几张标签页也在用户的标签条上，它们消失了这边得跟上。
+    this.publish();
   }
 
   async navigate(rawUrl: string, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
@@ -684,7 +710,10 @@ export class BrowserRuntimeManager {
   private installTabEvents(tab: BrowserTab): void {
     const contents = this.guestOf(tab);
     const update = (): void => {
-      if (tab.scopeId === this.uiScopeId) this.publish();
+      // 不再只在「这张是界面这个 scope 的」时候才发：别的会话那几张现在也画在上面
+      // 那一排里，不发的话它们的标题和地址就永远停在刚创建时的样子，用户看着一排
+      // 「新标签页」，不知道 agent 到底把它们带到哪儿去了。
+      this.publish();
       if (tab.announced) this.cdp.announceChanged(tab);
     };
     contents.on("did-start-loading", update);
