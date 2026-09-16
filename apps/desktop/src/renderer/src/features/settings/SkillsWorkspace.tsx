@@ -17,7 +17,7 @@ export function SkillsWorkspace({
 }): React.JSX.Element {
   return (
     <section className="skills-workspace" aria-labelledby="skills-workspace-title">
-      <header className="skills-workspace-header">
+      <header className="skills-workspace-header window-drag-bar">
         <WindowDragBar />
         <div>
           {!leftOpen ? (

@@ -51,8 +51,7 @@
  * 拿不到这个桥（手机远程端、或者气泡窗口这种主进程没往里发的）时 `focused` 保持
  * true，退化成只看 `document.hidden`——宁可不省，也不能停错。
  *
- * 焦点桥从 `target.defaultView` 上取而不是全局 `window`：既跟 `window-drag.ts` 的
- * 写法一致，也让这段逻辑能在没有 `window` 的环境里被测到。
+ * 焦点桥从 `target.defaultView` 上取而不是全局 `window`：也让这段逻辑能在没有 `window` 的环境里被测到。
  */
 
 /** 装饰动画此刻该不该走。 */

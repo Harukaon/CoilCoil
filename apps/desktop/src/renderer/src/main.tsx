@@ -6,7 +6,6 @@ import { BrowserGuestLayer } from "./features/browser/BrowserGuestLayer";
 import { diagnostics, installRendererErrorHandlers } from "./diagnostics";
 import { AppErrorBoundary } from "./ui/AppErrorBoundary";
 import { WindowControls } from "./ui/WindowControls";
-import { installWindowDragRegions } from "./ui/window-drag";
 import { installIdleMotionPause } from "./ui/idle-motion";
 import { initTheme } from "./theme";
 import { ToastHost } from "./ui/toast";
@@ -34,7 +33,6 @@ if (window.coilcoil?.isRemote) {
 installRendererErrorHandlers();
 initTheme();
 // 手机远程端没有窗口可拖，别白挂一个 pointermove 监听。
-if (!window.coilcoil?.isRemote) installWindowDragRegions();
 // 常驻的墨团标志每帧都要重算一整条 blur + contrast 滤镜链，没人看的时候先停下。
 installIdleMotionPause();
 diagnostics.info("process", "renderer_started", { userAgent: navigator.userAgent });

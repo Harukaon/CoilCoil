@@ -82,27 +82,18 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .window-controls .window-close:hover { color: #fff; background: #c42b1c; }
 .window-controls .window-close:active { color: #fff; background: #b02418; }
 .window-controls button:focus-visible { outline: 2px solid hsl(var(--th) var(--ts) var(--l-547)); outline-offset: -2px; }
-.window-drag { -webkit-app-region: drag; -webkit-user-select: none; user-select: none; }
-.window-drag * { -webkit-user-select: none; user-select: none; }
-.window-drag input, .window-drag textarea, .window-drag [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
+.window-drag { -webkit-app-region: drag; }
 .no-drag, button, textarea, input, select { -webkit-app-region: no-drag; }
-/* 拖动层：标题栏自己不再写 app-region，改由这一层空元素铺满它。整条约定（必须是
-   第一个子节点、必须留出最小宽度的空带、只给交互元素标 no-drag）写在
-   ui/window-drag.ts 的文件头，动标题栏之前先读那里。 */
+/* 拖动层：标题栏自己不写 app-region，由这一层空元素铺满它。整条约定写在
+   ui/WindowDragBar.tsx 的文件头，动标题栏之前先读那里。 */
 .window-drag-layer { position: absolute; z-index: 0; inset: 0; }
 /* 拖动层铺在最底下，标题栏里的内容整体抬到它上面，否则它会把按钮的点击吃掉。 */
 .window-drag-layer ~ * { position: relative; z-index: 1; }
-/* 承载拖动层的标题栏容器。既是拖动层的定位上下文，也是刷新机制认人的依据：指针
-   压在它上面（哪怕压着的是标签条、标题文字这些盖在拖动层上面的东西）就先把拖动
-   矩形重算一遍。挂 <WindowDragBar /> 时会自动补上这个类，见 ui/window-drag.ts。 */
+/* 承载拖动层的标题栏容器，给它当定位上下文。这个类写在标记里，没有脚本会补。 */
 .window-drag-bar { position: relative; }
-/* 标题栏里的文字不参与选中：在标题上按下会被判成「选文字」，同一次按下只会命中
-   其中一个，拖窗口的动作就丢了。输入框仍然要能选中。 */
+/* 标题栏里的文字不参与选中。输入框仍然要能选中。 */
 .window-drag-bar, .window-drag-bar * { -webkit-user-select: none; user-select: none; }
 .window-drag-bar input, .window-drag-bar textarea, .window-drag-bar [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
-/* 强制 Chromium 重算拖动矩形用的哨兵：0×0、在窗口外，翻转它的 app-region 只是把
-   整份矩形列表标脏，不会真的挡住或让出任何一块区域（见 ui/window-drag.ts）。 */
-.window-drag-sentinel { position: fixed; z-index: -1; top: 0; left: -1px; width: 0; height: 0; overflow: hidden; opacity: 0; pointer-events: none; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -316,9 +307,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 [data-platform="darwin"] .app-shell.left-collapsed .memory-workspace-header { padding-left: 82px; }
 .conversation-header { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; }
 [data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 82px; }
-/* 标题文字不接收指针事件：Chromium 在文字节点上有时会优先启动选区，导致同一次按下没有交给
-   Electron 的窗口拖拽。按下会落到它下面的 .window-drag-layer 上（见 ui/window-drag.ts）。 */
-.conversation-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; pointer-events: none; -webkit-user-select: none; user-select: none; }
+.conversation-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; -webkit-user-select: none; user-select: none; }
 .conversation-title strong, .conversation-title span { -webkit-user-select: none; user-select: none; }
 .conversation-title strong { display: block; width: 100%; max-width: 620px; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-title span { color: hsl(var(--th) var(--ts) var(--l-531)); font-size: 10px; }

@@ -123,7 +123,7 @@ async function main() {
     assert.deepEqual(conversation, { hasActivity: false, paddingBottom: 76 });
 
     // Every title bar is an empty drag layer laid over the header as its FIRST
-    // child - see src/renderer/src/ui/window-drag.ts for the whole convention.
+    // child - see src/renderer/src/ui/WindowDragBar.tsx for the whole convention.
     // First matters: Electron unions and subtracts the rectangles in tree order,
     // so the buttons that follow punch their no-drag holes into the layer. Put
     // the layer last and it hands the buttons' area back to the window.
@@ -143,7 +143,6 @@ async function main() {
         layerCoversHeader: Math.round(layerBox.width) === Math.round(headerBox.width)
           && Math.round(layerBox.height) === Math.round(headerBox.height),
         titleRegion: getComputedStyle(title).webkitAppRegion,
-        titlePointerEvents: getComputedStyle(title).pointerEvents,
         overlays: document.querySelectorAll(".conversation-title-drag-surface").length,
       };
     })()`);
@@ -157,7 +156,6 @@ async function main() {
       layerIsEmpty: true,
       layerCoversHeader: true,
       titleRegion: "none",
-      titlePointerEvents: "none",
       overlays: 0,
     }, "The conversation title bar must be one empty drag layer laid over the header.");
 

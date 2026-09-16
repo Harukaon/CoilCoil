@@ -2,14 +2,6 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import {
-  DRAG_BAR_CLASS,
-  HOVER_REFRESH_INTERVAL_MS,
-  initialHoverRefreshState,
-  isDragBarPoint,
-  nextHoverRefresh,
-  TITLE_BAR_STRIP_PX,
-} from "../src/renderer/src/ui/window-drag.ts";
 
 const rendererRoot = resolve(import.meta.dirname, "../src/renderer/src");
 const styles = readFileSync(resolve(rendererRoot, "styles.css"), "utf8");
@@ -27,100 +19,6 @@ function pixels(selector: string, property: string): number {
   assert.ok(match, `${selector} 上没有 ${property}`);
   return Number.parseFloat(match[1]);
 }
-
-test("刚进入拖动带就重算，停在里面按间隔重算，离开后复位", () => {
-  const entered = nextHoverRefresh(initialHoverRefreshState, true, 1_000);
-  assert.equal(entered.refresh, true);
-  assert.deepEqual(entered.state, { inside: true, refreshedAt: 1_000 });
-
-  const stillInside = nextHoverRefresh(entered.state, true, 1_000 + HOVER_REFRESH_INTERVAL_MS - 1);
-  assert.equal(stillInside.refresh, false);
-  assert.deepEqual(stillInside.state, entered.state);
-
-  const afterInterval = nextHoverRefresh(entered.state, true, 1_000 + HOVER_REFRESH_INTERVAL_MS);
-  assert.equal(afterInterval.refresh, true);
-  assert.equal(afterInterval.state.refreshedAt, 1_000 + HOVER_REFRESH_INTERVAL_MS);
-
-  const left = nextHoverRefresh(entered.state, false, 1_010);
-  assert.equal(left.refresh, false);
-  assert.equal(left.state.inside, false);
-  // 重新进来必须立刻重算，哪怕离上一次不到一个间隔——按下鼠标就在这一下之后。
-  assert.equal(nextHoverRefresh(left.state, true, 1_020).refresh, true);
-});
-
-test("压在标题栏上就算数，不管指针命中的是哪个元素", () => {
-  // 上一版认的是拖动层元素本身，可它被压在内容底下：右侧栏那条空带、技能/记忆页
-  // 标题栏里包标题的那个 div 都盖在它上面，于是那几条标题栏一次都没刷新过。
-  assert.equal(isDragBarPoint(true, 900), true, "标题栏不一定在窗口顶上（设置页就是）");
-  assert.equal(isDragBarPoint(false, 0), true);
-  assert.equal(isDragBarPoint(false, TITLE_BAR_STRIP_PX), true);
-  assert.equal(isDragBarPoint(false, TITLE_BAR_STRIP_PX + 1), false, "顶上那条以外不该白刷");
-});
-
-test("顶部兜底的那条盖得住最高的一条标题栏", () => {
-  // 谁将来加了标题栏却忘了标 .window-drag-bar，靠这条兜底。
-  const rows = /grid-template-rows:\s*([\d.]+)px/.exec(declarations(".conversation-pane"));
-  assert.ok(rows, ".conversation-pane 的 grid-template-rows 必须以标题栏高度开头");
-  assert.ok(TITLE_BAR_STRIP_PX >= Number.parseFloat(rows[1]), "兜底范围比会话标题栏还矮");
-});
-
-test("标记类的名字和样式表里的一致", () => {
-  assert.match(declarations(`.${DRAG_BAR_CLASS}`), /position:\s*relative/);
-});
-
-test("拖动层铺满标题栏，并且排在内容下面", () => {
-  const layer = declarations(".window-drag-layer");
-  assert.match(layer, /position:\s*absolute/);
-  assert.match(layer, /inset:\s*0/);
-  // 层要在内容下面，否则它会把标题栏里按钮的点击吃掉。
-  assert.match(declarations(".window-drag-layer ~ *"), /z-index:\s*1/);
-});
-
-test("哨兵不占任何可见区域", () => {
-  // 翻转它只是为了把矩形列表标脏；它要是有面积，就会真的挡住或让出一块窗口。
-  assert.equal(pixels(".window-drag-sentinel", "width"), 0);
-  assert.equal(pixels(".window-drag-sentinel", "height"), 0);
-});
-
-test("宿主标题栏都给拖动层建立了定位上下文", () => {
-  for (const selector of [
-    ".conversation-header",
-    ".inspector-header",
-    ".skills-workspace-header",
-    ".memory-workspace-header",
-    ".sidebar-drag",
-  ]) {
-    assert.match(declarations(selector), /position:\s*relative/, `${selector} 需要 position: relative`);
-  }
-});
-
-test("右侧栏标签条让出的宽度，正好够按钮、间距和那条拖动带", () => {
-  const header = declarations(".inspector-header");
-  const horizontalPadding = 2 * Number.parseFloat(/padding:\s*[\d.]+(?:px)?\s+([\d.]+)px/.exec(header)?.[1] ?? "NaN");
-  const gaps = 2 * Number.parseFloat(/gap:\s*([\d.]+)px/.exec(header)?.[1] ?? "NaN");
-  // 右侧永远是「打开面板」+「收起右侧栏」两个 icon-button，中间 2px。
-  const actions = 2 * pixels(".icon-button", "width") + Number.parseFloat(/gap:\s*([\d.]+)px/.exec(declarations(".inspector-actions"))?.[1] ?? "NaN");
-  const band = pixels(".inspector-drag-surface", "min-width");
-
-  const reserved = Number.parseFloat(
-    /max-width:\s*calc\(100% - ([\d.]+)px\)/.exec(declarations(".inspector-nav"))?.[1] ?? "NaN",
-  );
-  assert.ok(Number.isFinite(reserved), ".inspector-nav 必须用 calc(100% - Npx) 限宽");
-  // 标签一多就会顶到 max-width；剩下的必须还够右侧按钮和整条拖动带，
-  // 少一px 都会让标题栏先没得拖、再把按钮挤出可视区。
-  assert.equal(reserved, band + actions + gaps + horizontalPadding);
-  assert.ok(band >= 48, "拖动带留得太窄，按不住");
-});
-
-test("拖动区只由拖动层提供，标题栏元素自己不写 app-region", () => {
-  // 以前是「哪里拖不动就给哪个元素补一条 CSS」，补出来的规则彼此不知道对方存在。
-  // 现在的约定是：只有 .window-drag 这一个类给 drag，只有交互元素给 no-drag。
-  const dragRules = styles
-    .split("\n")
-    .filter((line) => /-webkit-app-region:\s*drag/.test(line))
-    .map((line) => line.slice(0, line.indexOf("{")).trim());
-  assert.deepEqual(dragRules, [".window-drag"]);
-});
 
 /** 渲染层里所有文件，用来做整片扫描。 */
 function rendererFiles(extensions: string[]): string[] {
@@ -146,6 +44,68 @@ const DRAG_BAR_HOSTS = [
   "sidebar-drag",
 ];
 
+test("拖动层铺满标题栏，并且排在内容下面", () => {
+  const layer = declarations(".window-drag-layer");
+  assert.match(layer, /position:\s*absolute/);
+  assert.match(layer, /inset:\s*0/);
+  // 层要在内容下面，否则它会把标题栏里按钮的点击吃掉。
+  assert.match(declarations(".window-drag-layer ~ *"), /z-index:\s*1/);
+});
+
+test("宿主标题栏都给拖动层建立了定位上下文", () => {
+  assert.match(declarations(".window-drag-bar"), /position:\s*relative/);
+  for (const host of DRAG_BAR_HOSTS) {
+    if (host === "issue-board-header") continue; // 它的样式在 features/issues/issues.css 里。
+    assert.match(declarations(`.${host}`), /position:\s*relative/, `.${host} 需要 position: relative`);
+  }
+});
+
+test("挂了拖动层的标题栏，标记类必须写在标记里", () => {
+  // 以前这个类是脚本在运行时补上去的，跟着刷新机制一起拆了。现在没有任何脚本会补，
+  // 漏写就等于拖动层没有定位上下文，会铺到更外面某个祖先上去。
+  const offenders: string[] = [];
+  for (const file of rendererFiles([".tsx"])) {
+    const source = readFileSync(file, "utf8");
+    if (!source.includes("<WindowDragBar")) continue;
+    if (file.endsWith("WindowDragBar.tsx")) continue;
+    for (const host of DRAG_BAR_HOSTS) {
+      if (!source.includes(host)) continue;
+      const written = new RegExp(`className="[^"]*\\b${host}\\b[^"]*window-drag-bar`).test(source)
+        || new RegExp(`className="[^"]*window-drag-bar[^"]*\\b${host}\\b`).test(source);
+      if (!written) offenders.push(`${file.slice(rendererRoot.length + 1)} → .${host}`);
+    }
+  }
+  assert.deepEqual(offenders, [], "挂 <WindowDragBar /> 的容器要同时写上 window-drag-bar");
+});
+
+test("拖动区只由拖动层提供，标题栏元素自己不写 app-region", () => {
+  // 以前是「哪里拖不动就给哪个元素补一条 CSS」，补出来的规则彼此不知道对方存在。
+  // 现在的约定是：只有 .window-drag 这一个类给 drag，只有交互元素给 no-drag。
+  const dragRules = styles
+    .split("\n")
+    .filter((line) => /-webkit-app-region:\s*drag/.test(line))
+    .map((line) => line.slice(0, line.indexOf("{")).trim());
+  assert.deepEqual(dragRules, [".window-drag"]);
+});
+
+test("右侧栏标签条让出的宽度，正好够按钮、间距和那条拖动带", () => {
+  const header = declarations(".inspector-header");
+  const horizontalPadding = 2 * Number.parseFloat(/padding:\s*[\d.]+(?:px)?\s+([\d.]+)px/.exec(header)?.[1] ?? "NaN");
+  const gaps = 2 * Number.parseFloat(/gap:\s*([\d.]+)px/.exec(header)?.[1] ?? "NaN");
+  // 右侧永远是「打开面板」+「收起右侧栏」两个 icon-button，中间 2px。
+  const actions = 2 * pixels(".icon-button", "width") + Number.parseFloat(/gap:\s*([\d.]+)px/.exec(declarations(".inspector-actions"))?.[1] ?? "NaN");
+  const band = pixels(".inspector-drag-surface", "min-width");
+
+  const reserved = Number.parseFloat(
+    /max-width:\s*calc\(100% - ([\d.]+)px\)/.exec(declarations(".inspector-nav"))?.[1] ?? "NaN",
+  );
+  assert.ok(Number.isFinite(reserved), ".inspector-nav 必须用 calc(100% - Npx) 限宽");
+  // 标签一多就会顶到 max-width；剩下的必须还够右侧按钮和整条拖动带，
+  // 少一px 都会让标题栏先没得拖、再把按钮挤出可视区。
+  assert.equal(reserved, band + actions + gaps + horizontalPadding);
+  assert.ok(band >= 48, "拖动带留得太窄，按不住");
+});
+
 test("标题栏里的选择器不能用 :first-child——拖动层永远排在第一个", () => {
   // <WindowDragBar /> 插在最前面，`> div:first-child` 于是一条都匹配不上。记忆页
   // 的标题栏就是这么坏掉的：包图标和标题的那个 div 从 flex 掉回 block，图标被挤
@@ -170,4 +130,20 @@ test("no-window-drag 不是一个类，样式表里根本没有它", () => {
     .filter((file) => readFileSync(file, "utf8").includes("no-window-drag"))
     .map((file) => file.slice(rendererRoot.length + 1));
   assert.deepEqual(offenders, [], "只有 .no-drag 这一个类，别再造一个同义词");
+});
+
+test("拆掉的刷新补丁不许再长回来", () => {
+  // 2026-09-16 把整套「逼 Chromium 重算拖动矩形」的东西拆干净了：哨兵元素、悬停
+  // 轮询、按下时重算、resize 重算、body 子节点监听、每条标题栏的两个观察器。它们
+  // 治的是一个从来没被定位过的偶发失效，只是把现场盖住。再遇到拖不动，从「左侧栏
+  // 那条是空的、会话标题栏上面压着文字」这个差别查起，不要往回加刷新。
+  const banned = ["window-drag-sentinel", "refreshWindowDragRegions", "installWindowDragRegions", "observeWindowDragBar"];
+  const offenders: string[] = [];
+  for (const file of rendererFiles([".css", ".ts", ".tsx"])) {
+    const source = readFileSync(file, "utf8");
+    for (const token of banned) {
+      if (source.includes(token)) offenders.push(`${file.slice(rendererRoot.length + 1)} → ${token}`);
+    }
+  }
+  assert.deepEqual(offenders, [], "拖动带不要再加刷新机制，见 ui/WindowDragBar.tsx 的文件头");
 });

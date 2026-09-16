@@ -557,7 +557,7 @@ export function WorkspaceSidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-drag"><WindowDragBar className="sidebar-drag-region" /></div>
+      <div className="sidebar-drag window-drag-bar"><WindowDragBar className="sidebar-drag-region" /></div>
       {/* 三个主按钮永远是竖着一列、带文字标签的样子。工作区一多就折成一排图标的
           做法已经去掉：省下的那点高度换来的是「同一个按钮换了位置、也没了名字」，
           左上角看着像换了个界面。 */}

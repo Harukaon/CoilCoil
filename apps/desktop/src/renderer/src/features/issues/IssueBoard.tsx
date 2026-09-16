@@ -113,7 +113,7 @@ export function IssueBoard({
 
   return (
     <section className="issue-board" aria-labelledby="issue-board-title">
-      <header className="issue-board-header">
+      <header className="issue-board-header window-drag-bar">
         <WindowDragBar />
         <div>
           {!leftOpen ? (

@@ -186,7 +186,7 @@ export function MemoryWorkspace({
 
   return (
     <section className="memory-workspace" aria-labelledby="memory-workspace-title">
-      <header className="memory-workspace-header">
+      <header className="memory-workspace-header window-drag-bar">
         <WindowDragBar />
         <div>
           {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}

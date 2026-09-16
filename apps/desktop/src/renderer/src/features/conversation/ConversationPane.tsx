@@ -287,7 +287,7 @@ export function ConversationPane({
   return (
     <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""} ${hasComposerActivity ? "has-composer-activity" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       {/* 拖动层必须排在最前，后面的按钮才能在它上面挖出 no-drag 的洞；见 ui/window-drag.ts。 */}
-      <header className="conversation-header">
+      <header className="conversation-header window-drag-bar">
         <WindowDragBar />
         {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
         <div className="conversation-title" title={conversationTitle}>
