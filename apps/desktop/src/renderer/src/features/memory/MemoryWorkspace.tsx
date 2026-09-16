@@ -196,7 +196,7 @@ export function MemoryWorkspace({
             <p>这台机器上的全部记忆：中心是全局记忆，外圈是各个项目和它们的记忆条目。</p>
           </div>
         </div>
-        <div className="memory-header-actions no-drag">
+        <div className="memory-header-actions">
           <span className={`memory-status ${inspection?.memory?.state ?? "idle"}`}><Sparkles size={12} />{statusLabel(inspection)}</span>
           <button className="settings-header-action" type="button" disabled={loading || saving} onClick={() => void load(true)}><RefreshCw className={loading ? "spin" : ""} size={13} />刷新</button>
           <button className="settings-header-action primary" type="button" disabled={!settings || !dirty || saving} onClick={() => void save()}><Save size={13} />保存</button>

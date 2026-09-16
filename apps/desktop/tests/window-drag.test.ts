@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import {
@@ -120,4 +120,54 @@ test("拖动区只由拖动层提供，标题栏元素自己不写 app-region", 
     .filter((line) => /-webkit-app-region:\s*drag/.test(line))
     .map((line) => line.slice(0, line.indexOf("{")).trim());
   assert.deepEqual(dragRules, [".window-drag"]);
+});
+
+/** 渲染层里所有文件，用来做整片扫描。 */
+function rendererFiles(extensions: string[]): string[] {
+  const found: string[] = [];
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const full = resolve(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (extensions.some((extension) => entry.name.endsWith(extension))) found.push(full);
+    }
+  };
+  walk(rendererRoot);
+  return found;
+}
+
+/** 挂了 <WindowDragBar /> 的那些标题栏容器。 */
+const DRAG_BAR_HOSTS = [
+  "conversation-header",
+  "inspector-header",
+  "skills-workspace-header",
+  "memory-workspace-header",
+  "issue-board-header",
+  "sidebar-drag",
+];
+
+test("标题栏里的选择器不能用 :first-child——拖动层永远排在第一个", () => {
+  // <WindowDragBar /> 插在最前面，`> div:first-child` 于是一条都匹配不上。记忆页
+  // 的标题栏就是这么坏掉的：包图标和标题的那个 div 从 flex 掉回 block，图标被挤
+  // 到标题栏外面。要按类型选就用 :first-of-type，最好直接给类名。
+  const offenders: string[] = [];
+  for (const file of rendererFiles([".css"])) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      const brace = line.indexOf("{");
+      if (brace < 0) continue;
+      const selector = line.slice(0, brace);
+      if (!selector.includes(":first-child")) continue;
+      if (DRAG_BAR_HOSTS.some((host) => selector.includes(host))) offenders.push(selector.trim());
+    }
+  }
+  assert.deepEqual(offenders, [], "标题栏里请改用 :first-of-type 或直接给类名");
+});
+
+test("no-window-drag 不是一个类，样式表里根本没有它", () => {
+  // 写过这个类的两处元素本来就是 no-drag（一个是 button，一个自己写了 app-region），
+  // 于是它看起来「有用」，实际上什么都没做——留着只会让下一个人以为标了就生效。
+  const offenders = rendererFiles([".css", ".ts", ".tsx"])
+    .filter((file) => readFileSync(file, "utf8").includes("no-window-drag"))
+    .map((file) => file.slice(rendererRoot.length + 1));
+  assert.deepEqual(offenders, [], "只有 .no-drag 这一个类，别再造一个同义词");
 });

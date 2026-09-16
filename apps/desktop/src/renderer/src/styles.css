@@ -308,7 +308,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 [data-platform="darwin"] .app-shell.left-collapsed .skills-workspace-header { padding-left: 82px; }
 .memory-workspace { display: grid; min-width: 0; min-height: 0; grid-column: 2 / -1; grid-template-rows: 76px minmax(0, 1fr); background: var(--pane-glass); }
 .memory-workspace-header { position: relative; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-882)); }
-.memory-workspace-header > div:first-child { display: flex; min-width: 0; align-items: center; gap: 11px; }
+.memory-workspace-header > div:first-of-type { display: flex; min-width: 0; align-items: center; gap: 11px; }
 .memory-workspace-header h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-198)); font-size: 18px; font-weight: 650; }
 .memory-workspace-header p { margin: 4px 0 0; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 11px; }
 .memory-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }

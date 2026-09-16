@@ -92,7 +92,7 @@ function ToolPurposePolicyToggle({ configuration, runtimeId, onSaved }: {
     }
   };
   return <label
-    className="settings-policy-toggle no-window-drag"
+    className="settings-policy-toggle"
     title="每次工具调用都要求填写简短的直接目的，并记录在会话中。"
   >
     <input
@@ -782,7 +782,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
             <ToolPurposePolicyToggle configuration={configuration} runtimeId={runtimeId} onSaved={onSaved} />
           ) : shown === "mcp" ? (
             <button
-              className="settings-header-action no-window-drag"
+              className="settings-header-action"
               type="button"
               onClick={() => setMcpJsonOpen(true)}
             >
