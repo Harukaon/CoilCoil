@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Api } from "@earendil-works/pi-ai";
 import { registerApiProvider, unregisterApiProviders } from "@earendil-works/pi-ai/compat";
@@ -39,7 +39,12 @@ function writeCatalogCache(agentDir: string, modelsUrl: string, catalog: OpenAIR
   const temporaryPath = `${path}.${process.pid}.tmp`;
   mkdirSync(agentDir, { recursive: true });
   writeFileSync(temporaryPath, `${JSON.stringify({ ...catalog, modelsUrl, fetchedAt: Date.now() }, null, 2)}\n`);
-  renameSync(temporaryPath, path);
+  try {
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    throw error;
+  }
 }
 
 async function registerGenericProtocol(): Promise<void> {

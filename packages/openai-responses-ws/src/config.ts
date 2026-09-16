@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const OPENAI_RESPONSES_WS_PROVIDER_ID = "openai-responses-ws";
@@ -41,7 +41,12 @@ export function writeOpenAIResponsesWsConfig(agentDir: string, value: OpenAIResp
   const temporaryPath = `${path}.${process.pid}.tmp`;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  renameSync(temporaryPath, path);
+  try {
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    throw error;
+  }
   try { chmodSync(path, 0o600); } catch { /* Private mode is best effort on non-POSIX filesystems. */ }
   return path;
 }

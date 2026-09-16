@@ -93,7 +93,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           // happens because `isStreaming` can still read true at that point.
           // The drain is guarded, so an early attempt is simply a no-op.
           else queueMicrotask(() => { void this.drainPromptQueue(active); });
-          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
+          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot })).catch(() => undefined);
           this.scheduleProjectRefresh();
           void this.listSessions(active.cwd);
           break;
@@ -171,7 +171,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             });
           }
           this.publishRuntimeInspection(active);
-          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
+          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot })).catch(() => undefined);
           break;
         }
         case "auto_retry_start":
@@ -262,7 +262,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           }
           break;
         case "session_info_changed":
-          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot }));
+          void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot })).catch(() => undefined);
           void this.listSessions(active.cwd);
           break;
         case "message_start": {

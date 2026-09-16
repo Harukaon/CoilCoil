@@ -1182,7 +1182,9 @@ app.whenReady().then(async () => {
   void remoteController().start();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      void createWindow().then(() => runtime.start());
+      void createWindow()
+        .then(() => runtime.start())
+        .catch((error) => diagnosticLog().error("window", "reactivate_failed", error));
     }
   });
 });
