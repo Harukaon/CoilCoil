@@ -16,17 +16,38 @@
  *    给一个容器标 `no-drag`，等于把它整块从拖动带里挖掉。
  * 5. 承载拖动层的那个标题栏元素带 `.window-drag-bar`（挂上 `<WindowDragBar />`
  *    时会自动补上）。**刷新机制认的是这个类，不是拖动层本身**——原因见下。
+ * 6. 标题栏里的 CSS **不要用 `:first-child`**。拖动层永远是第一个子节点，写
+ *    `> div:first-child` 就一条也匹配不上。记忆页的标题栏正是这么坏掉的：
+ *    `.memory-workspace-header > div:first-child` 失效之后，那个包图标和标题的
+ *    div 从 flex 掉回 block，图标被挤到标题栏外面去了。要按类型选就用
+ *    `:first-of-type`（议题页那条就是），最好是直接给个类名。
  *
- * ## 为什么还需要 refreshWindowDragRegions()
+ * ## 这一层的真实机制（2026-09-16 照着 Electron 43 / Chromium 150 的源码核过）
  *
- * Chromium 只有在**某个元素的 `-webkit-app-region` 计算值发生变化**时，才会把
- * 「可拖动矩形列表」标脏并重新收集一遍。以下情况都不会触发重算：
+ * 这一段以前写的是「Chromium 只有在某个元素的 app-region 计算值变了才会重算，
+ * 矩形挪位置或者浮层卸载都不会」。**那是错的**，而后来几轮修复都建在那句话上，
+ * 所以一直修不到点子上。实际是：
  *
- * - 矩形只是移动或改变大小（面板拉宽、标题多出一行、窗口变高）；
- * - 一个曾经在拖动带上挖过洞的浮层（弹出菜单、右键菜单、设置弹窗）被卸载，
- *   洞留在原地，而窗口系统还照着那份旧列表判断。
+ * - Blink 在**每一次布局之后**都会把整份文档的可拖动矩形重新收集一遍，和上一次
+ *   的结果逐条比对，不一样才发给 Electron（`LocalFrameView::PerformPostLayoutTasks`
+ *   → `UpdateDocumentDraggableRegions`）。所以「面板拉宽、标题多出一行、窗口变高、
+ *   浮层卸载」全都会重算——它们本来就要跑布局。
+ * - 收集是按**布局树顺序**走的，跳过 `visibility: hidden` 和非盒元素（纯 inline
+ *   的元素标了 app-region 等于没标），而且**不按 overflow 裁剪**：一个被滚出可视
+ *   区、肉眼看不见的按钮，照样在列表里占着它那块矩形。
+ * - Electron 把这串矩形按顺序做并集（drag）/差集（no-drag），落成一个 SkRegion，
+ *   鼠标按下时当场拿它做命中测试，不缓存（`WebContentsView::NonClientHitTest`）。
  *
- * 结果就是标题栏莫名其妙拖不动，而随便 resize 一下窗口（强制重排 + 重算）就好了。
+ * 所以真正会漏掉的只有一类：**矩形变了但没跑布局**。最常见的是容器滚动，以及只跑
+ * 在合成线程上的 transform / opacity 动画——它们把 no-drag 的洞挪了地方，Blink
+ * 不会因此重新收集。refreshWindowDragRegions() 补的就是这一类：翻转哨兵的
+ * app-region 能逼出一次布局（这个属性在 Chromium 的属性表里标了
+ * `invalidate: ["layout"]`），收集自然跟着做。
+ *
+ * **改这条拖动带之前请先量一遍，不要照着感觉改。** 量法：拿 CDP 连上跑起来的
+ * 应用，按文档顺序遍历所有 app-region 不为 none 的元素，取 `getBoundingClientRect()`，
+ * 对任意一点来说「最后一个盖住它的矩形」是 drag 还是 no-drag，就是 Electron 的结论。
+ * `scripts/desktop-layout-smoke.mjs` 里有现成的启动和连接代码可以抄。
  *
  * ## 刷新是怎么保证「一定赶得上」的
  *
