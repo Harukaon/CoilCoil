@@ -622,15 +622,27 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     const profileName = params.agent?.trim();
     const profile = profileName ? profiles.get(profileName) : undefined;
     if (profileName && !profile) {
-      throw new Error(`未找到子 Agent profile：${profileName}。\n${formatProfileCatalog(profiles)}`);
+      throw new Error(`未找到子 Agent profile：${profileName}。\n${formatProfileCatalog(profiles, (item) => readConfiguredSubagentModel(item.name) || item.model)}`);
     }
-    // Each built-in profile has its own user-controlled model. The tool schema
-    // deliberately exposes no model override, so an Agent cannot bypass this
-    // setting. A profile frontmatter model remains the fallback for custom
-    // profiles; otherwise the child inherits the parent session model.
+    // 每个 profile 用哪个模型完全由用户配置；工具 schema 里没有 model 参数，Agent
+    // 无法绕过。自定义 profile 可以在自己的 frontmatter 里写 model，那同样算配置
+    // 过了。
+    //
+    // 没配置就不给用。以前这里退回主会话模型，等于让派发方替用户做了选择——一个
+    // 本该跑在便宜模型上的侦察子 Agent，会悄悄用主会话那个贵的跑完。宁可直接不
+    // 可用，让 Agent 换别的办法，也好过用错模型跑一遍。
     const configuredModel = readConfiguredSubagentModel(profile?.name);
     const modelQuery = configuredModel || profile?.model;
-    const modelInherited = !configuredModel && !profile?.model;
+    if (!modelQuery || !modelQuery.trim()) {
+      const who = profile?.name ? `子 Agent「${profile.name}」` : "默认子 Agent";
+      throw new Error(
+        `${who}不可用：用户还没有为它配置模型。`
+        + `\n模型只能由用户在「运行时 → 子 Agent 模型」里配置，你无法代为选择，也不要重试这次派发。`
+        + `\n请改用其他方式完成这项工作（例如自己直接读文件、跑命令），或换一个已配置模型的 profile。`
+        + `\n${formatProfileCatalog(profiles, (item) => readConfiguredSubagentModel(item.name) || item.model)}`,
+      );
+    }
+    const modelInherited = false;
     const resolved = resolveModel(modelQuery, ctx);
     if ("error" in resolved) throw new Error(resolved.error);
 
@@ -749,7 +761,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     const query = params.runId?.trim();
     if (!query) {
       const runs = registry.list();
-      const catalog = formatProfileCatalog(profiles);
+      const catalog = formatProfileCatalog(profiles, (item) => readConfiguredSubagentModel(item.name) || item.model);
       if (runs.length === 0) return { content: [{ type: "text", text: `当前会话还没有派发过子 Agent。\n${catalog}` }], details: { error: "no-runs" } };
       const lines = runs.map((run) => `${run.runId} · ${run.agent} · ${run.status}${run.background ? " · 后台" : ""} · ${truncate(run.task, 120)}`);
       return { content: [{ type: "text", text: `共 ${runs.length} 个子 Agent 运行：\n${lines.join("\n")}\n\n${catalog}` }], details: { error: "no-runs" } };

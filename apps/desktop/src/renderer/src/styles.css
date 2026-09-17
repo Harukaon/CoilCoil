@@ -1042,6 +1042,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .runtime-subagent-model-row { display: grid; min-width: 0; gap: 4px; }
 .runtime-subagent-model-row + .runtime-subagent-model-row { padding-top: 8px; border-top: 1px solid hsl(var(--th) var(--ts) var(--l-918)); }
 .runtime-subagent-model-row > span { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 6px; }
+/* 没配模型的那一项：标题前面挂一个叉，说明文字换成「派发会被拒绝」。它不是警告
+   而是不可用——Agent 派它会直接吃到错误。 */
+.runtime-subagent-model-row > span > strong { display: inline-flex; align-items: center; gap: 4px; }
+.runtime-subagent-unavailable { flex: 0 0 auto; color: var(--c-red-muted); }
+.runtime-subagent-model-row.unconfigured > span > strong { color: hsl(var(--th) var(--ts) var(--l-457)); }
 .runtime-subagent-model-row strong { color: hsl(var(--th) var(--ts) var(--l-282)); font-size: 9px; }
 .runtime-subagent-model-row small { overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-subagent-model-row .runtime-subagent-select { height: 30px; border-radius: var(--radius-lg); font-size: 9px; }

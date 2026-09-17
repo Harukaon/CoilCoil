@@ -115,14 +115,25 @@ export function loadProfiles(dirs: ProfileDirs): Map<string, SubagentProfile> {
   return merged;
 }
 
-export function formatProfileCatalog(profiles: Map<string, SubagentProfile>): string {
+/**
+ * 列出 profile 给模型看。
+ *
+ * `resolveModel` 传进来时，没有配置模型的那几条会标成不可用——模型不能自己挑模型，
+ * 用户没配就用不了。先在目录里说清楚，好过它派发一次再吃一个错误。
+ */
+export function formatProfileCatalog(
+  profiles: Map<string, SubagentProfile>,
+  resolveModel?: (profile: SubagentProfile) => string | undefined,
+): string {
   if (profiles.size === 0) return "当前没有可用的子 Agent profile。";
   const lines = [...profiles.values()].map((profile) => {
+    const model = resolveModel ? resolveModel(profile) : profile.model;
     const parts = [`- ${profile.name}`];
     if (profile.description) parts.push(`：${profile.description}`);
-    if (profile.model) parts.push(`（模型 ${profile.model}）`);
+    if (resolveModel && !model) parts.push("（⚠ 未配置模型，当前不可用）");
+    else if (model) parts.push(`（模型 ${model}）`);
     if (profile.tools?.length) parts.push(`（工具 ${profile.tools.join("/")}）`);
     return parts.join("");
   });
-  return `可用的子 Agent profile：\n${lines.join("\n")}`;
+  return `子 Agent profile：\n${lines.join("\n")}`;
 }

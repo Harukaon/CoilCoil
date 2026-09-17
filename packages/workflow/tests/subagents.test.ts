@@ -143,7 +143,7 @@ test("configured subagent model reads the legacy global setting for built-in pro
   assert.equal(configuredSubagentModel({ model: " provider/legacy " }, "custom"), "");
 });
 
-test("configured profile models drive dispatch while unconfigured profiles inherit the parent", async (context) => {
+test("配置过的 profile 用配置的模型；没配的直接不可用，不再回退主会话模型", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-subagent-profile-models-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
@@ -182,11 +182,12 @@ test("configured profile models drive dispatch while unconfigured profiles inher
   );
   assert.deepEqual(lookups, ["provider/review"]);
 
+  // explore 没配模型：连 worktree 都到不了，先被拒；也不能去解析主会话模型。
   await assert.rejects(
     execute("call-profile-explore", { task: "搜索", agent: "explore", worktree: true }, undefined, undefined, extensionContext),
-    /不是 git 仓库/,
+    /不可用：用户还没有为它配置模型/,
   );
-  assert.deepEqual(lookups, ["provider/review"], "explore should inherit without resolving another configured model");
+  assert.deepEqual(lookups, ["provider/review"], "未配置的 profile 不该去解析任何模型");
 });
 
 test("status reports an empty registry", async () => {
@@ -662,21 +663,62 @@ test("subagent worktrees stay hidden when the opened project is itself a linked 
   assert.equal(await removeSubagentWorktreeIfClean(linkedRoot, child.worktreePath), true);
 });
 
-test("run rejects worktree isolation outside a git repository", async () => {
-  const { execute } = createHarness();
+/** 给这条测试造一个「三个 profile 都配好模型」的 agent 目录。没配模型的 profile 现在
+    会在 worktree 检查之前就被拒绝，而这两条测试要验的是 worktree。 */
+const CONFIGURED_MODEL_REGISTRY = {
+  find: (provider: string, id: string) => ({ provider, id }),
+  hasConfiguredAuth: () => true,
+};
+
+function withConfiguredSubagentModels(context: { after(fn: () => void): void }): void {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-subagent-configured-"));
+  const agentDir = join(root, "agent");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(join(agentDir, "subagent-settings.json"), JSON.stringify({
+    models: { explore: "provider/explore", worker: "provider/worker", reviewer: "provider/review" },
+    model: "provider/worker",
+  }));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  context.after(() => {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  });
+}
+
+test("run rejects worktree isolation outside a git repository", async (context) => {
+  withConfiguredSubagentModels(context);
+  const { handlers, execute } = createHarness();
   const dir = mkdtempSync(join(tmpdir(), "coilcoil-no-repo-"));
+  const ctx = createContext({ cwd: dir, modelRegistry: CONFIGURED_MODEL_REGISTRY });
+  await handlers.get("session_start")?.[0]({}, ctx);
+  // 带上一个配置过的 profile：没配模型的话会在 worktree 检查之前就被拒，测不到这里。
   await assert.rejects(
-    execute("call-wt-1", { task: "写点东西", worktree: true }, undefined, undefined, createContext({ cwd: dir })),
+    execute("call-wt-1", { task: "写点东西", agent: "explore", worktree: true }, undefined, undefined, ctx),
     /不是 git 仓库/,
   );
 });
 
-test("worker profile defaults to worktree isolation", async () => {
+test("不指定 profile 的派发同样被拒——那条路径没有任何用户配置", async (context) => {
+  withConfiguredSubagentModels(context);
+  const { execute } = createHarness();
+  const dir = mkdtempSync(join(tmpdir(), "coilcoil-no-profile-"));
+  context.after(() => rmSync(dir, { recursive: true, force: true }));
+  await assert.rejects(
+    execute("call-no-profile", { task: "随便做点什么" }, undefined, undefined, createContext({ cwd: dir, modelRegistry: CONFIGURED_MODEL_REGISTRY })),
+    /不可用：用户还没有为它配置模型/,
+  );
+});
+
+test("worker profile defaults to worktree isolation", async (context) => {
+  withConfiguredSubagentModels(context);
   const { handlers, execute } = createHarness();
   const dir = mkdtempSync(join(tmpdir(), "coilcoil-no-repo-worker-"));
-  await handlers.get("session_start")?.[0]({}, createContext({ cwd: dir }));
+  const ctx = createContext({ cwd: dir, modelRegistry: CONFIGURED_MODEL_REGISTRY });
+  await handlers.get("session_start")?.[0]({}, ctx);
   await assert.rejects(
-    execute("call-wt-2", { task: "写点东西", agent: "worker" }, undefined, undefined, createContext({ cwd: dir })),
+    execute("call-wt-2", { task: "写点东西", agent: "worker" }, undefined, undefined, ctx),
     /不是 git 仓库/,
   );
 });

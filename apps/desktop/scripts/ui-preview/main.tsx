@@ -12,8 +12,9 @@ import { createRoot } from "react-dom/client";
 import { MemoryWorkspace } from "../../src/renderer/src/features/memory/MemoryWorkspace";
 import { InspectorPane } from "../../src/renderer/src/features/inspector/InspectorPane";
 import { ProviderModelCard, type EditableModel } from "../../src/renderer/src/features/settings/ModelSettings";
+import { RuntimePanel } from "../../src/renderer/src/features/runtime/RuntimePanel";
 import "../../src/renderer/src/features/settings/settings.css";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { Cpu, Files, Globe, TerminalSquare } from "lucide-react";
 import { initTheme } from "../../src/renderer/src/theme";
@@ -204,9 +205,47 @@ function ModelCatalogPreview(): React.JSX.Element {
   );
 }
 
+/** 右侧「运行时」面板，用来看没配模型的子 Agent 那一行长什么样。 */
+function RuntimePanelPreview(): React.JSX.Element {
+  // 分区默认折叠，截图前先把要看的那个点开——和用户点它是同一条路径。
+  useEffect(() => {
+    const wanted = parameters.get("section");
+    if (!wanted) return;
+    const timer = setTimeout(() => {
+      const target = [...document.querySelectorAll<HTMLElement>("button, summary")]
+        .find((node) => node.textContent?.includes(wanted));
+      target?.click();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, []);
+  const configured = parameters.get("configured") === "1";
+  return (
+    <div className="inspector-pane" style={{ width: 420, height: "100vh", overflow: "auto" }}>
+      <RuntimePanel
+        runtimeId="preview"
+        tokenUsage={{ input: 12000, output: 3400, cacheRead: 0, cacheWrite: 0, total: 15400, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as never}
+        contextUsage={{ used: 15400, total: 400000, percent: 3.85 } as never}
+        cwd="/Users/hao/Desktop/feedmob"
+        inspection={{
+          tools: [],
+          mcpServers: [],
+          skills: [],
+          effectiveSystemPrompt: "",
+          estimates: { total: 15400, system: 2000, tools: 1200, messages: 12200 },
+          subagent: { models: configured
+            ? { explore: "pierce/glm-5.3-flash", worker: "pierce/gpt-5.6-luna", reviewer: "pierce/gpt-5.6-sol" }
+            : { explore: "", worker: "", reviewer: "" } },
+        } as never}
+      />
+    </div>
+  );
+}
+
 const panel = parameters.get("panel");
 const root = createRoot(document.getElementById("root")!);
-if (panel === "models") {
+if (panel === "runtime") {
+  root.render(<RuntimePanelPreview />);
+} else if (panel === "models") {
   root.render(<ModelCatalogPreview />);
 } else if (panel === "inspector") {
   const count = Number.parseInt(parameters.get("tabs") ?? "1", 10);

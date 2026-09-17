@@ -1,19 +1,4 @@
-import {
-  AlertCircle,
-  Bot,
-  BrainCircuit,
-  CheckCircle2,
-  CircleDashed,
-  GitBranch,
-  History,
-  LoaderCircle,
-  PlugZap,
-  RefreshCw,
-  RotateCcw,
-  Save,
-  Sparkles,
-  Wrench,
-} from "lucide-react";
+import { AlertCircle, Bot, BrainCircuit, CheckCircle2, CircleDashed, GitBranch, History, LoaderCircle, PlugZap, RefreshCw, RotateCcw, Save, Sparkles, Wrench, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   ConfigurableSubagentProfile,
@@ -345,14 +330,14 @@ export function RuntimePanel({
       <RuntimeSection
         title="子 Agent 模型"
         icon={<Bot size={14} />}
-        badge={configuredSubagentCount ? `${configuredSubagentCount}/3 已配置` : "均继承主会话"}
+        badge={configuredSubagentCount ? `${configuredSubagentCount}/3 已配置` : "3 个都未配置 · 不可用"}
       >
         <div className="runtime-subagent-models">
           {subagentProfiles.map((profile) => {
             const selected = subagentModels[profile.id];
             const selectedAvailable = availableModels.some((model) => `${model.provider}/${model.id}` === selected);
             const modelOptions: SelectOption[] = [
-              { value: "", label: "继承主会话模型", detail: "由主 Agent 当前模型决定" },
+              { value: "", label: "未配置（此子 Agent 不可用）", detail: "不配置就不给派发，而不是悄悄用主会话模型" },
               ...(selected && !selectedAvailable
                 ? [{ value: selected, label: selected, detail: "当前不可用", disabled: true }]
                 : []),
@@ -364,8 +349,11 @@ export function RuntimePanel({
               })),
             ];
             return (
-              <label className="runtime-subagent-model-row" key={profile.id}>
-                <span><strong>{profile.label}</strong><small>{profile.description}</small></span>
+              <label className={`runtime-subagent-model-row ${selected ? "" : "unconfigured"}`} key={profile.id}>
+                <span>
+                  <strong>{selected ? null : <XCircle className="runtime-subagent-unavailable" size={13} />}{profile.label}</strong>
+                  <small>{selected ? profile.description : "未配置模型，派发会被拒绝"}</small>
+                </span>
                 <Select
                   value={selected}
                   options={modelOptions}
@@ -388,7 +376,7 @@ export function RuntimePanel({
             {subagentSaving ? <LoaderCircle className="spin" size={12} /> : <Save size={12} />}保存三个配置
           </button>
         </div>
-        <p className="runtime-section-footnote">三个 profile 独立配置；未配置的项继承主会话模型，并在对应子 Agent 卡片上显示黄色提示。</p>
+        <p className="runtime-section-footnote">三个 profile 独立配置。没配模型的那一项不可用：Agent 派发它会直接收到「未配置，请改用其他方式」的错误，而不是悄悄改用主会话模型跑一遍。</p>
       </RuntimeSection>
 
       <RuntimeSection title="工具" icon={<Wrench size={14} />} badge={inspection?.tools.length ? `${activeTools.length}/${inspection.tools.length} 启用` : undefined}>
