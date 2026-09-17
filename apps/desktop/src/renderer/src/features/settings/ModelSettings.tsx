@@ -1,4 +1,4 @@
-import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Search, Trash2, Zap } from "lucide-react";
+import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   OpenAIResponsesWsConfiguration,
@@ -28,7 +28,7 @@ import { Select, type SelectOption } from "../../ui/Select";
 import { UpstreamModelPicker, type UpstreamModelOption } from "./UpstreamModelPicker";
 import { ProviderOAuthDialog } from "./ProviderOAuthDialog";
 
-type EditableModel = ModelProviderModelConfiguration & { uid: string };
+export type EditableModel = ModelProviderModelConfiguration & { uid: string };
 type ProviderDraft = Omit<ModelProviderConfigurationInput["provider"], "models"> & { models: EditableModel[] };
 
 interface ModelAdvancedText {
@@ -318,7 +318,8 @@ function ProviderCredentialEditor({
   );
 }
 
-function ProviderModelCard({
+/** Exported for scripts/ui-preview: the折叠列表只有画出来才看得出对不对。 */
+export function ProviderModelCard({
   model,
   index,
   apiOptions: options,
@@ -326,6 +327,8 @@ function ProviderModelCard({
   onChange,
   onAdvancedChange,
   onRemove,
+  expanded,
+  onToggle,
 }: {
   model: EditableModel;
   index: number;
@@ -334,6 +337,8 @@ function ProviderModelCard({
   onChange: (next: EditableModel) => void;
   onAdvancedChange: (next: ModelAdvancedText) => void;
   onRemove: () => void;
+  expanded: boolean;
+  onToggle: () => void;
 }): React.JSX.Element {
   const updateCost = (key: keyof NonNullable<EditableModel["cost"]>, value: number | undefined): void => {
     const current = model.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -363,9 +368,26 @@ function ProviderModelCard({
       thinkingLevelMap: JSON.stringify(thinkingLevelMapFromLevels(next.length ? next : ["off"]), null, 2),
     });
   };
+  /* 一个服务商挂几十个模型是常事，全部摊开就没法找了。折叠态一行一个，只报能
+     认出它是谁的那几项（名字、上下文、识图）；要改参数再点开。 */
+  const contextLabel = model.contextWindow ? `${Math.round(model.contextWindow / 1000)}K 上下文` : "未设上下文";
   return (
-    <article className="provider-model-card">
-      <header><span><CircleDot size={14} />模型 {index + 1}</span><button type="button" aria-label={`移除模型 ${index + 1}`} onClick={onRemove}><Trash2 size={14} />移除</button></header>
+    <article className={`provider-model-card ${expanded ? "expanded" : ""}`}>
+      <header>
+        <button className="provider-model-summary" type="button" aria-expanded={expanded} onClick={onToggle}>
+          <ChevronRight className="provider-model-caret" size={14} />
+          <CircleDot size={14} />
+          <strong>{model.name || model.id || `模型 ${index + 1}`}</strong>
+          <small>{model.id || "未填模型 ID"}</small>
+          <span className="provider-model-badges">
+            <em>{contextLabel}</em>
+            {supportsImages ? <em>识图</em> : null}
+            {model.reasoning ? <em>推理</em> : null}
+          </span>
+        </button>
+        <button type="button" aria-label={`移除模型 ${index + 1}`} onClick={onRemove}><Trash2 size={14} />移除</button>
+      </header>
+      {!expanded ? null : <>
       <div className="settings-grid provider-model-identity"><label>模型 ID<input value={model.id} placeholder="例如 dog-coder-v1" onChange={(event) => onChange({ ...model, id: event.target.value })} /></label><label>显示名称<input value={model.name ?? ""} placeholder="可选，默认使用模型 ID" onChange={(event) => onChange({ ...model, name: event.target.value })} /></label></div>
       <div className="settings-grid"><label>协议覆盖<Select value={model.api ?? ""} options={options} ariaLabel={`模型 ${index + 1} 的协议`} onChange={(api) => onChange({ ...model, api: api || undefined })} searchable /></label><label>模型专用 Base URL<input value={model.baseUrl ?? ""} placeholder="可选，默认继承服务商 Base URL" onChange={(event) => onChange({ ...model, baseUrl: event.target.value })} /></label></div>
       <div className="settings-grid provider-model-capabilities"><label>上下文窗口<NumberInput value={model.contextWindow} placeholder="128000" onChange={(contextWindow) => onChange({ ...model, contextWindow })} /></label><label>最大输出 Token<NumberInput value={model.maxTokens} placeholder="16384" onChange={(maxTokens) => onChange({ ...model, maxTokens })} /></label></div>
@@ -390,6 +412,7 @@ function ProviderModelCard({
         <label>成本阶梯 JSON<textarea value={advanced.costTiers} placeholder={'[{ "inputTokensAbove": 272000, "input": 10, "output": 45, "cacheRead": 1, "cacheWrite": 12.5 }]'} onChange={(event) => onAdvancedChange({ ...advanced, costTiers: event.target.value })} /></label>
         <div className="settings-grid"><label>请求头 JSON<textarea value={advanced.headers} placeholder={'{ "X-Gateway": "value" }'} onChange={(event) => onAdvancedChange({ ...advanced, headers: event.target.value })} /></label><label>兼容性 JSON<textarea value={advanced.compat} placeholder={'{ "supportsDeveloperRole": false }'} onChange={(event) => onAdvancedChange({ ...advanced, compat: event.target.value })} /></label></div>
       </details>
+      </>}
     </article>
   );
 }
@@ -480,6 +503,9 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelQuery, setModelQuery] = useState("");
+  /* 折叠是默认态，展开的记在这里。按 uid 记而不是按序号：过滤之后序号会变。 */
+  const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
   const [testing, setTesting] = useState(false);
   const [removeArmed, setRemoveArmed] = useState(false);
   const [upstreamPickerModels, setUpstreamPickerModels] = useState<UpstreamModelOption[]>();
@@ -598,6 +624,14 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const activeTestModel = defaultModels.find((model) => model.id === testModelId) ?? defaultModels[0];
   const thinkingOptions = activeTestModel ? modelThinkingLevels(activeTestModel, configuration, draft?.id ?? "").map((level) => THINKING_OPTIONS.find((option) => option.value === level)!).filter(Boolean) : THINKING_OPTIONS.filter((option) => option.value === "off");
   const isBuiltinProvider = selectedSource !== "custom";
+  /* 搜索只挑要画哪几张卡，不动 draft.models 本身——过滤是看的事，删和改都还认
+     uid。序号跟着原始位置走，这样「模型 3」在搜与不搜时说的是同一个。 */
+  const visibleModels = useMemo(() => {
+    const rows = (draft?.models ?? []).map((model, index) => ({ model, index }));
+    const query = modelQuery.trim().toLowerCase();
+    if (!query) return rows;
+    return rows.filter(({ model }) => `${model.id} ${model.name ?? ""}`.toLowerCase().includes(query));
+  }, [draft?.models, modelQuery]);
 
   const selectProvider = (provider: ModelProviderConfiguration): void => applyProvider(provider);
   const addProvider = (): void => {
@@ -926,13 +960,19 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
               if (!current) return current;
               return { ...current, replaceModels: true, models: current.models.length ? current.models : [blankModel()] };
             })}>自定义目录</button></div></header>
-            {!isBuiltinProvider ? <div className="provider-model-toolbar provider-model-toolbar-top">
-              <button className="secondary-button" type="button" disabled={fetchingModels || saving} onClick={() => void fetchUpstreamModels()}>{fetchingModels ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{fetchingModels ? "正在拉取…" : "拉取上游模型列表"}</button>
+            {!isBuiltinProvider || draft.replaceModels ? <div className="provider-model-toolbar provider-model-toolbar-top">
+              {!isBuiltinProvider ? <button className="secondary-button" type="button" disabled={fetchingModels || saving} onClick={() => void fetchUpstreamModels()}>{fetchingModels ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{fetchingModels ? "正在拉取…" : "拉取上游模型列表"}</button> : null}
+              {draft.replaceModels && draft.models.length > 1 ? <label className="provider-model-search">
+                <Search size={14} />
+                <input value={modelQuery} placeholder={`在 ${draft.models.length} 个模型里搜索`} aria-label="搜索模型" onChange={(event) => setModelQuery(event.target.value)} />
+                {modelQuery ? <button type="button" aria-label="清除搜索" onClick={() => setModelQuery("")}><X size={13} /></button> : null}
+              </label> : null}
             </div> : null}
             {draft.replaceModels ? <>
-              <div className="provider-model-list">{draft.models.map((model, index) => <ProviderModelCard key={model.uid} model={model} index={index} apiOptions={protocolOptions} advanced={modelAdvanced[model.uid] ?? { thinkingLevelMap: "{}", samplingParams: "{}", headers: "{}", compat: "{}", costTiers: "[]" }} onChange={(next) => updateModel(model.uid, next)} onAdvancedChange={(next) => setModelAdvanced((current) => ({ ...current, [model.uid]: next }))} onRemove={() => { setDraft((current) => current ? { ...current, models: current.models.filter((item) => item.uid !== model.uid) } : current); setModelAdvanced((current) => { const { [model.uid]: _removed, ...rest } = current; return rest; }); }} />)}</div>
+              <div className="provider-model-list">{visibleModels.map(({ model, index }) => <ProviderModelCard key={model.uid} model={model} index={index} apiOptions={protocolOptions} advanced={modelAdvanced[model.uid] ?? { thinkingLevelMap: "{}", samplingParams: "{}", headers: "{}", compat: "{}", costTiers: "[]" }} expanded={expandedModels.has(model.uid)} onToggle={() => setExpandedModels((current) => { const next = new Set(current); if (next.has(model.uid)) next.delete(model.uid); else next.add(model.uid); return next; })} onChange={(next) => updateModel(model.uid, next)} onAdvancedChange={(next) => setModelAdvanced((current) => ({ ...current, [model.uid]: next }))} onRemove={() => { setDraft((current) => current ? { ...current, models: current.models.filter((item) => item.uid !== model.uid) } : current); setModelAdvanced((current) => { const { [model.uid]: _removed, ...rest } = current; return rest; }); }} />)}</div>
+              {draft.models.length && !visibleModels.length ? <p className="provider-model-empty">没有匹配「{modelQuery}」的模型。</p> : null}
               <div className="provider-model-toolbar">
-                <button className="add-model-button" type="button" onClick={() => { const next = blankModel(); setDraft((current) => current ? { ...current, models: [...current.models, next] } : current); setModelAdvanced((current) => ({ ...current, ...initialAdvancedText([next]) })); }}><Plus size={14} />添加模型</button>
+                <button className="add-model-button" type="button" onClick={() => { const next = blankModel(); setDraft((current) => current ? { ...current, models: [...current.models, next] } : current); setModelAdvanced((current) => ({ ...current, ...initialAdvancedText([next]) })); /* 新加的那条要立刻能填，也不能被正在生效的搜索藏起来。 */ setModelQuery(""); setExpandedModels((current) => new Set(current).add(next.uid)); }}><Plus size={14} />添加模型</button>
               </div>
             </> : <><div className="provider-builtins-summary">当前内置目录包含 {defaultModels.length} 个模型。启用“自定义目录”后，你可以只保留需要展示的模型。</div><details className="provider-advanced"><summary>按模型覆盖参数 <ChevronRight size={14} /></summary><p>保留内置目录时，使用 <code>modelOverrides</code> 为任意内置模型配置上下文、输出上限、图片能力、采样或兼容性参数。</p><label>modelOverrides JSON<textarea value={overridesText} placeholder={'{\n  "gpt-5.6": { "contextWindow": 128000, "maxTokens": 16384 }\n}'} onChange={(event) => setOverridesText(event.target.value)} /></label></details></>}
           </section>

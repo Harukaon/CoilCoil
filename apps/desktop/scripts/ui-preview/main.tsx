@@ -11,6 +11,10 @@
 import { createRoot } from "react-dom/client";
 import { MemoryWorkspace } from "../../src/renderer/src/features/memory/MemoryWorkspace";
 import { InspectorPane } from "../../src/renderer/src/features/inspector/InspectorPane";
+import { ProviderModelCard, type EditableModel } from "../../src/renderer/src/features/settings/ModelSettings";
+import "../../src/renderer/src/features/settings/settings.css";
+import { useState } from "react";
+import { Search } from "lucide-react";
 import { Cpu, Files, Globe, TerminalSquare } from "lucide-react";
 import { initTheme } from "../../src/renderer/src/theme";
 import fixture from "./memory-fixture.json";
@@ -158,9 +162,53 @@ const INSPECTOR_TABS = [
   { id: "term-2", label: "term-2 · wrangler tail", icon: TerminalSquare, closable: true },
 ];
 
+/** 模型目录：折叠成一行一条，加上那条带搜索框的工具栏。 */
+const MODEL_ROWS: EditableModel[] = [
+  { uid: "m1", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", contextWindow: 1050000, maxTokens: 128000, reasoning: true, input: ["text", "image"] },
+  { uid: "m2", id: "glm-5.3-flash", name: "GLM-5.3-Flash", contextWindow: 400000, maxTokens: 131072, reasoning: true, input: ["text", "image"] },
+  { uid: "m3", id: "minimax-m3", name: "MiniMax M3", contextWindow: 1000000, maxTokens: 512000, input: ["text"] },
+  { uid: "m4", id: "deepseek-v4", contextWindow: 128000, input: ["text"] },
+];
+
+function ModelCatalogPreview(): React.JSX.Element {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState<Set<string>>(new Set(parameters.get("open")?.split(",") ?? []));
+  const rows = MODEL_ROWS.map((model, index) => ({ model, index }))
+    .filter(({ model }) => `${model.id} ${model.name ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  return (
+    <div className="settings-screen" style={{ display: "block" }}><div style={{ padding: 20, width: 760, margin: "0 auto" }}>
+      <div className="provider-model-toolbar provider-model-toolbar-top">
+        <button className="secondary-button" type="button">拉取上游模型列表</button>
+        <label className="provider-model-search">
+          <Search size={14} />
+          <input value={query} placeholder={`在 ${MODEL_ROWS.length} 个模型里搜索`} aria-label="搜索模型" onChange={(event) => setQuery(event.target.value)} />
+        </label>
+      </div>
+      <div className="provider-model-list" style={{ marginTop: 10 }}>
+        {rows.map(({ model, index }) => (
+          <ProviderModelCard
+            key={model.uid}
+            model={model}
+            index={index}
+            apiOptions={[{ value: "", label: "继承服务商协议" }]}
+            advanced={{ thinkingLevelMap: "{}", samplingParams: "{}", headers: "{}", compat: "{}", costTiers: "[]" }}
+            expanded={open.has(model.uid)}
+            onToggle={() => setOpen((current) => { const next = new Set(current); if (next.has(model.uid)) next.delete(model.uid); else next.add(model.uid); return next; })}
+            onChange={() => undefined}
+            onAdvancedChange={() => undefined}
+            onRemove={() => undefined}
+          />
+        ))}
+      </div>
+    </div></div>
+  );
+}
+
 const panel = parameters.get("panel");
 const root = createRoot(document.getElementById("root")!);
-if (panel === "inspector") {
+if (panel === "models") {
+  root.render(<ModelCatalogPreview />);
+} else if (panel === "inspector") {
   const count = Number.parseInt(parameters.get("tabs") ?? "1", 10);
   const width = parameters.get("width") ?? "360";
   root.render(

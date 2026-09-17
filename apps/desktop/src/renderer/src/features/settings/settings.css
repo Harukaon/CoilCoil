@@ -289,10 +289,27 @@
 .provider-model-mode button { height: 25px; padding: 0 7px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-476)); background: transparent; font-size: 9px; cursor: pointer; }
 .provider-model-mode button.active { color: hsl(var(--th) var(--ts) var(--l-227)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 1px 2px rgb(25 25 22 / 10%); }
 .provider-model-list { display: grid; gap: 9px; }
+/* 折叠态就是一行：卡片不再自带内边距和竖向间距，展开后才撑开。 */
+.provider-model-card { padding: 4px 10px; gap: 0; }
+.provider-model-card.expanded { gap: 10px; padding: 12px; }
+.provider-model-summary { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 7px; padding: 6px 0; border: 0; background: transparent; color: hsl(var(--th) var(--ts) var(--l-339)); font-size: 10px; text-align: left; cursor: pointer; }
+.provider-model-caret { flex: 0 0 auto; color: hsl(var(--th) var(--ts) var(--l-590)); transition: transform 120ms ease; }
+.provider-model-card.expanded .provider-model-caret { transform: rotate(90deg); }
+.provider-model-summary > strong { overflow: hidden; flex: 0 1 auto; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.provider-model-summary > small { overflow: hidden; min-width: 0; flex: 0 1 auto; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.provider-model-badges { display: inline-flex; flex: 0 0 auto; margin-left: auto; gap: 4px; }
+.provider-model-badges em { padding: 2px 6px; border-radius: var(--radius-xl); color: hsl(var(--th) var(--ts) var(--l-457)); background: hsl(var(--th) var(--ts) var(--l-937)); font-size: 9px; font-style: normal; white-space: nowrap; }
+/* label.* 是为了压过 .settings-screen label 的 display:grid——权重一样时靠这条更靠后。 */
+label.provider-model-search { display: inline-flex; min-width: 180px; flex: 1 1 200px; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid hsl(var(--th) var(--ts) var(--l-878)); border-radius: var(--radius-lg); background: hsl(var(--th) var(--ts) var(--l-1000)); color: hsl(var(--th) var(--ts) var(--l-590)); }
+.provider-model-search input { width: 100%; min-width: 0; height: 29px; flex: 1 1 auto; border: 0; background: transparent; color: hsl(var(--th) var(--ts) var(--l-196)); font-size: 10px; outline: 0; }
+.provider-model-search > button { display: grid; width: 18px; height: 18px; flex: 0 0 auto; border-radius: var(--radius-sm); color: inherit; background: transparent; place-items: center; cursor: pointer; }
+.provider-model-search > button:hover { background: hsl(var(--th) var(--ts) var(--l-922)); }
+.provider-model-empty { margin: 0; padding: 12px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; text-align: center; }
 .provider-model-card { display: grid; gap: 10px; padding: 12px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: var(--radius-3xl); background: hsl(var(--th) var(--ts) var(--l-1000)); }
 .provider-model-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .provider-model-card > header > span { display: inline-flex; align-items: center; gap: 6px; color: hsl(var(--th) var(--ts) var(--l-339)); font-size: 10px; font-weight: 600; }
-.provider-model-card > header > button { display: inline-flex; height: 25px; align-items: center; gap: 4px; padding: 0 6px; border-radius: var(--radius-md); color: var(--c-red-muted); background: var(--c-red-subtle); font-size: 9px; cursor: pointer; }
+/* 「移除」那一个才是红的。折叠按钮也是 header 下的 button，原来这条把它一起染红了。 */
+.provider-model-card > header > button:not(.provider-model-summary) { display: inline-flex; height: 25px; flex: 0 0 auto; align-items: center; gap: 4px; white-space: nowrap; padding: 0 6px; border-radius: var(--radius-md); color: var(--c-red-muted); background: var(--c-red-subtle); font-size: 9px; cursor: pointer; }
 .provider-model-capabilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .provider-cost-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .provider-cost-grid label { font-size: 9px !important; }
