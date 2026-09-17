@@ -53,6 +53,73 @@ function matchesQuery(item: SlashMenuItem, needle: string): boolean {
   return haystack.includes(needle);
 }
 
+/** 斜杠菜单里有哪些条目。抽成纯函数是为了能直接测：哪些写进输入框、哪些跳设置。 */
+export function buildSlashMenuItems(
+  skills: SkillEntry[],
+  mcpServers: McpConfigurationSnapshot["servers"],
+): SlashMenuItem[] {
+  const items: SlashMenuItem[] = [
+    {
+      id: "action:mcp",
+      kind: "action",
+      title: "/mcp",
+      description: "打开 MCP 设置，连接或管理服务器（下面每一条是直接告诉 Agent 用哪个）",
+      openSettings: "mcp",
+    },
+    {
+      id: "action:skills",
+      kind: "action",
+      title: "/skills",
+      description: "打开技能设置，管理技能与目录",
+      openSettings: "skills",
+    },
+    {
+      id: "command:goal",
+      kind: "command",
+      title: "/goal",
+      description: "设定必须完成的目标，进入不会自行停止的 Agent 循环",
+      insert: "/goal ",
+    },
+    {
+      id: "command:memory",
+      kind: "command",
+      title: "/memory",
+      description: "立即在后台整理当前项目记忆",
+      insert: "/memory",
+    },
+  ];
+  /* 选一个 MCP 服务器，是「我想让 Agent 用这个去查」，不是「我想去设置页看看」。
+     以前这一排每一条都跳去 MCP 设置，等于把人从正在写的那句话里踢出去，还得自己
+     回来把名字打一遍。现在把菜单里那行原样写进输入框，剩下的交给 Agent 自己判断
+     ——不做引用、不做连接，给它一个名字就够了。
+     已停用的那几条仍然跳设置：写进去也用不了，那才是死路。 */
+  for (const server of mcpServers) {
+    const scope = server.scope === "project" ? "项目" : "全局";
+    items.push({
+      id: `mcp:${server.name}`,
+      kind: "mcp",
+      title: `/mcp ${server.name}`,
+      description: server.disabled
+        ? `${scope} · 已停用，选中后去设置里启用`
+        : `${scope} · ${server.transport === "http" ? server.url : server.command}`,
+      ...(server.disabled
+        ? { openSettings: "mcp" as const }
+        : { insert: `/mcp ${server.name} ` }),
+    });
+  }
+  for (const skill of skills) {
+    items.push({
+      id: `skill:${skill.filePath}`,
+      kind: "skill",
+      title: `/skill:${skill.name}`,
+      description: skill.description.trim(),
+      insert: `/skill:${skill.name} `,
+      skill,
+    });
+  }
+  return items;
+}
+
 export function useSlashMenu({
   draft,
   inputRef,
@@ -179,60 +246,10 @@ export function useSlashMenu({
     setSlashDismissed(false);
   }, [token?.start, token?.query]);
 
-  const allItems = useMemo<SlashMenuItem[]>(() => {
-    const items: SlashMenuItem[] = [
-      {
-        id: "action:mcp",
-        kind: "action",
-        title: "/mcp",
-        description: "打开 MCP 设置，连接或管理服务器",
-        openSettings: "mcp",
-      },
-      {
-        id: "action:skills",
-        kind: "action",
-        title: "/skills",
-        description: "打开技能设置，管理技能与目录",
-        openSettings: "skills",
-      },
-      {
-        id: "command:goal",
-        kind: "command",
-        title: "/goal",
-        description: "设定必须完成的目标，进入不会自行停止的 Agent 循环",
-        insert: "/goal ",
-      },
-      {
-        id: "command:memory",
-        kind: "command",
-        title: "/memory",
-        description: "立即在后台整理当前项目记忆",
-        insert: "/memory",
-      },
-    ];
-    for (const server of mcpServers) {
-      items.push({
-        id: `mcp:${server.name}`,
-        kind: "mcp",
-        title: `/mcp ${server.name}`,
-        description: server.disabled
-          ? `${server.scope === "project" ? "项目" : "全局"} · 已停用`
-          : `${server.scope === "project" ? "项目" : "全局"} · ${server.transport === "http" ? server.url : server.command}`,
-        openSettings: "mcp",
-      });
-    }
-    for (const skill of skills) {
-      items.push({
-        id: `skill:${skill.filePath}`,
-        kind: "skill",
-        title: `/skill:${skill.name}`,
-        description: skill.description.trim(),
-        insert: `/skill:${skill.name} `,
-        skill,
-      });
-    }
-    return items;
-  }, [mcpServers, skills]);
+  const allItems = useMemo<SlashMenuItem[]>(
+    () => buildSlashMenuItems(skills, mcpServers),
+    [mcpServers, skills],
+  );
 
   const filteredItems = useMemo(() => {
     if (!token) return [];
