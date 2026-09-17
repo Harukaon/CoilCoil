@@ -162,12 +162,21 @@ test("连不上的时候把服务器自己那句话带出来", async (t) => {
   assert.match(result.failure ?? "", /ENOENT|not found|spawn/i);
 });
 
-test("标了「启动时」的服务器会被主动连上", async (t) => {
-  const { manager: mcp } = manager([server({ lifecycle: "eager" })]);
+test("开机预连不看 lifecycle：默认的 lazy 服务器也会被连上", async (t) => {
+  // 以前只连显式标了 eager 的，而默认就是 lazy，等于几乎不预连——第一次用还是
+  // 要当场等一次握手。
+  const { manager: mcp } = manager([server({ lifecycle: "lazy" })]);
   t.after(() => mcp.close());
-  await mcp.startEagerServers();
+  await mcp.warmUpConnections();
   assert.equal((await mcp.status()).connectedCount, 1);
   assert.equal((await mcp.serverTools("smoke")).tools.length, 1);
+});
+
+test("停用的服务器不预连", async (t) => {
+  const { manager: mcp } = manager([server({ disabled: true })]);
+  t.after(() => mcp.close());
+  await mcp.warmUpConnections();
+  assert.equal((await mcp.status()).connectedCount, 0);
 });
 
 test("会话内停用只挡 Agent，不改配置也不断连接", async (t) => {

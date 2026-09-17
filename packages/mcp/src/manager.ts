@@ -624,11 +624,22 @@ export class McpManager {
     return this.connectionFor(server).callTool(tool, args, signal);
   }
 
-  /** Connect everything marked `eager`, without letting one failure stop the rest. */
-  async startEagerServers(): Promise<void> {
+  /**
+   * 开机就把能连的都连上，一台失败不影响其余。
+   *
+   * 连接和披露是两件事：这里只是把握手的钱先付掉，工具仍然要等 Agent 真的伸手去
+   * 拿才会披露给它。用户的原话：「连接本身是 Coding 软件做的事情，是否披露给模型，
+   * 是另外一件事情」——这样模型想连的时候是立刻连上、立刻拿到工具，而不是当场等
+   * 一次握手（在他的网络上曾经要十几秒）。
+   *
+   * 从前这里只连显式标了 `eager` 的那几台，而默认都是 `lazy`，所以实际上几乎不预
+   * 连。`lifecycle` 仍然管闲置回收：只有 `lazy` 会被闲置扫描丢掉，`eager` /
+   * `keep-alive` 一直留着。
+   */
+  async warmUpConnections(): Promise<void> {
     await this.reload();
     await mapLimited(
-      this.availableDefinitions().filter((definition) => definition.lifecycle === "eager"),
+      this.availableDefinitions(),
       CONNECT_CONCURRENCY,
       async (definition) => { await this.connect(definition.name); },
     );

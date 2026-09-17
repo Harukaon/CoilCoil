@@ -409,7 +409,8 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     });
     // 「启动时」这一档只在客户端刚起来的时候兑现一次，而不是每次配置刷新都重来；
     // 失败不该拖住任何东西，所以是放出去不等。
-    void this.mcpManagerInstance.startEagerServers().catch(() => undefined);
+    // 后台预连，不 await：运行时起得来不该等 MCP 握手。
+    void this.mcpManagerInstance.warmUpConnections().catch(() => undefined);
     return this.mcpManagerInstance;
   }
 
