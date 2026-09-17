@@ -370,6 +370,14 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       installedActive.fastState = next;
       this.emitEvent({ type: "session_fast_updated", fast: next.enabled });
     });
+    /* 压缩这几条一定要带会话标识。
+       「一个压缩周期里只清理一次」这条规矩，事后只能靠日志复核；而清理配额在换会话
+       （session_start / session_tree / session_shutdown）时也会重置，所以同一条流里
+       连着两次清理，可能是违规，也可能只是换了个对话——记录里没有会话标识就分不出
+       来，这正是 2026-09-18 复核时卡住的地方。 */
+    const compactionLogContext = (): { sessionPath?: string } => ({
+      sessionPath: installedActive?.session.sessionFile ?? undefined,
+    });
     eventBus.on(CONTEXT_CLEARING_EVENT, (value) => {
       // Every decision is logged, including the ones that cleared nothing: this
       // stage is invisible in the UI by design, so the log is the only place it
@@ -383,7 +391,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
           // 这一条是长会话唯一要看的：清完还落在我们的线下面吗？落不回去，
           // 下一步就是 pi 的有损摘要。
           fitsAgain: value.fitsAgain,
-        });
+        }, compactionLogContext());
       }
       // Clearing runs while a request is being built, which can be before the
       // active session is installed, so the record is held until it is.
@@ -411,7 +419,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
         contextWindow: value.contextWindow,
         // 瘦完还超窗口，那这一发注定被上游顶回来——这一条是 error，别埋在 info 里。
         fitsWindow: window <= 0 ? undefined : after <= window,
-      });
+      }, compactionLogContext());
     });
     eventBus.on(CONTEXT_CLEARING_SKIPPED_EVENT, (value) => {
       if (!isRecord(value)) return;
@@ -420,7 +428,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
         contextTokens: value.contextTokens,
         contextWindow: value.contextWindow,
         freedTokens: value.freedTokens,
-      });
+      }, compactionLogContext());
     });
     eventBus.on(PROJECT_MEMORY_STATUS_EVENT, (value) => {
       const parsed = projectMemoryStatus(value);
