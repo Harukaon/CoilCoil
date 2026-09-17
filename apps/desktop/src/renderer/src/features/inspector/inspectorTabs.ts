@@ -70,6 +70,20 @@ export function ownBrowserTabCount(state: BrowserStateSnapshot): number {
   return state.tabs.filter((tab) => tab.foreign !== true).length;
 }
 
+/**
+ * 关掉一张网页之后，浏览器这一项还要不要从右侧栏撤掉。
+ *
+ * 看的是标签条上还剩不剩东西，也就是总数，而不是「自己还剩几张」。别的会话开的
+ * 标签页同样列在这一排里：只剩它们的时候撤掉浏览器项，用户看到的是标签条上明明
+ * 还有好几个标签，右侧栏却整个折叠了——东西都还在，只是看不见了。
+ *
+ * 这和 ownBrowserTabCount 的用途不冲突：那个回答的是「要不要给用户补建一张自己的
+ * 页面」，只能数自己的；这个回答的是「还有没有东西可显示」，得数全部。
+ */
+export function shouldCloseBrowserEntry(state: BrowserStateSnapshot): boolean {
+  return state.tabs.length === 0;
+}
+
 /** 中键 = 关闭标签页。 */
 export const MIDDLE_MOUSE_BUTTON = 1;
 

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import type { BrowserStateSnapshot } from "../src/shared/desktop-api.ts";
 import {
+  shouldCloseBrowserEntry,
   activeBrowserPaneTabId,
   BROWSER_PLACEHOLDER_TAB_ID,
   browserPaneTabId,
@@ -99,4 +100,15 @@ test("顶部标签条对浏览器的操作还是走原来那几个 IPC", () => {
   // 标签集合只来自主进程的快照，右侧栏状态里不会另存一份。
   const state = source("features/inspector/useWorkspaceInspector.ts");
   assert.ok(!state.includes("browserTabId"), "网页标签不应该进 useWorkspaceInspector 的状态");
+});
+
+test("只剩别的会话开的标签页时，浏览器面板不能自己折叠", () => {
+  const mine = page("mine", "我的页");
+  const theirs = page("theirs", "另一个会话的页", false, true);
+  // 关掉自己最后一张：标签条上还列着别人的那张，面板就不能撤。
+  assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [theirs], activeTabId: "theirs" }), false);
+  // 真的一张都不剩了才撤。
+  assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [], activeTabId: undefined }), true);
+  // 自己的还在当然也不撤。
+  assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [mine, theirs], activeTabId: "mine" }), false);
 });

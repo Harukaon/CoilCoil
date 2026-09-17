@@ -13,7 +13,7 @@ import {
   activeBrowserPaneTabId,
   browserPaneTabs,
   browserTabIdFromPaneId,
-  ownBrowserTabCount,
+  shouldCloseBrowserEntry,
 } from "./inspectorTabs";
 import {
   fileInspectorTabId,
@@ -139,7 +139,7 @@ export function WorkspaceInspector({
     }
     void window.coilcoil.closeBrowserTab(scopeId, pageId).then((next) => {
       browser.setState(next);
-      if (ownBrowserTabCount(next) === 0) onCloseTab("browser");
+      if (shouldCloseBrowserEntry(next)) onCloseTab("browser");
     }).catch((error: unknown) => {
       toastError(error instanceof Error ? error.message : String(error));
     });
