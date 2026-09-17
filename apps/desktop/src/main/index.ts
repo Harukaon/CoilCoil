@@ -524,7 +524,8 @@ const remotePreviewOwner: PreviewOwner = {
   id: -1,
   alive: () => Boolean(remoteAccess),
   send: (document) => remoteAccess?.broadcast(PREVIEW_UPDATED_CHANNEL, document),
-  onGone: () => {},
+  // 远程这份没有窗口可以销毁，退订也就无事可做。
+  onGone: () => () => undefined,
 };
 
 function remoteController(): RemoteAccessController {

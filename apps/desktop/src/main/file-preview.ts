@@ -44,8 +44,15 @@ export interface PreviewOwner {
   id: number;
   alive(): boolean;
   send(document: FilePreviewDocument): void;
-  /** 这个人不在了（窗口关掉）时把预览一起收掉。 */
-  onGone(handler: () => void): void;
+  /**
+   * 这个人不在了（窗口关掉）时把预览一起收掉。
+   *
+   * 返回一个退订函数：预览自己先关掉的时候要把监听摘干净。以前不摘，于是同一个
+   * 窗口每开一份预览就往 WebContents 上多挂一个 destroyed 监听，开到第 11 份
+   * Electron 就开始报 "Possible EventEmitter memory leak detected"——日志里那条
+   * 告警就是这么来的。
+   */
+  onGone(handler: () => void): () => void;
 }
 
 /** 桌面窗口的那一份。 */
@@ -54,7 +61,13 @@ export function windowPreviewOwner(contents: Electron.WebContents): PreviewOwner
     id: contents.id,
     alive: () => !contents.isDestroyed(),
     send: (document) => contents.send(PREVIEW_UPDATED_CHANNEL, document),
-    onGone: (handler) => { contents.once("destroyed", handler); },
+    onGone: (handler) => {
+      contents.once("destroyed", handler);
+      return () => {
+        if (contents.isDestroyed()) return;
+        contents.removeListener("destroyed", handler);
+      };
+    },
   };
 }
 
@@ -65,6 +78,8 @@ interface PreviewRecord {
   path: string;
   forceText: boolean;
   owner: PreviewOwner;
+  /** 摘掉 owner 上那个 destroyed 监听；预览关掉时必须调用。 */
+  releaseOwner?: () => void;
   watcher?: FSWatcher;
   document?: FilePreviewDocument;
 }
@@ -125,6 +140,8 @@ function closePreviewRecord(id: string): void {
   const record = previews.get(id);
   if (!record) return;
   record.watcher?.close();
+  record.releaseOwner?.();
+  record.releaseOwner = undefined;
   previews.delete(id);
 }
 
@@ -156,7 +173,7 @@ async function createPreviewRecord(owner: PreviewOwner, input: OpenFilePreviewIn
     record.watcher = watch(dirname(record.path), { persistent: false }, (_event, filename) => {
       if (!filename || filename.toString() === basename(record.path)) void updatePreview(record);
     });
-    owner.onGone(() => closePreviewRecord(id));
+    record.releaseOwner = owner.onGone(() => closePreviewRecord(id));
     return record.document;
   } catch (error) {
     closePreviewRecord(id);
