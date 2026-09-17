@@ -6,8 +6,13 @@ CoilCoil carries a thin fork of Pi under `vendor/pi`.
 - Upstream branch: `main`
 - Local remote name: `pi-upstream`
 - Import method: Git subtree with squashed upstream history
-- Current sync point: upstream `8fa7eebd2` ("fix: persist default to scoped if
-  non-empty", 2026-08-25). The previous one was `05bf9df65` (2026-08-04).
+- Current sync point: upstream `d981de122` ("Release v0.85.1", 2026-09-05),
+  the `v0.85.1` tag. The previous one was `8fa7eebd2` (2026-08-25).
+- The 2026-09-17 update was applied as `git diff <old> <new> | git apply -3
+  --directory=vendor/pi`, not a subtree merge, because the tree had already lost
+  its subtree history. Three-way apply carries the patches below across on its
+  own and reports the rest as conflicts, which is what we want: only
+  `agent-session.ts` conflicted.
 
 The initial import intentionally contains no CoilCoil-specific Pi changes.
 Product behavior should remain in CoilCoil packages whenever Pi's public SDK or
@@ -39,6 +44,44 @@ embedded runtime requires a capability that cannot be implemented outside Pi.
   does. Regression test:
   `packages/coding-agent/test/suite/agent-session-model-extension.test.ts`.
 
+- `packages/coding-agent/src/core/settings-manager.ts` raises Pi's turn-retry
+  defaults from 3 attempts / 2000 ms to 8 attempts / 1500 ms and adds a 30 s
+  ceiling (`maxDelayMs`). An unstable gateway usually recovers, and giving up
+  after three tries left the user resuming a half-finished run by hand; without
+  a ceiling the doubling reaches minutes per attempt and reads as a hang.
+- `packages/ai/src/utils/retry.ts` adds the wordings gateways use for a dropped
+  upstream stream (`upstream_error`, `stream ended prematurely`, `premature
+  close`, `ECONNRESET`, …). Pi's list only matched the origin providers' own
+  phrasing, so a gateway failure ended the run outright instead of retrying.
+- `packages/coding-agent/src/core/agent-session.ts` adds
+  `_checkMidTurnCompaction()`, called from the `prepareNextTurnWithContext`
+  hook. See "Mid-turn compaction" below for why we keep it over the upstream
+  equivalent that landed in 0.85.0.
+
+## Upstream features we deliberately do not take
+
+### Mid-turn compaction (`_compactBeforeNextAssistantResponse`)
+
+- Upstream added its own mid-turn compaction check in the same
+  `prepareNextTurnWithContext` seam we had patched (the fix for
+  earendil-works/pi#6879, which our patch comment cites). On the 2026-09-17
+  pull we **removed upstream's method and its call** and kept CoilCoil's
+  `_checkMidTurnCompaction`, so the two do not both fire at one threshold.
+- The token source is nearly the same: upstream's `estimateContextTokens` also
+  starts from the last assistant message's real usage and only estimates
+  messages after it at chars/4. The difference is the guards. Ours additionally
+  refuses to run when a compaction is already in flight, when the assistant
+  message was aborted or errored, when the message came from a different
+  provider/model than the session's current one, and — most importantly — when
+  the message predates the latest compaction entry, whose usage still describes
+  the pre-compaction conversation and would trigger an immediate second pass.
+  Upstream's has none of these.
+- Compaction is the area of CoilCoil the user has asked us most often to stop
+  churning. Preserving the behaviour of the build they are running is worth more
+  here than shedding a local patch.
+- On the next pull: if upstream grows the same guards, drop our patch and take
+  theirs. Otherwise keep removing theirs.
+
 ## Upstream bugs we patch ourselves
 
 These are Pi defects, not CoilCoil behavior. Each one is carried until upstream
@@ -68,6 +111,7 @@ subtree pull** and drop the patch once the fix lands there.
 - On the next pull: if `convertResponsesMessages` now keeps call ids unique
   across the input, drop our patch and keep the regression test if it still
   compiles. Otherwise re-apply. If we upstream it, link the issue and PR here.
+- Re-checked against `v0.85.1` (2026-09-17): still unfixed upstream, patch kept.
 
 ### Response-only `status` on replayed Responses input
 
@@ -82,6 +126,22 @@ subtree pull** and drop the patch once the fix lands there.
   The patch casts to `ResponseInputItem` instead.
 - On the next pull: keep the patch unless upstream starts building these items
   as `ResponseInputItem`.
+- Re-checked against `v0.85.1` (2026-09-17): still unfixed upstream, patch kept.
+
+### Duplicate tool call id replayed to Anthropic-shaped endpoints
+
+- Added 2026-09-07. Patch: `packages/ai/src/api/transform-messages.ts`
+  (`claimToolCallId` in `transformMessages`). Regression test:
+  `packages/ai/test/duplicate-tool-call-id-replay.test.ts`.
+- Symptom: the mirror image of the Responses bug above. Providers on
+  `openai-completions` restart their tool call ids at `call_0` every turn, and
+  an Anthropic-shaped endpoint rejects the replayed history because each
+  `tool_use` must have exactly one result.
+- Cause: `transformMessages` replayed the stored ids verbatim; only the
+  cross-provider *normalization* path rewrote them, so a same-shape replay kept
+  the duplicates. The patch renames repeats and routes the following tool
+  result to the renamed call through `toolCallIdMap`.
+- Re-checked against `v0.85.1` (2026-09-17): still unfixed upstream, patch kept.
 
 ## Update from upstream
 
