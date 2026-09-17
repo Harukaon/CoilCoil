@@ -3,8 +3,10 @@ import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protoco
 export const DEFAULT_VISIBLE_SESSION_ROWS = 4;
 export const SESSION_EXPANSION_BATCH = 4;
 
-export function collapsedSessionLimit(hasPendingConversation: boolean): number {
-  return DEFAULT_VISIBLE_SESSION_ROWS - (hasPendingConversation ? 1 : 0);
+/* 从前这里要给「新对话」那一行让出一格，所以带一个 hasPendingConversation 参数。
+   那一行已经不画了，折叠时就是固定的四行。 */
+export function collapsedSessionLimit(): number {
+  return DEFAULT_VISIBLE_SESSION_ROWS;
 }
 
 export function nextExpandedSessionLimit(currentVisible: number, total: number): number {
@@ -23,6 +25,27 @@ export function upsertSessionSummary(sessions: SessionSummary[], session: Sessio
     if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
     return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
   });
+}
+
+/**
+ * 归档掉当前这条之后，该轮到哪一条。
+ *
+ * 取紧挨着的下一条；被归档的是最后一条就取上一条；整个工作区空了就返回
+ * undefined，由调用方落到空白状态。原来这里一律弹一个「新对话」出来——归档一条
+ * 旧对话并不表示要开新的，用户的话是「直接默认选中下一个不就好了…如果没有下一个
+ * 可选，就显示一个空白」。
+ *
+ * 传进来的是归档前的那份列表：只有它还留着被归档那条的位置，才谈得上「下一条」。
+ */
+export function nextSelectionAfterArchive(
+  previous: readonly SessionSummary[],
+  archivedPath: string,
+): SessionSummary | undefined {
+  const index = previous.findIndex((session) => session.path === archivedPath);
+  if (index === -1) return undefined;
+  const remaining = previous.filter((session) => session.path !== archivedPath);
+  if (!remaining.length) return undefined;
+  return remaining[Math.min(index, remaining.length - 1)];
 }
 
 export interface PinnedSessionEntry {

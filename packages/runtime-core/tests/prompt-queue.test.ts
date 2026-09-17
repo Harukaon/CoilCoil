@@ -76,6 +76,7 @@ function createQueueHarness(root: string, failures = new Set<number>()) {
     messageRevision: 0,
     pendingUserPrompts: [],
     promptQueue: [],
+    steeringMessages: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 0,
     toolRunIds: new ToolRunIds(),

@@ -1,4 +1,4 @@
-import type { ChatMessage, QueuedPrompt } from "@coilcoil/runtime-protocol";
+import type { ChatMessage, QueuedPrompt, SteeringMessage } from "@coilcoil/runtime-protocol";
 
 export interface PendingUserMessage {
   message: ChatMessage;
@@ -17,7 +17,7 @@ export type ConversationMessagesAction =
   | { type: "reset"; sessionPath?: string; messages?: ChatMessage[] }
   | { type: "queue"; message: ChatMessage; sessionPath?: string }
   | { type: "bind_session"; id: string; sessionPath: string }
-  | { type: "snapshot"; sessionPath: string; messages: ChatMessage[]; promptQueue?: QueuedPrompt[]; revision: number }
+  | { type: "snapshot"; sessionPath: string; messages: ChatMessage[]; promptQueue?: QueuedPrompt[]; steering?: SteeringMessage[]; revision: number }
   | { type: "prompt_queue"; queue: QueuedPrompt[]; revision: number; sessionPath?: string }
   | { type: "runtime_message"; message: ChatMessage; revision: number; sessionPath?: string }
   | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; timestamp: number; revision: number; sessionPath?: string }
@@ -92,11 +92,34 @@ export function conversationMessagesReducer(
       if (sameSession && action.revision < state.revision) return state;
       const queued = queuedMessages(action.promptQueue ?? []);
       const queuedIds = new Set(queued.map((message) => message.id));
-      const pending = sameSession
+      /* 介入消息既不在队列里也不在记录里，切走时本地那份 pending 就没了。快照
+         现在带着它们（SessionSnapshot.steering），所以切回来要按快照重建，而不是
+         清空——否则介入照常生效，界面上却看不到，用户「切换了一次界面之后就看不
+         到了」说的就是这里。 */
+      const restored = (action.steering ?? []).map((item) => ({
+        message: {
+          id: item.id,
+          order: item.timestamp,
+          role: "user" as const,
+          text: item.text,
+          images: item.images,
+          timestamp: item.timestamp,
+          status: "steering" as const,
+        },
+        sessionPath: action.sessionPath,
+      }));
+      const restoredIds = new Set(restored.map((item) => item.message.id));
+      const carried = sameSession
         ? state.pending.filter((item) => item.sessionPath === action.sessionPath
+          && !restoredIds.has(item.message.id)
           && !queuedIds.has(item.message.id)
           && !action.messages.some((message) => message.id === item.message.id))
         : [];
+      const pending = [
+        ...carried,
+        ...restored.filter((item) => !queuedIds.has(item.message.id)
+          && !action.messages.some((message) => message.id === item.message.id)),
+      ];
       return {
         sessionPath: action.sessionPath,
         revision: action.revision,

@@ -877,7 +877,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
    .inspector-nav 的 max-width 配套算出来的：48（本条）+ 62（右侧两个 30px 按钮 + 2px
    间距）+ 14（两处 gap）+ 16（左右 padding）= 140，正好是 nav 让出来的那 140px。
    改任何一个数都要一起改，apps/desktop/tests/window-drag.test.ts 会核对这笔账。 */
-.inspector-drag-surface { min-width: 48px; align-self: stretch; flex: 1 1 auto; user-select: none; }
+.inspector-drag-surface { min-width: 48px; align-self: stretch; flex: 0 0 auto; user-select: none; }
 .inspector-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
 /* 右栏展开时它在窗口最右上角，正好是窗口按钮的位置。 */
 [data-platform="win32"] .inspector-actions, [data-platform="linux"] .inspector-actions { margin-right: var(--window-controls-width); }
@@ -886,13 +886,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .inspector-add-popover button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-196)); background: hsl(var(--th) var(--ts) var(--l-922)); }
 .inspector-add-popover button:disabled { color: hsl(var(--th) var(--ts) var(--l-678)); cursor: default; }
 /* 标签条只能占到给它的那一段，多出来的横向滚动——以前是 calc(100% - 80px)，而右侧
-   按钮 + padding + gap 本身就要 92px，于是标签一多先把拖动带挤没、再把按钮顶出去。 */
-.inspector-nav { display: flex; min-width: 0; max-width: calc(100% - 140px); flex: 0 0 auto; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
+   按钮 + padding + gap 本身就要 92px，于是标签一多先把拖动带挤没、再把按钮顶出去。
+   标签条现在 flex:1 吃掉剩余宽度、拖动带退回固定 48px：从前是反过来的，标签只有
+   一两个时那段空白全归拖动带，看上去就是「右边明明还有位置却不放标签」。标签自己
+   也能长（flex:1 1 auto，上限 200px），先把名字显全再说。 */
+.inspector-nav { display: flex; min-width: 0; max-width: calc(100% - 140px); flex: 1 1 auto; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
 .inspector-nav::-webkit-scrollbar { display: none; }
-.inspector-tab { display: flex; width: max-content; min-width: 0; max-width: 150px; height: 32px; flex: 0 0 auto; align-items: center; overflow: hidden; border: 1px solid transparent; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-402)); font-size: 10px; }
+.inspector-tab { display: flex; width: max-content; min-width: 0; max-width: 200px; height: 32px; flex: 1 0 auto; align-items: center; overflow: hidden; border: 1px solid transparent; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-402)); font-size: 10px; }
 .inspector-tab:hover, .inspector-tab.active { color: hsl(var(--th) var(--ts) var(--l-153)); background: hsl(var(--th) var(--ts) var(--l-920)); }
 .inspector-nav .inspector-tab-select { display: flex; width: auto; min-width: 0; height: 100%; flex: 1 1 auto; align-items: center; gap: 5px; overflow: hidden; padding: 0 5px 0 9px; border-radius: var(--radius-lg) 0 0 var(--radius-lg); color: inherit; background: transparent; cursor: pointer; }
-.inspector-tab-select > span { display: block; width: auto; max-width: none; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inspector-tab-select > span { display: block; width: auto; max-width: none; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-nav .inspector-tab-close { display: grid; width: 25px; height: 25px; flex: 0 0 auto; margin-right: 2px; padding: 0; border-radius: var(--radius-md); color: inherit; background: transparent; place-items: center; cursor: pointer; }
 .inspector-tab-close:hover { background: hsl(var(--th) var(--ts) var(--l-861)); }
 .inspector-nav small { position: absolute; top: -3px; right: 3px; min-width: 15px; padding: 1px 4px; border-radius: var(--radius-xl); color: hsl(var(--th) var(--ts) var(--l-457)); background: hsl(var(--th) var(--ts) var(--l-861)); font-size: 9px; text-align: center; }

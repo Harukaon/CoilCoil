@@ -10,6 +10,8 @@
  */
 import { createRoot } from "react-dom/client";
 import { MemoryWorkspace } from "../../src/renderer/src/features/memory/MemoryWorkspace";
+import { InspectorPane } from "../../src/renderer/src/features/inspector/InspectorPane";
+import { Cpu, Files, Globe, TerminalSquare } from "lucide-react";
 import { initTheme } from "../../src/renderer/src/theme";
 import fixture from "./memory-fixture.json";
 import "../../src/renderer/src/styles.css";
@@ -141,8 +143,47 @@ if (parameters.get("measure")) {
   }, 1600);
 }
 
-createRoot(document.getElementById("root")!).render(
-  <div className="app-shell left-collapsed" style={{ display: "grid", gridTemplateColumns: "0 1fr", gridTemplateRows: "100%", height: "100vh" }}>
-    <MemoryWorkspace leftOpen={false} onOpenLeft={() => undefined} onClose={() => undefined} />
-  </div>,
-);
+/**
+ * `?panel=inspector&tabs=N&width=W` draws the right-hand pane on its own.
+ *
+ * The header there splits a fixed width between the tab strip, a band reserved
+ * for dragging the window, and two buttons. Which of the three ends up with the
+ * slack is not visible in any test — only in a picture.
+ */
+const INSPECTOR_TABS = [
+  { id: "runtime", label: "运行时", icon: Cpu, closable: true },
+  { id: "files", label: "文件", icon: Files, closable: true },
+  { id: "browser", label: "浏览器", icon: Globe, closable: true },
+  { id: "term-1", label: "term-1 · npm run dev", icon: TerminalSquare, closable: true },
+  { id: "term-2", label: "term-2 · wrangler tail", icon: TerminalSquare, closable: true },
+];
+
+const panel = parameters.get("panel");
+const root = createRoot(document.getElementById("root")!);
+if (panel === "inspector") {
+  const count = Number.parseInt(parameters.get("tabs") ?? "1", 10);
+  const width = parameters.get("width") ?? "360";
+  root.render(
+    <div className="app-shell" style={{ display: "grid", gridTemplateColumns: `1fr ${width}px`, gridTemplateRows: "100%", height: "100vh" }}>
+      <div />
+      <InspectorPane
+        tabs={INSPECTOR_TABS.slice(0, Math.max(1, count))}
+        activeTab={INSPECTOR_TABS[0].id}
+        onSelectTab={() => undefined}
+        onCloseTab={() => undefined}
+        addOptions={[{ id: "files", label: "文件", icon: Files }]}
+        onAddTab={() => undefined}
+        onClose={() => undefined}
+        emptyState={<p>没有面板</p>}
+      >
+        <div style={{ padding: 16, font: "12px/1.6 system-ui" }}>面板内容</div>
+      </InspectorPane>
+    </div>,
+  );
+} else {
+  root.render(
+    <div className="app-shell left-collapsed" style={{ display: "grid", gridTemplateColumns: "0 1fr", gridTemplateRows: "100%", height: "100vh" }}>
+      <MemoryWorkspace leftOpen={false} onOpenLeft={() => undefined} onClose={() => undefined} />
+    </div>,
+  );
+}

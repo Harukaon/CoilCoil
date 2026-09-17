@@ -628,6 +628,19 @@ export interface QueuedPrompt {
   promoting?: boolean;
 }
 
+/**
+ * 已经交给 Pi、但要等这一轮跑完才会落进对话的介入消息。
+ *
+ * 它既不在队列里（已经离开了），也不在记录里（还没送到），所以除非单独带着，
+ * 切走一次就再也找不回来了——用户碰到的正是这个：介入还生效，界面上却没了。
+ */
+export interface SteeringMessage {
+  id: string;
+  text: string;
+  images?: PromptImage[];
+  timestamp: number;
+}
+
 /** A Pi custom message, carried so the UI can render it as its own card. */
 export interface ChatMessageCustom {
   /** Pi `customType`, e.g. `terminal-notification`. */
@@ -1136,6 +1149,8 @@ export interface SessionSnapshot {
   session: SessionSummary;
   messages: ChatMessage[];
   promptQueue: QueuedPrompt[];
+  /** 已交给 Pi、等这一轮结束才会落地的介入消息；切换会话后要靠它把界面恢复回来。 */
+  steering: SteeringMessage[];
   tools: ToolRun[];
   subagents: SubagentActivity[];
   project: ProjectSnapshot;
@@ -1261,6 +1276,8 @@ export type RuntimeCommand =
   | { type: "list_sessions"; cwd: string }
   | { type: "list_archived_sessions"; cwd: string }
   | { type: "archive_session"; cwd: string; sessionPath: string }
+  | { type: "delete_session"; cwd: string; sessionPath: string }
+  | { type: "delete_workspace_sessions"; cwd: string }
   | { type: "restore_session"; cwd: string; sessionPath: string }
   | { type: "rename_session"; cwd: string; sessionPath: string; name: string }
   | { type: "pin_session"; cwd: string; sessionPath: string; pinned: boolean }

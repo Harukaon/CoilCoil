@@ -61,6 +61,7 @@ function startRuntime(root: string, events: RuntimeEvent[]): { internals: Runtim
     messageRevision: 0,
     pendingUserPrompts: [],
     promptQueue: [],
+    steeringMessages: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 1,
     toolRunIds: new ToolRunIds(),

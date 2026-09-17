@@ -58,6 +58,7 @@ test("a mid-stream snapshot includes the in-progress assistant message instead o
     messageRevision: 0,
     pendingUserPrompts: [],
     promptQueue: [],
+    steeringMessages: [],
     promptDrainInProgress: false,
     // Deliberately far from reconstructState's own local order counter (which starts at
     // 0 per call) to prove the splice recomputes order rather than trusting this value.
@@ -152,6 +153,7 @@ test("assistant tool calls stay visible before a result and survive a live snaps
     messageRevision: 0,
     pendingUserPrompts: [],
     promptQueue: [],
+    steeringMessages: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 1,
     toolRunIds: new ToolRunIds(),

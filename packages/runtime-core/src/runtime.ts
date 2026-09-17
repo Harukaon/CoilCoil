@@ -199,12 +199,21 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     // for that stretch: it has left the queue, and it is not in the transcript
     // yet, so without this it reads as a message that was swallowed.
     if (clientMessageId) {
-      this.emitEvent({
-        type: "message_steering",
+      const steering = {
         id: clientMessageId,
         text: expandedPrompt,
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ mimeType, data })) : undefined,
         timestamp: Date.now(),
+      };
+      // 事件只对「此刻正开着这个会话」的界面有用。同时记进会话状态，快照才带得走
+      // ——否则切去别的对话再切回来，这条介入就从界面上消失了（它还会照常生效）。
+      // 清除时机和 pendingUserPrompts 一致：Pi 把这条用户消息回显出来就删。
+      if (!active.steeringMessages.some((item) => item.id === clientMessageId)) {
+        active.steeringMessages.push(steering);
+      }
+      this.emitEvent({
+        type: "message_steering",
+        ...steering,
         revision: ++active.messageRevision,
       });
     }
@@ -540,6 +549,10 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       promptQueue: active.promptQueue.map((item) => ({
         ...item,
         images: item.images?.map((image) => ({ ...image })),
+      })),
+      steering: active.steeringMessages.map((item) => ({
+        ...item,
+        images: item.images?.map((image: PromptImage) => ({ ...image })),
       })),
       tools: [...projectedTools.values()].sort((a, b) => a.order - b.order),
       subagents: [...active.subagents.values()].sort((left, right) => left.updatedAt - right.updatedAt || left.index - right.index),

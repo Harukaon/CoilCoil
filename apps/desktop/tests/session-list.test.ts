@@ -6,6 +6,7 @@ import {
   collapsedSessionLimit,
   conversationStatusKind,
   nextExpandedSessionLimit,
+  nextSelectionAfterArchive,
   summarizeWorkspaceActivity,
   titleFromPrompt,
   upsertSessionSummary,
@@ -78,8 +79,7 @@ test("置顶会话在全局区排序，但保留原工作区归属", () => {
 });
 
 test("工作区默认展示四行会话", () => {
-  assert.equal(collapsedSessionLimit(false), 4);
-  assert.equal(collapsedSessionLimit(true), 3);
+  assert.equal(collapsedSessionLimit(), 4);
 });
 
 test("更多会话每次只追加四行并且不会超过总数", () => {
@@ -170,4 +170,26 @@ test("没有置顶的时候，行为和原来完全一样", () => {
   assert.deepEqual(view.rows.map((item) => item.id), ["a", "b", "c", "d"]);
   assert.equal(view.hiddenCount, 1);
   assert.equal(view.plainTotal, 5);
+});
+
+test("归档后接着选下一条，而不是弹一个新对话出来", () => {
+  const rows = [
+    session({ id: "a", path: "/sessions/a.jsonl" }),
+    session({ id: "b", path: "/sessions/b.jsonl" }),
+    session({ id: "c", path: "/sessions/c.jsonl" }),
+  ];
+  // 归档中间那条 → 轮到它后面那条。
+  assert.equal(nextSelectionAfterArchive(rows, "/sessions/b.jsonl")?.id, "c");
+  // 归档第一条 → 同样是它后面那条。
+  assert.equal(nextSelectionAfterArchive(rows, "/sessions/a.jsonl")?.id, "b");
+  // 归档最后一条 → 没有下一条了，退回上一条。
+  assert.equal(nextSelectionAfterArchive(rows, "/sessions/c.jsonl")?.id, "b");
+});
+
+test("归档掉最后一条对话时落到空白，而不是随便选一条", () => {
+  const only = [session({ id: "a", path: "/sessions/a.jsonl" })];
+  assert.equal(nextSelectionAfterArchive(only, "/sessions/a.jsonl"), undefined);
+  // 不在这个工作区里的路径不该牵动选中。
+  assert.equal(nextSelectionAfterArchive(only, "/sessions/zzz.jsonl"), undefined);
+  assert.equal(nextSelectionAfterArchive([], "/sessions/a.jsonl"), undefined);
 });

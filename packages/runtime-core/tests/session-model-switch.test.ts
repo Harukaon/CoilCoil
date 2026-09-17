@@ -54,6 +54,7 @@ function snapshot(session: ModelSessionDouble): SessionSnapshot {
     },
     messages: [],
     promptQueue: [],
+    steering: [],
     tools: [],
     subagents: [],
     project: { cwd: "/tmp", files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },

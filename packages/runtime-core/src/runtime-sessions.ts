@@ -23,6 +23,7 @@ import {
 } from "@coilcoil/runtime-protocol";
 import {
   existsSync,
+  rmSync,
   statSync,
 } from "node:fs";
 import { SessionListingCache } from "./session-listing-cache.js";
@@ -147,6 +148,64 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       this.writePinnedSessions(pinned);
     }
     return this.listSessions(resolvedCwd);
+  }
+
+  /** 把这些会话从归档表和置顶表里摘掉——文件都没了，记账也不该留着。 */
+  private forgetSessionRecords(resolvedSessions: string[]): void {
+    const targets = new Set(resolvedSessions.map((item) => safeRealPath(item)));
+    const archived = this.readArchivedSessions();
+    let archivedChanged = false;
+    for (const key of Object.keys(archived)) {
+      if (targets.has(key)) { delete archived[key]; archivedChanged = true; }
+    }
+    if (archivedChanged) this.writeArchivedSessions(archived);
+    const pinned = this.readPinnedSessions();
+    let pinnedChanged = false;
+    for (const key of Object.keys(pinned)) {
+      if (targets.has(key)) { delete pinned[key]; pinnedChanged = true; }
+    }
+    if (pinnedChanged) this.writePinnedSessions(pinned);
+  }
+
+  /**
+   * 永久删除一条对话。
+   *
+   * 归档只是把它从列表里藏起来，文件仍然躺在会话目录里，所以工作区不用了也清不
+   * 干净。用户的原话：「没有删除对话的功能，就会导致我想把这个对话删掉，但删不
+   * 掉」。删不可撤销，确认放在界面那一层。
+   */
+  async deleteSession(cwd: string, sessionPath: string): Promise<SessionSummary[]> {
+    const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
+    const activeFile = this.active?.session.sessionFile ? safeRealPath(this.active.session.sessionFile) : undefined;
+    if (activeFile && activeFile === safeRealPath(resolvedSession)) {
+      throw new Error("该会话仍在运行，请先停止后再删除。");
+    }
+    this.forgetSessionRecords([resolvedSession]);
+    rmSync(resolvedSession, { force: true });
+    return this.listSessions(resolvedCwd);
+  }
+
+  /**
+   * 删掉一个工作区的全部对话记录，含已归档的那些。
+   *
+   * 只动 CoilCoil 自己的会话文件；工作区目录里的代码一个字节都不碰。
+   */
+  async deleteWorkspaceSessions(cwd: string): Promise<{ deleted: number }> {
+    const resolvedCwd = safeRealPath(cwd);
+    const sessions = await this.listSessionInfos(resolvedCwd);
+    const activeFile = this.active?.session.sessionFile ? safeRealPath(this.active.session.sessionFile) : undefined;
+    const paths = sessions.map((session) => safeRealPath(session.path));
+    if (activeFile && paths.includes(activeFile)) {
+      throw new Error("该工作区里还有正在运行的会话，请先停止后再删除。");
+    }
+    this.forgetSessionRecords(paths);
+    let deleted = 0;
+    for (const path of paths) {
+      rmSync(path, { force: true });
+      deleted += 1;
+    }
+    await this.listSessions(resolvedCwd);
+    return { deleted };
   }
 
   async restoreSession(cwd: string, sessionPath: string): Promise<SessionSummary[]> {
@@ -522,6 +581,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       messageRevision: 0,
       pendingUserPrompts: [],
       promptQueue: [],
+      steeringMessages: [],
       promptDrainInProgress: false,
       nextTimelineOrder: reconstructed.nextTimelineOrder,
       toolRunIds: reconstructed.toolRunIds,

@@ -301,7 +301,13 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           }
           // Confirm the user bubble before removing its queued projection, so
           // the renderer never observes a frame where the message disappears.
-          if (role === "user" && clientMessageId) this.removeQueuedPrompt(active, clientMessageId);
+          if (role === "user" && clientMessageId) {
+            this.removeQueuedPrompt(active, clientMessageId);
+            // 这条介入已经落进对话了，快照里那份投影就该收掉，否则界面上会同时
+            // 出现「等待介入」和它本身。
+            const steeringIndex = active.steeringMessages.findIndex((item) => item.id === clientMessageId);
+            if (steeringIndex >= 0) active.steeringMessages.splice(steeringIndex, 1);
+          }
           if (mapped && mapped.role === "assistant") {
             active.activeAssistantMessage = { ...mapped, status: "running" };
           }

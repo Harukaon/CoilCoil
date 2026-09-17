@@ -1,5 +1,6 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import {
+  Trash2,
   Archive,
   BookOpen,
   ChevronDown,
@@ -28,6 +29,7 @@ import { primaryModifierLabel } from "../../../../shared/platform-labels";
 import { OrbitLoader } from "../../ui/loaders";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
+import { ConfirmDialog } from "../../ui/dialog";
 import { copyText } from "../files/pathActions";
 import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, visibleRecentSessions } from "./recentSessions";
 import { dropSidebarSection, loadSidebarSectionOrder, saveSidebarSectionOrder, SIDEBAR_SECTION_LABELS, type SidebarSection } from "./sidebarSections";
@@ -147,7 +149,6 @@ export function WorkspaceSidebar({
   projects,
   activeProject,
   activeSessionId,
-  pendingProjectPath,
   sessionsByProject,
   sessionActivity,
   expandedProjects,
@@ -159,13 +160,14 @@ export function WorkspaceSidebar({
   onShowMoreSessions,
   onOpenConversation,
   onArchiveConversation,
+  onDeleteConversation,
+  onDeleteWorkspaceData,
   onRenameConversation,
   onPinConversation,
   onForkConversation,
   onMoveConversation,
   onReorderProjects,
   onRestoreSessions,
-  onFocusPending,
   boardOpen,
   onOpenBoard,
   skillsOpen,
@@ -179,7 +181,6 @@ export function WorkspaceSidebar({
   projects: ProjectSelection[];
   activeProject: ProjectSelection | null;
   activeSessionId?: string;
-  pendingProjectPath?: string;
   sessionsByProject: Record<string, SessionSummary[]>;
   sessionActivity: Record<string, SessionActivityState>;
   expandedProjects: Set<string>;
@@ -191,13 +192,14 @@ export function WorkspaceSidebar({
   onShowMoreSessions: (path: string, limit: number) => void;
   onOpenConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onArchiveConversation: (project: ProjectSelection, session: SessionSummary) => void;
+  onDeleteConversation: (project: ProjectSelection, session: SessionSummary) => void;
+  onDeleteWorkspaceData: (project: ProjectSelection) => void;
   onRenameConversation: (project: ProjectSelection, session: SessionSummary, name: string) => Promise<void> | void;
   onPinConversation: (project: ProjectSelection, session: SessionSummary, pinned: boolean) => void;
   onForkConversation: (project: ProjectSelection, session: SessionSummary) => void;
   onMoveConversation: (project: ProjectSelection, session: SessionSummary, target: ProjectSelection) => void;
   onReorderProjects: (fromPath: string, toPath: string) => void;
   onRestoreSessions: (project: ProjectSelection, sessions: SessionSummary[]) => void;
-  onFocusPending: () => void;
   /** 任务面板是不是正开着——开着的那个工作区，行上的按钮要亮起来。 */
   boardOpen: boolean;
   onOpenBoard: (owner: ProjectSelection) => void;
@@ -219,6 +221,12 @@ export function WorkspaceSidebar({
   const [draggingSection, setDraggingSection] = useState<SidebarSection>();
   const [sectionDropTarget, setSectionDropTarget] = useState<SidebarSection>();
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_ROWS);
+  /* 删除不可撤销，所以两个删除入口都先过这个确认框。把要删的东西记在 state 里而
+     不是各画一个对话框——右键菜单一关，菜单里的组件就跟着卸载了。 */
+  const [pendingDelete, setPendingDelete] = useState<
+    | { kind: "conversation"; project: ProjectSelection; session: SessionSummary }
+    | { kind: "workspace"; project: ProjectSelection; count: number }
+  >();
   const pinnedSessions = collectPinnedSessions(projects, sessionsByProject);
   const recentSessions = collectRecentSessions(projects, sessionsByProject);
   // The limit counts unpinned rows only; see visibleRecentSessions.
@@ -345,14 +353,13 @@ export function WorkspaceSidebar({
     {projects.length ? projects.map((project) => {
       const expanded = expandedProjects.has(project.path);
       const allSessions = sessionsByProject[project.path] ?? [];
-      const hasPending = pendingProjectPath === project.path;
       // Collapsed workspaces hide their running conversations; the folder
       // row carries their state so nothing is forgotten in there. Pinned ones
       // are not counted: they are listed in the strip at the top now, not under
       // this folder, and a badge for a row that is not there is just confusing.
       const workspaceActivity = summarizeWorkspaceActivity(allSessions, sessionActivity);
       const workspaceActivityText = workspaceActivityLabel(workspaceActivity);
-      const collapsedLimit = collapsedSessionLimit(hasPending);
+      const collapsedLimit = collapsedSessionLimit();
       const visibleLimit = Math.max(collapsedLimit, expandedSessionLimits[project.path] ?? collapsedLimit);
       const { rows: visibleSessions, hiddenCount, plainTotal } = visibleProjectSessions(allSessions, visibleLimit);
       return (
@@ -422,12 +429,23 @@ export function WorkspaceSidebar({
                 >
                   <span>卸载工作区</span>
                 </ContextMenu.Item>
+                <ContextMenu.Separator className="conversation-context-separator" />
+                <ContextMenu.Item
+                  className="conversation-context-item danger"
+                  disabled={project.kind === "home"}
+                  onSelect={() => setPendingDelete({ kind: "workspace", project, count: allSessions.length })}
+                >
+                  <Trash2 size={13} /><span>删除工作区所有记录</span>
+                </ContextMenu.Item>
               </ContextMenu.Content>
             </ContextMenu.Portal>
           </ContextMenu.Root>
           <div className={`conversation-list-shell ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
             <div className="conversation-list">
-              {hasPending ? <button className="conversation-row active pending" type="button" onClick={onFocusPending}><span className="conversation-status"><Circle size={11} strokeWidth={1.7} /></span><span className="conversation-title-text">新对话</span><time>刚刚</time></button> : null}
+              {/* 这里原来有一行「新对话」占位。拿掉了：空的输入框本身就是「还没有
+                  对话」，再给它一行列表项反而像凭空多出一条记录——归档完最明显，
+                  刚删掉一条，列表顶上立刻冒出一条新的。现在没有可选的对话时，列表
+                  里就是什么都不选，右边是空白输入框。 */}
               {visibleSessions.map((session) => {
                 const activity = sessionActivity[session.path];
                 const renaming = renamingPath === session.path;
@@ -531,6 +549,13 @@ export function WorkspaceSidebar({
                       <ConversationCopyItems session={session} />
                       <ContextMenu.Separator className="conversation-context-separator" />
                       <ContextMenu.Item className="conversation-context-item" disabled={activity?.running} onSelect={() => onArchiveConversation(project, session)}>归档对话</ContextMenu.Item>
+                      <ContextMenu.Item
+                        className="conversation-context-item danger"
+                        disabled={activity?.running}
+                        onSelect={() => setPendingDelete({ kind: "conversation", project, session })}
+                      >
+                        <Trash2 size={13} /><span>删除对话</span>
+                      </ContextMenu.Item>
                     </ContextMenu.Content>
                   </ContextMenu.Portal>
                 </ContextMenu.Root>;
@@ -543,7 +568,7 @@ export function WorkspaceSidebar({
               />
               {/* 置顶的对话搬到顶上去了，所以「一条都没有」现在得按剩下的算。全被
                   置顶的工作区展开是空的，那就说清楚它们去哪了，别让人以为丢了。 */}
-              {!plainTotal && !hasPending ? (
+              {!plainTotal ? (
                 <p className="empty-conversations">{allSessions.length ? "对话都在上面的置顶区" : "暂无对话"}</p>
               ) : null}
             </div>
@@ -594,6 +619,28 @@ export function WorkspaceSidebar({
         {sectionOrder.map((name) => <Fragment key={name}>{name === "recent" ? recentSection : projectsSection}</Fragment>)}
       </section>
       <div className="sidebar-footer"><div className="brand-mark"><span className="brand-icon" aria-hidden="true" /></div><div className="brand-copy"><strong>CoilCoil</strong><span>{modelLabel}</span></div><button className="icon-button" type="button" aria-label="设置" onClick={onOpenSettings}><Settings size={17} strokeWidth={1.7} /></button></div>
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title={pendingDelete?.kind === "workspace" ? "删除这个工作区的所有记录？" : "删除这条对话？"}
+        description={pendingDelete?.kind === "workspace"
+          ? `将永久删除「${pendingDelete.project.name}」的全部 ${pendingDelete.count} 条对话记录（含已归档的），然后把它从侧栏卸载。工作区目录里的文件不会被动。此操作不可撤销。`
+          : `将永久删除「${pendingDelete?.session.title ?? ""}」。归档只是收起来，删除是真的删掉，不可撤销。`}
+        actions={[
+          {
+            label: "删除",
+            variant: "danger",
+            onClick: () => {
+              const target = pendingDelete;
+              setPendingDelete(undefined);
+              if (!target) return;
+              if (target.kind === "workspace") onDeleteWorkspaceData(target.project);
+              else onDeleteConversation(target.project, target.session);
+            },
+          },
+          { label: "取消", onClick: () => setPendingDelete(undefined), autoFocus: true },
+        ]}
+        onClose={() => setPendingDelete(undefined)}
+      />
     </aside>
   );
 }

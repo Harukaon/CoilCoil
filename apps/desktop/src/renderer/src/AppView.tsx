@@ -84,6 +84,8 @@ export interface AppViewController {
   removeProject(owner: ProjectSelection): void;
   openConversation(owner: ProjectSelection, session: SessionSummary): Promise<void>;
   archiveConversation(owner: ProjectSelection, session: SessionSummary): Promise<void>;
+  deleteConversation(owner: ProjectSelection, session: SessionSummary): Promise<void>;
+  deleteWorkspaceData(owner: ProjectSelection): Promise<void>;
   renameConversation(owner: ProjectSelection, session: SessionSummary, name: string): Promise<void>;
   pinConversation(owner: ProjectSelection, session: SessionSummary, pinned: boolean): Promise<void>;
   forkConversation(owner: ProjectSelection, session: SessionSummary): Promise<void>;
@@ -116,7 +118,8 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,
     setSettingsOpen, setSettingsSection, setLeftOpen, beginResize,
     startNewConversation, openProject, removeProject, openConversation,
-    archiveConversation, renameConversation, pinConversation, forkConversation,
+    archiveConversation, deleteConversation, deleteWorkspaceData,
+    renameConversation, pinConversation, forkConversation,
     moveConversation, reorderProjects,
     rewindPrompt, cancelQueuedPrompt, promoteQueuedPrompt, abortRun, stopSubagent, resumeSubagent,
     approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
@@ -161,7 +164,6 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
         projects={projects}
         activeProject={project}
         activeSessionId={activeConversation?.id}
-        pendingProjectPath={pendingProjectPath}
         sessionsByProject={sessionsByProject}
         sessionActivity={sessionActivity}
         expandedProjects={expandedProjects}
@@ -177,18 +179,19 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
         onShowMoreSessions={(path, limit) => setExpandedSessionLimits((current) => ({ ...current, [path]: limit }))}
         onOpenConversation={(owner, session) => { void openConversation(owner, session); }}
         onArchiveConversation={(owner, session) => { void archiveConversation(owner, session); }}
+        onDeleteConversation={(owner, session) => { void deleteConversation(owner, session); }}
+        onDeleteWorkspaceData={(owner) => { void deleteWorkspaceData(owner); }}
         onRenameConversation={renameConversation}
         onPinConversation={(owner, session, pinned) => { void pinConversation(owner, session, pinned); }}
         onForkConversation={(owner, session) => { void forkConversation(owner, session); }}
         onMoveConversation={(owner, session, target) => { void moveConversation(owner, session, target); }}
         onReorderProjects={reorderProjects}
         onRestoreSessions={(owner, sessions) => setSessionsByProject((current) => ({ ...current, [owner.path]: sessions }))}
-        onFocusPending={() => {
-          setWorkspaceSurface("conversation");
-          window.requestAnimationFrame(() => inputRef.current?.focus());
-        }}
         boardOpen={workspaceSurface === "issues"}
-        onOpenBoard={(owner) => { setModelMenuOpen(false); setWorkspaceSurface("issues"); if (owner.path !== project?.path) startNewConversation(owner); }}
+        /* 切工作区要排在设面板之前：startNewConversation 内部会把 surface 拨回
+           "conversation"，先设 "issues" 会被它盖掉——于是点另一个工作区的任务按钮，
+           第一下只是开了个新对话，第二下（这时已经是当前工作区、不再切）才进得去。 */
+        onOpenBoard={(owner) => { setModelMenuOpen(false); if (owner.path !== project?.path) startNewConversation(owner); setWorkspaceSurface("issues"); }}
         skillsOpen={workspaceSurface === "skills"}
         onOpenSkills={() => { setModelMenuOpen(false); setWorkspaceSurface("skills"); }}
         memoryOpen={workspaceSurface === "memory"}

@@ -155,7 +155,7 @@ export default function App(): React.JSX.Element {
       type: "snapshot",
       sessionPath: next.session.path,
       messages: next.messages,
-      promptQueue: next.promptQueue,
+      promptQueue: next.promptQueue, steering: next.steering,
       revision: next.messageRevision ?? 0,
     });
     setTools(next.tools);
@@ -399,12 +399,12 @@ export default function App(): React.JSX.Element {
   useBubbleHandoff({ projects, sessionsByProject, openConversation, onError: toastError });
 
   const {
-    archiveConversation, renameConversation, pinConversation, forkConversation,
-    moveConversation, reorderProjects,
+    archiveConversation, deleteConversation, deleteWorkspaceData,
+    renameConversation, pinConversation, forkConversation, moveConversation, reorderProjects,
   } = useConversationActions({
-    sessionActivity, projectRef, snapshotRef, snapshotCacheRef, runtimeSessionRef,
-    optimisticSessionsRef, setProjects, setSessionsByProject, setSessionActivity,
-    setExpandedProjects, startPendingConversation, openConversation,
+    projects, sessionsByProject, sessionActivity, projectRef, snapshotRef, snapshotCacheRef,
+    runtimeSessionRef, optimisticSessionsRef, setProjects, setSessionsByProject, setSessionActivity,
+    setExpandedProjects, startPendingConversation, openConversation, removeProject,
   });
 
   const {
@@ -589,8 +589,8 @@ export default function App(): React.JSX.Element {
         setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,
         setSettingsOpen, setSettingsSection, setLeftOpen, beginResize,
         startNewConversation, openProject, removeProject, openConversation,
-        archiveConversation, renameConversation, pinConversation, forkConversation,
-        moveConversation, reorderProjects,
+        archiveConversation, deleteConversation, deleteWorkspaceData, renameConversation,
+        pinConversation, forkConversation, moveConversation, reorderProjects,
         rewindPrompt, cancelQueuedPrompt, promoteQueuedPrompt, abortRun, stopSubagent, resumeSubagent,
         approvePlan, rejectPlan, submitPrompt, handleTimelineScroll,
         handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,

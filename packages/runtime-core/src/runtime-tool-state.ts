@@ -433,6 +433,9 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     if (!clientMessageId) return;
     const index = active.pendingUserPrompts.findIndex((prompt) => prompt.id === clientMessageId);
     if (index >= 0) active.pendingUserPrompts.splice(index, 1);
+    // 被拒掉的介入不会再落进对话，快照里那份投影也要一起收掉。
+    const steeringIndex = active.steeringMessages.findIndex((item) => item.id === clientMessageId);
+    if (steeringIndex >= 0) active.steeringMessages.splice(steeringIndex, 1);
     this.emitEvent({ type: "message_rejected", id: clientMessageId, revision: ++active.messageRevision, text });
   }
 

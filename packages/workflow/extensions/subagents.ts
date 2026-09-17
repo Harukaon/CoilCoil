@@ -67,7 +67,7 @@ const SubagentParams = Type.Object({
   ),
   agent: Type.Optional(Type.String({ description: "子 Agent profile 名称（如 explore、reviewer、worker），会套用预设的提示词、用户配置模型和工具范围；省略则用默认配置派发。" })),
   task: Type.Optional(Type.String({ description: "action=run 时必填；action=resume 时作为追加指示，省略则继续原任务。" })),
-  background: Type.Optional(Type.Boolean({ description: "true 时立即返回 runId，子 Agent 在后台运行，完成后会自动汇报。" })),
+  background: Type.Optional(Type.Boolean({ description: "默认 false：派发后阻塞等待子 Agent 跑完再返回结果。true 时立即返回 runId，子 Agent 在后台运行，完成后会自动汇报。" })),
   worktree: Type.Optional(Type.Boolean({ description: "true 时子 Agent 在独立的 git worktree 分支上工作，适合并行写入；省略则跟随 profile 设置（worker 默认开启）。" })),
   runId: Type.Optional(Type.String({ description: "action=status/stop/resume 时指定目标运行；status 省略则列出全部。" })),
 });
@@ -849,7 +849,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           {
             agent: request.params?.agent,
             task,
-            background: request.params?.background ?? true,
+            // 默认阻塞，和 subagent 工具那条路径一致（那边是 params.background === true）。
+            // 这里原本默认 true，同一个「派发子 Agent」在两条入口下行为相反：走工具是
+            // 等它跑完，走 RPC 是立刻返回。派发的默认语义应当是等结果，要并行再显式
+            // 传 background:true。
+            background: request.params?.background ?? false,
             worktree: request.params?.worktree,
             planId: request.params?.planId,
           },

@@ -50,6 +50,7 @@ function createAbortHarness(root: string) {
     messageRevision: 0,
     pendingUserPrompts: [],
     promptQueue: [],
+    steeringMessages: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 0,
     toolRunIds: new ToolRunIds(),

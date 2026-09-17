@@ -402,6 +402,8 @@ export class RuntimeServer {
       || command.type === "list_sessions"
       || command.type === "list_archived_sessions"
       || command.type === "archive_session"
+      || command.type === "delete_session"
+      || command.type === "delete_workspace_sessions"
       || command.type === "restore_session"
       || command.type === "configure_model"
       || command.type === "start_model_provider_oauth"
@@ -415,7 +417,9 @@ export class RuntimeServer {
       || (addressedRuntimeGone && answersFromWorkspaceConfiguration(command));
     const runtime = useControlRuntime ? this.runtime : this.selectedRuntime(runtimeId);
     const result = await this.dispatchTo(runtime, command);
-    if (command.type === "archive_session") await this.releaseSession(command.sessionPath);
+    if (command.type === "archive_session" || command.type === "delete_session") {
+      await this.releaseSession(command.sessionPath);
+    }
     if (
       command.type === "save_openai_responses_ws_configuration"
       || command.type === "save_model_provider_configuration"
@@ -564,6 +568,10 @@ export class RuntimeServer {
         return runtime.listArchivedSessions(command.cwd);
       case "archive_session":
         return runtime.archiveSession(command.cwd, command.sessionPath);
+      case "delete_session":
+        return runtime.deleteSession(command.cwd, command.sessionPath);
+      case "delete_workspace_sessions":
+        return runtime.deleteWorkspaceSessions(command.cwd);
       case "restore_session":
         return runtime.restoreSession(command.cwd, command.sessionPath);
       case "rename_session":

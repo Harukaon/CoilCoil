@@ -17,6 +17,7 @@ import {
   type ContextClearingRecord,
   type RuntimeSummaryEvent,
   type SkillConfigurationSnapshot,
+  type SteeringMessage,
   type SubagentActivity,
   type TerminalRun,
   type TodoItem,
@@ -77,6 +78,8 @@ export interface ActiveSession {
   /** Prompts handed to Pi whose user message it has not echoed back yet. */
   pendingUserPrompts: PendingUserPrompt[];
   promptQueue: QueuedPrompt[];
+  /** 已交给 Pi、还没落进对话的介入消息；快照带着它，切换会话后界面才恢复得回来。 */
+  steeringMessages: SteeringMessage[];
   promptDrainInProgress: boolean;
   /** Pending re-check for a queue held back only by Pi's streaming flag. */
   drainRetryTimer?: ReturnType<typeof setTimeout>;

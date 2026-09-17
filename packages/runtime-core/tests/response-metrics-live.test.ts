@@ -43,6 +43,7 @@ test("a just-finished response is reflected before Pi persists its assistant mes
     messageRevision: 0,
     pendingUserPrompts: [],
     promptQueue: [],
+    steeringMessages: [],
     promptDrainInProgress: false,
     nextTimelineOrder: 0,
     toolRunIds: new ToolRunIds(),
