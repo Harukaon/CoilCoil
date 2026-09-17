@@ -76,6 +76,8 @@ function answersFromWorkspaceConfiguration(command: RuntimeCommand): boolean {
     || command.type === "get_mcp_status"
     || command.type === "get_memory_configuration"
     || command.type === "get_subagent_configuration"
+    || command.type === "get_session_naming_configuration"
+    || command.type === "save_session_naming_configuration"
     || command.type === "get_skill_configuration";
 }
 
@@ -526,6 +528,10 @@ export class RuntimeServer {
         return runtime.saveMemoryConfiguration(command.input, command.cwd);
       case "get_subagent_configuration":
         return runtime.getSubagentConfiguration();
+      case "get_session_naming_configuration":
+        return runtime.getSessionNamingConfiguration();
+      case "save_session_naming_configuration":
+        return runtime.saveSessionNamingConfiguration(command.input);
       case "save_subagent_configuration":
         return runtime.saveSubagentConfiguration(command.input);
       case "get_skill_configuration":

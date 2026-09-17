@@ -122,7 +122,10 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       const prepared = await preparePromptImages(images);
       const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
       const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
-      if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
+      if (!hasUserMessage) {
+        active.session.setSessionName(titleFromText(prompt));
+        active.titlePending = true;
+      }
       this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
       // Session-scoped System Prompt, Skill, and MCP policies live on the active
       // Pi branch. Rewinding changes that branch, so refresh the right-hand
@@ -576,7 +579,11 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
 
   protected runtimeInspection(active: ActiveSession): RuntimeInspectionSnapshot {
     const snapshot = buildRuntimeInspectionSnapshot(active);
-    return { ...snapshot, subagent: this.readSubagentConfiguration() };
+    return {
+      ...snapshot,
+      subagent: this.readSubagentConfiguration(),
+      sessionNaming: this.readSessionNamingConfiguration(),
+    };
   }
 
   protected publishRuntimeInspection(active: ActiveSession): void {

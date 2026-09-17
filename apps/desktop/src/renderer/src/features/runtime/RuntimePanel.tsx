@@ -7,6 +7,7 @@ import type {
   RuntimeConfiguration,
   RuntimeInspectionSnapshot,
   RuntimeSummaryEvent,
+  SessionNamingConfiguration,
   SubagentConfiguration,
   SubagentProfileModels,
   TokenUsage,
@@ -133,6 +134,8 @@ export function RuntimePanel({
   const [busyAction, setBusyAction] = useState<string>();
   const [mcpOverrides, setMcpOverrides] = useState<McpVisibilityOverrides>({});
   const [subagentModels, setSubagentModels] = useState<SubagentProfileModels>(inspection?.subagent?.models ?? emptySubagentModels());
+  const [namingModel, setNamingModel] = useState(inspection?.sessionNaming?.model ?? "");
+  const [namingSaving, setNamingSaving] = useState(false);
   const [subagentSaving, setSubagentSaving] = useState(false);
   const summaries = inspection?.summaryEvents ?? [];
   const activeTools = useMemo(() => inspection?.tools.filter((tool) => tool.active) ?? [], [inspection?.tools]);
@@ -222,9 +225,24 @@ export function RuntimePanel({
       const configuredCount = Object.values(result.models).filter(Boolean).length;
       toastSuccess(configuredCount > 0
         ? `已保存子 Agent 模型配置（${configuredCount}/3）`
-        : "已清除子 Agent 模型配置，三个 profile 均继承主会话模型");
+        : "已清除子 Agent 模型配置，三个 profile 都将不可用");
     } finally {
       setSubagentSaving(false);
+    }
+  };
+
+  const saveNamingModel = async (): Promise<void> => {
+    setNamingSaving(true);
+    try {
+      const result = await request<SessionNamingConfiguration>("session-naming", {
+        type: "save_session_naming_configuration",
+        input: { model: namingModel.trim() },
+      });
+      if (!result) return;
+      setNamingModel(result.model);
+      toastSuccess(result.model ? `会话命名将使用 ${result.model}` : "会话命名已改回跟随会话当前模型");
+    } finally {
+      setNamingSaving(false);
     }
   };
 
@@ -377,6 +395,50 @@ export function RuntimePanel({
           </button>
         </div>
         <p className="runtime-section-footnote">三个 profile 独立配置。没配模型的那一项不可用：Agent 派发它会直接收到「未配置，请改用其他方式」的错误，而不是悄悄改用主会话模型跑一遍。</p>
+      </RuntimeSection>
+
+      <RuntimeSection
+        title="会话命名"
+        icon={<Bot size={14} />}
+        badge={namingModel ? namingModel : "跟随会话模型"}
+      >
+        <p className="runtime-section-footnote">
+          第一轮结束后单独问一次模型，给这段对话起个标题。以前标题就是第一句话截断，
+          侧栏里一排「继续」「帮我看一下」，根本找不到人。不配置就用会话当前的模型；
+          想让它跑在便宜模型上就在这里指定。
+        </p>
+        <label className="runtime-subagent-model-row">
+          <span><strong>命名用的模型</strong><small>只发一次很小的请求</small></span>
+          <Select
+            value={namingModel}
+            options={[
+              { value: "", label: "跟随会话当前模型", detail: "不额外指定" },
+              ...(namingModel && !availableModels.some((model) => `${model.provider}/${model.id}` === namingModel)
+                ? [{ value: namingModel, label: namingModel, detail: "当前不可用", disabled: true }]
+                : []),
+              ...availableModels.map((model) => ({
+                value: `${model.provider}/${model.id}`,
+                label: model.name,
+                detail: `${model.providerName} · ${model.provider}/${model.id}`,
+                keywords: `${model.providerName} ${model.provider} ${model.id}`,
+              })),
+            ]}
+            onChange={setNamingModel}
+            ariaLabel="会话命名使用的模型"
+            className="runtime-subagent-select"
+            searchable
+          />
+        </label>
+        <div className="runtime-actions">
+          <button
+            className="primary"
+            type="button"
+            disabled={namingSaving || !runtimeId}
+            onClick={() => { void saveNamingModel(); }}
+          >
+            {namingSaving ? <LoaderCircle className="spin" size={12} /> : <Save size={12} />}保存
+          </button>
+        </div>
       </RuntimeSection>
 
       <RuntimeSection title="工具" icon={<Wrench size={14} />} badge={inspection?.tools.length ? `${activeTools.length}/${inspection.tools.length} 启用` : undefined}>

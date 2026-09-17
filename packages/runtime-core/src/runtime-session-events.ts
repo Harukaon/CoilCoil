@@ -18,6 +18,11 @@ import {
   toolResultText,
 } from "./message-helpers.js";
 import { agentRetryRuntimeEvent } from "./runtime-agent-retry.js";
+import {
+  buildSessionTitlePrompt,
+  sanitizeSessionTitle,
+  SESSION_TITLE_SYSTEM_PROMPT,
+} from "./session-title.js";
 import { beginStreamingToolRun } from "./streaming-tool-call.js";
 import {
   isShellToolName,
@@ -86,6 +91,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           // The promise that owns the completed Pi run starts the next item only
           // after AgentSession.prompt() has fully resolved.
           this.log.info("run-state", "agent_settled", { queued: active.promptQueue.length });
+          // 第一轮跑完了，去单独问一次模型要个标题。不 await：命名慢一点无所谓，
+          // 不能让它挡住这一轮的收尾。
+          if (active.titlePending) void this.nameSessionFromFirstTurn(active);
           if (active.promptQueue.length === 0) this.publishRunning(false, "agent_settled");
           // Settling is the second, independent chance to start queued work.
           // Relying only on the owning run's `finally` deadlocks a prompt that
@@ -512,6 +520,61 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
    * lands here on `agent_start`, which Pi awaits before it sends anything to
    * the model — so the turn the user stopped never reaches the provider.
    */
+  /**
+   * 第一轮跑完后单独问一次模型：这段对话该叫什么。
+   *
+   * 标题原来就是第一句话截断，一屏侧栏全是「继续」「帮我看一下」，等于没有标题。
+   * 这里发一次很小的独立请求——不是主对话里的工具调用，所以不占记录、不会因为模型
+   * 不配合而要重发，也不会把命名变成两个来回。
+   *
+   * 整个过程是尽力而为：拿不到、模型没配好、请求失败，都保留兜底的那个截断标题，
+   * 绝不把错误抛给用户——命名失败不该影响这次对话。
+   */
+  private async nameSessionFromFirstTurn(active: ActiveSession): Promise<void> {
+    // 只试一次。失败了也不留着标记，否则每一轮结束都会再试一遍。
+    active.titlePending = false;
+    try {
+      const messages = active.session.messages;
+      const firstUser = messages.find((message) => isRecord(message) && message.role === "user");
+      if (!firstUser) return;
+      const firstAssistant = messages.find((message) => isRecord(message) && message.role === "assistant");
+      const userText = contentParts(isRecord(firstUser) ? firstUser.content : undefined).text;
+      if (!userText.trim()) return;
+      const assistantText = firstAssistant
+        ? contentParts(isRecord(firstAssistant) ? firstAssistant.content : undefined).text
+        : "";
+
+      const modelRuntime = await this.ready();
+      const configured = this.readSessionNamingConfiguration().model;
+      const separator = configured.indexOf("/");
+      const model = configured && separator > 0
+        ? modelRuntime.getModel(configured.slice(0, separator), configured.slice(separator + 1))
+        : active.session.model;
+      if (!model) {
+        this.log.warn("session-title", "model_unavailable", { configured });
+        return;
+      }
+
+      const reply = await modelRuntime.completeSimple(model, {
+        systemPrompt: SESSION_TITLE_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: buildSessionTitlePrompt(userText, assistantText), timestamp: Date.now() }],
+      }, { maxTokens: 200 });
+      const title = sanitizeSessionTitle(contentParts(reply.content).text);
+      if (!title) {
+        this.log.info("session-title", "unusable_reply", { preview: contentParts(reply.content).text.slice(0, 120) });
+        return;
+      }
+      if (this.active !== active) return;
+      active.session.setSessionName(title);
+      this.log.info("session-title", "named", { title, model: `${model.provider}/${model.id}` });
+      void this.listSessions(active.cwd);
+      this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
+    } catch (error) {
+      // 命名失败保留兜底标题就好，不要打扰这次对话。
+      this.log.warn("session-title", "naming_failed", { error: errorMessage(error) });
+    }
+  }
+
   private applyPendingAbort(active: ActiveSession): void {
     if (!active.abortOnStart) return;
     active.abortOnStart = false;
@@ -541,7 +604,11 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
       const prepared = await preparePromptImages(images);
       const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
       const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
-      if (!hasUserMessage) active.session.setSessionName(titleFromText(prompt));
+      if (!hasUserMessage) {
+        // 先用第一句话兜底，第一轮结束后再让模型起个像样的名字。
+        active.session.setSessionName(titleFromText(prompt));
+        active.titlePending = true;
+      }
 
       this.queueClientMessage(active, clientMessageId, expandedPrompt);
       const run = active.session.prompt(expandedPrompt, {

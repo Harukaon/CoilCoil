@@ -971,6 +971,8 @@ export interface RuntimeInspectionSnapshot {
   memory?: ProjectMemoryRuntimeStatus;
   /** User-configured default models for the built-in subagent profiles. */
   subagent?: SubagentConfiguration;
+  /** 会话自动命名用哪个模型；空表示跟随会话当前模型。 */
+  sessionNaming?: SessionNamingConfiguration;
   capabilities: {
     editSystemPrompt: boolean;
     removeOriginalSessionItems: false;
@@ -1083,6 +1085,20 @@ export interface SubagentProfileModels {
   worker: string;
   /** `provider/model-id`, or empty to inherit the parent session's model. */
   reviewer: string;
+}
+
+/**
+ * 会话自动命名用哪个模型。
+ *
+ * 空字符串表示用会话当前的模型——命名只是一次很小的请求，多数时候没必要单独配；
+ * 想让它跑在便宜模型上的人再去配。
+ */
+export interface SessionNamingConfiguration {
+  model: string;
+}
+
+export interface SessionNamingConfigurationInput {
+  model: string;
 }
 
 /** User-configured default models for dispatched subagents. */
@@ -1237,6 +1253,7 @@ export type RuntimeCommand =
   | { type: "get_memory_configuration"; cwd?: string }
   | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
   | { type: "get_subagent_configuration" }
+  | { type: "get_session_naming_configuration" }
   /**
    * 跑任务面板上的一条任务。
    *
@@ -1256,6 +1273,7 @@ export type RuntimeCommand =
     maxTurns?: number;
   }
   | { type: "save_subagent_configuration"; input: SubagentConfigurationInput }
+  | { type: "save_session_naming_configuration"; input: SessionNamingConfigurationInput }
   | { type: "get_skill_configuration"; cwd?: string }
   | { type: "set_skill_enabled"; filePath: string; enabled: boolean; cwd?: string }
   | { type: "remove_skill"; filePath: string; cwd?: string }

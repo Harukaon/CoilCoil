@@ -4,6 +4,8 @@ import {
   type McpServerRuntimeStatus,
   type ProjectMemoryRuntimeStatus,
   type RuntimeInspectionSnapshot,
+  type SessionNamingConfiguration,
+  type SessionNamingConfigurationInput,
   type SubagentConfiguration,
   type SubagentConfigurationInput,
 } from "@coilcoil/runtime-protocol";
@@ -107,6 +109,45 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     }
     const configuration = this.normalizeSubagentConfiguration(input);
     const path = this.subagentSettingsPath();
+    mkdirSync(dirname(path), { recursive: true });
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(configuration, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(temporaryPath, path);
+    return configuration;
+  }
+
+  private sessionNamingSettingsPath(): string {
+    return join(this.agentDir, "session-naming.json");
+  }
+
+  private normalizeSessionNamingConfiguration(value: unknown): SessionNamingConfiguration {
+    const record = value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+    return { model: typeof record.model === "string" ? record.model.trim().slice(0, 200) : "" };
+  }
+
+  /** 会话自动命名用哪个模型；空表示跟随会话当前模型。 */
+  protected readSessionNamingConfiguration(): SessionNamingConfiguration {
+    const path = this.sessionNamingSettingsPath();
+    if (!existsSync(path)) return this.normalizeSessionNamingConfiguration(undefined);
+    try {
+      return this.normalizeSessionNamingConfiguration(JSON.parse(readFileSync(path, "utf8")));
+    } catch {
+      return this.normalizeSessionNamingConfiguration(undefined);
+    }
+  }
+
+  async getSessionNamingConfiguration(): Promise<SessionNamingConfiguration> {
+    return this.readSessionNamingConfiguration();
+  }
+
+  async saveSessionNamingConfiguration(input: SessionNamingConfigurationInput): Promise<SessionNamingConfiguration> {
+    if (!input || typeof input !== "object" || typeof input.model !== "string") {
+      throw new Error("会话命名配置无效。");
+    }
+    const configuration = this.normalizeSessionNamingConfiguration(input);
+    const path = this.sessionNamingSettingsPath();
     mkdirSync(dirname(path), { recursive: true });
     const temporaryPath = `${path}.${process.pid}.tmp`;
     writeFileSync(temporaryPath, `${JSON.stringify(configuration, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
