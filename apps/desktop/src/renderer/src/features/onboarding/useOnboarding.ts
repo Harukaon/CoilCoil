@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 import { clearOnboarding, loadOnboarding, saveOnboarding } from "../../appState";
-import type { PermissionDecisions } from "./onboardingSteps";
 
 /**
  * 引导现在该不该出现，以及怎么结束、怎么重来。
@@ -10,15 +9,15 @@ import type { PermissionDecisions } from "./onboardingSteps";
 export function useOnboarding(): {
   /** 引导正在占着整个界面。它为真的时候工作区一概不渲染。 */
   active: boolean;
-  /** 走完了。把用户对每一项系统权限的处置一起记下来。 */
-  finish: (permissions: PermissionDecisions) => void;
+  /** 走完了。 */
+  finish: () => void;
   /** 从设置里重新走一遍。 */
   replay: () => void;
 } {
   const [active, setActive] = useState(() => loadOnboarding() === undefined);
 
-  const finish = useCallback((permissions: PermissionDecisions): void => {
-    saveOnboarding({ completedAt: new Date().toISOString(), permissions });
+  const finish = useCallback((): void => {
+    saveOnboarding({ completedAt: new Date().toISOString() });
     setActive(false);
   }, []);
 

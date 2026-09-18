@@ -6,7 +6,6 @@ import { ModelSettings } from "../settings/ModelSettings";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import {
   advance,
-  canAdvance,
   canSkip,
   goBack,
   INITIAL_ONBOARDING,
@@ -16,7 +15,6 @@ import {
   PERMISSION_TOPICS,
   type OnboardingProgress,
   type OnboardingStepId,
-  type PermissionDecisions,
   stepIndex,
 } from "./onboardingSteps";
 import "./onboarding.css";
@@ -63,27 +61,15 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
   runtimeId?: string;
   projects: ProjectSelection[];
   onOpenProject: () => void;
-  onDone: (permissions: PermissionDecisions) => void;
+  onDone: () => void;
 }): React.JSX.Element {
   const [progress, setProgress] = useState<OnboardingProgress>(INITIAL_ONBOARDING);
   const [permissions, setPermissions] = useState<MacPermissions>();
 
-  // 系统已经给了的那几项不必再问一遍——用户早就表过态了。
-  const adoptGranted = useCallback((next: MacPermissions): void => {
-    setPermissions(next);
-    setProgress((current) => {
-      const granted = PERMISSION_TOPICS.filter((topic) => next.status[topic.id] === "granted" && current.permissions[topic.id] === undefined);
-      if (granted.length === 0) return current;
-      const merged = { ...current.permissions };
-      for (const topic of granted) merged[topic.id] = "grant";
-      return { ...current, permissions: merged };
-    });
-  }, []);
-
   const refresh = useCallback(() => {
     if (typeof window.coilcoil?.getMacPermissions !== "function") return;
-    void window.coilcoil.getMacPermissions().then(adoptGranted).catch(() => undefined);
-  }, [adoptGranted]);
+    void window.coilcoil.getMacPermissions().then(setPermissions).catch(() => undefined);
+  }, []);
 
   // 进到权限这一步就探一次；用户去系统设置点完再切回来，窗口重新拿到焦点时再探一次
   // ——授权之后不用他自己回来按刷新。
@@ -94,14 +80,9 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
     return () => window.removeEventListener("focus", refresh);
   }, [progress.step, refresh]);
 
-  const decide = (id: MacPermissionId, decision: "grant" | "skip"): void => {
-    setProgress((current) => ({ ...current, permissions: { ...current.permissions, [id]: decision } }));
-    if (decision === "grant") void window.coilcoil.openPermissionSettings(id);
-  };
-
   const index = stepIndex(progress.step);
   const next = (): void => {
-    if (isLastStep(progress.step)) onDone(progress.permissions);
+    if (isLastStep(progress.step)) onDone();
     else setProgress(advance(progress));
   };
 
@@ -151,7 +132,6 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
               {progress.step === "permissions" ? (
                 <div className="onboarding-permissions">
                   {PERMISSION_TOPICS.map((topic, position) => {
-                    const decision = progress.permissions[topic.id];
                     const granted = permissions?.status[topic.id] === "granted";
                     return (
                       <div className="onboarding-permission onboarding-rise" key={topic.id} style={{ "--i": position } as React.CSSProperties}>
@@ -161,10 +141,10 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
                         </div>
                         <p className="onboarding-permission-purpose">{topic.purpose}</p>
                         <div className="onboarding-permission-actions">
-                          <button className={decision === "grant" ? "chosen" : ""} type="button" onClick={() => decide(topic.id, "grant")}>
-                            {granted ? "已开启" : "去开启"}
+                          {/* 只有一个动作：去系统设置里开。开不开都能继续，这一页只是介绍。 */}
+                          <button type="button" onClick={() => void window.coilcoil.openPermissionSettings(topic.id)}>
+                            {granted ? "去设置里看看" : "去开启"}
                           </button>
-                          <button className={decision === "skip" ? "chosen" : ""} type="button" onClick={() => decide(topic.id, "skip")}>不用</button>
                         </div>
                       </div>
                     );
@@ -193,7 +173,7 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
         {index > 0 ? <button className="onboarding-back" type="button" onClick={() => setProgress(goBack(progress))}>上一步</button> : null}
         <span className="spacer" />
         {canSkip(progress.step) ? <button className="onboarding-skip" type="button" onClick={next}>跳过这一步</button> : null}
-        <button className="onboarding-next" type="button" disabled={!canAdvance(progress)} onClick={next}>
+        <button className="onboarding-next" type="button" onClick={next}>
           {isLastStep(progress.step) ? "开始使用" : "继续"}
         </button>
       </footer>

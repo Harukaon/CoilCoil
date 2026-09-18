@@ -83,8 +83,6 @@ export function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[]
  */
 export interface OnboardingRecord {
   completedAt: string;
-  /** 每一项系统权限当时选了给还是不给。 */
-  permissions?: Record<string, "grant" | "skip">;
 }
 
 export function loadOnboarding(): OnboardingRecord | undefined {
