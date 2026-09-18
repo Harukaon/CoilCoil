@@ -59,7 +59,9 @@
 }
 
 /* 进度：一行极轻的小字，走过的加深，当前的最深。没有圆点没有连线——那是表单的语言。 */
-.onboarding-rail { display: flex; grid-row: 1; align-items: baseline; justify-content: center; gap: 22px; padding-bottom: 4px; }
+/* 步骤条和标题之间要留出一段。挨太近的话两行字读起来像同一块，分不出哪个是进度、
+   哪个是标题。留白写在步骤条这一侧，四步一起受用，不会各步各调。 */
+.onboarding-rail { display: flex; grid-row: 1; align-items: baseline; justify-content: center; gap: 22px; padding-bottom: 34px; }
 .onboarding-rail span { color: hsl(var(--th) var(--ts) var(--l-743)); font-size: 10.5px; letter-spacing: .1em; transition: color 260ms ease; }
 .onboarding-rail span.done { color: hsl(var(--th) var(--ts) var(--l-590)); }
 .onboarding-rail span.current { color: hsl(var(--th) var(--ts) var(--l-137)); font-weight: 620; }
