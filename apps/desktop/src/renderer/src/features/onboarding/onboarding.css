@@ -1,0 +1,157 @@
+/* 首次启动的引导。整屏一层，和设置页同级：它在的时候，下面的工作区不渲染。
+   排版驱动，不用卡片和描边——分隔全靠留白和发丝线，背景是一团慢慢飘的墨，和
+   产品自己那个墨团标志同一套语言。颜色一律走主题令牌，这里不写任何固定色。 */
+
+.onboarding-screen {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--shell-fill);
+}
+
+/* 墨。三团大面积高斯模糊，极低对比，各自以不同周期慢慢漂——静止的画面会让整屏
+   显得像张图片，这一点点位移才让它活着。绝不能抢文字。 */
+.onboarding-ink { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; }
+.onboarding-ink i {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  opacity: .5;
+  filter: blur(90px);
+}
+.onboarding-ink i:nth-child(1) { top: -14%; left: -6%; width: 46vw; height: 46vw; background: hsl(var(--th) var(--ts) var(--l-861) / 70%); animation: ink-drift-a 34s ease-in-out infinite; }
+.onboarding-ink i:nth-child(2) { right: -10%; bottom: -18%; width: 52vw; height: 52vw; background: hsl(var(--th) var(--ts) var(--l-888) / 62%); animation: ink-drift-b 42s ease-in-out infinite; }
+.onboarding-ink i:nth-child(3) { top: 26%; left: 42%; width: 30vw; height: 30vw; background: hsl(var(--th) var(--ts) var(--l-922) / 70%); animation: ink-drift-c 38s ease-in-out infinite; }
+@keyframes ink-drift-a { 0%, 100% { transform: none; } 50% { transform: translate3d(5vw, 4vh, 0) scale(1.1); } }
+@keyframes ink-drift-b { 0%, 100% { transform: none; } 50% { transform: translate3d(-6vw, -3vh, 0) scale(1.08); } }
+@keyframes ink-drift-c { 0%, 100% { transform: none; } 50% { transform: translate3d(-4vw, 5vh, 0) scale(.92); } }
+
+/* 顶上这条空带是用来拖窗口的。整屏界面必须自己留一条，否则窗口没处按。
+   macOS 的红绿灯在左上角 18,18，所以这条要够高。 */
+.onboarding-drag { position: relative; z-index: 2; height: 52px; }
+[data-platform="darwin"] .onboarding-drag { height: 62px; }
+
+/* 内容垂直居中。`safe` 是必须的：内容比窗口高的时候，普通的 center 会把顶上那截
+   顶出可视区且滚不回去，safe 会退回贴顶。 */
+.onboarding-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  overflow: auto;
+  padding: 8px 40px 20px;
+}
+.onboarding-inner { display: flex; width: 100%; max-width: 720px; min-height: 0; max-height: 100%; flex-direction: column; gap: 30px; }
+/* 模型那一步嵌的是真正的设置面板，比别的页宽得多，单独放宽。 */
+.onboarding-inner.wide { max-width: 1120px; }
+
+/* 进度：一行极轻的小字，走过的加深，当前的最深。没有圆点没有连线——那是表单的语言。 */
+.onboarding-rail { display: flex; flex: 0 0 auto; align-items: baseline; justify-content: center; gap: 22px; }
+.onboarding-rail span { color: hsl(var(--th) var(--ts) var(--l-743)); font-size: 10.5px; letter-spacing: .1em; transition: color 260ms ease; }
+.onboarding-rail span.done { color: hsl(var(--th) var(--ts) var(--l-590)); }
+.onboarding-rail span.current { color: hsl(var(--th) var(--ts) var(--l-137)); font-weight: 620; }
+
+.onboarding-step { position: relative; display: flex; min-height: 0; flex-direction: column; gap: 22px; animation: onboarding-step-in 420ms cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes onboarding-step-in {
+  from { opacity: 0; transform: translateY(14px); filter: blur(3px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+.onboarding-rise { animation: onboarding-step-in 460ms cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(var(--i, 0) * 80ms); }
+
+/* 序号做成书页角上的折标，靠边放。压在标题正后面会和字撞在一起，读起来像笔误。 */
+.onboarding-mark {
+  position: absolute;
+  z-index: -1;
+  top: -54px;
+  left: -14px;
+  color: hsl(var(--th) var(--ts) var(--l-137) / 4%);
+  font-size: 132px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -.06em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.onboarding-headline { display: grid; flex: 0 0 auto; justify-items: center; gap: 12px; text-align: center; }
+.onboarding-headline h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-137)); font-size: 30px; font-weight: 660; letter-spacing: -.03em; line-height: 1.2; }
+.onboarding-headline p { max-width: 500px; margin: 0; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 12.5px; line-height: 1.85; }
+
+/* 理念：三行，发丝线隔开，没有盒子。 */
+.onboarding-lines { display: grid; flex: 0 0 auto; gap: 0; }
+.onboarding-lines > div { display: grid; align-items: baseline; padding: 15px 2px; gap: 5px; grid-template-columns: 116px minmax(0, 1fr); }
+.onboarding-lines > div + div { border-top: 1px solid hsl(var(--th) var(--ts) var(--l-137) / 7%); }
+.onboarding-lines strong { color: hsl(var(--th) var(--ts) var(--l-178)); font-size: 12.5px; font-weight: 600; }
+.onboarding-lines span { color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 11.5px; line-height: 1.75; }
+
+/* 权限：一项一行，左边名字和用途，右边两个安静的文字动作。不做推荐。
+   三块都显式定位——只写一半会让自动排布把按钮甩到第一列去，名字被挤到右边。 */
+.onboarding-permissions { display: grid; flex: 1 1 auto; min-height: 0; overflow: auto; gap: 0; }
+.onboarding-permission { display: grid; align-items: start; padding: 13px 2px; gap: 3px 20px; grid-template-columns: minmax(0, 1fr) auto; }
+.onboarding-permission + .onboarding-permission { border-top: 1px solid hsl(var(--th) var(--ts) var(--l-137) / 7%); }
+.onboarding-permission-name { display: flex; align-items: center; grid-area: 1 / 1; gap: 8px; color: hsl(var(--th) var(--ts) var(--l-178)); font-size: 12.5px; font-weight: 600; }
+.onboarding-permission-name em { color: var(--c-green-text); font-size: 10px; font-style: normal; font-weight: 500; }
+.onboarding-permission-purpose { grid-area: 2 / 1; max-width: 520px; margin: 0; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 11.5px; line-height: 1.7; }
+.onboarding-permission-actions { display: flex; grid-area: 1 / 2 / 3 / 3; align-items: center; gap: 4px; }
+.onboarding-permission-actions button {
+  height: 26px; padding: 0 11px; border-radius: var(--radius-pill);
+  color: hsl(var(--th) var(--ts) var(--l-590)); background: transparent;
+  font-size: 11px; white-space: nowrap; cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+.onboarding-permission-actions button:hover { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-137) / 6%); }
+.onboarding-permission-actions button.chosen { color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-198)); }
+.onboarding-permission-actions button.chosen:hover { background: hsl(var(--th) var(--ts) var(--l-137)); }
+
+/* 模型那一步把真正的设置面板嵌进来。撑满剩下的高度，而不是定死一个值。 */
+.onboarding-embed { display: grid; min-height: 300px; flex: 1 1 auto; overflow: hidden; border-radius: var(--radius-4xl); background: hsl(var(--th) var(--ts) var(--l-1000) / 70%); }
+.onboarding-embed > * { min-height: 0; }
+
+/* 工作区。 */
+.onboarding-workspace { display: grid; flex: 0 0 auto; justify-items: center; gap: 14px; }
+.onboarding-pick {
+  display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 20px;
+  border-radius: var(--radius-pill);
+  color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-198));
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background 160ms ease, transform 160ms cubic-bezier(.16, 1, .3, 1);
+}
+.onboarding-pick:hover { background: hsl(var(--th) var(--ts) var(--l-137)); transform: translateY(-1px); }
+.onboarding-mounted { display: grid; width: 100%; max-width: 480px; gap: 0; }
+/* min-width: 0 是必须的：grid item 默认 min-width: auto，一条长路径会把它撑破外层
+   的 max-width，看上去就是这一行比整页还宽。 */
+.onboarding-mounted li { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 10px 2px; color: hsl(var(--th) var(--ts) var(--l-302)); font-size: 11.5px; }
+.onboarding-mounted li + li { border-top: 1px solid hsl(var(--th) var(--ts) var(--l-137) / 7%); }
+.onboarding-mounted li > svg { flex: 0 0 auto; }
+.onboarding-mounted li small { flex: 1 1 auto; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 底部操作条。 */
+.onboarding-footer { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 14px 40px 26px; }
+.onboarding-footer .spacer { flex: 1 1 auto; }
+.onboarding-footer button { height: 34px; padding: 0 17px; border-radius: var(--radius-pill); font-size: 12px; cursor: pointer; transition: background 160ms ease, color 160ms ease; }
+.onboarding-back, .onboarding-skip { color: hsl(var(--th) var(--ts) var(--l-590)); background: transparent; }
+.onboarding-back:hover, .onboarding-skip:hover { color: hsl(var(--th) var(--ts) var(--l-157)); background: hsl(var(--th) var(--ts) var(--l-137) / 6%); }
+.onboarding-next { color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-198)); font-weight: 600; }
+.onboarding-next:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-137)); }
+.onboarding-next:disabled { color: hsl(var(--th) var(--ts) var(--l-743)); background: hsl(var(--th) var(--ts) var(--l-137) / 7%); cursor: default; }
+
+@media (max-width: 720px) {
+  .onboarding-stage, .onboarding-footer { padding-right: 22px; padding-left: 22px; }
+  .onboarding-lines > div { grid-template-columns: minmax(0, 1fr); }
+  .onboarding-permission { grid-template-columns: minmax(0, 1fr); }
+  .onboarding-permission-actions { grid-row: auto; margin-top: 6px; }
+  .onboarding-mark { font-size: 108px; }
+}
+
+/* 用户把系统动效关掉了就别动。 */
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-step, .onboarding-rise { animation: none; }
+  .onboarding-ink i { animation: none; }
+}

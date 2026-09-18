@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, ClipboardPaste, FileJson, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Smartphone, Sparkles, Trash2 } from "lucide-react";
+import { Activity, ArrowLeft, ClipboardPaste, Compass, FileJson, Keyboard, LoaderCircle, LogOut, Network, Palette, Plus, Power, RefreshCw, Settings, Smartphone, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
@@ -652,7 +652,7 @@ function McpSettings({ runtimeId, cwd, reloadKey = 0 }: { runtimeId?: string; cw
   );
 }
 
-export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeId, cwd, initialSection = "models" }: {
+export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeId, cwd, initialSection = "models", onReplayOnboarding }: {
   configuration?: RuntimeConfiguration;
   open: boolean;
   onClose: () => void;
@@ -660,6 +660,8 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
   runtimeId?: string;
   cwd?: string;
   initialSection?: SettingsSection;
+  /** 重新走一遍首次启动的引导。手机远程端没有这一项：权限那一步说的是这台 Mac。 */
+  onReplayOnboarding?: () => void;
 }): React.JSX.Element | null {
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const mobile = useMobileRemote();
@@ -752,6 +754,11 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
           {mobile ? null : <button className={section === "remote" ? "active" : ""} type="button" onClick={() => setSection("remote")}><Smartphone size={15} />远程控制</button>}
           <button className={section === "appearance" ? "active" : ""} type="button" onClick={() => setSection("appearance")}><Palette size={15} />外观</button>
         </nav>
+        {onReplayOnboarding && !mobile ? (
+          <button className="settings-sidebar-replay" type="button" onClick={onReplayOnboarding}>
+            <Compass size={14} />重新查看引导
+          </button>
+        ) : null}
         <div className="settings-version" title={appVersion ? `CoilCoil ${appVersion}` : undefined}>
           {appVersion ? `CoilCoil ${appVersion}` : ""}
         </div>

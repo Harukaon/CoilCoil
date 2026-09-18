@@ -3,6 +3,7 @@ import type { ProjectSelection, ProjectSnapshot } from "@coilcoil/runtime-protoc
 const LEGACY_PROJECT_STORAGE_KEY = "coilcoil.selected-workspace";
 export const PROJECTS_STORAGE_KEY = "coilcoil.mounted-projects";
 export const ACTIVE_PROJECT_STORAGE_KEY = "coilcoil.active-project";
+export const ONBOARDING_STORAGE_KEY = "coilcoil.onboarding";
 
 export const EMPTY_PROJECT: ProjectSnapshot = {
   cwd: "",
@@ -72,4 +73,44 @@ export function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[]
     seen.add(project.path);
     return true;
   });
+}
+
+/**
+ * 引导走完没有，以及用户当时对系统权限的选择。
+ *
+ * 只记「走完了」和「选了什么」，不记走到第几步：引导很短，中途退出下次从头来比
+ * 记一个可能已经过期的进度更不容易出错。设置里可以随时重来。
+ */
+export interface OnboardingRecord {
+  completedAt: string;
+  /** 每一项系统权限当时选了给还是不给。 */
+  permissions?: Record<string, "grant" | "skip">;
+}
+
+export function loadOnboarding(): OnboardingRecord | undefined {
+  try {
+    const stored = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
+    if (!stored) return undefined;
+    const parsed = JSON.parse(stored) as Partial<OnboardingRecord>;
+    return typeof parsed?.completedAt === "string" ? parsed as OnboardingRecord : undefined;
+  } catch {
+    // 读不出来就当没走过：再走一遍引导，比把用户挡在外面强。
+    return undefined;
+  }
+}
+
+export function saveOnboarding(record: OnboardingRecord): void {
+  try {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(record));
+  } catch {
+    // 写不进去也要让用户进得去，大不了下次再引导一遍。
+  }
+}
+
+export function clearOnboarding(): void {
+  try {
+    window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+  } catch {
+    // 同上。
+  }
 }

@@ -46,10 +46,13 @@ import type { AgentPhase } from "./features/conversation/agentActivity";
 import {
   ACTIVE_PROJECT_STORAGE_KEY,
   EMPTY_PROJECT,
+  loadOnboarding,
   loadStoredProjects,
   saveMountedProjects,
   uniqueProjects,
 } from "./appState";
+import { OnboardingScreen } from "./features/onboarding/OnboardingScreen";
+import { useOnboarding } from "./features/onboarding/useOnboarding";
 
 type WorkspaceSurface = "conversation" | "skills" | "memory" | "issues";
 
@@ -88,6 +91,8 @@ export default function App(): React.JSX.Element {
 
   const [agentPhase, setAgentPhase] = useState<AgentPhase>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 没走过引导就先走引导。它在的时候工作区一概不渲染。
+  const onboarding = useOnboarding();
   const [settingsSection, setSettingsSection] = useState<"models" | "mcp" | "skills" | "appearance">("models");
   const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("conversation");
   const [loading, setLoading] = useState(true);
@@ -269,7 +274,9 @@ export default function App(): React.JSX.Element {
           setSessionsByProject((current) => ({ ...current, [item.path]: listed }));
         }));
         const [bootstrap] = await Promise.all([bootstrapPromise, activateProject(activeProject)]);
-        if (!bootstrap.configuration.configuredProviders.length) setSettingsOpen(true);
+        // 一个模型都没配就直接把设置推到脸上——这是引导出现之前的老做法。引导自己
+        // 有配置模型那一步，正在走引导的时候不要抢。
+        if (!bootstrap.configuration.configuredProviders.length && loadOnboarding() !== undefined) setSettingsOpen(true);
       } catch (caught) {
         toastError(caught instanceof Error ? caught.message : String(caught));
         setLoading(false);
@@ -569,10 +576,19 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  if (onboarding.active) {
+    return <OnboardingScreen
+      configuration={configuration} onConfigurationSaved={setConfiguration}
+      runtimeId={snapshot?.runtimeId} projects={projects}
+      onOpenProject={() => { void openProject(); }} onDone={onboarding.finish}
+    />;
+  }
+
   if (settingsOpen) {
     return <SettingsDialog
       configuration={configuration} open onSaved={setConfiguration}
       runtimeId={snapshot?.runtimeId} cwd={project?.path} initialSection={settingsSection}
+      onReplayOnboarding={() => { setSettingsOpen(false); onboarding.replay(); }}
       onClose={() => { shouldAutoScrollRef.current = true; setSettingsOpen(false); }}
     />;
   }

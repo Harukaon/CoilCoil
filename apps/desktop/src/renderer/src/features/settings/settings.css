@@ -951,3 +951,22 @@ label.provider-model-search { display: inline-flex; min-width: 180px; flex: 1 1 
 
 .remote-notes { min-height: 96px; padding: 9px 11px; border: 1px solid hsl(var(--th) var(--ts) var(--l-859)); border-radius: var(--radius-2xl); outline: 0; color: hsl(var(--th) var(--ts) var(--l-262)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace); font-size: 11px; line-height: 1.7; resize: vertical; }
 .remote-notes:focus { border-color: hsl(var(--th) var(--ts) var(--l-735)); box-shadow: 0 0 0 2px rgb(110 130 106 / 10%); }
+
+/* 侧栏底部：重新走一遍首次启动的引导。放在版本号上面，和「返回工作区」同一列。 */
+.settings-sidebar-replay {
+  display: flex;
+  width: 100%;
+  height: 34px;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 0 10px;
+  border-radius: var(--radius-xl);
+  color: hsl(var(--th) var(--ts) var(--l-527));
+  background: transparent;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.settings-sidebar-replay:hover { color: hsl(var(--th) var(--ts) var(--l-198)); background: hsl(var(--th) var(--ts) var(--l-888)); }

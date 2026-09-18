@@ -97,6 +97,20 @@ export interface ProjectFileActionResult {
   trashed?: boolean;
 }
 
+/** 一项系统权限现在是什么状态。`unknown` 表示探不出来，不能当成被拒绝。 */
+export type MacPermissionStatus = "granted" | "denied" | "unknown" | "unsupported";
+
+/**
+ * 这些在 macOS 里是**彼此独立**的开关——「完全磁盘访问权限」既不包含「App 管理」，
+ * 也不包含「屏幕录制」。
+ */
+export type MacPermissionId = "full-disk" | "screen-recording" | "app-management" | "accessibility";
+
+export interface MacPermissions {
+  platform: "darwin" | "other";
+  status: Record<MacPermissionId, MacPermissionStatus>;
+}
+
 export interface BrowserTabSnapshot {
   id: string;
   title: string;
@@ -416,8 +430,10 @@ export interface CoilCoilDesktopApi {
   setBrowserUiViewport(viewport: BrowserUiViewport): Promise<void>;
   /** Browsers installed on this Mac whose signed-in state can be taken over. */
   listImportableBrowsers(): Promise<ImportableProfile[]>;
-  /** 打开系统设置里「完全磁盘访问权限」那一页。 */
-  openFullDiskAccessSettings(): Promise<void>;
+  /** 打开系统设置里某一项权限那一页。 */
+  openPermissionSettings(id: MacPermissionId): Promise<void>;
+  /** 这台 Mac 现在给了哪些权限。每次调用都现探一遍，不缓存。 */
+  getMacPermissions(): Promise<MacPermissions>;
   /** Copy one profile's cookies into the built-in browser. May prompt for the keychain. */
   importBrowserCookies(input: ImportBrowserCookiesInput): Promise<BrowserImportSummary>;
   getBrowserDataStats(): Promise<BrowserDataStats>;

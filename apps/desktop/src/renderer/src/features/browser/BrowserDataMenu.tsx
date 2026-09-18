@@ -160,7 +160,7 @@ export function BrowserDataMenu(): React.JSX.Element {
                       disabled={(!profile.available && !profile.fix) || busy !== undefined}
                       onClick={() => {
                         // 缺权限的那一行不是死路：点它就去开权限，回来再导入。
-                        if (profile.fix) void window.coilcoil.openFullDiskAccessSettings();
+                        if (profile.fix) void window.coilcoil.openPermissionSettings("full-disk");
                         else void importFrom(profile);
                       }}
                     >

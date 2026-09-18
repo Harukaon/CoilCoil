@@ -13,8 +13,23 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell } from "electron";
 import { createRequire } from "node:module";
 import type { DiagnosticLogBatch } from "@coilcoil/runtime-protocol";
-import type { BrowserUiViewport, ImportBrowserCookiesInput, McpConnectionTestInput, OpenFilePreviewInput, PathKind, ProjectFileActionInput, ProjectFileActionResult, ProjectSelection, RemoteAccessInput, RuntimeRequestPayload, RuntimeRequestResult, SaveProjectFileInput } from "../shared/desktop-api";
+import type {
+  BrowserUiViewport,
+  ImportBrowserCookiesInput,
+  MacPermissionId,
+  McpConnectionTestInput,
+  OpenFilePreviewInput,
+  PathKind,
+  ProjectFileActionInput,
+  ProjectFileActionResult,
+  ProjectSelection,
+  RemoteAccessInput,
+  RuntimeRequestPayload,
+  RuntimeRequestResult,
+  SaveProjectFileInput,
+} from "../shared/desktop-api";
 import { appIconPath } from "./app-icon";
+import { macPermissions, openPermissionSettings } from "./mac-permissions";
 import { BUBBLE_OPEN_SESSION_CHANNEL, setupBubbleWindow } from "./bubble-window.js";
 import { testMcpConnection } from "./mcp-connection-test.js";
 import { BrowserRuntimeManager } from "./browser-runtime";
@@ -138,6 +153,7 @@ const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_UI_VIEWPORT_CHANNEL = "browser:ui-viewport";
 const BROWSER_IMPORT_LIST_CHANNEL = "browser:import-list";
 const OPEN_FULL_DISK_ACCESS_CHANNEL = "system:open-full-disk-access";
+const MAC_PERMISSIONS_CHANNEL = "system:mac-permissions";
 const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
 const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
 const BROWSER_SAVED_LOGINS_CHANNEL = "browser:saved-logins";
@@ -1098,11 +1114,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event, scopeId: string) => browserFor(event).forward(scopeId));
   ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event, scopeId: string) => browserFor(event).reload(scopeId));
   ipcMain.handle(BROWSER_IMPORT_LIST_CHANNEL, () => listImportableProfiles());
-  // 目的地是写死的，调用方递不进来任何东西——这条绕过了 openExternal 的协议白名单。
-  ipcMain.handle(OPEN_FULL_DISK_ACCESS_CHANNEL, async (): Promise<void> => {
-    if (process.platform !== "darwin") return;
-    await shell.openExternal("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles");
-  });
+  // 每次都现探一遍：用户可能刚在系统设置里改完就切回来。
+  ipcMain.handle(MAC_PERMISSIONS_CHANNEL, () => macPermissions());
+  // 目的地在 mac-permissions 的表里写死，调用方只能递一个已知的 id——这条绕过了
+  // openExternal 的协议白名单，不能让任何外来字符串走到 shell 那里。
+  ipcMain.handle(OPEN_FULL_DISK_ACCESS_CHANNEL, (_event, id: MacPermissionId) => openPermissionSettings(id));
   // 登录状态是按工作区存的，所以导入、统计、清空都冲当前这个窗口的那一份去。
   ipcMain.handle(BROWSER_IMPORT_COOKIES_CHANNEL, (event, input: ImportBrowserCookiesInput) =>
     importBrowserCookies(input, browserFor(event).partitionName()));
