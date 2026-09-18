@@ -88,15 +88,15 @@
   user-select: none;
 }
 
-/* 标题块高度写死，而且内容**贴着块顶**排：整块居中的话，导语行数一变就把标题顶上去，
-   四步之间标题的纵向位置还是会差那么十几像素。贴顶之后标题永远在同一行上。 */
+/* 标题贴着块顶排，它的纵向位置于是只由上面的步骤条决定——四步都一样，这才是「标题
+   不能跳」真正要保证的。块本身不定高度：导语一行就占一行，两行就占两行，下面的正文
+   跟着自然上移。硬把高度定死去让正文也对齐，只会白白吃掉模型那一页要用的空间。 */
 .onboarding-headline {
   display: grid;
   align-content: start;
   justify-items: center;
-  min-height: 148px;
-  gap: 10px;
-  padding-bottom: 6px;
+  gap: 8px;
+  padding-bottom: 22px;
   text-align: center;
 }
 .onboarding-headline h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-137)); font-size: 26px; font-weight: 660; letter-spacing: -.03em; line-height: 1.25; }
