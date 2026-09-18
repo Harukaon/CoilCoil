@@ -143,7 +143,7 @@
   display: grid;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid hsl(var(--th) var(--ts) var(--l-137) / 10%);
+  border: 2px solid hsl(var(--th) var(--ts) var(--l-137) / 12%);
   border-radius: var(--radius-4xl);
   background: hsl(var(--th) var(--ts) var(--l-1000) / 88%);
 }
