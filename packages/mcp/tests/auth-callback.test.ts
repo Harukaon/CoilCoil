@@ -111,3 +111,20 @@ test("整个进程只有一个监听器，端口不会跟着会话数往后挪",
   // 是往 7842 回调，那边没人在等，浏览器看到「这次回调没人在等」，得重来一次。
   assert.equal(sharedAuthCallbackServer(), sharedAuthCallbackServer());
 });
+
+test("退到备用端口这件事要能被看见", async (t) => {
+  // 退一格本身不致命，但这次注册给授权服务器的回调地址会被永久记住，等首选端口
+  // 空出来就再也对不上。所以必须能报出来，而不是静悄悄换一个端口。
+  const first = new McpAuthCallbackServer([0]);
+  t.after(() => first.close());
+  await first.listen();
+  const taken = first.listeningPort;
+  assert.ok(taken);
+  assert.equal(first.fellBackFrom, undefined, "端口列表只有一个，谈不上回退");
+
+  const second = new McpAuthCallbackServer([taken, 0]);
+  t.after(() => second.close());
+  await second.listen();
+  assert.notEqual(second.listeningPort, taken, "首选被占，应该退到下一个");
+  assert.equal(second.fellBackFrom, taken, "退了就要说清楚是从哪个端口退的");
+});

@@ -78,6 +78,24 @@ export class McpAuthCallbackServer {
   constructor(private readonly ports: readonly number[] = CANDIDATE_PORTS) {}
 
   /**
+   * 这次监听有没有退到备用端口，以及退到了哪个。
+   *
+   * 退一格本身不致命，但后果是隐形的：回调地址会被原样注册给授权服务器，而下次
+   * 首选端口空出来了，注册就永久对不上——brain 这台就是这么钉死在 7843 上的，
+   * 从头到尾没有任何地方说过一句。调用方拿它写日志。
+   */
+  get fellBackFrom(): number | undefined {
+    if (this.port === undefined) return undefined;
+    const preferred = this.ports[0];
+    return preferred !== undefined && preferred !== 0 && this.port !== preferred ? preferred : undefined;
+  }
+
+  /** 实际监听的端口，没起来就是 undefined。 */
+  get listeningPort(): number | undefined {
+    return this.port;
+  }
+
+  /**
    * Start listening, or return the address already being listened on.
    *
    * Guarded against being called concurrently. Several servers connecting at

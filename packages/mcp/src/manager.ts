@@ -280,6 +280,11 @@ export class McpManager {
     await this.callback.listen();
   }
 
+  /** 回调监听在哪个端口，以及有没有从首选端口退下来。调用方拿它写日志。 */
+  authCallbackDiagnostics(): { port?: number; fellBackFrom?: number } {
+    return { port: this.callback.listeningPort, fellBackFrom: this.callback.fellBackFrom };
+  }
+
   /**
    * Open one server, having first made sure it can be opened.
    *

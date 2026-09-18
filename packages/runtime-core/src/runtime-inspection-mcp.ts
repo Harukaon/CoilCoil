@@ -488,6 +488,20 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     const secrets = await this.mcpSensitiveValues();
     try {
       const started = await this.mcpManager().startAuth(server);
+      /* 回调端口退了一格就记一笔。退一格本身不致命，但后果是隐形的：这次注册给
+         授权服务器的回调地址会被永久记住，等首选端口空出来就再也对不上——brain
+         那台就是这么钉死在 7843 上的，从头到尾没有一处说过。 */
+      const callback = this.mcpManager().authCallbackDiagnostics();
+      if (callback.fellBackFrom !== undefined) {
+        this.log.warn("mcp", "auth_callback_port_fallback", {
+          server,
+          preferred: callback.fellBackFrom,
+          actual: callback.port,
+          note: "首选端口被占（多半是另一个 CoilCoil 实例），这次授权会按实际端口注册",
+        });
+      } else {
+        this.log.info("mcp", "auth_callback_port", { server, port: callback.port });
+      }
       const status = await this.getMcpStatus();
       if (started.error) {
         const message = redactSensitiveText(started.error, secrets);
