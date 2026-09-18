@@ -15,10 +15,31 @@ import {
   ONBOARDING_STEPS,
   PERMISSION_TOPICS,
   type OnboardingProgress,
+  type OnboardingStepId,
   type PermissionDecisions,
   stepIndex,
 } from "./onboardingSteps";
 import "./onboarding.css";
+
+/** 四步的标题和导语。集中一处，保证四步的标题块长得一模一样。 */
+const HEADINGS: Record<OnboardingStepId, { title: React.ReactNode; lead: string }> = {
+  intro: {
+    title: <>让 AI 和你<br />待在同一个界面里</>,
+    lead: "它开的网页、跑的命令、改的文件都在你眼前，而不是在你看不见的地方。",
+  },
+  model: {
+    title: "配一个模型",
+    lead: "选一个服务商填上密钥就能开始。现在不配也行，之后在「设置 → 模型与服务商」里随时能补。",
+  },
+  permissions: {
+    title: "系统权限",
+    lead: "下面每一项在 macOS 里都是独立的开关，给不给都由你定。这里只说明它可能被用来做什么——macOS 拒绝的时候不会报错，功能只会悄悄消失。",
+  },
+  workspace: {
+    title: "挂一个工作区",
+    lead: "选一个本地文件夹，CoilCoil 就在它里面干活。之后在左侧栏随时能再加，现在跳过也行。",
+  },
+};
 
 /** 三条产品理念。放在这里而不是散在 JSX 里，改文案不用动结构。 */
 const PRINCIPLES: readonly { label: string; body: string }[] = [
@@ -90,7 +111,7 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
       <div className="onboarding-drag window-drag-bar"><WindowDragBar /></div>
 
       <div className="onboarding-stage">
-        <div className={`onboarding-inner ${progress.step === "model" ? "wide" : ""}`}>
+        <div className="onboarding-inner">
           <nav className="onboarding-rail" aria-label="引导进度">
             {ONBOARDING_STEPS.map((step, position) => (
               <span className={position < index ? "done" : position === index ? "current" : ""} key={step}>
@@ -99,44 +120,35 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
             ))}
           </nav>
 
-          <section className={`onboarding-step ${progress.step === "model" ? "dense" : ""}`} key={progress.step}>
+          <section className="onboarding-step" key={progress.step}>
             <span className="onboarding-mark" aria-hidden="true">{index + 1}</span>
 
-            {progress.step === "intro" ? (
-              <>
-                <div className="onboarding-headline onboarding-rise" style={{ "--i": 0 } as React.CSSProperties}>
-                  <h1 id="onboarding-title">让 AI 和你<br />待在同一个界面里</h1>
-                  <p>它开的网页、跑的命令、改的文件都在你眼前，而不是在你看不见的地方。</p>
-                </div>
+            {/* 标题块四步共用同一份结构和高度，换步只换文字——各步自己写标题的话，
+                字号和位置会一步一个样，用户一眼就看出来了。 */}
+            <div className="onboarding-headline">
+              <h1 id="onboarding-title">{HEADINGS[progress.step].title}</h1>
+              <p>{HEADINGS[progress.step].lead}</p>
+            </div>
+
+            <div className={`onboarding-body ${progress.step === "model" ? "stretch" : ""}`}>
+              {progress.step === "intro" ? (
                 <div className="onboarding-lines">
                   {PRINCIPLES.map((line, position) => (
-                    <div className="onboarding-rise" key={line.label} style={{ "--i": position + 1 } as React.CSSProperties}>
+                    <div className="onboarding-rise" key={line.label} style={{ "--i": position } as React.CSSProperties}>
                       <strong>{line.label}</strong>
                       <span>{line.body}</span>
                     </div>
                   ))}
                 </div>
-              </>
-            ) : null}
+              ) : null}
 
-            {progress.step === "model" ? (
-              <>
-                <div className="onboarding-headline compact">
-                  <h1 id="onboarding-title">配一个模型</h1>
-                  <p>选一个服务商填上密钥就能开始。现在不配也行，之后在「设置 → 模型与服务商」里随时能补。</p>
-                </div>
+              {progress.step === "model" ? (
                 <div className="onboarding-embed settings-surface">
                   <ModelSettings configuration={configuration} onSaved={onConfigurationSaved} runtimeId={runtimeId} />
                 </div>
-              </>
-            ) : null}
+              ) : null}
 
-            {progress.step === "permissions" ? (
-              <>
-                <div className="onboarding-headline">
-                  <h1 id="onboarding-title">系统权限</h1>
-                  <p>下面每一项在 macOS 里都是独立的开关，给不给都由你定。这里只说明它可能被用来做什么——macOS 拒绝的时候不会报错，功能只会悄悄消失，所以每一项都请你自己过一遍。</p>
-                </div>
+              {progress.step === "permissions" ? (
                 <div className="onboarding-permissions">
                   {PERMISSION_TOPICS.map((topic, position) => {
                     const decision = progress.permissions[topic.id];
@@ -158,15 +170,9 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
                     );
                   })}
                 </div>
-              </>
-            ) : null}
+              ) : null}
 
-            {progress.step === "workspace" ? (
-              <>
-                <div className="onboarding-headline">
-                  <h1 id="onboarding-title">挂一个工作区</h1>
-                  <p>选一个本地文件夹，CoilCoil 就在它里面干活。之后在左侧栏随时能再加，现在跳过也行。</p>
-                </div>
+              {progress.step === "workspace" ? (
                 <div className="onboarding-workspace">
                   <button className="onboarding-pick" type="button" onClick={onOpenProject}><FolderOpen size={15} />选择文件夹</button>
                   {projects.length ? (
@@ -177,8 +183,8 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
                     </ul>
                   ) : null}
                 </div>
-              </>
-            ) : null}
+              ) : null}
+            </div>
           </section>
         </div>
       </div>

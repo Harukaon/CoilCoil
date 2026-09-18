@@ -35,30 +35,36 @@
 .onboarding-drag { position: relative; z-index: 2; height: 52px; }
 [data-platform="darwin"] .onboarding-drag { height: 62px; }
 
-/* 内容垂直居中。`safe` 是必须的：内容比窗口高的时候，普通的 center 会把顶上那截
-   顶出可视区且滚不回去，safe 会退回贴顶。 */
+/* 四步共用同一套骨架：进度条、标题、正文各占固定的一行。以前是整块垂直居中，每一步
+   内容高度不同，标题就跟着上下跳，字号也各改各的——用户的原话是「文本一、二、三，
+   为什么连大小都不一样？位置也不一样」。现在标题的大小和位置在四步里完全一样，
+   换步只换正文那一块。 */
 .onboarding-stage {
   position: relative;
   z-index: 1;
-  display: flex;
+  display: grid;
+  width: 100%;
   min-height: 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: safe center;
-  overflow: auto;
+  justify-items: center;
+  overflow: hidden;
   padding: 8px 40px 20px;
 }
-.onboarding-inner { display: flex; width: 100%; max-width: 720px; min-height: 0; max-height: 100%; flex-direction: column; gap: 30px; }
-/* 模型那一步嵌的是真正的设置面板，比别的页宽得多，单独放宽。 */
-.onboarding-inner.wide { max-width: 1120px; }
+.onboarding-inner {
+  display: grid;
+  width: 100%;
+  max-width: 880px;
+  min-height: 0;
+  gap: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
 
 /* 进度：一行极轻的小字，走过的加深，当前的最深。没有圆点没有连线——那是表单的语言。 */
-.onboarding-rail { display: flex; flex: 0 0 auto; align-items: baseline; justify-content: center; gap: 22px; }
+.onboarding-rail { display: flex; grid-row: 1; align-items: baseline; justify-content: center; gap: 22px; padding-bottom: 4px; }
 .onboarding-rail span { color: hsl(var(--th) var(--ts) var(--l-743)); font-size: 10.5px; letter-spacing: .1em; transition: color 260ms ease; }
 .onboarding-rail span.done { color: hsl(var(--th) var(--ts) var(--l-590)); }
 .onboarding-rail span.current { color: hsl(var(--th) var(--ts) var(--l-137)); font-weight: 620; }
 
-.onboarding-step { position: relative; display: flex; min-height: 0; flex-direction: column; gap: 22px; animation: onboarding-step-in 420ms cubic-bezier(.16, 1, .3, 1) both; }
+.onboarding-step { position: relative; display: grid; min-height: 0; grid-row: 2 / span 2; grid-template-rows: auto minmax(0, 1fr); animation: onboarding-step-in 420ms cubic-bezier(.16, 1, .3, 1) both; }
 @keyframes onboarding-step-in {
   from { opacity: 0; transform: translateY(14px); filter: blur(3px); }
   to { opacity: 1; transform: none; filter: none; }
@@ -69,7 +75,7 @@
 .onboarding-mark {
   position: absolute;
   z-index: -1;
-  top: -54px;
+  top: -40px;
   left: -14px;
   color: hsl(var(--th) var(--ts) var(--l-137) / 4%);
   font-size: 132px;
@@ -80,17 +86,30 @@
   user-select: none;
 }
 
-.onboarding-headline { display: grid; flex: 0 0 auto; justify-items: center; gap: 12px; text-align: center; }
-.onboarding-headline h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-137)); font-size: 30px; font-weight: 660; letter-spacing: -.03em; line-height: 1.2; }
-.onboarding-headline p { max-width: 500px; margin: 0; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 12.5px; line-height: 1.85; }
-/* 模型这一步里嵌着一整块真正的设置面板，标题必须让位——用大标题的话面板只剩一截，
-   表单在半路被切断，看上去像坏了。 */
-.onboarding-headline.compact { gap: 5px; }
-.onboarding-headline.compact h1 { font-size: 19px; letter-spacing: -.02em; }
-.onboarding-headline.compact p { max-width: 620px; font-size: 11.5px; line-height: 1.7; }
+/* 标题块高度写死，而且内容**贴着块顶**排：整块居中的话，导语行数一变就把标题顶上去，
+   四步之间标题的纵向位置还是会差那么十几像素。贴顶之后标题永远在同一行上。 */
+.onboarding-headline {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  min-height: 148px;
+  gap: 10px;
+  padding-bottom: 6px;
+  text-align: center;
+}
+.onboarding-headline h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-137)); font-size: 26px; font-weight: 660; letter-spacing: -.03em; line-height: 1.25; }
+.onboarding-headline p { max-width: 560px; margin: 0; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 12px; line-height: 1.8; }
+
+/* 正文区。内容一律贴着标题往下排——居中的话，导语和第一行之间会空出一大块，而且每
+   一步内容高度不同，空多少还不一样。留白统一放到底部。 */
+.onboarding-body { display: grid; min-height: 0; align-content: start; gap: 0; overflow: auto; }
+.onboarding-body.stretch { align-content: stretch; }
+/* 正文的行宽收一收：正文区有 835px 宽，一行文字拉满不好读。三块内容用同一个宽度，
+   免得各步之间左右边界还不一样。 */
+.onboarding-lines, .onboarding-permissions, .onboarding-workspace { width: 100%; max-width: 760px; margin: 0 auto; }
 
 /* 理念：三行，发丝线隔开，没有盒子。 */
-.onboarding-lines { display: grid; flex: 0 0 auto; gap: 0; }
+.onboarding-lines { display: grid; align-content: start; gap: 0; }
 .onboarding-lines > div { display: grid; align-items: baseline; padding: 15px 2px; gap: 5px; grid-template-columns: 116px minmax(0, 1fr); }
 .onboarding-lines > div + div { border-top: 1px solid hsl(var(--th) var(--ts) var(--l-137) / 7%); }
 .onboarding-lines strong { color: hsl(var(--th) var(--ts) var(--l-178)); font-size: 12.5px; font-weight: 600; }
@@ -98,7 +117,7 @@
 
 /* 权限：一项一行，左边名字和用途，右边两个安静的文字动作。不做推荐。
    三块都显式定位——只写一半会让自动排布把按钮甩到第一列去，名字被挤到右边。 */
-.onboarding-permissions { display: grid; flex: 1 1 auto; min-height: 0; overflow: auto; gap: 0; }
+.onboarding-permissions { display: grid; align-content: start; gap: 0; }
 .onboarding-permission { display: grid; align-items: start; padding: 13px 2px; gap: 3px 20px; grid-template-columns: minmax(0, 1fr) auto; }
 .onboarding-permission + .onboarding-permission { border-top: 1px solid hsl(var(--th) var(--ts) var(--l-137) / 7%); }
 .onboarding-permission-name { display: flex; align-items: center; grid-area: 1 / 1; gap: 8px; color: hsl(var(--th) var(--ts) var(--l-178)); font-size: 12.5px; font-weight: 600; }
@@ -116,11 +135,11 @@
 .onboarding-permission-actions button.chosen:hover { background: hsl(var(--th) var(--ts) var(--l-137)); }
 
 /* 模型那一步把真正的设置面板嵌进来。撑满剩下的高度，而不是定死一个值。 */
-.onboarding-embed { display: grid; min-height: 300px; flex: 1 1 auto; overflow: hidden; border-radius: var(--radius-4xl); background: hsl(var(--th) var(--ts) var(--l-1000) / 70%); }
+.onboarding-embed { display: grid; min-height: 0; overflow: hidden; border-radius: var(--radius-4xl); background: hsl(var(--th) var(--ts) var(--l-1000) / 70%); }
 .onboarding-embed > * { min-height: 0; }
 
 /* 工作区。 */
-.onboarding-workspace { display: grid; flex: 0 0 auto; justify-items: center; gap: 14px; }
+.onboarding-workspace { display: grid; align-content: start; justify-items: center; gap: 14px; }
 .onboarding-pick {
   display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 20px;
   border-radius: var(--radius-pill);
@@ -146,10 +165,6 @@
 .onboarding-next { color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-198)); font-weight: 600; }
 .onboarding-next:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-137)); }
 .onboarding-next:disabled { color: hsl(var(--th) var(--ts) var(--l-743)); background: hsl(var(--th) var(--ts) var(--l-137) / 7%); cursor: default; }
-
-/* 这一步标题矮，折标跟着往上收，否则会盖到面板上沿。 */
-.onboarding-step.dense .onboarding-mark { top: -34px; font-size: 96px; }
-.onboarding-step.dense { gap: 14px; }
 
 @media (max-width: 720px) {
   .onboarding-stage, .onboarding-footer { padding-right: 22px; padding-left: 22px; }
