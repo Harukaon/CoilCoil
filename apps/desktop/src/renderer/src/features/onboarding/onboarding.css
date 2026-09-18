@@ -137,7 +137,16 @@
 .onboarding-permission-actions button.chosen:hover { background: hsl(var(--th) var(--ts) var(--l-137)); }
 
 /* 模型那一步把真正的设置面板嵌进来。撑满剩下的高度，而不是定死一个值。 */
-.onboarding-embed { display: grid; min-height: 0; overflow: hidden; border-radius: var(--radius-4xl); background: hsl(var(--th) var(--ts) var(--l-1000) / 70%); }
+/* 这一块是把设置里的模型面板整个嵌进来的。引导其他地方都不用描边，但这里得有一道：
+   没有边框的话，它和外面的引导正文糊成一片，看不出是一整块独立的东西。 */
+.onboarding-embed {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--th) var(--ts) var(--l-137) / 10%);
+  border-radius: var(--radius-4xl);
+  background: hsl(var(--th) var(--ts) var(--l-1000) / 88%);
+}
 .onboarding-embed > * { min-height: 0; }
 
 /* 工作区。 */
