@@ -42,16 +42,32 @@ function safariProfile(): ImportableProfile | undefined {
     statSync(path);
   } catch {
     available = false;
-    problem = "需要「完全磁盘访问权限」";
+    problem = "没有读取权限，点这里去开";
   }
-  return { browser: "safari", browserName: "Safari", id: "default", name: "默认", available, problem };
+  return { browser: "safari", browserName: "Safari", id: "default", name: "默认", available, problem, ...(available ? {} : { fix: "full-disk-access" as const }) };
 }
 
 export function listImportableProfiles(): ImportableProfile[] {
   if (!importSupported()) return [];
   const profiles: ImportableProfile[] = [];
   for (const browser of CHROMIUM_BROWSERS) {
-    for (const profile of listChromiumProfiles(browser)) {
+    const listing = listChromiumProfiles(browser);
+    if (listing.kind === "absent") continue;
+    // 没权限的时候照样把它列出来，并且说清楚为什么。以前这里和「没装」走同一条路，
+    // 浏览器直接消失，用户只看得到 Safari，问不出任何原因。见 browser-catalog.ts。
+    if (listing.kind === "denied") {
+      profiles.push({
+        browser: browser.id,
+        browserName: browser.name,
+        id: "default",
+        name: "全部配置",
+        available: false,
+        problem: "没有读取权限，点这里去开",
+        fix: "full-disk-access",
+      });
+      continue;
+    }
+    for (const profile of listing.profiles) {
       const path = profileDirectory(browser, profile.id);
       profiles.push({
         ...profile,

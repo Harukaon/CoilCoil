@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,6 +9,7 @@ import { cookiesFromDatabase } from "../src/main/browser-import/chromium-cookies
 import { toElectronCookie } from "../src/main/browser-import/cookie-record.ts";
 import { decryptChromiumValue } from "../src/main/browser-import/chromium-crypto.ts";
 import { parseBinaryCookies } from "../src/main/browser-import/safari-cookies.ts";
+import { CHROMIUM_BROWSERS, isPermissionDenied, listChromiumProfiles } from "../src/main/browser-import/browser-catalog.ts";
 import { chromiumTimeToUnixSeconds } from "../src/main/browser-import/sqlite-snapshot.ts";
 
 const KEY = pbkdf2Sync("peanuts", "saltysalt", 1003, 16, "sha1");
@@ -227,4 +228,40 @@ test("a cookie whose expiry overflows a JavaScript number is still imported", ()
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+/**
+ * macOS 27 起，别的 App 在 Application Support 下的数据目录受系统保护：没权限时
+ * `stat` 照样成功，但列目录抛 EPERM。以前这里的异常被吞掉、返回空数组，于是
+ * 「没权限」和「没装」长得一模一样，Chrome 整个从导入列表里消失，只剩 Safari。
+ */
+test("没权限和没装要分得开，不能都当成没装", { skip: process.getuid?.() === 0 ? "root 不受 chmod 限制" : false }, () => {
+  const chrome = CHROMIUM_BROWSERS[0];
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-chromium-"));
+  try {
+    mkdirSync(join(root, "Default"));
+    writeFileSync(join(root, "Default", "Cookies"), "");
+
+    const listed = listChromiumProfiles(chrome, root);
+    assert.equal(listed.kind, "profiles");
+    assert.deepEqual(listed.kind === "profiles" ? listed.profiles.map((profile) => profile.id) : [], ["Default"]);
+
+    // 目录还在、stat 还成功，只是读不了——这正是系统拒绝时的样子。
+    chmodSync(root, 0o000);
+    assert.equal(listChromiumProfiles(chrome, root).kind, "denied");
+  } finally {
+    chmodSync(root, 0o700);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("目录真的不在才算没装", () => {
+  assert.equal(listChromiumProfiles(CHROMIUM_BROWSERS[0], join(tmpdir(), "coilcoil-no-such-browser-xyz")).kind, "absent");
+});
+
+test("只有系统拒绝才算拒绝，找不到不算", () => {
+  assert.equal(isPermissionDenied(Object.assign(new Error("denied"), { code: "EPERM" })), true);
+  assert.equal(isPermissionDenied(Object.assign(new Error("denied"), { code: "EACCES" })), true);
+  assert.equal(isPermissionDenied(Object.assign(new Error("gone"), { code: "ENOENT" })), false);
+  assert.equal(isPermissionDenied(new Error("nothing at all")), false);
 });

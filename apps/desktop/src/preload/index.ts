@@ -91,6 +91,7 @@ type MountedProject = { name: string; path: string; kind: "workspace" };
 const ISSUES_LIST_CHANNEL = "issues:list";
 const ISSUES_SAVE_CHANNEL = "issues:save";
 const BROWSER_IMPORT_LIST_CHANNEL = "browser:import-list";
+const OPEN_FULL_DISK_ACCESS_CHANNEL = "system:open-full-disk-access";
 const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
 const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
 const BROWSER_SAVED_LOGINS_CHANNEL = "browser:saved-logins";
@@ -198,6 +199,7 @@ const api: CoilCoilDesktopApi = {
   reloadBrowser: (scopeId: string) => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   setBrowserUiViewport: (viewport: BrowserUiViewport) => ipcRenderer.invoke(BROWSER_UI_VIEWPORT_CHANNEL, viewport) as Promise<void>,
   listImportableBrowsers: () => ipcRenderer.invoke(BROWSER_IMPORT_LIST_CHANNEL) as Promise<ImportableProfile[]>,
+  openFullDiskAccessSettings: () => ipcRenderer.invoke(OPEN_FULL_DISK_ACCESS_CHANNEL) as Promise<void>,
   importBrowserCookies: (input: ImportBrowserCookiesInput) =>
     ipcRenderer.invoke(BROWSER_IMPORT_COOKIES_CHANNEL, input) as Promise<BrowserImportSummary>,
   getBrowserDataStats: () => ipcRenderer.invoke(BROWSER_DATA_STATS_CHANNEL) as Promise<BrowserDataStats>,

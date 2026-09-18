@@ -172,6 +172,11 @@ export interface ImportableProfile {
   available: boolean;
   /** Why it cannot be imported right now, when `available` is false. */
   problem?: string;
+  /**
+   * 挡住它的那件事用户自己能解决时，点这一行就直接去解决，而不是留一句话让人
+   * 自己找设置。目前只有一种：macOS 不让读别的浏览器的数据，要给完全磁盘访问权限。
+   */
+  fix?: "full-disk-access";
 }
 
 /**
@@ -411,6 +416,8 @@ export interface CoilCoilDesktopApi {
   setBrowserUiViewport(viewport: BrowserUiViewport): Promise<void>;
   /** Browsers installed on this Mac whose signed-in state can be taken over. */
   listImportableBrowsers(): Promise<ImportableProfile[]>;
+  /** 打开系统设置里「完全磁盘访问权限」那一页。 */
+  openFullDiskAccessSettings(): Promise<void>;
   /** Copy one profile's cookies into the built-in browser. May prompt for the keychain. */
   importBrowserCookies(input: ImportBrowserCookiesInput): Promise<BrowserImportSummary>;
   getBrowserDataStats(): Promise<BrowserDataStats>;

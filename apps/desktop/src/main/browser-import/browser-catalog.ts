@@ -98,22 +98,51 @@ export function passwordDatabasePath(profilePath: string): string | undefined {
   return existsSync(candidate) ? candidate : undefined;
 }
 
-export function listChromiumProfiles(browser: ChromiumBrowserDescriptor): ImportableProfile[] {
-  const root = join(applicationSupport(), browser.userDataDirectory);
-  if (!existsSync(root)) return [];
-  const labels = readProfileLabels(root);
-  const profiles: ImportableProfile[] = [];
+/**
+ * 一个 Chromium 安装现在是什么状况。
+ *
+ * 必须把「没装」和「没权限」分开，因为在 macOS 上它们长得一模一样，而以前这里
+ * 把两者都当成了「没装」。
+ *
+ * macOS 27 起，别的 App 在 `~/Library/Application Support` 下的数据目录受系统
+ * 保护。没拿到权限时 `stat` 仍然**成功**（所以 existsSync 返回 true，「装没装」
+ * 的检查完全过得去），但**列目录会抛 EPERM**，打开 cookie 文件也会失败。以前
+ * readdir 的异常是被 catch 掉然后返回空数组的，于是整个浏览器从列表里消失，用户
+ * 看到的就是「Chrome 的选项没了，只剩 Safari」，完全不知道发生了什么。
+ *
+ * Safari 没受影响是因为它的 cookie 文件是所有人可读的，压根碰不到这道墙。
+ */
+export type ChromiumListing =
+  | { kind: "absent" }
+  | { kind: "denied" }
+  | { kind: "profiles"; profiles: ImportableProfile[] };
+
+/** 这个错误是不是「系统不让读」，而不是「东西不在」。 */
+export function isPermissionDenied(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EPERM" || code === "EACCES";
+}
+
+export function listChromiumProfiles(
+  browser: ChromiumBrowserDescriptor,
+  root: string = join(applicationSupport(), browser.userDataDirectory),
+): ChromiumListing {
   let entries: string[] = [];
   try {
     entries = readdirSync(root);
-  } catch {
-    return [];
+  } catch (error) {
+    // 装没装看的是这一步分类的结果，不再用 existsSync —— 它对「没权限」返回 true。
+    return isPermissionDenied(error) ? { kind: "denied" } : { kind: "absent" };
   }
+  const labels = readProfileLabels(root);
+  const profiles: ImportableProfile[] = [];
+  let deniedEntries = 0;
   for (const entry of entries) {
     const path = join(root, entry);
     try {
       if (!statSync(path).isDirectory() || !isProfileDirectory(path)) continue;
-    } catch {
+    } catch (error) {
+      if (isPermissionDenied(error)) deniedEntries += 1;
       continue;
     }
     const label = labels.get(entry);
@@ -126,8 +155,11 @@ export function listChromiumProfiles(browser: ChromiumBrowserDescriptor): Import
       available: true,
     });
   }
+  // 一个目录在、却一个配置都没读出来，多半也是被挡住了（读到一半才被拒）。
+  if (profiles.length === 0 && deniedEntries > 0) return { kind: "denied" };
   // Chrome lists `Default` first and then numbers; readdir order is arbitrary.
-  return profiles.sort((left, right) => (left.id === "Default" ? -1 : right.id === "Default" ? 1 : left.id.localeCompare(right.id)));
+  profiles.sort((left, right) => (left.id === "Default" ? -1 : right.id === "Default" ? 1 : left.id.localeCompare(right.id)));
+  return { kind: "profiles", profiles };
 }
 
 /**

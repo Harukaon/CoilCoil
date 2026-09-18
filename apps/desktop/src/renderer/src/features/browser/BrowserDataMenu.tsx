@@ -1,5 +1,5 @@
 import * as Popover from "@radix-ui/react-popover";
-import { Compass, Download, Globe, LoaderCircle, Trash2, UserRound } from "lucide-react";
+import { Compass, Download, ExternalLink, Globe, LoaderCircle, Trash2, UserRound } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { BrowserDataStats, ImportableProfile } from "../../../../shared/desktop-api";
 import { ConfirmDialog } from "../../ui/dialog";
@@ -7,6 +7,12 @@ import { toastError, toastInfo, toastSuccess } from "../../ui/toast";
 
 function profileKey(profile: ImportableProfile): string {
   return `${profile.browser}:${profile.id}`;
+}
+
+/** 列表里那一行放不下的完整说明。 */
+function profileHint(profile: ImportableProfile): string | undefined {
+  if (profile.fix !== "full-disk-access") return undefined;
+  return `macOS 不允许 CoilCoil 读取 ${profile.browserName} 的数据。点这一行去「系统设置 → 隐私与安全性 → 完全磁盘访问权限」里允许 CoilCoil，然后重开 CoilCoil 再来导入。`;
 }
 
 function describeProfile(profile: ImportableProfile): string {
@@ -150,8 +156,13 @@ export function BrowserDataMenu(): React.JSX.Element {
                   <li key={profileKey(profile)}>
                     <button
                       type="button"
-                      disabled={!profile.available || busy !== undefined}
-                      onClick={() => void importFrom(profile)}
+                      title={profileHint(profile)}
+                      disabled={(!profile.available && !profile.fix) || busy !== undefined}
+                      onClick={() => {
+                        // 缺权限的那一行不是死路：点它就去开权限，回来再导入。
+                        if (profile.fix) void window.coilcoil.openFullDiskAccessSettings();
+                        else void importFrom(profile);
+                      }}
                     >
                       <span className="browser-identity-icon">
                         {profile.browser === "safari" ? <Compass size={14} /> : <Globe size={14} />}
@@ -160,7 +171,9 @@ export function BrowserDataMenu(): React.JSX.Element {
                         <strong>{profile.browserName} · {profile.name}</strong>
                         <small>{describeProfile(profile)}</small>
                       </span>
-                      {busy === profileKey(profile) ? <LoaderCircle className="spin" size={13} /> : <Download size={13} />}
+                      {busy === profileKey(profile)
+                        ? <LoaderCircle className="spin" size={13} />
+                        : profile.fix ? <ExternalLink size={13} /> : <Download size={13} />}
                     </button>
                   </li>
                 ))}

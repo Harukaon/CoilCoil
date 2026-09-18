@@ -137,6 +137,7 @@ const BROWSER_FORWARD_CHANNEL = "browser:forward";
 const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_UI_VIEWPORT_CHANNEL = "browser:ui-viewport";
 const BROWSER_IMPORT_LIST_CHANNEL = "browser:import-list";
+const OPEN_FULL_DISK_ACCESS_CHANNEL = "system:open-full-disk-access";
 const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
 const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
 const BROWSER_SAVED_LOGINS_CHANNEL = "browser:saved-logins";
@@ -1096,6 +1097,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_FORWARD_CHANNEL, (event, scopeId: string) => browserFor(event).forward(scopeId));
   ipcMain.handle(BROWSER_RELOAD_CHANNEL, (event, scopeId: string) => browserFor(event).reload(scopeId));
   ipcMain.handle(BROWSER_IMPORT_LIST_CHANNEL, () => listImportableProfiles());
+  // 目的地是写死的，调用方递不进来任何东西——这条绕过了 openExternal 的协议白名单。
+  ipcMain.handle(OPEN_FULL_DISK_ACCESS_CHANNEL, async (): Promise<void> => {
+    if (process.platform !== "darwin") return;
+    await shell.openExternal("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles");
+  });
   // 登录状态是按工作区存的，所以导入、统计、清空都冲当前这个窗口的那一份去。
   ipcMain.handle(BROWSER_IMPORT_COOKIES_CHANNEL, (event, input: ImportBrowserCookiesInput) =>
     importBrowserCookies(input, browserFor(event).partitionName()));
