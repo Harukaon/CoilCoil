@@ -7,6 +7,7 @@ import { diagnostics, installRendererErrorHandlers } from "./diagnostics";
 import { AppErrorBoundary } from "./ui/AppErrorBoundary";
 import { WindowControls } from "./ui/WindowControls";
 import { installIdleMotionPause } from "./ui/idle-motion";
+import { installWindowDragFailureReport } from "./ui/window-drag-report";
 import { initTheme } from "./theme";
 import { ToastHost } from "./ui/toast";
 import { UpdateDialog } from "./ui/update/UpdateDialog";
@@ -32,9 +33,11 @@ if (window.coilcoil?.isRemote) {
 
 installRendererErrorHandlers();
 initTheme();
-// 手机远程端没有窗口可拖，别白挂一个 pointermove 监听。
 // 常驻的墨团标志每帧都要重算一整条 blur + contrast 滤镜链，没人看的时候先停下。
 installIdleMotionPause();
+// 标题栏偶发拖不动，只在发生的那一刻留得下痕迹，见 ui/window-drag-report.ts。
+// 手机远程端没有窗口可拖，不用挂。
+if (!window.coilcoil?.isRemote) installWindowDragFailureReport();
 diagnostics.info("process", "renderer_started", { userAgent: navigator.userAgent });
 
 const root = document.getElementById("root");
