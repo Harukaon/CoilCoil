@@ -279,7 +279,11 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     registry.set(eventBus, withBundledBrowserMcp(
       mcpConfigurationForAgent(configuration, hiddenNames),
       process.env,
-      this.browserScopeId,
+      // 浏览器按**工作区**分，不按会话分。同一个工作区里换一个会话，看到的必须还是
+      // 同一个浏览器，用户和 Agent 共用同一批标签页。以前这里传的是会话 id，于是每
+      // 个会话各有一份浏览器：Agent 在后台会话里开的页面对用户就成了「别人的」，而
+      // 每个会话第一次连上 CDP 又会各垫一张空白页，用户看到的就是一堆 about:blank。
+      cwd,
     ));
     // Pi no longer hands extensions the bus object itself, so identity lookups
     // miss. Answering over the bus is what actually reaches the adapter.

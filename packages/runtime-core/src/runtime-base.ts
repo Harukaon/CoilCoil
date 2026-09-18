@@ -74,7 +74,6 @@ export abstract class RuntimeBase {
 
   readonly workflowDir: string;
 
-  readonly browserScopeId?: string;
 
   protected readonly emitEvent: EventSink;
 
@@ -120,7 +119,6 @@ export abstract class RuntimeBase {
     });
     setGlobalToolPurposeAuditEnabled(this.readToolPurposeAuditSetting());
     this.workflowDir = resolveWorkflowDirectory(options.workflowDir);
-    this.browserScopeId = options.browserScopeId;
     const resources = bundledRuntimeResources(this.workflowDir);
     this.extensionPaths = [...resources.extensions, ...options.additionalExtensionPaths ?? []];
     this.skillPaths = resources.skills;

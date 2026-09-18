@@ -53,7 +53,6 @@ export interface CoilCoilRuntimeOptions {
   modelRuntime?: ModelRuntime;
   modelRuntimePromise?: Promise<ModelRuntime>;
   /** Browser capability scope owned by this runtime/session. */
-  browserScopeId?: string;
   /**
    * Extra Pi extensions for this runtime only, on top of the bundled workflow.
    *

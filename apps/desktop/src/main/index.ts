@@ -447,13 +447,14 @@ class RuntimeBridge {
   private host?: RuntimeHost;
 
   private broadcast = (runtimeId: string | undefined, event: RuntimeEventEnvelope["event"]): void => {
-    if (runtimeId && event.type === "runtime_released") primaryBrowserRuntime?.releaseScope(runtimeId);
-    // 每个会话属于哪个工作区，只有快照说得清。记下来，后台会话的 Agent 开的标签页
-    // 才会落在它自己那个工作区的 cookie 里——界面切到别处也不影响。
+    // 会话结束时不再关浏览器：浏览器是整个工作区的，同一个工作区里别的会话、还有
+    // 用户自己都在用它。以前这里按会话作用域把那一批标签页关掉，换成按工作区之后，
+    // 这一条会连用户正看着的页面一起关。
+    // 每个会话在哪个工作区，只有快照说得清。记下来，那个工作区那份 cookie jar 才会
+    // 提前配好——界面切到别处也不影响。
     if (runtimeId && event.type === "session_snapshot") {
-      for (const runtime of browserRuntimes.values()) {
-        runtime.noteScopeWorkspace(runtimeId, event.snapshot.session.cwd);
-      }
+      const cwd = event.snapshot.session.cwd;
+      for (const runtime of browserRuntimes.values()) runtime.noteScopeWorkspace(cwd, cwd);
     }
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });

@@ -154,7 +154,6 @@ export class RuntimeServer {
       ...this.options,
       log: this.log,
       modelRuntimePromise,
-      browserScopeId: runtimeId,
       onEvent: (event) => this.sendRuntimeEvent(runtimeId, event),
     });
   }

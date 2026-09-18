@@ -490,14 +490,6 @@ export class BrowserRuntimeManager {
     return this.state(scopeId);
   }
 
-  releaseScope(scopeId: string): void {
-    this.cdp.releaseScope(scopeId);
-    for (const tab of this.tabsForScope(scopeId)) this.closeTabRecord(tab);
-    this.activeTabIds.delete(scopeId);
-    // 无条件发：被回收的会话那几张标签页也在用户的标签条上，它们消失了这边得跟上。
-    this.publish();
-  }
-
   async navigate(rawUrl: string, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
     const tab = await this.ensureActiveTab(scopeId);
     await loadGuestUrl(this.guestOf(tab), normalizeBrowserUrl(rawUrl));

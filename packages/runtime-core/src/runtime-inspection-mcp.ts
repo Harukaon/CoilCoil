@@ -394,7 +394,8 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     this.mcpManagerInstance = new McpManager({
       loadServers: async () => {
         const configured = (await this.getMcpConfiguration(this.active?.cwd)).servers;
-        const browser = bundledBrowserServerConfiguration(process.env, this.browserScopeId);
+        // 和 refreshAgentMcpConfiguration 一样：浏览器跟着工作区，不跟着会话。
+        const browser = bundledBrowserServerConfiguration(process.env, this.active?.cwd);
         // The built-in browser is not in the workspace's MCP file — it is wired
         // up by the desktop app — so it has to be added here or the Agent never
         // sees it. Which is exactly what happened when this client replaced the

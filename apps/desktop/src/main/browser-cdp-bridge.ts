@@ -133,12 +133,6 @@ export class BrowserCdpBridge {
     return `ws://127.0.0.1:${this.port}/devtools/browser/${this.pathToken}`;
   }
 
-  releaseScope(scopeId: string): void {
-    for (const client of [...this.clients.values()]) {
-      if (client.scopeId === scopeId) client.socket.close(1008, "浏览器会话已释放");
-    }
-  }
-
   async dispose(): Promise<void> {
     for (const client of this.clients.values()) client.socket.close(1001, "CoilCoil 正在关闭");
     this.clients.clear();

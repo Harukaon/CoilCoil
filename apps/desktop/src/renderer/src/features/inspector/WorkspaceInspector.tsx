@@ -85,7 +85,10 @@ export function WorkspaceInspector({
   const terminalTabs = tabs.filter((item) => item.kind === "terminal");
   // 浏览器的网页标签由主进程按 scope 拥有，agent 也会开关它们，所以这份列表订阅
   // 主进程而不是存在右侧栏状态里；tabs 里那条 browser 记录只表示「开着浏览器」。
-  const scopeId = snapshot?.runtimeId ?? projectPath ?? "default";
+  // 浏览器按工作区分，不按会话分：同一个工作区里换一个会话，标签页必须还是那一批。
+  // 以前这里是 `snapshot?.runtimeId ?? projectPath`，会话 id 在前，于是每换一个会话
+  // 就换一份浏览器，Agent 的页面对用户也成了「别人的」。见 browser-runtime.ts。
+  const scopeId = projectPath ?? "default";
   const browser = useBrowserTabs({ scopeId, workspacePath: projectPath, open: hasBrowser });
   const openTerminal = useCallback(async (): Promise<void> => {
     try {

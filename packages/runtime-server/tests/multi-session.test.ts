@@ -29,7 +29,6 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 class FakeRuntime {
   private readonly emit: (event: RuntimeEvent) => void;
   private snapshotValue?: SessionSnapshot;
-  readonly browserScopeId?: string;
   readonly promptGate = deferred();
   readonly promptClientMessageIds: Array<string | undefined> = [];
   readonly createdWithModels: Array<SessionModelSelection | undefined> = [];
@@ -48,7 +47,6 @@ class FakeRuntime {
     } = {},
   ) {
     this.emit = options.onEvent ?? (() => undefined);
-    this.browserScopeId = options.browserScopeId;
   }
 
   async initialize(): Promise<RuntimeBootstrap> {
@@ -598,8 +596,6 @@ test("idle historical runtimes are bounded while recent sessions remain reopenab
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(runtimes.filter((runtime) => !runtime.disposed).length, 7, "control plus six idle session runtimes should remain");
   assert.ok(runtimes.slice(1, 5).every((runtime) => runtime.disposed), "the least recently used idle sessions should be retired");
-  assert.equal(runtimes[0].browserScopeId, undefined, "the control runtime must not claim a session browser scope");
-  assert.equal(runtimes[1].browserScopeId, "runtime-1", "each session runtime must own its matching browser scope");
   const releasedRuntimeIds = messages.flatMap((message) =>
     "event" in message && message.event.type === "runtime_released" && message.runtimeId ? [message.runtimeId] : [],
   );
