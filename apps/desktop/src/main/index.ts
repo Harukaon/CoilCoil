@@ -177,6 +177,7 @@ const browserRuntimes = new Map<number, BrowserRuntimeManager>();
 const webviewHostIds = new Set<number>();
 const terminalRuntimes = new Map<number, TerminalRuntimeManager>();
 let primaryBrowserRuntime: BrowserRuntimeManager | undefined;
+let primaryTerminalRuntime: TerminalRuntimeManager | undefined;
 
 function chromeDevtoolsMcpEntry(): string {
   const resolved = moduleRequire.resolve("chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js");
@@ -235,7 +236,7 @@ async function safeProjectEntryPath(
 }
 
 async function performProjectFileAction(
-  event: Electron.IpcMainInvokeEvent,
+  event: Electron.IpcMainInvokeEvent | undefined,
   input: ProjectFileActionInput,
 ): Promise<ProjectFileActionResult> {
   const target = await safeProjectEntryPath(input);
@@ -244,7 +245,7 @@ async function performProjectFileAction(
     return { completed: true };
   }
   if (input.action !== "trash") throw new Error("不支持的文件操作。");
-  const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const owner = event ? BrowserWindow.fromWebContents(event.sender) ?? undefined : undefined;
   const trash = trashLabel(currentPlatform(process.platform));
   const options = {
     type: "warning" as const,
@@ -563,10 +564,59 @@ function remoteController(): RemoteAccessController {
           return { ok: false, error: error instanceof Error ? error.message : String(error) } satisfies RuntimeRequestResult;
         }
       }
+      if (channel === MCP_TEST_CHANNEL) return testMcpConnection(args[0] as McpConnectionTestInput);
       if (channel === APP_VERSION_CHANNEL) return app.getVersion();
       if (channel === PROJECT_HOME_CHANNEL) return homeProject();
+      if (channel === PROJECT_SELECT_CHANNEL) {
+        const result = await dialog.showOpenDialog({ title: "打开项目", properties: ["openDirectory"] });
+        const path = result.filePaths[0];
+        return result.canceled || !path ? null : { name: basename(path), path, kind: "workspace" } satisfies ProjectSelection;
+      }
+      if (channel === PICK_DIRECTORY_CHANNEL) {
+        const options = args[0] as { title?: unknown } | undefined;
+        const result = await dialog.showOpenDialog({
+          title: typeof options?.title === "string" && options.title.trim() ? options.title.trim() : "选择目录",
+          properties: ["openDirectory"],
+        });
+        return result.canceled ? null : result.filePaths[0] ?? null;
+      }
+      if (
+        channel === WINDOW_MINIMUM_WIDTH_CHANNEL
+        || channel === WINDOW_GROW_WIDTH_CHANNEL
+        || channel === WINDOW_BACKGROUND_CHANNEL
+        || channel === WINDOW_OPACITY_CHANNEL
+      ) return channel === WINDOW_OPACITY_CHANNEL ? 1 : undefined;
+      if (channel === BADGE_COUNT_CHANNEL) {
+        const count = Number(args[0]);
+        app.setBadgeCount(Number.isFinite(count) && count > 0 ? Math.floor(count) : 0);
+        return undefined;
+      }
+      if (channel === EXTERNAL_OPEN_CHANNEL) {
+        if (typeof args[0] !== "string") throw new Error("授权地址无效。");
+        const url = new URL(args[0]);
+        if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("只允许打开 HTTP 或 HTTPS 授权地址。");
+        await shell.openExternal(url.toString());
+        return undefined;
+      }
+      if (channel === CLIPBOARD_WRITE_CHANNEL) {
+        if (typeof args[0] !== "string" || args[0].length > 1_000_000) throw new Error("剪贴板内容无效。");
+        clipboard.writeText(args[0]);
+        return undefined;
+      }
       if (channel === PROJECT_DIRECTORY_LIST_CHANNEL) return listProjectDirectory(args[0] as string, args[1] as string | undefined);
       if (channel === PATH_CLASSIFY_CHANNEL) return classifyPaths(args[0] as string[]);
+      if (channel === PATH_REVEAL_CHANNEL) {
+        const rawPath = args[0];
+        if (typeof rawPath !== "string" || !rawPath.trim() || !isAbsolute(rawPath)) throw new Error("路径无效。");
+        const target = resolve(rawPath);
+        const stats = await stat(target).catch(() => undefined);
+        if (!stats) throw new Error("路径不存在或已被移动。");
+        if (stats.isDirectory()) {
+          const error = await shell.openPath(target);
+          if (error) throw new Error(error);
+        } else shell.showItemInFolder(target);
+        return true;
+      }
       // 手机上的浏览器存储是另一个来源的，挂载的文件夹和任务面板都只能问这台机器
       // 要——同一份文件，桌面和手机看到的是同一份清单。
       if (channel === MOUNTED_PROJECTS_CHANNEL) return readMountedProjects(mountedProjectsFile());
@@ -581,27 +631,66 @@ function remoteController(): RemoteAccessController {
       // 是同一份文档，所以图片、PDF、Markdown 在手机上照样看得到。
       if (channel === PREVIEW_OPEN_CHANNEL) return openFilePreview(remotePreviewOwner, args[0] as OpenFilePreviewInput, safePreviewPath);
       if (channel === PREVIEW_CLOSE_CHANNEL) return closeFilePreview(remotePreviewOwner.id, args[0] as string);
+      if (channel === PROJECT_FILE_SAVE_CHANNEL) return saveProjectFile(args[0] as SaveProjectFileInput, safeProjectPath);
+      if (channel === PROJECT_FILE_ACTION_CHANNEL) return performProjectFileAction(undefined, args[0] as ProjectFileActionInput);
       // The phone drives the same browser the agent drives — the one belonging
       // to the desktop window — rather than a browser of its own, which it has
       // no way to host anyway.
       if (channel.startsWith("browser:")) {
         const browser = primaryBrowserRuntime;
         if (!browser) throw new Error("内置浏览器尚未就绪，请先在 Mac 上打开 CoilCoil 窗口。");
-        const scopeId = args[0] as string;
         switch (channel) {
-          case BROWSER_GET_STATE_CHANNEL: return browser.state(scopeId);
-          case BROWSER_CAPTURE_CHANNEL: return browser.captureTab(scopeId);
-          case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, scopeId);
-          case BROWSER_SELECT_TAB_CHANNEL: return browser.selectTab(args[1] as string, scopeId);
-          case BROWSER_CLOSE_TAB_CHANNEL: return browser.closeTab(args[1] as string, scopeId);
-          case BROWSER_NAVIGATE_CHANNEL: return browser.navigate(args[1] as string, scopeId);
-          case BROWSER_ZOOM_CHANNEL: return browser.setZoom(args[1] as "in" | "out" | "reset", scopeId);
-          case BROWSER_BACK_CHANNEL: return browser.back(scopeId);
-          case BROWSER_FORWARD_CHANNEL: return browser.forward(scopeId);
-          case BROWSER_RELOAD_CHANNEL: return browser.reload(scopeId);
+          case BROWSER_SET_SCOPE_CHANNEL: return browser.setUiScope(args[0] as string, args[1] as string | undefined);
+          case BROWSER_GET_STATE_CHANNEL: return browser.state(args[0] as string);
+          case BROWSER_CAPTURE_CHANNEL: return browser.captureTab(args[0] as string);
+          case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, args[0] as string);
+          case BROWSER_SELECT_TAB_CHANNEL: return browser.selectTab(args[1] as string, args[0] as string);
+          case BROWSER_CLOSE_TAB_CHANNEL: return browser.closeTab(args[1] as string, args[0] as string);
+          case BROWSER_NAVIGATE_CHANNEL: return browser.navigate(args[1] as string, args[0] as string);
+          case BROWSER_ZOOM_CHANNEL: return browser.setZoom(args[1] as "in" | "out" | "reset", args[0] as string);
+          case BROWSER_BACK_CHANNEL: return browser.back(args[0] as string);
+          case BROWSER_FORWARD_CHANNEL: return browser.forward(args[0] as string);
+          case BROWSER_RELOAD_CHANNEL: return browser.reload(args[0] as string);
+          case BROWSER_IMPORT_LIST_CHANNEL: return listImportableProfiles();
+          case MAC_PERMISSIONS_CHANNEL: return macPermissions();
+          case OPEN_FULL_DISK_ACCESS_CHANNEL: return openPermissionSettings(args[0] as MacPermissionId);
+          case BROWSER_IMPORT_COOKIES_CHANNEL: return importBrowserCookies(args[0] as ImportBrowserCookiesInput, browser.partitionName());
+          case BROWSER_DATA_STATS_CHANNEL: return browserDataStats(browser.partitionName());
+          case BROWSER_SAVED_LOGINS_CHANNEL: return savedLogins(browser.partitionName());
+          case BROWSER_DATA_CLEAR_CHANNEL: return clearBrowserData((name, data) => diagnosticLog().info("browser-data", name, data));
+          case BROWSER_GUEST_LAYER_READY_CHANNEL: return browser.markGuestLayerReady();
+          case BROWSER_GUEST_FAILED_CHANNEL: return undefined;
+          case BROWSER_UI_VIEWPORT_CHANNEL: return undefined;
           default: break;
         }
       }
+      if (channel === TERMINAL_GET_CHANNEL) return primaryTerminalRuntime?.state() ?? [];
+      if (channel === TERMINAL_CREATE_CHANNEL) return primaryTerminalRuntime?.create(args[0] as string) ?? [];
+      if (channel === TERMINAL_WRITE_CHANNEL) {
+        primaryTerminalRuntime?.write(args[0] as string, args[1] as string);
+        return undefined;
+      }
+      if (channel === TERMINAL_RESIZE_CHANNEL) {
+        primaryTerminalRuntime?.resize(args[0] as string, args[1] as number, args[2] as number);
+        return undefined;
+      }
+      if (channel === TERMINAL_CLOSE_CHANNEL) return primaryTerminalRuntime?.close(args[0] as string) ?? [];
+      if (channel === WINDOW_IS_MAXIMIZED_CHANNEL) return BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false;
+      if (channel === DIAGNOSTIC_LOG_CHANNEL) {
+        const batch = args[0] as DiagnosticLogBatch;
+        if (Array.isArray(batch?.entries)) diagnosticLog().writeEntries(batch.entries);
+        return undefined;
+      }
+      if (channel === DIAGNOSTIC_REVEAL_CHANNEL) {
+        const log = diagnosticLog();
+        shell.showItemInFolder(log.filePath);
+        return log.filePath;
+      }
+      if (channel === REMOTE_GET_CHANNEL) return remoteController().state();
+      if (channel === REMOTE_SAVE_CHANNEL) return remoteController().apply((args[0] ?? {}) as RemoteAccessInput);
+      if (channel === REMOTE_NEW_CODE_CHANNEL) return remoteController().regenerateCode();
+      if (channel === REMOTE_ACCOUNT_CHANNEL) return remoteController().setAccount(String(args[0] ?? ""), String(args[1] ?? ""));
+      if (channel === REMOTE_REVOKE_CHANNEL) return remoteController().revokeDevices();
       throw new Error(`远程会话不支持 ${channel}。`);
     },
     log: (level, event, data) => diagnosticLog().log(level, "remote", event, data),
@@ -611,6 +700,7 @@ function remoteController(): RemoteAccessController {
       for (const window of BrowserWindow.getAllWindows()) {
         window.webContents.send(REMOTE_STATE_CHANNEL, state);
       }
+      remoteAccess?.broadcast(REMOTE_STATE_CHANNEL, state);
     },
   });
   return remoteAccess;
@@ -768,13 +858,17 @@ async function createWindow(): Promise<void> {
     remoteAccess?.broadcast(BROWSER_STATE_CHANNEL, state);
   }, (scopeId) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
+    remoteAccess?.broadcast(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
   }, (roster) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_GUEST_ROSTER_CHANNEL, roster);
+    remoteAccess?.broadcast(BROWSER_GUEST_ROSTER_CHANNEL, roster);
   });
   const terminalRuntime = new TerminalRuntimeManager((state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_STATE_CHANNEL, state);
+    remoteAccess?.broadcast(TERMINAL_STATE_CHANNEL, state);
   }, (id, data) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_DATA_CHANNEL, { id, data });
+    remoteAccess?.broadcast(TERMINAL_DATA_CHANNEL, { id, data });
   });
   installHostNavigationGuard(mainWindow, browserRuntime, (scopeId) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
@@ -790,9 +884,13 @@ async function createWindow(): Promise<void> {
   browserRuntimes.set(ownerWebContentsId, browserRuntime);
   terminalRuntimes.set(ownerWebContentsId, terminalRuntime);
   primaryBrowserRuntime ??= browserRuntime;
+  primaryTerminalRuntime ??= terminalRuntime;
   mainWindow.once("closed", () => {
     browserRuntimes.delete(ownerWebContentsId);
     terminalRuntimes.delete(ownerWebContentsId);
+    if (primaryTerminalRuntime === terminalRuntime) {
+      primaryTerminalRuntime = terminalRuntimes.values().next().value;
+    }
     if (primaryBrowserRuntime === browserRuntime) {
       runtime.stop();
       primaryBrowserRuntime = browserRuntimes.values().next().value;
@@ -903,6 +1001,7 @@ function offerUpdate(update: UpdateAvailable): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(UPDATE_AVAILABLE_CHANNEL, update);
   }
+  remoteAccess?.broadcast(UPDATE_AVAILABLE_CHANNEL, update);
 }
 
 

@@ -1,6 +1,25 @@
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import type { Plugin } from "vite";
+
+/**
+ * The browser entry point is only a second transport for the real Electron
+ * client. Keep the renderer bundle identical and proxy the existing remote
+ * bridge/WebSocket to the main process during local development.
+ */
+function localRemoteBridgePlugin(): Plugin {
+  return {
+    name: "coilcoil-local-remote-bridge",
+    apply: "serve",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        return html.replace("<head>", "<head>\n    <script src=\"/__remote/bridge.js\"></script>");
+      },
+    },
+  };
+}
 
 export default defineConfig({
   main: {
@@ -44,6 +63,15 @@ export default defineConfig({
         "@renderer": resolve("src/renderer/src"),
       },
     },
-    plugins: [react()],
+    plugins: [react(), localRemoteBridgePlugin()],
+    server: {
+      proxy: {
+        "/__remote": {
+          target: `http://127.0.0.1:${process.env.COILCOIL_REMOTE_PORT ?? "7788"}`,
+          ws: true,
+          changeOrigin: false,
+        },
+      },
+    },
   },
 });

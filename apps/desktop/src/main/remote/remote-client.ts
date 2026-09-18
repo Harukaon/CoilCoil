@@ -1,30 +1,36 @@
 import type { DesktopPlatform } from "../../shared/desktop-api";
 
 /**
- * Channels a remote client is allowed to call. Everything else in the desktop
- * bridge either needs a real window (title bar buttons, native dialogs) or a
- * real screen (the embedded browser), and is answered locally by the shim
- * below instead of being sent over the wire.
+ * The browser client is another renderer for the same desktop process. Keep
+ * this allow-list in step with the preload IPC surface: state must come from
+ * the main process, never from a browser-only copy of models/config/database.
  */
 export const REMOTE_INVOKE_CHANNELS = [
+  "mcp:test-connection",
   "runtime:request",
   "app:version",
+  "project:select",
   "project:home",
+  "dialog:pick-directory",
+  "window:minimum-width",
+  "window:grow-width",
+  "window:background",
+  "window:opacity",
+  "app:badge-count",
+  "external:open",
+  "clipboard:write",
+  "path:reveal",
   "project-directory:list",
+  "project-file:action",
+  "project-file:save",
   "path:classify",
-  // 挂载的文件夹清单。手机上的 localStorage 是另一个来源的，本来就是空的，所以
-  // 这份清单必须问 Mac 要——不接这两条，手机上侧栏里就只有一个 Home。
   "projects:mounted",
   "projects:mounted:set",
-  // 任务面板同理：数据在 Mac 的 userData 里，手机只是另一个看它的窗口。
   "issues:list",
   "issues:save",
-  // 文件预览。图片、PDF、Markdown 的内容都是主进程读出来放进返回值里的，手机拿到
-  // 的和桌面拿到的是同一份文档，没有任何理由把它挡在门外。
   "preview:open",
   "preview:close",
-  // The built-in browser is the agent's, running on the Mac. The phone cannot
-  // host the view, but it can drive the same tabs and watch frames of them.
+  "browser:set-scope",
   "browser:get-state",
   "browser:capture",
   "browser:create-tab",
@@ -35,15 +41,45 @@ export const REMOTE_INVOKE_CHANNELS = [
   "browser:back",
   "browser:forward",
   "browser:reload",
+  "browser:import-list",
+  "system:open-full-disk-access",
+  "system:mac-permissions",
+  "browser:import-cookies",
+  "browser:data-stats",
+  "browser:saved-logins",
+  "browser:data-clear",
+  "browser:guest-layer-ready",
+  "browser:register-guest",
+  "browser:guest-failed",
+  "browser:ui-viewport",
+  "terminal:get",
+  "terminal:create",
+  "terminal:write",
+  "terminal:resize",
+  "terminal:close",
+  "window:is-maximized",
+  "diagnostics:log",
+  "diagnostics:reveal",
+  "remote:get",
+  "remote:save",
+  "remote:new-code",
+  "remote:account",
+  "remote:revoke",
 ] as const;
 
 /** Main-process pushes forwarded to remote clients. */
 export const REMOTE_PUSH_CHANNELS = [
   "runtime:event",
   "update:available",
-  // 手机和桌面看的是同一个浏览器、同一份预览，那边变了这边就得跟着变。
   "browser:state",
+  "browser:agent-activated",
+  "browser:guest-roster",
   "preview:updated",
+  "terminal:state",
+  "terminal:data",
+  "window:maximized",
+  "window:focus",
+  "remote:state",
 ] as const;
 
 /**
@@ -161,10 +197,6 @@ export function bridgeScript(platform: DesktopPlatform): string {
     return function () { return Promise.resolve(value); };
   }
 
-  function rejects(message) {
-    return function () { return Promise.reject(new Error(message)); };
-  }
-
   function ignore() { return function () {}; }
 
   connect();
@@ -179,54 +211,48 @@ export function bridgeScript(platform: DesktopPlatform): string {
         return result.value;
       });
     },
-    onRuntimeEvent: function (listener) {
-      return subscribe("runtime:event")(function (payload) { listener(payload.event, payload.runtimeId); });
-    },
-    onUpdateAvailable: subscribe("update:available"),
+  onRuntimeEvent: function (listener) {
+    return subscribe("runtime:event")(function (payload) { listener(payload.event, payload.runtimeId); });
+  },
+  onUpdateAvailable: subscribe("update:available"),
 
+    testMcpConnection: function (input) { return invoke("mcp:test-connection", [input]); },
     appVersion: function () { return invoke("app:version", []); },
     homeProject: function () { return invoke("project:home", []); },
+    selectProject: function () { return invoke("project:select", []); },
+    pickDirectory: function (options) { return invoke("dialog:pick-directory", [options]); },
+    setWindowMinimumWidth: function (width) { return invoke("window:minimum-width", [width]); },
+    growWindowWidth: function (byPixels) { return invoke("window:grow-width", [byPixels]); },
+    setWindowBackground: function (color) { return invoke("window:background", [color]); },
+    setWindowOpacity: function (opacity) { return invoke("window:opacity", [opacity]); },
+    setBadgeCount: function (count) { return invoke("app:badge-count", [count]); },
     listProjectDirectory: function (root, path) { return invoke("project-directory:list", [root, path]); },
     classifyPaths: function (paths) { return invoke("path:classify", [paths]); },
+    revealPath: function (path) { return invoke("path:reveal", [path]); },
+    openExternal: function (url) { return invoke("external:open", [url]); },
+    copyText: function (value) { return invoke("clipboard:write", [value]); },
     mountedProjects: function () { return invoke("projects:mounted", []); },
     setMountedProjects: function (projects) { return invoke("projects:mounted:set", [projects]); },
     listIssues: function (cwd) { return invoke("issues:list", [cwd]); },
     saveIssues: function (cwd, issues) { return invoke("issues:save", [cwd, issues]); },
-
-    // Needs a native dialog on the Mac; the phone browses directories instead.
-    selectProject: resolves(null),
-    pickDirectory: resolves(null),
-    performProjectFileAction: rejects("远程会话暂不支持修改项目文件。"),
-    saveProjectFile: rejects("远程会话暂不支持编辑文件。"),
-    testMcpConnection: rejects("远程会话暂不支持测试 MCP 连接。"),
-
-    // 预览的内容是 Mac 读出来随返回值一起送过来的，所以图片、PDF 在手机上照样看。
+    performProjectFileAction: function (input) { return invoke("project-file:action", [input]); },
+    saveProjectFile: function (input) { return invoke("project-file:save", [input]); },
     openFilePreview: function (input) { return invoke("preview:open", [input]); },
     closeFilePreview: function (id) { return invoke("preview:close", [id]); },
     onFilePreviewUpdated: subscribe("preview:updated"),
 
-    // The desktop window's own controls have no meaning on a phone.
-    setWindowMinimumWidth: resolves(undefined),
-    growWindowWidth: resolves(undefined),
-    setWindowBackground: resolves(undefined),
-    minimizeWindow: function () {},
-    toggleWindowMaximized: function () {},
-    closeWindow: function () {},
-    isWindowMaximized: resolves(false),
-    onWindowMaximizedChange: ignore,
+    minimizeWindow: function () { invoke("window:minimize", []); },
+    toggleWindowMaximized: function () { invoke("window:toggle-maximized", []); },
+    closeWindow: function () { invoke("window:close", []); },
+    isWindowMaximized: function () { return invoke("window:is-maximized", []); },
+    onWindowMaximizedChange: subscribe("window:maximized"),
     getBubbleShortcut: resolves({ registered: false }),
     setBubbleShortcut: resolves({ registered: false }),
     hideBubble: resolves(undefined),
     openMainWindow: resolves(undefined),
     onOpenBubbleSession: ignore,
 
-    // The agent still drives the Mac's real browser. The phone controls the same
-    // tabs and shows captured frames instead of an embedded view, so the panel
-    // is live rather than disabled.
-    // 不往 Mac 上设 UI scope（那会把桌面窗口正看着的东西也换掉），只问它这个
-    // scope 现在有哪些标签页。以前这里直接回一份空的，于是手机既看不到 Mac 上已经
-    // 开着的标签，还会每次打开面板都在 Mac 上多建一个。
-    setBrowserScope: function (scopeId) { return invoke("browser:get-state", [scopeId]); },
+    setBrowserScope: function (scopeId, workspacePath) { return invoke("browser:set-scope", [scopeId, workspacePath]); },
     getBrowserState: function (scopeId) { return invoke("browser:get-state", [scopeId]); },
     captureBrowserTab: function (scopeId) { return invoke("browser:capture", [scopeId]); },
     createBrowserTab: function (scopeId, url) { return invoke("browser:create-tab", [scopeId, url]); },
@@ -237,34 +263,39 @@ export function bridgeScript(platform: DesktopPlatform): string {
     browserBack: function (scopeId) { return invoke("browser:back", [scopeId]); },
     browserForward: function (scopeId) { return invoke("browser:forward", [scopeId]); },
     reloadBrowser: function (scopeId) { return invoke("browser:reload", [scopeId]); },
-    // Reporting a viewport from here would resize the agent's browser to the
-    // phone's panel, so the phone stays a viewer of the Mac's own viewport.
-    setBrowserUiViewport: resolves(undefined),
-    browserGuestLayerReady: resolves({ tabs: [] }),
+    setBrowserUiViewport: function (viewport) { return invoke("browser:ui-viewport", [viewport]); },
+    browserGuestLayerReady: function () { return invoke("browser:guest-layer-ready", []); },
     registerBrowserGuest: resolves(undefined),
     reportBrowserGuestFailure: resolves(undefined),
-    onBrowserGuestRoster: ignore,
+    onBrowserGuestRoster: subscribe("browser:guest-roster"),
     onBrowserStateUpdated: subscribe("browser:state"),
-    onBrowserAgentActivated: ignore,
+    onBrowserAgentActivated: subscribe("browser:agent-activated"),
 
-    // The user's own terminal panel is a Mac-side pty; the agent's terminal
-    // tool is unaffected and reports through runtime events like everything else.
-    getTerminalSessions: resolves([]),
-    createTerminal: resolves([]),
-    writeTerminal: resolves(undefined),
-    resizeTerminal: resolves(undefined),
-    closeTerminal: resolves([]),
-    onTerminalStateUpdated: ignore,
-    onTerminalData: ignore,
+    listImportableBrowsers: function () { return invoke("browser:import-list", []); },
+    openPermissionSettings: function (id) { return invoke("system:open-full-disk-access", [id]); },
+    getMacPermissions: function () { return invoke("system:mac-permissions", []); },
+    importBrowserCookies: function (input) { return invoke("browser:import-cookies", [input]); },
+    getBrowserDataStats: function () { return invoke("browser:data-stats", []); },
+    listSavedLogins: function () { return invoke("browser:saved-logins", []); },
+    clearBrowserData: function () { return invoke("browser:data-clear", []); },
 
-    openExternal: function (url) { window.open(url, "_blank", "noopener"); return Promise.resolve(); },
-    revealPath: resolves(false),
-    revealDiagnostics: resolves(""),
-    writeDiagnostics: function () {},
-    copyText: function (text) {
-      if (navigator.clipboard) return navigator.clipboard.writeText(text);
-      return Promise.resolve();
-    },
+    getTerminalSessions: function () { return invoke("terminal:get", []); },
+    createTerminal: function (cwd) { return invoke("terminal:create", [cwd]); },
+    writeTerminal: function (id, data) { return invoke("terminal:write", [id, data]); },
+    resizeTerminal: function (id, cols, rows) { return invoke("terminal:resize", [id, cols, rows]); },
+    closeTerminal: function (id) { return invoke("terminal:close", [id]); },
+    onTerminalStateUpdated: subscribe("terminal:state"),
+    onTerminalData: subscribe("terminal:data"),
+
+    revealDiagnostics: function () { return invoke("diagnostics:reveal", []); },
+    writeDiagnostics: function (batch) { void invoke("diagnostics:log", [batch]); },
+    getRemoteAccess: function () { return invoke("remote:get", []); },
+    saveRemoteAccess: function (input) { return invoke("remote:save", [input]); },
+    regenerateRemotePairingCode: function () { return invoke("remote:new-code", []); },
+    setRemoteAccount: function (username, password) { return invoke("remote:account", [username, password]); },
+    revokeRemoteDevices: function () { return invoke("remote:revoke", []); },
+    onRemoteAccessChanged: subscribe("remote:state"),
+    onWindowFocusChange: subscribe("window:focus"),
     filePath: function () { return ""; },
   };
 })();

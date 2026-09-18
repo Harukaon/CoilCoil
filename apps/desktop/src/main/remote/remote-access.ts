@@ -243,6 +243,10 @@ export class RemoteAccessController {
       rendererUrl: this.options.rendererUrl,
       rendererDir: this.options.rendererDir,
       authFile: this.options.authFile,
+      // The Vite page at localhost:5173 is a local development client for
+      // this exact Electron process. It must not be forced through pairing,
+      // while packaged/remote access keeps the normal auth gate.
+      allowLoopback: Boolean(this.options.rendererUrl),
       invoke: this.options.invoke,
       log: this.options.log,
       trustLocalNetwork: () => this.config.trustLocalNetwork,

@@ -42,6 +42,8 @@ export interface RemoteServerOptions {
   /** Built renderer directory, used when there is no dev server. */
   rendererDir: string;
   authFile: string;
+  /** Development-only loopback access for the Vite browser client. */
+  allowLoopback?: boolean;
   /**
    * Skip the login screen for connections that arrive from the user's own
    * network — a tailnet or a LAN. Never applies to loopback: the reverse-proxy
@@ -67,6 +69,12 @@ function cookieToken(header: string | undefined): string | undefined {
     if (name === COOKIE) return decodeURIComponent(rest.join("="));
   }
   return undefined;
+}
+
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const normalized = address.toLowerCase().replace(/^::ffff:/, "");
+  return normalized === "127.0.0.1" || normalized === "::1";
 }
 
 function readBody(request: IncomingMessage, limit = 4096): Promise<string> {
@@ -247,6 +255,7 @@ export class RemoteServer {
    */
   private allowed(request: IncomingMessage): boolean {
     if (this.auth.verify(cookieToken(request.headers.cookie))) return true;
+    if (this.options.allowLoopback && isLoopbackAddress(request.socket.remoteAddress)) return true;
     if (!this.options.trustLocalNetwork()) return false;
     const peer = request.socket.remoteAddress;
     return !!peer && isTrustedAddress(peer);
