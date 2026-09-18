@@ -8,6 +8,7 @@ import planExtension, {
   PLAN_RPC_REPLY_PREFIX,
   PLAN_RPC_REQUEST_CHANNEL,
   PLAN_STATE_CHANNEL,
+  latestPlanFromBranch,
   parsePlanFile,
   serializePlanFile,
   type PlanState,
@@ -356,4 +357,25 @@ test("rejecting a pending plan persists the decision without starting an Agent",
   assert.equal((rejected.value as any).success, true);
   assert.equal((rejected.value as any).data.plan.status, "rejected");
   assert.equal(harness.sentUserMessages.length, 0);
+});
+
+test("找最近一个计划时只能取一次 branch——取多了就是 O(n²)", () => {
+  // getBranch() 每次都会把整条父链重走一遍、再新建一个数组。它一度写在循环条件里，
+  // 于是一个 60MB 的会话光这一步就要 5.8 秒，而「打开会话」总共才 6.5 秒。
+  let calls = 0;
+  const branch = Array.from({ length: 5_000 }, (_, index) => ({
+    type: "message" as const,
+    id: `m${index}`,
+    message: { role: "user" as const, content: "x" },
+  }));
+  const ctx = {
+    sessionManager: {
+      getBranch: () => { calls += 1; return branch; },
+    },
+  } as never;
+
+  const started = Date.now();
+  assert.equal(latestPlanFromBranch(ctx), undefined, "没有计划就是没有");
+  assert.equal(calls, 1, `branch 只该取一次，实际取了 ${calls} 次`);
+  assert.ok(Date.now() - started < 1_000, "五千条的分支不该扫出秒级耗时");
 });

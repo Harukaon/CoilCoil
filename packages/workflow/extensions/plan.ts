@@ -219,9 +219,14 @@ function assistantFailure(message: unknown): string | undefined {
   return "主 Agent 执行失败。";
 }
 
-function latestPlanFromBranch(ctx: ExtensionContext): PlanState | undefined {
-  for (let index = ctx.sessionManager.getBranch().length - 1; index >= 0; index -= 1) {
-    const entry = ctx.sessionManager.getBranch()[index];
+/** Exported for the regression test that keeps this scan from going quadratic again. */
+export function latestPlanFromBranch(ctx: ExtensionContext): PlanState | undefined {
+  /* getBranch() 每次调用都要把整条父链重走一遍、再新建一个数组。原来它写在循环条件
+     和取元素两处，于是这个倒着找的循环是 O(n²)：一个 60MB 的会话打开一次要在这里
+     花掉 5.8 秒，而「打开会话」总共才 6.5 秒。取一次就够，分支在这段循环里不会变。 */
+  const branch = ctx.sessionManager.getBranch();
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const entry = branch[index];
     if (entry.type === "custom" && entry.customType === PLAN_ENTRY_TYPE) {
       const parsed = parsePlanState(entry.data);
       if (parsed) return parsed;
