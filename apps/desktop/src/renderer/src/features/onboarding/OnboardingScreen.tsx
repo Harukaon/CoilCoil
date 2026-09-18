@@ -99,7 +99,7 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
             ))}
           </nav>
 
-          <section className="onboarding-step" key={progress.step}>
+          <section className={`onboarding-step ${progress.step === "model" ? "dense" : ""}`} key={progress.step}>
             <span className="onboarding-mark" aria-hidden="true">{index + 1}</span>
 
             {progress.step === "intro" ? (
@@ -121,11 +121,11 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
 
             {progress.step === "model" ? (
               <>
-                <div className="onboarding-headline">
+                <div className="onboarding-headline compact">
                   <h1 id="onboarding-title">配一个模型</h1>
                   <p>选一个服务商填上密钥就能开始。现在不配也行，之后在「设置 → 模型与服务商」里随时能补。</p>
                 </div>
-                <div className="onboarding-embed">
+                <div className="onboarding-embed settings-surface">
                   <ModelSettings configuration={configuration} onSaved={onConfigurationSaved} runtimeId={runtimeId} />
                 </div>
               </>

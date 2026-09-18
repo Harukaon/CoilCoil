@@ -203,13 +203,17 @@
 }
 .settings-page-content { min-width: 0; min-height: 0; overflow: hidden; }
 .settings-icon { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid hsl(var(--th) var(--ts) var(--l-841)); border-radius: var(--radius-2xl); background: hsl(var(--th) var(--ts) var(--l-1000)); }
-.settings-screen form { display: grid; gap: 15px; padding: 22px 26px 26px; }
-.settings-screen label { display: grid; gap: 7px; color: hsl(var(--th) var(--ts) var(--l-357)); font-size: 11px; font-weight: 550; }
-.settings-screen input, .settings-screen textarea { width: 100%; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: var(--radius-xl); color: hsl(var(--th) var(--ts) var(--l-198)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px; }
-.settings-screen input { height: 34px; padding: 0 9px; }
-.settings-screen textarea { min-height: 72px; resize: vertical; padding: 8px 9px; font: 10px/1.5 var(--font-mono, "SFMono-Regular", Consolas, monospace); }
-.settings-screen footer { display: flex; align-items: center; gap: 12px; padding-top: 3px; }
-.settings-screen footer > span { min-width: 0; flex: 1; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 10px; }
+/* 这一段管的是表单里的排版（字号、行距、内边距）。以前只挂在 .settings-screen 上，
+   于是模型面板一旦被搬到别的容器里（引导页第二步），这些规则一条都不生效——label 和
+   input 掉回浏览器默认的 16px，紧挨着 10~12px 的字，整块看上去大大小小全乱。
+   现在多认一个 .settings-surface：谁要把设置里的面板嵌到别处，加这个类就行。 */
+:is(.settings-screen, .settings-surface) form { display: grid; gap: 15px; padding: 22px 26px 26px; }
+:is(.settings-screen, .settings-surface) label { display: grid; gap: 7px; color: hsl(var(--th) var(--ts) var(--l-357)); font-size: 11px; font-weight: 550; }
+:is(.settings-screen, .settings-surface) :is(input, textarea) { width: 100%; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: var(--radius-xl); color: hsl(var(--th) var(--ts) var(--l-198)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px; }
+:is(.settings-screen, .settings-surface) input { height: 34px; padding: 0 9px; }
+:is(.settings-screen, .settings-surface) textarea { min-height: 72px; resize: vertical; padding: 8px 9px; font: 10px/1.5 var(--font-mono, "SFMono-Regular", Consolas, monospace); }
+:is(.settings-screen, .settings-surface) footer { display: flex; align-items: center; gap: 12px; padding-top: 3px; }
+:is(.settings-screen, .settings-surface) footer > span { min-width: 0; flex: 1; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 10px; }
 .mcp-editor-footer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .model-search, .secret-input { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: var(--radius-xl); color: hsl(var(--th) var(--ts) var(--l-535)); background: hsl(var(--th) var(--ts) var(--l-1000)); }
 .model-search input, .secret-input input { height: 100%; padding: 0; border: 0; outline: 0; background: transparent; }
@@ -423,8 +427,8 @@ label.provider-model-search { display: inline-flex; min-width: 180px; flex: 1 1 
 .mcp-server-meta small { min-width: 0; }
 .mcp-server-title em, .mcp-server-meta em { padding: 1px 5px; border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-447)); background: hsl(var(--th) var(--ts) var(--l-888)); font-size: 8px; font-style: normal; }
 .mcp-server-title em.mounted, .mcp-server-meta em.mounted { color: var(--c-blue-muted); background: hsl(var(--th) var(--ts) var(--l-910)); }
-.settings-screen fieldset.mcp-definition-fields { display: grid; gap: 15px; min-width: 0; margin: 0; padding: 0; border: 0; }
-.settings-screen fieldset.mcp-definition-fields:disabled { opacity: .62; }
+:is(.settings-screen, .settings-surface) fieldset.mcp-definition-fields { display: grid; gap: 15px; min-width: 0; margin: 0; padding: 0; border: 0; }
+:is(.settings-screen, .settings-surface) fieldset.mcp-definition-fields:disabled { opacity: .62; }
 .mcp-status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: hsl(var(--th) var(--ts) var(--l-655)); }
 .mcp-status-dot.connected { background: var(--c-green-muted); box-shadow: 0 0 0 2px rgb(95 140 98 / 12%); }
 .mcp-status-dot.needs-auth { background: var(--c-amber-solid); }

@@ -83,6 +83,11 @@
 .onboarding-headline { display: grid; flex: 0 0 auto; justify-items: center; gap: 12px; text-align: center; }
 .onboarding-headline h1 { margin: 0; color: hsl(var(--th) var(--ts) var(--l-137)); font-size: 30px; font-weight: 660; letter-spacing: -.03em; line-height: 1.2; }
 .onboarding-headline p { max-width: 500px; margin: 0; color: hsl(var(--th) var(--ts) var(--l-527)); font-size: 12.5px; line-height: 1.85; }
+/* 模型这一步里嵌着一整块真正的设置面板，标题必须让位——用大标题的话面板只剩一截，
+   表单在半路被切断，看上去像坏了。 */
+.onboarding-headline.compact { gap: 5px; }
+.onboarding-headline.compact h1 { font-size: 19px; letter-spacing: -.02em; }
+.onboarding-headline.compact p { max-width: 620px; font-size: 11.5px; line-height: 1.7; }
 
 /* 理念：三行，发丝线隔开，没有盒子。 */
 .onboarding-lines { display: grid; flex: 0 0 auto; gap: 0; }
@@ -141,6 +146,10 @@
 .onboarding-next { color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-198)); font-weight: 600; }
 .onboarding-next:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-137)); }
 .onboarding-next:disabled { color: hsl(var(--th) var(--ts) var(--l-743)); background: hsl(var(--th) var(--ts) var(--l-137) / 7%); cursor: default; }
+
+/* 这一步标题矮，折标跟着往上收，否则会盖到面板上沿。 */
+.onboarding-step.dense .onboarding-mark { top: -34px; font-size: 96px; }
+.onboarding-step.dense { gap: 14px; }
 
 @media (max-width: 720px) {
   .onboarding-stage, .onboarding-footer { padding-right: 22px; padding-left: 22px; }
