@@ -85,8 +85,23 @@ export class McpOAuthProvider implements OAuthClientProvider {
     return next;
   }
 
+  /**
+   * 之前动态注册下来的 client，前提是它注册的回调地址还是我们现在这一个。
+   *
+   * 回调监听器按 7842、7843、7844… 依次找空位，所以某次授权可能是在 7843 上注册
+   * 的；等端口腾出来、这次回到 7842，再拿那个旧 client_id 去发起授权，授权服务器
+   * 只会回一句「redirect_uri 与注册时不一致」——而且会一直这样，因为我们每次都把
+   * 那份过期的注册信息原样拿出来用。
+   *
+   * 对不上就当作没注册过，让 SDK 重新做一次动态注册，把当前地址注册进去。服务器
+   * 没回 redirect_uris 的情况不判断：那是它没告诉我们，不是对不上。
+   */
   clientInformation(): OAuthClientInformationMixed | undefined {
-    return this.options.store.get(this.key)?.clientInformation as OAuthClientInformationMixed | undefined;
+    const stored = this.options.store.get(this.key)?.clientInformation as OAuthClientInformationMixed | undefined;
+    if (!stored) return undefined;
+    const registered = (stored as { redirect_uris?: unknown }).redirect_uris;
+    if (!Array.isArray(registered) || registered.length === 0) return stored;
+    return registered.includes(this.options.redirectUrl) ? stored : undefined;
   }
 
   saveClientInformation(clientInformation: OAuthClientInformationMixed): void {

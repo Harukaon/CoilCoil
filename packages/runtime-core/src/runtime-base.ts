@@ -221,6 +221,11 @@ export abstract class RuntimeBase {
 
   async initialize(): Promise<RuntimeBootstrap> {
     await this.ready();
+    // MCP 管理器一造出来就会在后台把启用的服务器都连上。以前它是等第一次查状态
+    // 才被造出来，而第一次查状态发生在打开会话之后——等于「开机预连」要等用户先
+    // 点开一个对话，白白错过了启动到第一次用之间的那段时间。这里只是把它造出来，
+    // 连接仍然是后台跑的，披露给 Agent 也仍然按需。
+    try { this.mcpManager(); } catch { /* 起不来就算了，不该拖住运行时 */ }
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "runtime_ready", configuration });
     return { configuration, activeSession: this.active ? await this.snapshot() : undefined };

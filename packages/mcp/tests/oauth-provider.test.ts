@@ -112,3 +112,37 @@ test("两个服务器的凭据互不串门", () => {
   b.invalidateCredentials("all");
   assert.deepEqual(a.tokens(), tokens);
 });
+
+test("回调端口变了之后，旧的注册信息要作废重来", () => {
+  // 回调监听器按 7842、7843… 依次找空位，所以上一次授权可能注册在别的端口上。
+  // 拿着那份旧注册再去发起授权，服务器只会回「redirect_uri 与注册时不一致」，
+  // 而且会一直这样——除非我们自己认出来并重新注册。
+  const { provider: subject, store } = provider();
+  store.update(credentialKey(SERVER), {
+    url: SERVER,
+    clientInformation: {
+      client_id: "kmg_client_old",
+      redirect_uris: ["http://127.0.0.1:7843/callback"],
+    } as never,
+  });
+  assert.equal(subject.clientInformation(), undefined, "地址对不上就当没注册过");
+
+  store.update(credentialKey(SERVER), {
+    url: SERVER,
+    clientInformation: {
+      client_id: "kmg_client_current",
+      redirect_uris: ["http://127.0.0.1:7891/callback"],
+    } as never,
+  });
+  assert.equal(subject.clientInformation()?.client_id, "kmg_client_current", "地址对得上就继续用");
+});
+
+test("服务器没回 redirect_uris 时不乱作废", () => {
+  // 没告诉我们注册了什么，不代表对不上；作废了只会白白重新注册一次。
+  const { provider: subject, store } = provider();
+  store.update(credentialKey(SERVER), {
+    url: SERVER,
+    clientInformation: { client_id: "kmg_client_quiet" } as never,
+  });
+  assert.equal(subject.clientInformation()?.client_id, "kmg_client_quiet");
+});
