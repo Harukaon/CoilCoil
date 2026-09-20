@@ -48,12 +48,18 @@ export function useChatContentWidth(): {
   const beginChatWidthResize = useCallback((edge: "left" | "right", event: ReactPointerEvent<HTMLDivElement>): void => {
     event.preventDefault();
     event.stopPropagation();
+    // 组字期间冻结宽度：文本 reflow 会让候选窗跟着横跳，等组字结束再动。
+    const composing = (event.currentTarget.ownerDocument.activeElement as HTMLElement | null)?.matches?.(".tiptap.ProseMirror-composing, .prompt-editor:has(.ProseMirror-composing)")
+      ?? false;
+    if (composing) return;
     const startX = event.clientX;
     const startWidth = chatContentWidth;
     let finalWidth = startWidth;
     const pane = event.currentTarget.closest(".conversation-pane") as HTMLElement | null;
     document.body.classList.add("resizing-panels");
     const move = (pointer: PointerEvent): void => {
+      // 拖到一半才开始组字：同样冻结，松手也不提交这次拖动。
+      if (pane?.querySelector(".ProseMirror-composing")) return;
       const delta = edge === "right" ? pointer.clientX - startX : startX - pointer.clientX;
       // Dragging either edge expands/contracts symmetrically around center.
       const next = Math.round(startWidth + delta * 2);
