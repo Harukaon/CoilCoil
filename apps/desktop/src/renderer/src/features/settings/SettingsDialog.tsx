@@ -42,6 +42,10 @@ const SETTINGS_SIDEBAR_WIDTH_KEY = "coilcoil.settings-sidebar-width";
 const DEFAULT_SETTINGS_SIDEBAR_WIDTH = 220;
 const MINIMUM_SETTINGS_SIDEBAR_WIDTH = 160;
 const MAXIMUM_SETTINGS_SIDEBAR_WIDTH = 360;
+const MCP_LIST_WIDTH_KEY = "coilcoil.mcp-list-width";
+const DEFAULT_MCP_LIST_WIDTH = 230;
+const MINIMUM_MCP_LIST_WIDTH = 167;
+const MAXIMUM_MCP_LIST_WIDTH = 360;
 const MCP_SCOPE_OPTIONS: SelectOption[] = [
   { value: "global", label: "全局" },
   { value: "project", label: "当前项目" },
