@@ -78,6 +78,40 @@ const IDLE_SWEEP_MS = 30_000;
  */
 const CONNECT_CONCURRENCY = 2;
 
+/**
+ * 模型猜错的浏览器旧工具名 → 真实工具名。
+ *
+ * 历史会话统计：navigate/reload/screenshot/type/snapshot 等猜名错误共 9 次。
+ * 命中别名直接转调并记诊断，而不是让模型撞一次 schema 墙再重试。
+ */
+export const BROWSER_TOOL_ALIASES: Record<string, string> = {
+  navigate: "navigate_page",
+  reload: "navigate_page",
+  reload_page: "navigate_page",
+  screenshot: "take_screenshot",
+  type: "type_text",
+  snapshot: "take_snapshot",
+  get_page_snapshot: "take_snapshot",
+  get_snapshot: "take_snapshot",
+  evaluate_scriptxs: "evaluate_script",
+};
+
+/**
+ * pageId 自愈：字符串数字转成数字， "1" → 1。
+ *
+ * chrome-devtools-mcp 的 pageId 是 zod.number，模型经通用 mcp 包装层调用时
+ * 容易先生成字符串。能转就转，转不掉才原样透出让 schema 报错。
+ */
+export function coercePageId(args: Record<string, unknown>): Record<string, unknown> {
+  const raw = args.pageId;
+  if (typeof raw !== "string") return args;
+  const trimmed = raw.trim();
+  if (!trimmed) return args;
+  const numeric = Number(trimmed);
+  if (!Number.isInteger(numeric) || numeric < 0) return args;
+  return { ...args, pageId: numeric };
+}
+
 interface AuthFlow {
   /** Open the browser rather than only recording where it would have gone. */
   interactive: boolean;
@@ -630,7 +664,14 @@ export class McpManager {
     // `callTool` connects on demand, so the redirect address has to exist first
     // for exactly the same reason as above.
     if (this.supportsOAuth(definition)) await this.ensureCallbackServer();
-    return this.connectionFor(server).callTool(tool, args, signal);
+    // 旧工具名别名：命中直接转调，诊断里记一笔，模型不用撞墙重试。
+    const resolvedTool = BROWSER_TOOL_ALIASES[tool] ?? tool;
+    if (resolvedTool !== tool) {
+      this.options.diagnostic?.("info", "mcp_tool_alias", { server, tool, resolvedTool });
+    }
+    // pageId 自愈："1" → 1，只动浏览器类 server，不碰别的 server 的同名参数。
+    const resolvedArgs = server === "coilcoil-browser" ? coercePageId(args) : args;
+    return this.connectionFor(server).callTool(resolvedTool, resolvedArgs, signal);
   }
 
   /**
