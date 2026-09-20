@@ -55,7 +55,13 @@ jobs:
             vendor/pi/package-lock.json
 
       - name: Prepare dependencies and native modules
-        run: npm run setup
+        run: |
+          npm ci --prefix vendor/pi --ignore-scripts
+          npm ci --ignore-scripts
+          npm run build:pi
+          npm run patch:chrome-devtools-mcp
+          npm rebuild node-pty esbuild
+          node node_modules/electron/install.js
 
       - name: Verify bundled node-pty prebuilds
         shell: pwsh
