@@ -6,6 +6,7 @@ import {
   type PlanApprovalState,
   type PlanExecutionTarget,
   type PromptImage,
+  type PromptDocument,
   type SubagentActivity,
   type TerminalRun,
   type TodoItem,
@@ -17,6 +18,7 @@ import {
   contentParts,
   extractExitCode,
   mapMessage,
+  promptDocumentFromUnknown,
   messageTimestamp,
   normalizeTodoPlan,
   restoredSubagentActivity,
@@ -28,6 +30,7 @@ import {
   isShellToolName,
   MAX_TERMINAL_OUTPUT,
   PLAN_ENTRY_TYPE,
+  PROMPT_DOCUMENT_ENTRY_TYPE,
   PLAN_RPC_REQUEST_CHANNEL,
   SUBAGENT_RPC_REQUEST_CHANNEL,
   SUBAGENT_RUN_ENTRY_TYPE,
@@ -86,6 +89,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     const terminals = new Map<string, TerminalRun>();
     let plan: TodoItem[] = [];
     let planApproval: PlanApprovalState | undefined;
+    const promptDocumentsByEntryId = new Map<string, PromptDocument>();
     // `rawId` is kept because the tool-purpose audit entries are keyed by the id
     // the provider reported, not by the run id derived from it.
     const calls = new Map<string, AssistantToolCall & { order: number; rawId: string; }>();
@@ -101,13 +105,20 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     // entry type rather than as a message, so a walk that only took `message`
     // rebuilt the transcript without them: the card appeared while the turn ran
     // and vanished the moment the turn's end replaced it with a fresh snapshot.
-    const branchMessages = session.sessionManager.getBranch()
+    const branch = session.sessionManager.getBranch();
+    for (const entry of branch) {
+      if (entry.type !== "custom" || entry.customType !== PROMPT_DOCUMENT_ENTRY_TYPE || !isRecord(entry.data)) continue;
+      const messageEntryId = stringValue(entry.data.messageEntryId);
+      const document = promptDocumentFromUnknown(entry.data.document);
+      if (messageEntryId && document) promptDocumentsByEntryId.set(messageEntryId, document);
+    }
+    const branchMessages = branch
       .filter((entry) => entry.type === "message" || entry.type === "custom_message");
     for (const [index, entry] of branchMessages.entries()) {
       const rawMessage = customEntryMessage(entry) ?? (entry as { message?: unknown }).message;
       if (!isRecord(rawMessage)) continue;
       const liveMessageId = this.active?.messageIds.get(rawMessage);
-      const mapped = mapMessage(rawMessage, liveMessageId ?? `history-${entry.id}`, order, entry.id);
+      const mapped = mapMessage(rawMessage, liveMessageId ?? `history-${entry.id}`, order, entry.id, promptDocumentsByEntryId.get(entry.id));
       if (mapped && mapped.role !== "tool" && (mapped.role === "user" || mapped.text || mapped.thinking)) {
         messages.push(mapped);
         order += 1;
@@ -219,6 +230,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
       responseMetrics: responseMetricsHistory.at(-1),
       responseMetricsHistory,
       planApproval,
+      promptDocumentsByEntryId,
     };
   }
 
@@ -363,9 +375,43 @@ export abstract class RuntimeToolState extends RuntimeSessions {
    * The text is what correlates Pi's echoed user message back to this id; see
    * {@link matchPendingUserPrompt}.
    */
-  protected queueClientMessage(active: ActiveSession, clientMessageId: string | undefined, text: string): void {
+  protected queueClientMessage(active: ActiveSession, clientMessageId: string | undefined, text: string, promptDocument?: PromptDocument): void {
     if (!clientMessageId || active.pendingUserPrompts.some((prompt) => prompt.id === clientMessageId)) return;
-    active.pendingUserPrompts.push({ id: clientMessageId, text });
+    active.pendingUserPrompts.push({
+      id: clientMessageId,
+      text,
+      ...(promptDocument ? { promptDocument: structuredClone(promptDocument) } : {}),
+    });
+    if (promptDocument) active.pendingPromptDocuments?.set(clientMessageId, structuredClone(promptDocument));
+  }
+
+  protected persistPromptDocument(active: ActiveSession, messageEntryId: string, clientMessageId: string): boolean {
+    const document = active.pendingPromptDocuments?.get(clientMessageId) ?? active.promptDocumentsByMessageId?.get(clientMessageId);
+    if (!document) return false;
+    active.promptDocumentsByEntryId?.set(messageEntryId, structuredClone(document));
+    active.pendingPromptDocuments?.delete(clientMessageId);
+    active.promptDocumentsByMessageId?.delete(clientMessageId);
+    active.session.sessionManager.appendCustomEntry(PROMPT_DOCUMENT_ENTRY_TYPE, { messageEntryId, document });
+    return true;
+  }
+
+  /**
+   * Pi notifies subscribers of `message_end` before it writes the user message.
+   * Wait one microtask, then append our display metadata as a child of that
+   * real message entry so a later session switch can reconstruct the node.
+   */
+  protected schedulePromptDocumentPersistence(active: ActiveSession, clientMessageId: string, rawMessage: unknown): void {
+    queueMicrotask(() => {
+      if (this.active !== active) return;
+      const manager = active.session.sessionManager;
+      if (!manager) return;
+      const entry = [...manager.getBranch()].reverse().find((candidate) =>
+        candidate.type === "message" && candidate.message === rawMessage && candidate.message.role === "user");
+      if (!entry || entry.type !== "message") return;
+      if (!active.pendingPromptDocuments?.has(clientMessageId) && !active.promptDocumentsByMessageId?.has(clientMessageId)) return;
+      if (active.promptDocumentsByEntryId?.has(entry.id)) return;
+      if (!this.persistPromptDocument(active, entry.id, clientMessageId)) return;
+    });
   }
 
   protected publishPromptQueue(active: ActiveSession): void {
@@ -373,6 +419,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
       type: "prompt_queue_updated",
       queue: active.promptQueue.map((item) => ({
         ...item,
+        promptDocument: item.promptDocument ? structuredClone(item.promptDocument) : undefined,
         images: item.images?.map((image) => ({ ...image })),
       })),
       revision: ++active.messageRevision,
@@ -384,12 +431,14 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     text: string,
     images: PromptImage[] | undefined,
     clientMessageId?: string,
+    promptDocument?: PromptDocument,
   ): void {
     const id = clientMessageId || `queued-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     if (active.promptQueue.some((item) => item.id === id) || active.pendingUserPrompts.some((prompt) => prompt.id === id)) return;
     active.promptQueue.push({
       id,
       text,
+      promptDocument: promptDocument ? structuredClone(promptDocument) : undefined,
       images: images?.map((image) => ({ ...image })),
       queuedAt: Date.now(),
     });
@@ -431,12 +480,14 @@ export abstract class RuntimeToolState extends RuntimeSessions {
 
   protected rejectClientMessage(active: ActiveSession, clientMessageId?: string, text?: string): void {
     if (!clientMessageId) return;
+    const promptDocument = active.pendingPromptDocuments?.get(clientMessageId);
     const index = active.pendingUserPrompts.findIndex((prompt) => prompt.id === clientMessageId);
     if (index >= 0) active.pendingUserPrompts.splice(index, 1);
+    active.pendingPromptDocuments?.delete(clientMessageId);
     // 被拒掉的介入不会再落进对话，快照里那份投影也要一起收掉。
     const steeringIndex = active.steeringMessages.findIndex((item) => item.id === clientMessageId);
     if (steeringIndex >= 0) active.steeringMessages.splice(steeringIndex, 1);
-    this.emitEvent({ type: "message_rejected", id: clientMessageId, revision: ++active.messageRevision, text });
+    this.emitEvent({ type: "message_rejected", id: clientMessageId, revision: ++active.messageRevision, text, promptDocument });
   }
 
   protected publishSubagents(): void {

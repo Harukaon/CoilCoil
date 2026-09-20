@@ -1,8 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { app, BrowserWindow, screen, session, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
-import type { BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
+import type { BrowserElementSelection, BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
+import { BrowserElementPicker } from "./browser-element-picker";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
@@ -48,6 +49,7 @@ function realScreenMetrics(): { screenWidth: number; screenHeight: number } {
 export class BrowserRuntimeManager {
   private readonly tabs = new Map<string, BrowserTab>();
   private readonly cdp: BrowserCdpBridge;
+  private readonly elementPicker = new BrowserElementPicker();
   private readonly activeTabIds = new Map<string, string>();
   private uiScopeId = DEFAULT_SCOPE_ID;
   private uiViewport = { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height };
@@ -220,6 +222,7 @@ export class BrowserRuntimeManager {
    * 活着就行。
    */
   setUiScope(scopeId: string, workspacePath?: string): BrowserStateSnapshot {
+    this.elementPicker.cancel();
     this.uiScopeId = scopeId.trim() || DEFAULT_SCOPE_ID;
     this.noteScopeWorkspace(this.uiScopeId, workspacePath);
     if (workspacePath) {
@@ -453,6 +456,17 @@ export class BrowserRuntimeManager {
     return captureGuestFrame(this.activeTab(scopeId)?.guest);
   }
 
+  /** Let the user point at one node in the visible guest without opening DevTools. */
+  async pickElement(scopeId = this.uiScopeId): Promise<BrowserElementSelection | undefined> {
+    const tab = this.readyTab(scopeId);
+    if (!tab) throw new Error("请等待当前网页加载完成后再选择元素。");
+    return this.elementPicker.pick(this.guestOf(tab));
+  }
+
+  cancelElementPick(): void {
+    this.elementPicker.cancel();
+  }
+
   /**
    * scope 不再是这里的门槛——因为进得来的人都已经过了门。
    *
@@ -464,6 +478,7 @@ export class BrowserRuntimeManager {
    */
   selectTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
     if (!this.tabs.has(id)) throw new Error("浏览器标签页不存在。");
+    this.elementPicker.cancel();
     this.activeTabIds.set(scopeId, id);
     this.refreshViewportOverrides();
     this.publish();
@@ -474,6 +489,7 @@ export class BrowserRuntimeManager {
   closeTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
     const tab = this.tabs.get(id);
     if (!tab) return this.state(scopeId);
+    this.elementPicker.cancel();
     // 接替的那一张只从「自己的」里面挑：关掉的如果是别的会话那张，index 落到 -1，
     // 于是挑中自己的第一张。绝不能让一个 agent 的当前页变成另一个会话的页面。
     const order = this.tabsForScope(scopeId).map((item) => item.id);
@@ -527,6 +543,7 @@ export class BrowserRuntimeManager {
     const width = Math.round(viewport.width);
     const height = Math.round(viewport.height);
     const hidden = !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0;
+    if (hidden) this.elementPicker.cancel();
     // A zero size means the panel is hidden, so the active tab is parked like any
     // other and needs the override back to stay screenshot-able.
     if (this.panelVisible === !hidden) {
@@ -586,6 +603,7 @@ export class BrowserRuntimeManager {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.elementPicker.cancel();
     this.guests.dispose();
     if (!this.window.isDestroyed()) {
       this.window.webContents.off("did-start-navigation", this.handleHostNavigation);

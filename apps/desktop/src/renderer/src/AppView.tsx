@@ -1,5 +1,5 @@
-import { PanelLeft } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { PanelLeft, PanelRight } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isRemoteClient, MOBILE_DECK_QUERY } from "./hooks/useMobileRemote";
 
 import type {
@@ -10,17 +10,20 @@ import type {
   SetStateAction,
 } from "react";
 import type {
+  AgentMode,
   ChatMessage,
   PlanApprovalState,
   PlanExecutionTarget,
   ProjectSelection,
   ProjectSnapshot,
+  PromptDocument,
   PromptImage,
   RuntimeConfiguration,
   SessionSnapshot,
   SessionSummary,
   SubagentActivity,
 } from "@coilcoil/runtime-protocol";
+import type { BrowserElementSelection } from "../../shared/desktop-api";
 import { useInAppBrowserLinks } from "./features/browser/useInAppBrowserLinks";
 import { ConversationPane } from "./features/conversation/ConversationPane";
 import { IssueBoard } from "./features/issues/IssueBoard";
@@ -36,6 +39,7 @@ import {
 import type { useComposerController } from "./features/composer/useComposerController";
 import type { usePanelLayout } from "./hooks/usePanelLayout";
 import { toastError } from "./ui/toast";
+import { WindowDragBar } from "./ui/WindowDragBar";
 
 type WorkspaceSurface = "conversation" | "skills" | "memory" | "issues";
 type ConversationProps = ComponentProps<typeof ConversationPane>;
@@ -66,6 +70,8 @@ export interface AppViewController {
   startingSession: boolean;
   configuration?: RuntimeConfiguration;
   selectedModel: ConversationProps["selectedModel"];
+  agentMode: AgentMode;
+  agentModeLocked: boolean;
   fileDragActive: boolean;
   timelineRef: ConversationProps["timelineRef"];
   shouldAutoScrollRef: MutableRefObject<boolean>;
@@ -77,6 +83,7 @@ export interface AppViewController {
   setWorkspaceSurface: Dispatch<SetStateAction<WorkspaceSurface>>;
   setSettingsOpen: Dispatch<SetStateAction<boolean>>;
   setSettingsSection: Dispatch<SetStateAction<"models" | "mcp" | "skills" | "appearance">>;
+  setPendingAgentMode: Dispatch<SetStateAction<AgentMode>>;
   setLeftOpen(open: boolean): void;
   beginResize: ReturnType<typeof usePanelLayout>["beginResize"];
   startNewConversation(owner?: ProjectSelection): void;
@@ -91,7 +98,7 @@ export interface AppViewController {
   forkConversation(owner: ProjectSelection, session: SessionSummary): Promise<void>;
   moveConversation(owner: ProjectSelection, session: SessionSummary, target: ProjectSelection): Promise<void>;
   reorderProjects(fromPath: string, toPath: string): void;
-  rewindPrompt(message: ChatMessage, text: string, images: PromptImage[]): Promise<void>;
+  rewindPrompt(message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument): Promise<void>;
   cancelQueuedPrompt(id: string): Promise<void>;
   promoteQueuedPrompt(id: string): Promise<void>;
   abortRun(): Promise<void>;
@@ -113,10 +120,10 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
     leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
     timeline, queuedPrompts, running, activityLine, projectState, subagents,
-    startingSession, configuration, selectedModel, fileDragActive, timelineRef,
+    startingSession, configuration, selectedModel, agentMode, agentModeLocked, fileDragActive, timelineRef,
     shouldAutoScrollRef, composer, inspector, setExpandedProjects,
     setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,
-    setSettingsOpen, setSettingsSection, setLeftOpen, beginResize,
+    setSettingsOpen, setSettingsSection, setPendingAgentMode, setLeftOpen, beginResize,
     startNewConversation, openProject, removeProject, openConversation,
     archiveConversation, deleteConversation, deleteWorkspaceData,
     renameConversation, pinConversation, forkConversation,
@@ -126,10 +133,28 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
     handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop,
   } = controller;
   const {
-    draft, images: draftImages, inputRef, modelMenuOpen, modelChanging,
-    setDraft, setImages: setDraftImages, setModelMenuOpen,
+    draft, document: draftDocument, images: draftImages, inputRef, modelMenuOpen, modelChanging,
+    setDocument: setDraftDocument, setImages: setDraftImages, setModelMenuOpen,
+    insertBrowserElement,
   } = composer;
   const shellRef = useRef<HTMLElement | null>(null);
+  /* A workspace pane is mounted on demand. Align the motion state in a layout
+     effect, before the browser paints the newly mounted pane. A normal effect
+     would leave one paint where the pane can still use the grid's static
+     origin, which is the top-left flash seen on Skills/Memory. */
+  const [motionReadySurface, setMotionReadySurface] = useState<WorkspaceSurface>(workspaceSurface);
+  useLayoutEffect(() => {
+    if (motionReadySurface === workspaceSurface) return;
+    setMotionReadySurface(workspaceSurface);
+  }, [motionReadySurface, workspaceSurface]);
+  const workspaceLayoutPending = motionReadySurface !== workspaceSurface;
+
+  const [inspectorAddControlTarget, setInspectorAddControlTarget] = useState<HTMLDivElement | null>(null);
+  const mobileRemote = isRemoteClient() && window.matchMedia(MOBILE_DECK_QUERY).matches;
+  const attachBrowserElement = (selection: BrowserElementSelection): void => {
+    insertBrowserElement(selection);
+    composer.focus();
+  };
   // On a phone the three panes are one horizontal snap track, and its natural
   // resting place is the first pane — the sidebar. The conversation is what the
   // app opens on, so the track starts one pane in, leaving the sidebar a swipe
@@ -157,9 +182,11 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
   return (
     <main
       ref={shellRef}
-      className={`app-shell ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "" : "right-collapsed"}`}
+      className={`app-shell workspace-${workspaceSurface} ${motionReadySurface === workspaceSurface ? "workspace-motion-ready" : ""} ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "" : "right-collapsed"}`}
       style={{ "--sidebar-width": `${leftWidth}px`, "--inspector-width": `${rightWidth}px` } as React.CSSProperties}
     >
+      {/* 固定的全窗口顶栏拖动层不跟随三栏布局移动，避免侧栏动画后 Electron 继续使用旧矩形。 */}
+      <WindowDragBar className="app-window-drag-region" />
       <WorkspaceSidebar
         projects={projects}
         activeProject={project}
@@ -200,11 +227,6 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
         onRemoveProject={removeProject}
         onError={(message) => { if (message) toastError(message); }}
       />
-      {leftOpen ? (
-        <button className="sidebar-toggle" type="button" aria-label="收起侧栏" onClick={() => setLeftOpen(false)}>
-          <span><PanelLeft size={17} /></span>
-        </button>
-      ) : null}
       {leftOpen ? <div className="panel-resizer left-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("left", event)} /> : null}
 
       {workspaceSurface === "issues" ? (
@@ -213,8 +235,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
           issues={board.issues}
           loading={board.loading}
           run={board.run}
-          leftOpen={leftOpen}
-          onOpenLeft={() => setLeftOpen(true)}
+          layoutPending={workspaceLayoutPending}
           onClose={() => { shouldAutoScrollRef.current = true; setWorkspaceSurface("conversation"); }}
           onChange={board.update}
           onStart={board.start}
@@ -224,24 +245,21 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
         <SkillsWorkspace
           runtimeId={snapshot?.runtimeId}
           cwd={project?.path}
-          leftOpen={leftOpen}
-          onOpenLeft={() => setLeftOpen(true)}
+          layoutPending={workspaceLayoutPending}
           onClose={() => { shouldAutoScrollRef.current = true; setWorkspaceSurface("conversation"); }}
         />
       ) : workspaceSurface === "memory" ? (
         <MemoryWorkspace
           runtimeId={snapshot?.runtimeId}
           cwd={project?.path}
-          leftOpen={leftOpen}
-          onOpenLeft={() => setLeftOpen(true)}
+          layoutPending={workspaceLayoutPending}
           onClose={() => { shouldAutoScrollRef.current = true; setWorkspaceSurface("conversation"); }}
         />
       ) : (
         <>
           <ConversationPane
             fileDragActive={fileDragActive}
-            leftOpen={leftOpen}
-            rightOpen={rightOpen}
+            layoutPending={workspaceLayoutPending}
             pendingProjectPath={pendingProjectPath}
             activeConversation={activeConversation}
             project={project}
@@ -260,23 +278,25 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             snapshot={snapshot}
             startingSession={startingSession}
             draft={draft}
+            draftDocument={draftDocument}
             draftImages={draftImages}
             inputRef={inputRef}
             configuration={configuration}
             selectedModel={selectedModel}
+            agentMode={agentMode}
+            agentModeLocked={agentModeLocked}
             modelMenuOpen={modelMenuOpen}
             modelChanging={modelChanging}
             onDragEnter={handleFileDragEnter}
             onDragOver={handleFileDragOver}
             onDragLeave={handleFileDragLeave}
             onDrop={handleFileDrop}
-            onOpenLeft={() => setLeftOpen(true)}
-            onOpenRight={() => inspector.setRightOpen(true)}
             onTimelineScroll={handleTimelineScroll}
             onRewind={rewindPrompt}
             onError={(message) => { if (message) toastError(message); }}
             onSubmit={(event) => { void submitPrompt(event); }}
-            onDraftChange={setDraft}
+            onDocumentChange={setDraftDocument}
+            onReplaceTextRange={composer.replaceTextRange}
             onImagesChange={setDraftImages}
             onPaste={composer.handlePaste}
             onCompositionStart={composer.handleCompositionStart}
@@ -286,6 +306,7 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             onSelectModel={(model) => { void composer.selectModel(model); }}
             onConfigureModelOptions={composer.configureModelOptions}
             onFastChange={composer.setFast}
+            onAgentModeChange={setPendingAgentMode}
             onOpenSettings={(section) => {
               setModelMenuOpen(false);
               setSettingsSection(section ?? "models");
@@ -316,11 +337,44 @@ export function AppView({ controller }: { controller: AppViewController }): Reac
             onCloseTab={inspector.closeTab}
             onRemovePath={inspector.removePath}
             onOpenOption={inspector.openOption}
-            onClose={() => inspector.setRightOpen(false)}
+            onBrowserElementPicked={attachBrowserElement}
+            addControlTarget={mobileRemote ? null : inspectorAddControlTarget}
+            showAddControl={mobileRemote || rightOpen}
           />
           {rightOpen ? <div className="panel-resizer right-resizer" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize("right", event)} /> : null}
         </>
       )}
+      <div className="app-sidebar-control">
+        <div className="app-sidebar-control-bar window-drag-bar">
+            <WindowDragBar />
+            <button
+              className="icon-button app-sidebar-toggle no-drag"
+              type="button"
+              aria-label={leftOpen ? "收起侧栏" : "展开侧栏"}
+              aria-expanded={leftOpen}
+              onClick={() => setLeftOpen(!leftOpen)}
+            >
+              <PanelLeft size={17} />
+            </button>
+        </div>
+      </div>
+      {workspaceSurface === "conversation" ? (
+        <div className="conversation-inspector-control">
+          <div className="conversation-inspector-control-bar window-drag-bar">
+            <WindowDragBar />
+            <div ref={setInspectorAddControlTarget} className="conversation-inspector-add-slot no-drag" />
+            <button
+              className="icon-button conversation-inspector-toggle no-drag"
+              type="button"
+              aria-label={rightOpen ? "收起右侧栏" : "展开作业栏"}
+              aria-expanded={rightOpen}
+              onClick={() => inspector.setRightOpen(!rightOpen)}
+            >
+              <PanelRight size={17} />
+            </button>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

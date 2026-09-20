@@ -1,16 +1,17 @@
 import { ArrowUp, LoaderCircle, Square, X } from "lucide-react";
-import { useEffect, useRef } from "react";
 import type { DragEvent as ReactDragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import type {
   ModelOption,
+  PromptDocument,
   PromptImage,
   ProjectSelection,
   RuntimeConfiguration,
   SessionSnapshot,
 } from "@coilcoil/runtime-protocol";
-import { carriesPaths, droppedPaths, insertPathsAtCaret } from "./pathInsert";
+import { carriesPaths, droppedPaths, quotePath } from "./pathInsert";
 import { imageDataUrl } from "./promptImages";
 import { ModelPicker } from "./ModelPicker";
+import { PromptEditor, type PromptEditorHandle } from "./PromptEditor";
 
 export type ComposerVariant = "footer" | "inline";
 
@@ -23,6 +24,7 @@ export function ConversationComposer({
   loading,
   startingSession,
   draft,
+  document,
   images,
   inputRef,
   configuration,
@@ -33,7 +35,8 @@ export function ConversationComposer({
   modelChanging,
   autoFocus,
   onSubmit,
-  onDraftChange,
+  onDocumentChange,
+  onReplaceTextRange,
   onImagesChange,
   onPaste,
   onCompositionStart,
@@ -60,7 +63,7 @@ export function ConversationComposer({
   startingSession: boolean;
   draft: string;
   images: PromptImage[];
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  inputRef: RefObject<PromptEditorHandle | null>;
   configuration?: RuntimeConfiguration;
   selectedModel?: SessionSnapshot["model"];
   thinkingLevel?: RuntimeConfiguration["thinkingLevel"];
@@ -69,13 +72,15 @@ export function ConversationComposer({
   modelChanging: boolean;
   autoFocus?: boolean;
   onSubmit: (event: FormEvent) => void;
-  onDraftChange: (value: string) => void;
+  document: PromptDocument;
+  onDocumentChange: (document: PromptDocument) => void;
+  onReplaceTextRange: (start: number, end: number, replacement: string) => void;
   onImagesChange: React.Dispatch<React.SetStateAction<PromptImage[]>>;
-  onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
+  onPaste: React.ClipboardEventHandler<HTMLDivElement>;
   onCompositionStart: () => void;
   onCompositionEnd: () => void;
-  onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
-  onSlashKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean;
+  onKeyDown: React.KeyboardEventHandler<HTMLDivElement>;
+  onSlashKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => boolean;
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
   onConfigureModelOptions?: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow?: number) => Promise<void>;
@@ -87,40 +92,6 @@ export function ConversationComposer({
   onPathDropError?: (message: string) => void;
 }): React.JSX.Element {
   const inline = variant === "inline";
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const composingRef = useRef(false);
-
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    const onStart = (): void => {
-      composingRef.current = true;
-    };
-    const onEnd = (): void => {
-      composingRef.current = false;
-      input.style.height = "auto";
-      input.style.height = `${Math.max(42, Math.min(input.scrollHeight, 160))}px`;
-    };
-    input.addEventListener("compositionstart", onStart);
-    input.addEventListener("compositionend", onEnd);
-    return () => {
-      input.removeEventListener("compositionstart", onStart);
-      input.removeEventListener("compositionend", onEnd);
-    };
-  }, [inputRef]);
-
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input || composingRef.current) return;
-    input.style.height = "auto";
-    input.style.height = `${Math.max(42, Math.min(input.scrollHeight, 160))}px`;
-  }, [draft, inputRef]);
-
-  useEffect(() => {
-    if (!autoFocus) return;
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, [autoFocus, inputRef]);
 
   const handlePathDragOver = (event: ReactDragEvent<HTMLElement>): void => {
     if (!carriesPaths(event.dataTransfer)) return;
@@ -137,22 +108,24 @@ export function ConversationComposer({
     try {
       const paths = droppedPaths(event.dataTransfer);
       if (!paths.length) return;
-      const textarea = inputRef.current;
-      const value = draftRef.current;
-      const start = textarea?.selectionStart ?? value.length;
-      const end = textarea?.selectionEnd ?? start;
-      const result = insertPathsAtCaret(value, paths, start, end);
-      onDraftChange(result.value);
+      const value = draft;
+      const start = inputRef.current?.getCaretOffset() ?? value.length;
+      const before = value.slice(0, start);
+      const after = value.slice(start);
+      const leadingSpace = before.length && !/\s$/.test(before) ? " " : "";
+      const trailingSpace = after.length && !/^\s/.test(after) ? " " : "";
+      const insertion = `${leadingSpace}${paths.map(quotePath).join(" ")}${trailingSpace}`;
+      onReplaceTextRange(start, start, insertion);
       requestAnimationFrame(() => {
         inputRef.current?.focus();
-        inputRef.current?.setSelectionRange(result.caret, result.caret);
+        inputRef.current?.setCaretOffset(start + insertion.length);
       });
     } catch {
       onPathDropError?.("无法插入拖入的路径。请重新拖动一次。");
     }
   };
 
-  const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+  const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (event) => {
     if (onSlashKeyDown?.(event)) return;
     if (event.key === "Escape" && onEscape) {
       event.preventDefault();
@@ -174,7 +147,7 @@ export function ConversationComposer({
       {images.length ? (
         <div className="composer-images">
           {images.map((image) => (
-            <figure key={image.id ?? image.data.slice(0, 24)}>
+            <figure key={image.id ?? image.data.slice(0, 24)} title={image.name}>
               <img src={imageDataUrl(image)} alt={image.name ?? "粘贴的图片"} />
               <button type="button" aria-label="移除图片" onClick={() => onImagesChange((current) => current.filter((item) => item !== image))}>
                 <X size={11} />
@@ -183,11 +156,11 @@ export function ConversationComposer({
           ))}
         </div>
       ) : null}
-      <textarea
+      <PromptEditor
         ref={inputRef}
-        rows={1}
-        value={draft}
-        aria-label={inline ? "编辑历史消息" : "发送消息给 CoilCoil"}
+        document={document}
+        onChange={onDocumentChange}
+        ariaLabel={inline ? "编辑历史消息" : "发送消息给 CoilCoil"}
         placeholder={
           inline
             ? "编辑历史消息…"
@@ -196,13 +169,11 @@ export function ConversationComposer({
               : "请先打开项目"
         }
         disabled={!project || loading || startingSession || modelChanging}
-        onChange={(event) => onDraftChange(event.target.value)}
-        onPaste={onPaste}
+        onPasteImages={onPaste}
         onCompositionStart={onCompositionStart}
         onCompositionEnd={onCompositionEnd}
         onKeyDown={handleKeyDown}
-        onDragOver={handlePathDragOver}
-        onDrop={handlePathDrop}
+        autoFocus={autoFocus}
       />
       <div className="composer-toolbar">
         <ModelPicker

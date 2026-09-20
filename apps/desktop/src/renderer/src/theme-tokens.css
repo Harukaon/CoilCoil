@@ -2089,11 +2089,24 @@
 :root {
   --pane-glass: var(--pane-fill);
   --side-glass: var(--side-fill);
+  --composer-glass: var(--composer-fill);
 }
 
 :root[data-platform="darwin"],
 :root[data-platform="win32"] {
+  --window-tint: 0%;
+}
+
+:root[data-platform="darwin"][data-transparency="sidebar"],
+:root[data-platform="win32"][data-transparency="sidebar"] {
   --window-tint: 10%;
+  --side-glass: color-mix(in srgb, transparent var(--window-tint), var(--side-fill));
+}
+
+:root[data-platform="darwin"][data-transparency="window"],
+:root[data-platform="win32"][data-transparency="window"] {
+  --window-tint: 18%;
   --pane-glass: color-mix(in srgb, transparent var(--window-tint), var(--pane-fill));
   --side-glass: color-mix(in srgb, transparent var(--window-tint), var(--side-fill));
+  --composer-glass: color-mix(in srgb, transparent 9%, var(--composer-fill));
 }

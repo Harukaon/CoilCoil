@@ -20,6 +20,7 @@ export {
   type McpCredentialRecord,
 } from "./credential-store.js";
 export { McpOAuthProvider, type McpOAuthOptions } from "./oauth-provider.js";
+export type { McpDiagnosticLevel, McpDiagnosticLogger } from "./diagnostic.js";
 export {
   expandPlaceholders,
   launchFor,

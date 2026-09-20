@@ -1,4 +1,4 @@
-import { ArrowDown, PanelLeft, PanelRight } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
@@ -7,11 +7,13 @@ import type {
   RefObject,
 } from "react";
 import type {
+  AgentMode,
   ChatMessage,
   ModelOption,
   PlanApprovalState,
   PlanExecutionTarget,
   PromptImage,
+  PromptDocument,
   ProjectSelection,
   ProjectSnapshot,
   RuntimeConfiguration,
@@ -21,6 +23,7 @@ import type {
 import { useChatContentWidth } from "../../hooks/useChatContentWidth";
 import { ActivityPanel } from "../activity/ActivityPanel";
 import { ConversationComposer } from "../composer/ConversationComposer";
+import type { PromptEditorHandle } from "../composer/PromptEditor";
 import { useSlashMenu, type SettingsSection } from "../composer/useSlashSkills";
 import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { WindowDragBar } from "../../ui/WindowDragBar";
@@ -46,8 +49,7 @@ const LOAD_MORE_TURNS = 20;
 
 export function ConversationPane({
   fileDragActive,
-  leftOpen,
-  rightOpen,
+  layoutPending,
   pendingProjectPath,
   activeConversation,
   project,
@@ -61,23 +63,25 @@ export function ConversationPane({
   snapshot,
   startingSession,
   draft,
+  draftDocument,
   draftImages,
   inputRef,
   configuration,
   selectedModel,
+  agentMode,
+  agentModeLocked,
   modelMenuOpen,
   modelChanging,
   onDragEnter,
   onDragOver,
   onDragLeave,
   onDrop,
-  onOpenLeft,
-  onOpenRight,
   onTimelineScroll,
   onRewind,
   onError,
   onSubmit,
-  onDraftChange,
+  onDocumentChange,
+  onReplaceTextRange,
   onImagesChange,
   onPaste,
   onCompositionStart,
@@ -87,6 +91,7 @@ export function ConversationPane({
   onSelectModel,
   onConfigureModelOptions,
   onFastChange,
+  onAgentModeChange,
   onOpenSettings,
   onAbort,
   onStopGoal,
@@ -99,8 +104,7 @@ export function ConversationPane({
   onRejectPlan,
 }: {
   fileDragActive: boolean;
-  leftOpen: boolean;
-  rightOpen: boolean;
+  layoutPending: boolean;
   pendingProjectPath?: string;
   activeConversation?: SessionSnapshot["session"];
   project: ProjectSelection | null;
@@ -114,32 +118,35 @@ export function ConversationPane({
   snapshot?: SessionSnapshot;
   startingSession: boolean;
   draft: string;
+  draftDocument: PromptDocument;
   draftImages: PromptImage[];
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  inputRef: RefObject<PromptEditorHandle | null>;
   configuration?: RuntimeConfiguration;
   selectedModel?: SessionSnapshot["model"];
+  agentMode: AgentMode;
+  agentModeLocked: boolean;
   modelMenuOpen: boolean;
   modelChanging: boolean;
   onDragEnter: (event: ReactDragEvent<HTMLElement>) => void;
   onDragOver: (event: ReactDragEvent<HTMLElement>) => void;
   onDragLeave: (event: ReactDragEvent<HTMLElement>) => void;
   onDrop: (event: ReactDragEvent<HTMLElement>) => void;
-  onOpenLeft: () => void;
-  onOpenRight: () => void;
   onTimelineScroll: () => void;
-  onRewind: (message: ChatMessage, text: string, images: PromptImage[]) => Promise<void>;
+  onRewind: (message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument) => Promise<void>;
   onError: (message?: string) => void;
   onSubmit: (event: FormEvent) => void;
-  onDraftChange: (value: string) => void;
+  onDocumentChange: (document: PromptDocument) => void;
+  onReplaceTextRange: (start: number, end: number, replacement: string) => void;
   onImagesChange: React.Dispatch<React.SetStateAction<PromptImage[]>>;
-  onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
+  onPaste: React.ClipboardEventHandler<HTMLDivElement>;
   onCompositionStart: () => void;
   onCompositionEnd: () => void;
-  onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  onKeyDown: React.KeyboardEventHandler<HTMLDivElement>;
   onModelMenuOpenChange: (open: boolean) => void;
   onSelectModel: (model: ModelOption) => void;
   onConfigureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow?: number) => Promise<void>;
   onFastChange: (enabled: boolean) => Promise<void>;
+  onAgentModeChange: (mode: AgentMode) => void;
   onOpenSettings: (section?: SettingsSection) => void;
   onAbort: () => void;
   onStopGoal: () => void;
@@ -167,7 +174,7 @@ export function ConversationPane({
     inputRef,
     project,
     runtimeId: snapshot?.runtimeId,
-    onDraftChange,
+    onReplaceTextRange,
     onOpenSettings,
   });
   const hasComposerActivity = projectState.plan.length > 0 || subagents.length > 0 || queuedPrompts.length > 0 || slashMenu.slashActive || snapshot?.goal !== undefined;
@@ -285,15 +292,13 @@ export function ConversationPane({
   }, [onError]);
 
   return (
-    <section className={`conversation-pane ${fileDragActive ? "file-drag-active" : ""} ${hasComposerActivity ? "has-composer-activity" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px` } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+    <section className={`shell-surface conversation-pane ${fileDragActive ? "file-drag-active" : ""} ${hasComposerActivity ? "has-composer-activity" : ""}`} style={{ "--chat-content-width": `${chatContentWidth}px`, visibility: layoutPending ? "hidden" : undefined } as CSSProperties} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       {/* 拖动层必须排在最前，后面的按钮才能在它上面挖出 no-drag 的洞；见 ui/window-drag.ts。 */}
       <header className="conversation-header window-drag-bar">
         <WindowDragBar />
-        {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
         <div className="conversation-title" title={conversationTitle}>
           <strong>{conversationTitle}</strong>{project ? <span>{project.name}</span> : null}
         </div>
-        <div className="header-actions no-drag">{!rightOpen ? <button className="icon-button" type="button" aria-label="展开作业栏" onClick={onOpenRight}><PanelRight size={17} /></button> : null}</div>
       </header>
 
       <div className="conversation-scroll">
@@ -320,12 +325,15 @@ export function ConversationPane({
                   configuration={configuration}
                   selectedModel={selectedModel}
                   thinkingLevel={snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel ?? configuration?.thinkingLevel}
+                  fast={snapshot?.fast}
                   modelChanging={modelChanging}
                   runtimeId={snapshot?.runtimeId}
                   onEditingChange={(next) => setEditingMessageId(next ? item.message.id : undefined)}
                   onRewind={onRewind}
                   onError={reportError}
                   onSelectModel={onSelectModel}
+                  onConfigureModelOptions={onConfigureModelOptions}
+                  onFastChange={onFastChange}
                   onOpenSettings={onOpenSettings}
                 />
               ) : (
@@ -383,6 +391,7 @@ export function ConversationPane({
             loading={loading}
             startingSession={startingSession}
             draft={draft}
+            document={draftDocument}
             images={draftImages}
             inputRef={inputRef}
             configuration={configuration}
@@ -392,7 +401,8 @@ export function ConversationPane({
             modelMenuOpen={modelMenuOpen}
             modelChanging={modelChanging}
             onSubmit={onSubmit}
-            onDraftChange={onDraftChange}
+            onDocumentChange={onDocumentChange}
+            onReplaceTextRange={onReplaceTextRange}
             onImagesChange={onImagesChange}
             onPaste={onPaste}
             onCompositionStart={onCompositionStart}
@@ -407,7 +417,16 @@ export function ConversationPane({
             onAbort={onAbort}
           />
         </div>
-        <WorkspaceStatus project={project} responseMetrics={snapshot?.responseMetrics} responseMetricsHistory={snapshot?.responseMetricsHistory ?? []} contextUsage={snapshot?.contextUsage} tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown} />
+        <WorkspaceStatus
+          project={project}
+          agentMode={agentMode}
+          agentModeLocked={agentModeLocked}
+          onAgentModeChange={onAgentModeChange}
+          responseMetrics={snapshot?.responseMetrics}
+          responseMetricsHistory={snapshot?.responseMetricsHistory ?? []}
+          contextUsage={snapshot?.contextUsage}
+          tokenBreakdown={snapshot?.runtimeInspection.tokenBreakdown}
+        />
       </div>
       <SubagentDetailDialog activity={selectedSubagent} onClose={() => setSelectedSubagentId(undefined)} />
     </section>

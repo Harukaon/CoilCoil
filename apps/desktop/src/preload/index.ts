@@ -3,6 +3,7 @@ import type { DiagnosticLogBatch, RuntimeCommand, RuntimeEvent } from "@coilcoil
 import type { FileNode } from "@coilcoil/runtime-protocol";
 import type {
   BrowserDataStats,
+  BrowserElementSelection,
   BrowserGuestRoster,
   BrowserImportSummary,
   BrowserStateSnapshot,
@@ -77,6 +78,8 @@ const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
 const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
 const BROWSER_CAPTURE_CHANNEL = "browser:capture";
+const BROWSER_PICK_ELEMENT_CHANNEL = "browser:pick-element";
+const BROWSER_CANCEL_PICK_CHANNEL = "browser:cancel-pick";
 const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
@@ -192,6 +195,9 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(BROWSER_SET_SCOPE_CHANNEL, scopeId, workspacePath) as Promise<BrowserStateSnapshot>,
   getBrowserState: (scopeId: string) => ipcRenderer.invoke(BROWSER_GET_STATE_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
   captureBrowserTab: (scopeId: string) => ipcRenderer.invoke(BROWSER_CAPTURE_CHANNEL, scopeId) as Promise<string | undefined>,
+  pickBrowserElement: (scopeId: string) =>
+    ipcRenderer.invoke(BROWSER_PICK_ELEMENT_CHANNEL, scopeId) as Promise<BrowserElementSelection | undefined>,
+  cancelBrowserElementPick: () => ipcRenderer.invoke(BROWSER_CANCEL_PICK_CHANNEL) as Promise<void>,
   createBrowserTab: (scopeId: string, url?: string) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, scopeId, url) as Promise<BrowserStateSnapshot>,
   selectBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_SELECT_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
   closeBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,

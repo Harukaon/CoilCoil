@@ -6,6 +6,7 @@ import type {
   SkillConfigurationSnapshot,
   SkillEntry,
 } from "@coilcoil/runtime-protocol";
+import type { PromptEditorHandle } from "./PromptEditor";
 
 export type SlashToken = {
   query: string;
@@ -125,14 +126,14 @@ export function useSlashMenu({
   inputRef,
   project,
   runtimeId,
-  onDraftChange,
+  onReplaceTextRange,
   onOpenSettings,
 }: {
   draft: string;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  inputRef: RefObject<PromptEditorHandle | null>;
   project: ProjectSelection | null;
   runtimeId?: string;
-  onDraftChange: (value: string) => void;
+  onReplaceTextRange: (start: number, end: number, replacement: string) => void;
   onOpenSettings?: (section?: SettingsSection) => void;
 }): {
   slashActive: boolean;
@@ -142,7 +143,7 @@ export function useSlashMenu({
   setItemIndex: (index: number) => void;
   selectItem: (item: SlashMenuItem) => void;
   dismissSlash: () => void;
-  handleSlashKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean;
+  handleSlashKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => boolean;
 } {
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [mcpServers, setMcpServers] = useState<McpConfigurationSnapshot["servers"]>([]);
@@ -157,7 +158,7 @@ export function useSlashMenu({
 
   const readToken = useCallback((): SlashToken | null => {
     const caret = pendingCaret.current
-      ?? inputRef.current?.selectionStart
+      ?? inputRef.current?.getCaretOffset()
       ?? draftRef.current.length;
     return findSlashToken(draftRef.current, caret);
   }, [inputRef]);
@@ -179,7 +180,7 @@ export function useSlashMenu({
   }, [draft, publishTokenIfChanged]);
 
   useEffect(() => {
-    const input = inputRef.current;
+    const input = inputRef.current?.element;
     if (!input) return;
     const onCompositionStart = (): void => {
       composingRef.current = true;
@@ -239,7 +240,7 @@ export function useSlashMenu({
 
   const token = useMemo(() => {
     void slashEpoch;
-    return tokenRef.current ?? findSlashToken(draft, inputRef.current?.selectionStart ?? draft.length);
+    return tokenRef.current ?? findSlashToken(draft, inputRef.current?.getCaretOffset() ?? draft.length);
   }, [draft, inputRef, slashEpoch]);
 
   useEffect(() => {
@@ -270,46 +271,44 @@ export function useSlashMenu({
       tokenRef.current = null;
       onOpenSettings?.(item.openSettings);
       // Clear the bare slash token so the menu closes cleanly.
-      const current = findSlashToken(draftRef.current, inputRef.current?.selectionStart ?? draftRef.current.length);
+      const current = findSlashToken(draftRef.current, inputRef.current?.getCaretOffset() ?? draftRef.current.length);
       if (current && draftRef.current.slice(current.start, current.end).match(/^[/／]\S*$/)) {
-        const next = `${draftRef.current.slice(0, current.start)}${draftRef.current.slice(current.end)}`.replace(/\s+$/, " ").trimEnd();
         const caret = current.start;
         pendingCaret.current = caret;
-        onDraftChange(next);
+        onReplaceTextRange(current.start, current.end, "");
         requestAnimationFrame(() => {
           const input = inputRef.current;
           if (!input) return;
           input.focus();
-          input.setSelectionRange(caret, caret);
+          input.setCaretOffset(caret);
           pendingCaret.current = null;
         });
       }
       return;
     }
     if (!item.insert) return;
-    const current = findSlashToken(draftRef.current, inputRef.current?.selectionStart ?? draftRef.current.length);
+    const current = findSlashToken(draftRef.current, inputRef.current?.getCaretOffset() ?? draftRef.current.length);
     if (!current) return;
-    const next = `${draftRef.current.slice(0, current.start)}${item.insert}${draftRef.current.slice(current.end)}`;
     const nextCaret = current.start + item.insert.length;
     pendingCaret.current = nextCaret;
     tokenRef.current = null;
     setSlashDismissed(true);
-    onDraftChange(next);
+    onReplaceTextRange(current.start, current.end, item.insert);
     requestAnimationFrame(() => {
       const input = inputRef.current;
       if (!input) return;
       input.focus();
-      input.setSelectionRange(nextCaret, nextCaret);
+      input.setCaretOffset(nextCaret);
       pendingCaret.current = null;
       publishTokenIfChanged();
     });
-  }, [inputRef, onDraftChange, onOpenSettings, publishTokenIfChanged]);
+  }, [inputRef, onOpenSettings, onReplaceTextRange, publishTokenIfChanged]);
 
   const dismissSlash = useCallback((): void => {
     setSlashDismissed(true);
   }, []);
 
-  const handleSlashKeyDown = useCallback((event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const handleSlashKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>): boolean => {
     if (!slashMenuOpen) return false;
     if (event.key === "ArrowDown") {
       event.preventDefault();

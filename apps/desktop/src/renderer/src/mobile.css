@@ -50,24 +50,57 @@
   [data-client="remote"] .app-shell > .skills-workspace,
   [data-client="remote"] .app-shell > .memory-workspace {
     flex: 0 0 100%;
+    position: relative;
     width: 100%;
     min-width: 0;
     max-width: 100%;
+    inset: auto;
     grid-column: auto;
     scroll-snap-align: start;
     scroll-snap-stop: always;
   }
 
+  /* The phone switches panes by horizontal swiping, so desktop open/close
+   * transitions must not fade or slide the deck's three pages. */
+  [data-client="remote"] .app-shell,
+  [data-client="remote"] .app-shell > .conversation-pane,
+  [data-client="remote"] .app-shell > .issue-board,
+  [data-client="remote"] .app-shell > .skills-workspace,
+  [data-client="remote"] .app-shell > .memory-workspace,
+  [data-client="remote"] .app-shell > .sidebar,
+  [data-client="remote"] .app-shell > .inspector-pane {
+    transition: none;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+    will-change: auto;
+  }
+
+  /* 桌面端左右栏同时折叠时，组合选择器会给会话页同时叠加两侧的覆盖位移；它的
+   * 优先级高于上面的通用 pane 规则。移动端三页始终各占一屏，任何开关状态都不能
+   * 改写页宽或 transform，否则初始 scrollLeft 看似正确，实际滑动坐标会错一屏。 */
+  [data-client="remote"] .app-shell.left-collapsed > .conversation-pane,
+  [data-client="remote"] .app-shell.right-collapsed > .conversation-pane,
+  [data-client="remote"] .app-shell.left-collapsed.right-collapsed > .conversation-pane,
+  [data-client="remote"] .app-shell.left-collapsed > .issue-board,
+  [data-client="remote"] .app-shell.left-collapsed > .skills-workspace,
+  [data-client="remote"] .app-shell.left-collapsed > .memory-workspace {
+    width: 100%;
+    transform: none;
+  }
+
   /* Panels are switched by swiping, so there is nothing left to drag or
    * collapse, and the title bar has no window to move. */
   [data-client="remote"] .panel-resizer,
-  [data-client="remote"] .sidebar-toggle,
+  [data-client="remote"] .app-sidebar-control,
+  [data-client="remote"] .conversation-inspector-control,
   [data-client="remote"] .window-controls,
+  [data-client="remote"] .sidebar-drag,
   [data-client="remote"] .sidebar-drag-region { display: none; }
 
   [data-client="remote"] .window-drag { -webkit-app-region: no-drag; }
-  [data-client="remote"] .sidebar-drag { flex-basis: 12px; }
-  [data-client="remote"][data-platform="darwin"] .sidebar-drag { flex-basis: 12px; }
+  [data-client="remote"] .sidebar-drag-spacer { flex-basis: 12px; }
+  [data-client="remote"][data-platform="darwin"] .sidebar-drag-spacer { flex-basis: 12px; }
 
   /* The pane borders read as seams between screens rather than columns. */
   [data-client="remote"] .sidebar { border-right: 0; }
@@ -121,6 +154,22 @@
     padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
   [data-client="remote"] .composer-width-resizer { display: none; }
+
+  /* The task board's desktop filter row has a fixed 240px search field. On a
+   * phone that row becomes the grid's min-content width and stretches every
+   * header/toolbar past the viewport. Let only the search field absorb the
+   * remaining room; the checkbox and view switch keep their usable sizes. */
+  [data-client="remote"] .issue-board-header,
+  [data-client="remote"] .issue-board-toolbar { gap: 8px; padding-right: 14px; padding-left: 14px; }
+  [data-client="remote"] .issue-board-header > div:first-of-type { flex: 1 1 auto; overflow: hidden; }
+  [data-client="remote"] .issue-board-header > div:first-of-type > div { min-width: 0; }
+  [data-client="remote"] .issue-board-header h1,
+  [data-client="remote"] .issue-board-header p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-client="remote"] .issue-board-filters { gap: 8px; padding-right: 14px; padding-left: 14px; }
+  [data-client="remote"] .issue-board-filters input[type="text"] { width: auto; flex: 1 1 auto; }
+  [data-client="remote"] .issue-board-filters label,
+  [data-client="remote"] .issue-view-switch { flex: 0 0 auto; white-space: nowrap; }
+  [data-client="remote"] .issue-view-switch { margin-left: 0; }
 }
 
 @keyframes mobile-sheet-in {

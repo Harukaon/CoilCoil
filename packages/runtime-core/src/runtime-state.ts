@@ -5,12 +5,14 @@ import {
   type SessionShutdownEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type AgentMode,
   type ChatMessage,
   type GoalState,
   type McpRuntimeStatus,
   type PlanApprovalState,
   type ProjectMemoryRuntimeStatus,
   type ProjectSnapshot,
+  type PromptDocument,
   type PendingSessionModel,
   type QueuedPrompt,
   type ResponseMetrics,
@@ -73,6 +75,12 @@ export interface ActiveSession {
   plan: TodoItem[];
   project: ProjectSnapshot;
   messageIds: WeakMap<object, string>;
+  /** Documents waiting for Pi to append the corresponding user entry. */
+  pendingPromptDocuments: Map<string, PromptDocument>;
+  /** Live message ids are created before Pi exposes their persisted entry id. */
+  promptDocumentsByMessageId: Map<string, PromptDocument>;
+  /** Documents keyed by persisted Pi entry id for history reconstruction. */
+  promptDocumentsByEntryId: Map<string, PromptDocument>;
   messageRevision: number;
   /** Prompts handed to Pi whose user message it has not echoed back yet. */
   pendingUserPrompts: PendingUserPrompt[];
@@ -125,6 +133,7 @@ export interface FastRuntimeState {
 
 export interface RuntimeBridgeState {
   version: 1;
+  agentMode: AgentMode;
   effectiveSystemPrompt?: string;
   systemPromptOverride?: string;
   disabledSkills: string[];
@@ -145,6 +154,7 @@ export interface ReconstructedSessionState {
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   planApproval?: PlanApprovalState;
+  promptDocumentsByEntryId: Map<string, PromptDocument>;
 }
 
 export interface WorkflowManifest {
@@ -165,6 +175,7 @@ export function runtimeBridgeState(value: unknown): RuntimeBridgeState | undefin
   if (!isRecord(value) || value.version !== 1) return undefined;
   return {
     version: 1,
+    agentMode: value.agentMode === "unrestricted" ? "unrestricted" : "standard",
     effectiveSystemPrompt: optionalString(value, "effectiveSystemPrompt"),
     systemPromptOverride: optionalString(value, "systemPromptOverride"),
     disabledSkills: stringArray(value.disabledSkills),

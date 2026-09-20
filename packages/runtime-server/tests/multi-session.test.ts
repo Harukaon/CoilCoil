@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { CoilCoilRuntime, CoilCoilRuntimeOptions } from "@coilcoil/runtime-core";
 import type {
+  AgentMode,
   PlanApprovalState,
   PlanExecutionTarget,
   RuntimeBootstrap,
@@ -32,6 +33,7 @@ class FakeRuntime {
   readonly promptGate = deferred();
   readonly promptClientMessageIds: Array<string | undefined> = [];
   readonly createdWithModels: Array<SessionModelSelection | undefined> = [];
+  readonly createdWithModes: Array<AgentMode | undefined> = [];
   readonly sessionModelChanges: SessionModelSelection[] = [];
   readonly sessionFastChanges: boolean[] = [];
   disposed = false;
@@ -70,9 +72,10 @@ class FakeRuntime {
     return { cwd, ordinal: this.ordinal };
   }
 
-  async createSession(cwd: string, model?: SessionModelSelection): Promise<SessionSnapshot> {
+  async createSession(cwd: string, model?: SessionModelSelection, agentMode?: AgentMode): Promise<SessionSnapshot> {
     this.createdWithModels.push(model);
-    return this.install(cwd, `${cwd}/session-${this.ordinal}.jsonl`);
+    this.createdWithModes.push(agentMode);
+    return this.install(cwd, `${cwd}/session-${this.ordinal}.jsonl`, agentMode);
   }
 
   async configureModel(input: SessionModelSelection): Promise<RuntimeBootstrap["configuration"]> {
@@ -104,7 +107,7 @@ class FakeRuntime {
     return this.install(cwd, sessionPath);
   }
 
-  private install(cwd: string, path: string): SessionSnapshot {
+  private install(cwd: string, path: string, agentMode: AgentMode = "standard"): SessionSnapshot {
     const initialSubagent = this.controls.initialSubagentStatus ? [{
       id: `persisted-subagent-${this.ordinal}`,
       runId: `persisted-subagent-${this.ordinal}`,
@@ -128,6 +131,7 @@ class FakeRuntime {
         updatedAt: new Date(0).toISOString(),
         messageCount: 0,
       },
+      agentMode,
       messages: [],
       promptQueue: [],
       tools: [],
@@ -326,10 +330,12 @@ test("model selection is explicit at session creation and later switches only th
   const firstChoice: SessionModelSelection = { provider: "pierce", modelId: "gpt-5.6-sol", thinkingLevel: "high" };
   const firstResponse = await server.handle({
     id: "create-model-a",
-    command: { type: "create_session", cwd: "/project-a", model: firstChoice },
+    command: { type: "create_session", cwd: "/project-a", model: firstChoice, agentMode: "unrestricted" },
   });
   const first = firstResponse.result as SessionSnapshot;
   assert.deepEqual(runtimes[1].createdWithModels, [firstChoice]);
+  assert.deepEqual(runtimes[1].createdWithModes, ["unrestricted"]);
+  assert.equal(first.agentMode, "unrestricted");
 
   const secondResponse = await server.handle({ id: "create-model-b", command: { type: "create_session", cwd: "/project-b" } });
   const second = secondResponse.result as SessionSnapshot;

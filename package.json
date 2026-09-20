@@ -38,6 +38,7 @@
     "smoke:concurrency:live": "npm run build --workspace @coilcoil/desktop && node scripts/runtime-concurrency-smoke.mjs --live",
     "smoke:issue": "npm run build --workspace @coilcoil/desktop && node scripts/issue-run-smoke.mjs",
     "smoke:desktop": "node scripts/desktop-smoke.mjs",
+    "smoke:desktop:composer": "node scripts/desktop-composer-smoke.mjs",
     "smoke:desktop:layout": "node scripts/desktop-layout-smoke.mjs",
     "smoke:desktop:timeline": "node scripts/desktop-timeline-smoke.mjs",
     "smoke:desktop:browser-scope": "node scripts/browser-scope-smoke.mjs",

@@ -109,6 +109,15 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   overflow: hidden;
   position: relative;
 }
+.app-window-drag-region {
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: 0;
+  height: 56px;
+  box-sizing: border-box;
+}
+[data-platform="darwin"] .app-window-drag-region { height: 66px; }
 .resizing-panels {
   cursor: col-resize !important;
   user-select: none !important;
@@ -118,27 +127,104 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .resizing-panels input {
   pointer-events: none;
 }
-.panel-resizer { position: absolute; z-index: 20; top: 0; bottom: 0; width: 7px; cursor: col-resize; touch-action: none; }
+.panel-resizer { position: absolute; z-index: 20; top: 0; bottom: 0; width: 7px; -webkit-app-region: no-drag; cursor: col-resize; touch-action: none; }
 .panel-resizer::after { position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; content: ""; background: transparent; transition: background 120ms ease; }
 .panel-resizer:hover::after, .panel-resizer:active::after { background: hsl(var(--th) var(--ts) var(--l-653)); }
 .left-resizer { left: calc(var(--sidebar-width) - 3px); }
 .right-resizer { right: calc(var(--inspector-width) - 3px); }
-.app-shell.left-collapsed { grid-template-columns: 0 minmax(315px, 1fr) var(--inspector-width); }
-.app-shell.right-collapsed { grid-template-columns: var(--sidebar-width) minmax(315px, 1fr) 0; }
-.app-shell.left-collapsed.right-collapsed { grid-template-columns: 0 minmax(315px, 1fr) 0; }
+/* 折叠不改栅格：三条轨道一直在，折叠的那条只是让会话区盖上去。会话区本身用
+   absolute inset 覆盖折叠的轨道，因此即使隐藏栏曾经被拖得很宽，也不会把聊天内容
+   挤到窗口外；重新打开时仍然能回到用户拖出的宽度。 */
+.app-shell > .shell-surface {
+  /* The shell's grid tracks intentionally remain wider than the viewport when
+     a sidebar is preserved. A grid-positioned absolute child would therefore
+     use that overflow as its containing block. Fixed positioning keeps the
+     overlay anchored to the actual window while mobile.css restores the deck
+     panes to normal flow on remote clients. */
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  right: var(--inspector-width);
+  bottom: 0;
+  left: var(--sidebar-width);
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  transition: left 220ms cubic-bezier(.22, 1, .36, 1), right 220ms cubic-bezier(.22, 1, .36, 1);
+}
+.app-shell.left-collapsed > .shell-surface {
+  z-index: 10;
+  left: 0;
+}
+.app-shell.right-collapsed > .shell-surface {
+  z-index: 10;
+  right: 0;
+}
+.app-shell.left-collapsed.right-collapsed > .shell-surface { left: 0; right: 0; }
+/* 如果左栏本身被拖得很宽，保留它的隐藏宽度不能把仍打开的 inspector 推到
+   视口外；左栏收起时把 inspector 锚回窗口右边，重新展开时再回到第三轨道。 */
+.app-shell.left-collapsed > .inspector-pane {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--inspector-width);
+}
+/* 工作区页没有右侧 inspector，直接铺到窗口边缘；conversation 才需要为右栏
+   预留 inset。 */
+.app-shell.workspace-issues > .issue-board,
+.app-shell.workspace-skills > .skills-workspace,
+.app-shell.workspace-memory > .memory-workspace { right: 0; }
+.app-shell > .sidebar { grid-column: 1; }
+.app-shell > .inspector-pane { grid-column: 3; }
+.app-shell > .sidebar,
+.app-shell > .inspector-pane {
+  position: relative;
+  z-index: 1;
+  will-change: opacity, transform;
+  transition: opacity 160ms ease, transform 220ms cubic-bezier(.22, 1, .36, 1);
+}
+.app-shell.left-collapsed > .sidebar { opacity: 0; transform: translateX(-8px); pointer-events: none; }
+.app-shell.right-collapsed > .inspector-pane { opacity: 0; transform: translateX(8px); pointer-events: none; }
+body.resizing-panels .app-shell,
+body.resizing-panels .app-shell > .shell-surface,
+body.resizing-panels .app-shell > .sidebar,
+body.resizing-panels .app-shell > .inspector-pane { transition: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell > .shell-surface,
+  .app-shell > .sidebar,
+  .app-shell > .inspector-pane { transition: none; }
+}
 
 .sidebar, .inspector-pane { min-width: 0; overflow: hidden; }
 /* `layered` 只压深左侧栏。右栏讲的是当前会话的事（文件、运行时、浏览器），是会话
  * 区的延伸而不是第二条侧栏，所以它跟中间同底色；两边都压深会把会话区夹在中间。 */
-.sidebar { display: flex; flex-direction: column; border-right: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 45%); background: var(--side-glass); }
-.sidebar-drag { position: relative; flex: 0 0 56px; }
-.sidebar-drag-region { position: absolute; inset: 0 50px 0 0; }
-[data-platform="darwin"] .sidebar-drag { flex-basis: 66px; }
-.sidebar-toggle { position: absolute; z-index: 80; top: 12px; left: calc(var(--sidebar-width) - 42px); display: grid; width: 30px; height: 30px; padding: 0; -webkit-app-region: no-drag; place-items: center; border-radius: var(--radius-lg); background: transparent; cursor: pointer; pointer-events: auto; }
-.sidebar-toggle span { display: grid; width: 100%; height: 100%; place-items: center; border-radius: inherit; color: hsl(var(--th) var(--ts) var(--l-427)); pointer-events: none; }
-.sidebar-toggle:hover span { color: hsl(var(--th) var(--ts) var(--l-145)); background: hsl(var(--th) var(--ts) var(--l-880)); }
-.sidebar-toggle:focus-visible { outline: 2px solid hsl(var(--th) var(--ts) var(--l-547)); outline-offset: 1px; }
-[data-platform="darwin"] .sidebar-toggle { top: 18px; }
+.sidebar { position: relative; display: flex; flex-direction: column; border-right: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 45%); background: var(--side-glass); }
+:root[data-transparency="sidebar"] .sidebar { backdrop-filter: blur(28px) saturate(1.16); }
+:root[data-transparency="window"] .sidebar,
+:root[data-transparency="window"] .inspector-pane,
+:root[data-transparency="window"] .app-shell > .shell-surface { backdrop-filter: blur(42px) saturate(1.18); }
+/* 这个空盒只负责让导航从 macOS 顶部 66px（其他平台 56px）之后开始；它本身不声明
+   app-region，避免布局占位和真正的拖拽矩形变成两套逻辑。 */
+.sidebar-drag-spacer { position: relative; flex: 0 0 56px; }
+[data-platform="darwin"] .sidebar-drag-spacer { flex-basis: 66px; }
+/* 顶部整条都是窗口拖动区。它故意放在侧栏内容之后，让滚动列表里被裁掉的按钮矩形
+   不能在 Electron 的 app-region 差集里留下顶部的不可拖动空洞。 */
+.sidebar-drag { position: absolute; z-index: 2; top: 0; right: 0; left: 0; height: 56px; }
+.sidebar-drag-region { position: absolute; inset: 0; }
+[data-platform="darwin"] .sidebar-drag { height: 66px; }
+.app-sidebar-control { position: absolute; z-index: 80; top: 0; left: 0; width: 60px; height: 56px; }
+.app-sidebar-control-bar { position: relative; width: 100%; height: 100%; }
+.app-sidebar-toggle { position: absolute; top: 12px; left: 20px; }
+[data-platform="darwin"] .app-sidebar-control { width: 122px; height: 66px; }
+[data-platform="darwin"] .app-sidebar-toggle { top: 10px; left: 82px; }
+.conversation-inspector-control { position: absolute; z-index: 80; top: 0; right: var(--window-controls-width); width: 78px; height: 44px; }
+.conversation-inspector-control-bar { position: relative; width: 100%; height: 100%; }
+.conversation-inspector-add-slot { position: absolute; top: 7px; left: 8px; width: 30px; height: 30px; }
+.conversation-inspector-toggle { position: absolute; top: 7px; right: 8px; }
 .icon-button {
   display: inline-grid;
   width: 30px;
@@ -305,17 +391,67 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .memory-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .memory-workspace-content { min-width: 0; min-height: 0; overflow: hidden; }
 [data-platform="darwin"] .app-shell.left-collapsed .memory-workspace-header { padding-left: 82px; }
-.conversation-header { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; }
-[data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 82px; }
+/* 工作区标题和聊天标题走同一套「左侧可收缩、右侧固定」的布局。原来的
+   space-between flex 在拖动侧栏时会重新计算标题组的剩余宽度，副标题换行后就会
+   让图标和标题上下抖动；这里用显式两列并锁住标题组的最小宽度。 */
+.app-shell > .skills-workspace > .skills-workspace-header,
+.app-shell > .memory-workspace > .memory-workspace-header,
+.app-shell > .issue-board > .issue-board-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  transition: padding-left 220ms cubic-bezier(.22, 1, .36, 1);
+}
+.app-shell > .skills-workspace > .skills-workspace-header > div:first-of-type,
+.app-shell > .memory-workspace > .memory-workspace-header > div:first-of-type,
+.app-shell > .issue-board > .issue-board-header > div:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+}
+.app-shell > .skills-workspace > .skills-workspace-header > div:first-of-type > div,
+.app-shell > .memory-workspace > .memory-workspace-header > div:first-of-type > div,
+.app-shell > .issue-board > .issue-board-header > div:first-of-type > div {
+  min-width: 0;
+  overflow: hidden;
+}
+.app-shell.left-collapsed > .skills-workspace > .skills-workspace-header,
+.app-shell.left-collapsed > .memory-workspace > .memory-workspace-header,
+.app-shell.left-collapsed > .issue-board > .issue-board-header {
+  /* Match the shared AppView sidebar toggle: 20px + 30px + 10px on desktop. */
+  padding-left: 60px;
+}
+[data-platform="darwin"] .app-shell.left-collapsed > .skills-workspace > .skills-workspace-header,
+[data-platform="darwin"] .app-shell.left-collapsed > .memory-workspace > .memory-workspace-header,
+[data-platform="darwin"] .app-shell.left-collapsed > .issue-board > .issue-board-header {
+  /* The macOS traffic-light area adds 62px before the toggle. */
+  padding-left: 122px;
+}
+.app-shell > .skills-workspace > .skills-workspace-header h1,
+.app-shell > .skills-workspace > .skills-workspace-header p,
+.app-shell > .memory-workspace > .memory-workspace-header h1,
+.app-shell > .memory-workspace > .memory-workspace-header p,
+.app-shell > .issue-board > .issue-board-header h1,
+.app-shell > .issue-board > .issue-board-header p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 这些工作区是在切换栏目时才挂载的。AppView 会在浏览器绘制前对齐布局状态，
+   这里再作为 CSS 级兜底，避免它从网格静态原点闪入；之后收起/展开侧栏仍然平滑。 */
+.app-shell:not(.workspace-motion-ready) > .shell-surface {
+  /* A newly mounted workspace can otherwise paint once at its static grid
+     origin before the absolute inset is committed. Keep that frame out of the
+     compositor while the layout effect synchronizes the surface state. */
+  visibility: hidden;
+  transition: none;
+}
+.conversation-header { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; transition: padding-left 220ms cubic-bezier(.22, 1, .36, 1); }
+.app-shell.left-collapsed .conversation-header { padding-left: 60px; }
+[data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 122px; }
 .conversation-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; -webkit-user-select: none; user-select: none; }
 .conversation-title strong, .conversation-title span { -webkit-user-select: none; user-select: none; }
 .conversation-title strong { display: block; width: 100%; max-width: 620px; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-title span { color: hsl(var(--th) var(--ts) var(--l-531)); font-size: 10px; }
-.header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.conversation-header > .header-actions { align-self: flex-start; margin-top: 7px; }
-/* 右栏折叠后会话区顶到窗口右缘，换成它去躲窗口按钮。 */
-[data-platform="win32"] .app-shell.right-collapsed .conversation-header > .header-actions,
-[data-platform="linux"] .app-shell.right-collapsed .conversation-header > .header-actions { margin-right: var(--window-controls-width); }
 .conversation-scroll { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .conversation-body { min-width: 0; min-height: 0; height: 100%; overflow-x: hidden; overflow-y: auto; padding: 30px clamp(12px, 2vw, 28px) 76px; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .conversation-pane.has-composer-activity .conversation-body { padding-bottom: 190px; }
@@ -403,6 +539,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .user-message-queue-status { display: flex; width: fit-content; align-items: center; gap: 5px; margin-top: 7px; color: hsl(var(--th) var(--ts) var(--l-512)); font-size: 11px; line-height: 1; }
 .message-images { display: grid; margin-top: 8px; grid-template-columns: repeat(auto-fit, minmax(88px, 150px)); gap: 7px; }
 .message-images:first-child { margin-top: 0; }
+.message-images + .user-bubble-text { margin-top: 8px; }
 .message-image { position: relative; display: block; min-width: 0; }
 /* contain 而不是 cover：超出的部分按比例缩小，不裁掉画面。 */
 .message-image img { display: block; width: 100%; height: auto; max-height: 180px; object-fit: contain; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: var(--radius-2xl); }
@@ -752,7 +889,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   font-size: 11px;
   line-height: 1.45;
 }
-.composer { position: relative; z-index: 2; width: 100%; overflow: hidden; border: 1px solid hsl(var(--th) var(--ts) var(--l-843)); border-radius: var(--radius-9xl); background: var(--composer-fill); box-shadow: 0 1px 2px rgb(23 23 20 / 4%), 0 8px 24px rgb(23 23 20 / 4%); }
+.composer { position: relative; z-index: 2; width: 100%; overflow: hidden; border: 1px solid hsl(var(--th) var(--ts) var(--l-843)); border-radius: var(--radius-9xl); background: var(--composer-glass); box-shadow: 0 1px 2px rgb(23 23 20 / 4%), 0 8px 24px rgb(23 23 20 / 4%); }
 .composer-inline { z-index: 1; }
 .composer:focus-within { border-color: hsl(var(--th) var(--ts) var(--l-729)); box-shadow: 0 0 0 3px rgb(70 70 64 / 5%), 0 8px 24px rgb(23 23 20 / 4%); }
 /* Accepted but unsent prompts. They sit above the input because that is where
@@ -776,14 +913,21 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .composer-images figure { position: relative; width: 58px; height: 58px; flex: 0 0 auto; margin: 0; }
 .composer-images img { display: block; width: 100%; height: 100%; object-fit: cover; border: 1px solid hsl(var(--th) var(--ts) var(--l-843)); border-radius: var(--radius-2xl); }
 .composer-images button { position: absolute; top: -5px; right: -5px; display: grid; width: 18px; height: 18px; padding: 0; place-items: center; border: 1px solid hsl(var(--th) var(--ts) var(--l-816)); border-radius: 50%; color: hsl(var(--th) var(--ts) var(--l-339)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 2px 7px rgb(23 23 20 / 12%); cursor: pointer; }
-.composer textarea { display: block; width: 100%; height: 42px; min-height: 42px; max-height: 160px; overflow-x: hidden; overflow-y: auto; padding: 11px 18px 0; resize: none; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 1.45; }
+.composer textarea, .prompt-editor { display: block; width: 100%; min-height: 42px; max-height: 160px; overflow-x: hidden; overflow-y: auto; padding: 11px 18px 0; resize: none; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 1.45; }
+.composer textarea { height: 42px; }
 .composer textarea::placeholder { color: hsl(var(--th) var(--ts) var(--l-622)); }
-.composer textarea:disabled { cursor: default; }
+.prompt-editor { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.prompt-editor:empty::before { content: attr(data-placeholder); color: hsl(var(--th) var(--ts) var(--l-622)); pointer-events: none; }
+.prompt-editor:disabled, .prompt-editor[contenteditable="false"] { cursor: default; }
+.prompt-editor-element { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 7px; border: 1px solid hsl(214 78% 62% / 55%); border-radius: var(--radius-lg); color: hsl(214 72% 42%); background: hsl(214 86% 93%); font-size: .92em; line-height: 1.35; white-space: nowrap; user-select: none; vertical-align: baseline; }
+.prompt-history-element { margin: 0 3px; }
 .composer-toolbar { display: flex; align-items: center; min-height: 44px; padding: 4px 8px 8px 12px; }
 .agent-mode { display: inline-flex; max-width: 196px; align-items: center; gap: 4px; padding: 3px 6px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-398)); background: hsl(var(--th) var(--ts) var(--l-951)); font-size: 10px; font-weight: 500; cursor: pointer; }
 .agent-mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-mode:hover { background: hsl(var(--th) var(--ts) var(--l-914)); }
+.agent-mode-selector { margin-left: 0; }
 .model-popover { z-index: 1000; width: min(282px, calc(100vw - 24px)); overflow: hidden; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: var(--radius-2xl); outline: 0; background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: 0 16px 42px rgb(28 28 25 / 18%); transform-origin: var(--radix-popover-content-transform-origin); will-change: transform, opacity; }
+.mode-popover { width: min(194px, calc(100vw - 24px)); }
 .model-popover[data-state="open"] { animation: model-popover-in 150ms cubic-bezier(.16, 1, .3, 1); }
 .model-popover[data-state="closed"] { animation: model-popover-out 100ms ease-in; }
 .model-popover-arrow { fill: hsl(var(--th) var(--ts) var(--l-976)); filter: drop-shadow(0 1px 0 hsl(var(--th) var(--ts) var(--l-837))); }
@@ -833,9 +977,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .steer-button:disabled { color: hsl(var(--th) var(--ts) var(--l-653)); cursor: default; }
 .send-button:disabled { color: hsl(var(--th) var(--ts) var(--l-653)); background: hsl(var(--th) var(--ts) var(--l-925)); cursor: default; }
 .workspace-status { display: flex; height: 30px; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; }
+.workspace-status-left { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .workspace-path { display: inline-flex; min-width: 0; max-width: 48%; align-items: center; gap: 6px; padding: 3px 4px; border-radius: var(--radius-sm); color: inherit; background: transparent; cursor: pointer; }
 .workspace-path:hover { color: hsl(var(--th) var(--ts) var(--l-390)); background: hsl(var(--th) var(--ts) var(--l-925)); }
 .workspace-path span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-path.agent-mode-selector { max-width: 170px; }
 .path-popover, .context-popover { z-index: 1000; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: var(--radius-2xl); color: hsl(var(--th) var(--ts) var(--l-390)); background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: 0 12px 32px rgb(28 28 25 / 14%); font-size: 10px; }
 .path-popover { max-width: min(560px, calc(100vw - 24px)); overflow-wrap: anywhere; padding: 8px 10px; }
 .composer-metrics { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; }
@@ -873,26 +1019,40 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 
 .inspector-pane { display: grid; grid-template-rows: 44px minmax(0, 1fr); border-left: 1px solid hsl(var(--th) var(--ts) var(--l-876) / 70%); background: var(--pane-glass); }
 .inspector-header { position: relative; display: flex; min-width: 0; align-items: center; gap: 7px; padding: 0 8px; color: hsl(var(--th) var(--ts) var(--l-457)); font-size: 12px; font-weight: 550; }
-/* 标题栏里唯一保证不会被内容占掉的一段空带——拖动窗口就是按在它上面。48px 是和
-   .inspector-nav 的 max-width 配套算出来的：48（本条）+ 62（右侧两个 30px 按钮 + 2px
-   间距）+ 14（两处 gap）+ 16（左右 padding）= 140，正好是 nav 让出来的那 140px。
-   改任何一个数都要一起改，apps/desktop/tests/window-drag.test.ts 会核对这笔账。 */
-.inspector-drag-surface { min-width: 48px; align-self: stretch; flex: 0 0 auto; user-select: none; }
-.inspector-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
-/* 右栏展开时它在窗口最右上角，正好是窗口按钮的位置。 */
-[data-platform="win32"] .inspector-actions, [data-platform="linux"] .inspector-actions { margin-right: var(--window-controls-width); }
+.inspector-actions { display: flex; flex: 0 0 auto; align-items: center; margin-left: auto; }
+/* 右栏展开时它在窗口最右上角，正好和折叠态的按钮使用同一个锚点。 */
 .inspector-add-popover { z-index: 1000; display: grid; min-width: 116px; gap: 2px; padding: 4px; border: 1px solid hsl(var(--th) var(--ts) var(--l-853)); border-radius: var(--radius-xl); outline: 0; background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 8px 22px rgb(28 28 25 / 14%); }
 .inspector-add-popover button { display: flex; align-items: center; gap: 6px; padding: 6px 7px; border-radius: var(--radius-sm); color: hsl(var(--th) var(--ts) var(--l-361)); background: transparent; font-size: 10px; text-align: left; cursor: pointer; }
 .inspector-add-popover button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-196)); background: hsl(var(--th) var(--ts) var(--l-922)); }
 .inspector-add-popover button:disabled { color: hsl(var(--th) var(--ts) var(--l-678)); cursor: default; }
-/* 标签条只能占到给它的那一段，多出来的横向滚动——以前是 calc(100% - 80px)，而右侧
-   按钮 + padding + gap 本身就要 92px，于是标签一多先把拖动带挤没、再把按钮顶出去。
-   标签条现在 flex:1 吃掉剩余宽度、拖动带退回固定 48px：从前是反过来的，标签只有
-   一两个时那段空白全归拖动带，看上去就是「右边明明还有位置却不放标签」。标签自己
-   也能长（flex:1 1 auto，上限 200px），先把名字显全再说。 */
-.inspector-nav { display: flex; min-width: 0; max-width: calc(100% - 140px); flex: 1 1 auto; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
+/* 标签条按内容取宽；只有标签真的多到超过标题栏时，才把自己撑到最大区域并横向滚动。
+   右侧按钮固定在标题栏右边，所以这里仅需给两个按钮和 7px 间距留位。 */
+.inspector-nav { display: flex; width: max-content; min-width: 0; max-width: calc(100% - 69px); flex: 0 1 auto; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
 .inspector-nav::-webkit-scrollbar { display: none; }
+.inspector-scrollbar {
+  position: absolute;
+  z-index: 2;
+  right: calc(8px + var(--window-controls-width) + 69px);
+  bottom: 2px;
+  left: 8px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  pointer-events: none;
+}
+.inspector-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--scrollbar-thumb);
+  cursor: grab;
+  pointer-events: auto;
+}
+.inspector-scrollbar-thumb:hover { background: var(--scrollbar-thumb-active); }
+.inspector-scrollbar-thumb:active { cursor: grabbing; }
 .inspector-tab { display: flex; width: max-content; min-width: 0; max-width: 200px; height: 32px; flex: 1 0 auto; align-items: center; overflow: hidden; border: 1px solid transparent; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-402)); font-size: 10px; }
+.inspector-tab:has(> .inspector-tab-select[aria-label="about:blank"]) { max-width: 150px; }
 .inspector-tab:hover, .inspector-tab.active { color: hsl(var(--th) var(--ts) var(--l-153)); background: hsl(var(--th) var(--ts) var(--l-920)); }
 .inspector-nav .inspector-tab-select { display: flex; width: auto; min-width: 0; height: 100%; flex: 1 1 auto; align-items: center; gap: 5px; overflow: hidden; padding: 0 5px 0 9px; border-radius: var(--radius-lg) 0 0 var(--radius-lg); color: inherit; background: transparent; cursor: pointer; }
 .inspector-tab-select > span { display: block; width: auto; max-width: none; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -913,6 +1073,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .browser-panel { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: 34px minmax(0, 1fr); background: hsl(var(--th) var(--ts) var(--l-1000)); }
 .browser-toolbar > button { display: grid; width: 25px; height: 25px; flex: 0 0 auto; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-398)); background: transparent; place-items: center; cursor: pointer; }
 .browser-toolbar > button:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-886)); }
+.browser-toolbar > button.browser-element-picker.active { color: var(--c-green-text); background: color-mix(in srgb, var(--c-green-solid) 14%, transparent); }
 /* 内置浏览器的登录状态菜单：标签栏右侧的入口和它的弹层 */
 .browser-identity { display: grid; width: 25px; height: 25px; flex: 0 0 auto; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-398)); background: transparent; place-items: center; cursor: pointer; }
 .browser-identity:hover, .browser-identity[data-state="open"] { background: hsl(var(--th) var(--ts) var(--l-886)); }
@@ -959,7 +1120,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .browser-toolbar input { min-width: 0; height: 25px; flex: 1; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-865)); border-radius: var(--radius-lg); outline: 0; color: hsl(var(--th) var(--ts) var(--l-324)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 8px; }
 .browser-toolbar input:focus { border-color: hsl(var(--th) var(--ts) var(--l-735)); box-shadow: 0 0 0 2px rgb(110 130 106 / 10%); }
 .browser-native-host { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: hsl(var(--th) var(--ts) var(--l-1000)); }
-/* Guests composite above the app shell but below every overlay: resizer 20, sidebar-toggle 80,
+/* Guests composite above the app shell but below every overlay: resizer 20, app-sidebar-control 80,
    context-menu 100, dialog 240, subagent backdrop 300, popovers 1000, tooltip 1500. */
 .browser-guest-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
 /* Parked guests stay 1x1 and on-screen. Anything that stops them compositing —

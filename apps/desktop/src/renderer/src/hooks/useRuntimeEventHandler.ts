@@ -8,6 +8,7 @@ import type {
   ProjectSnapshot,
   RuntimeConfiguration,
   RuntimeEvent,
+  PromptDocument,
   SessionSnapshot,
   SessionSummary,
   SubagentActivity,
@@ -38,6 +39,7 @@ export function useRuntimeEventHandler({
   applySnapshot,
   dispatchConversationMessages,
   restoreDraft,
+  restoreDocument,
   setSnapshot,
   setSessionActivity,
   setConfiguration,
@@ -54,6 +56,7 @@ export function useRuntimeEventHandler({
   applySnapshot(next: SessionSnapshot): void;
   dispatchConversationMessages: Dispatch<ConversationMessageAction>;
   restoreDraft(text: string): void;
+  restoreDocument?: (document: PromptDocument) => void;
   setSnapshot: Dispatch<SetStateAction<SessionSnapshot | undefined>>;
   setSessionActivity: Dispatch<SetStateAction<Record<string, SessionActivityState>>>;
   setConfiguration: Dispatch<SetStateAction<RuntimeConfiguration | undefined>>;
@@ -167,6 +170,7 @@ export function useRuntimeEventHandler({
             order: event.timestamp,
             role: "user",
             text: event.text,
+            promptDocument: event.promptDocument,
             images: event.images,
             timestamp: event.timestamp,
             status: "steering",
@@ -177,7 +181,8 @@ export function useRuntimeEventHandler({
         dispatchConversationMessages({ type: "reject", id: event.id, revision: event.revision });
         // A stop hands back the steered message Pi never delivered; without this
         // it would only vanish from the transcript, which loses what was typed.
-        if (event.text) restoreDraft(event.text);
+        if (event.promptDocument && restoreDocument) restoreDocument(event.promptDocument);
+        else if (event.text) restoreDraft(event.text);
         break;
       case "tool_started":
         setAgentPhase("工具");
@@ -276,7 +281,7 @@ export function useRuntimeEventHandler({
       default:
         break;
     }
-  }, [applySnapshot, dispatchConversationMessages, optimisticSessionsRef, restoreDraft, runtimeSessionRef,
+  }, [applySnapshot, dispatchConversationMessages, optimisticSessionsRef, restoreDocument, restoreDraft, runtimeSessionRef,
     setAgentPhase, setConfiguration, setProjectState, setSessionActivity, setSessionsByProject,
     setSnapshot, setSubagents, setTools, snapshotCacheRef, snapshotRef]);
 }

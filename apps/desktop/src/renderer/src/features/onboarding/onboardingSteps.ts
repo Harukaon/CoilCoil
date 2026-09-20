@@ -6,9 +6,17 @@ import type { MacPermissionId } from "../../../../shared/desktop-api";
  * 规则单独放一份是为了能被测到，界面改版不该把它一起改没了。
  */
 
-export type OnboardingStepId = "intro" | "model" | "permissions" | "workspace";
+export type OnboardingStepId = "intro" | "model" | "agents" | "memory" | "integrations" | "permissions" | "workspace";
 
-export const ONBOARDING_STEPS: readonly OnboardingStepId[] = ["intro", "model", "permissions", "workspace"];
+export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
+  "intro",
+  "model",
+  "agents",
+  "memory",
+  "integrations",
+  "permissions",
+  "workspace",
+];
 
 /**
  * 引导里会介绍到的系统权限。
@@ -57,7 +65,7 @@ export function isLastStep(step: OnboardingStepId): boolean {
  * 以为漏了什么。**每一步都能往下走，任何一步都不会把人卡住。**
  */
 export function canSkip(step: OnboardingStepId): boolean {
-  return step === "model" || step === "workspace";
+  return step === "model" || step === "agents" || step === "memory" || step === "integrations" || step === "workspace";
 }
 
 export function advance(progress: OnboardingProgress): OnboardingProgress {
@@ -73,6 +81,9 @@ export function goBack(progress: OnboardingProgress): OnboardingProgress {
 export const ONBOARDING_STEP_LABELS: Record<OnboardingStepId, string> = {
   intro: "认识",
   model: "模型",
+  agents: "Agent",
+  memory: "记忆",
+  integrations: "扩展",
   permissions: "权限",
   workspace: "工作区",
 };

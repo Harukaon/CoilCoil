@@ -4,6 +4,9 @@ import type { RuntimeConfiguration } from "@coilcoil/runtime-protocol";
 import type { MacPermissionId, MacPermissions, ProjectSelection } from "../../../../shared/desktop-api";
 import { ModelSettings } from "../settings/ModelSettings";
 import { WindowDragBar } from "../../ui/WindowDragBar";
+import { OnboardingAgentSetup } from "./OnboardingAgentSetup";
+import { OnboardingIntegrationsSetup } from "./OnboardingIntegrationsSetup";
+import { OnboardingMemorySetup } from "./OnboardingMemorySetup";
 import {
   advance,
   canSkip,
@@ -19,7 +22,7 @@ import {
 } from "./onboardingSteps";
 import "./onboarding.css";
 
-/** 四步的标题和导语。集中一处，保证四步的标题块长得一模一样。 */
+/** 引导各步的标题和导语。集中一处，保证标题块始终一致。 */
 const HEADINGS: Record<OnboardingStepId, { title: React.ReactNode; lead: string }> = {
   intro: {
     title: <>让 AI 和你<br />待在同一个界面里</>,
@@ -28,6 +31,18 @@ const HEADINGS: Record<OnboardingStepId, { title: React.ReactNode; lead: string 
   model: {
     title: "配一个模型",
     lead: "选一个服务商填上密钥就能开始。现在不配也行，之后在「设置 → 模型与服务商」里随时能补。",
+  },
+  agents: {
+    title: "把 Agent 配完整",
+    lead: "子 Agent 和会话命名可以用独立模型。这里不配置也不影响主 Agent，之后可以在设置里补上。",
+  },
+  memory: {
+    title: "决定记忆怎么工作",
+    lead: "选择要不要把全局记忆、项目记忆注入对话，以及后台整理的频率和规则。",
+  },
+  integrations: {
+    title: "接入 MCP 和 Skill",
+    lead: "扫描这台机器已有的 MCP 配置，查看 CoilCoil 发现的 Skill；导入后由 CoilCoil 自己管理。",
   },
   permissions: {
     title: "系统权限",
@@ -55,10 +70,11 @@ const PRINCIPLES: readonly { label: string; body: string }[] = [
  * 视觉上刻意不用卡片和描边：分隔靠留白和发丝线，背景是一团慢慢飘的墨，和产品自己
  * 那个墨团标志是同一套语言。
  */
-export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeId, projects, onOpenProject, onDone }: {
+export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeId, cwd, projects, onOpenProject, onDone }: {
   configuration?: RuntimeConfiguration;
   onConfigurationSaved: (configuration: RuntimeConfiguration) => void;
   runtimeId?: string;
+  cwd?: string;
   projects: ProjectSelection[];
   onOpenProject: () => void;
   onDone: () => void;
@@ -104,14 +120,13 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
           <section className="onboarding-step" key={progress.step}>
             <span className="onboarding-mark" aria-hidden="true">{index + 1}</span>
 
-            {/* 标题块四步共用同一份结构和高度，换步只换文字——各步自己写标题的话，
-                字号和位置会一步一个样，用户一眼就看出来了。 */}
+            {/* 标题块共用同一份结构，换步只换文字。 */}
             <div className="onboarding-headline">
               <h1 id="onboarding-title">{HEADINGS[progress.step].title}</h1>
               <p>{HEADINGS[progress.step].lead}</p>
             </div>
 
-            <div className={`onboarding-body ${progress.step === "model" ? "stretch" : ""}`}>
+            <div className={`onboarding-body ${["model", "agents", "memory", "integrations"].includes(progress.step) ? "stretch" : ""}`}>
               {progress.step === "intro" ? (
                 <div className="onboarding-lines">
                   {PRINCIPLES.map((line, position) => (
@@ -126,6 +141,24 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
               {progress.step === "model" ? (
                 <div className="onboarding-embed settings-surface">
                   <ModelSettings configuration={configuration} onSaved={onConfigurationSaved} runtimeId={runtimeId} />
+                </div>
+              ) : null}
+
+              {progress.step === "agents" ? (
+                <div className="onboarding-embed onboarding-setup-embed">
+                  <OnboardingAgentSetup configuration={configuration} runtimeId={runtimeId} />
+                </div>
+              ) : null}
+
+              {progress.step === "memory" ? (
+                <div className="onboarding-embed onboarding-setup-embed">
+                  <OnboardingMemorySetup runtimeId={runtimeId} cwd={cwd} />
+                </div>
+              ) : null}
+
+              {progress.step === "integrations" ? (
+                <div className="onboarding-embed onboarding-setup-embed onboarding-integrations-embed">
+                  <OnboardingIntegrationsSetup runtimeId={runtimeId} cwd={cwd} />
                 </div>
               ) : null}
 

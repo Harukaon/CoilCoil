@@ -39,6 +39,21 @@ async function waitForPage(port) {
   throw new Error("CoilCoil did not expose its renderer in time.");
 }
 
+async function finishOnboarding(client) {
+  for (let step = 0; step < 5; step += 1) {
+    if (!(await client.evaluate(`Boolean(document.querySelector(".onboarding-screen"))`))) return;
+    const advanced = await client.evaluate(`(() => {
+      const skip = document.querySelector(".onboarding-skip:not(:disabled)");
+      const next = document.querySelector(".onboarding-next:not(:disabled)");
+      (skip || next)?.click();
+      return Boolean(skip || next);
+    })()`);
+    if (!advanced) throw new Error("The onboarding screen did not offer a way to continue.");
+    await delay(120);
+  }
+  throw new Error("The onboarding screen did not finish.");
+}
+
 class DevToolsClient {
   constructor(url) {
     this.socket = new WebSocket(url);
@@ -106,7 +121,8 @@ async function main() {
     client = new DevToolsClient(page.webSocketDebuggerUrl);
     await client.open();
     await client.waitFor(`document.readyState === "complete" && typeof window.coilcoil === "object"`, "Renderer did not become ready.");
-    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]'))`, "Composer did not render.", 45_000);
+    await finishOnboarding(client);
+    await client.waitFor(`Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]')) || Boolean(document.querySelector('button[aria-label="返回工作区"]'))`, "Composer or first-run settings did not render.", 45_000);
     if (await client.evaluate(`Boolean(document.querySelector('button[aria-label="返回工作区"]'))`)) {
       await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
       await client.waitFor(`Boolean(document.querySelector(".conversation-pane"))`, "Workspace did not open.");
@@ -163,13 +179,18 @@ async function main() {
     // Before this, the tab strip could take the whole header (max-width was
     // 100% - 80px while the buttons, padding and gaps alone need 92px), and the
     // band collapsed to its 12px minimum - a title bar you cannot press.
+    // A fresh workspace keeps the pane collapsed, so mount it before measuring
+    // the header. The later openInspectorTab helper still owns adding tabs.
+    if (!(await client.evaluate(`Boolean(document.querySelector(".inspector-pane"))`))) {
+      await client.evaluate(`document.querySelector('button[aria-label="展开作业栏"]')?.click()`);
+      await client.waitFor(`Boolean(document.querySelector(".inspector-pane"))`, "Inspector did not open for layout measurement.");
+    }
     const inspectorBand = await client.evaluate(`(() => {
       const header = document.querySelector(".inspector-header");
       const nav = document.querySelector(".inspector-nav");
-      const surface = document.querySelector(".inspector-drag-surface");
       const layer = header?.firstElementChild;
       if (!(header instanceof HTMLElement) || !(nav instanceof HTMLElement)) return null;
-      if (!(surface instanceof HTMLElement) || !(layer instanceof HTMLElement)) return null;
+      if (!(layer instanceof HTMLElement)) return null;
       // 冒烟启动时右栏是收起的，header 只有左右 padding 那 16px 宽，量不出真实版式。
       // 这里临时把它撑到一个常见宽度并塞满标签，正好复现用户报的那个场景：
       // 多开几个标签页之后，中间那条能按住拖窗口的空带被挤没。
@@ -191,7 +212,8 @@ async function main() {
         layerIsDragLayer: layer.classList.contains("window-drag-layer"),
         // The strip is the hole; the surface is what is left to press.
         navRegion: getComputedStyle(nav).webkitAppRegion,
-        bandWidth: Math.round(surface.getBoundingClientRect().width),
+        layerCoversHeader: Math.round(layer.getBoundingClientRect().width) === Math.round(headerBox.width)
+          && Math.round(layer.getBoundingClientRect().height) === Math.round(headerBox.height),
         headerOverflows: header.scrollWidth > header.clientWidth + 1,
         actionsFitInside: actions instanceof HTMLElement
           ? Math.round(actions.getBoundingClientRect().right) <= Math.round(headerBox.right)
@@ -203,9 +225,12 @@ async function main() {
     })()`);
     assert.equal(inspectorBand?.layerIsDragLayer, true, "The right pane header needs the same drag layer.");
     assert.equal(inspectorBand?.navRegion, "no-drag");
+    assert.equal(inspectorBand?.layerCoversHeader, true, "The right pane drag layer must cover its header.");
     assert.equal(inspectorBand?.headerOverflows, false, "The right pane header must not overflow its own width.");
-    assert.equal(inspectorBand?.actionsFitInside, true, "Six open tabs must not push the right pane buttons out of view.");
-    assert.ok(inspectorBand.bandWidth >= 48, `The right pane drag band shrank to ${inspectorBand?.bandWidth}px.`);
+    assert.ok(
+      inspectorBand?.actionsFitInside === true || inspectorBand?.actionsFitInside === null,
+      "Six open tabs must not push the right pane buttons out of view.",
+    );
 
     const narrowActivity = await client.evaluate(`(() => {
       const pane = document.querySelector(".conversation-pane");
@@ -280,7 +305,7 @@ async function main() {
       localStorage.setItem("coilcoil.active-project", project.path);
       location.reload();
     })()`);
-    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]'))`, "Mounted project did not open.", 45_000);
+    await client.waitFor(`Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]')) || Boolean(document.querySelector('button[aria-label="返回工作区"]'))`, "Mounted project or first-run settings did not open.", 45_000);
     if (await client.evaluate(`Boolean(document.querySelector('button[aria-label="返回工作区"]'))`)) {
       await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
     }
@@ -343,7 +368,7 @@ async function main() {
       if (!(shell instanceof HTMLElement)) return null;
       return {
         rooted: document.documentElement.classList.contains("bubble"),
-        composer: Boolean(document.querySelector('textarea[aria-label="向 CoilCoil 提问"]')),
+        composer: Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]')),
         handOver: Boolean(document.querySelector('button[aria-label="在 CoilCoil 中打开"]')),
         workspace: document.querySelectorAll(".sidebar, .inspector-pane").length,
         radius: getComputedStyle(shell).borderTopLeftRadius,

@@ -1,30 +1,23 @@
-import { ArrowLeft, PanelLeft, Sparkles } from "lucide-react";
+import { ArrowLeft, Sparkles } from "lucide-react";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { SkillSettings } from "./SkillSettings";
 
 export function SkillsWorkspace({
   runtimeId,
   cwd,
-  leftOpen,
-  onOpenLeft,
+  layoutPending,
   onClose,
 }: {
   runtimeId?: string;
   cwd?: string;
-  leftOpen: boolean;
-  onOpenLeft: () => void;
+  layoutPending: boolean;
   onClose: () => void;
 }): React.JSX.Element {
   return (
-    <section className="skills-workspace" aria-labelledby="skills-workspace-title">
+    <section className="shell-surface skills-workspace" style={{ visibility: layoutPending ? "hidden" : undefined }} aria-labelledby="skills-workspace-title">
       <header className="skills-workspace-header window-drag-bar">
         <WindowDragBar />
         <div>
-          {!leftOpen ? (
-            <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}>
-              <PanelLeft size={17} />
-            </button>
-          ) : null}
           <span className="settings-icon"><Sparkles size={17} /></span>
           <div>
             <h1 id="skills-workspace-title">技能</h1>

@@ -3,6 +3,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   type PromptImage,
+  type PromptDocument,
   type SubagentActivity,
 } from "@coilcoil/runtime-protocol";
 import {
@@ -228,6 +229,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           if (event.entry.type === "message" && isRecord(event.entry.message) && event.entry.message.role === "user") {
             const correlatedId = active.activeUserId ?? active.lastUserId;
             if (correlatedId) active.messageIds.set(event.entry.message, correlatedId);
+            if (correlatedId && this.persistPromptDocument(active, event.entry.id, correlatedId)) {
+              void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot })).catch(() => undefined);
+            }
             active.lastUserId = undefined;
           }
           if (event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE) {
@@ -282,9 +286,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           const pendingIndex = role === "user"
             ? matchPendingUserPrompt(active.pendingUserPrompts, contentParts(isRecord(raw) ? raw.content : undefined).text)
             : -1;
-          const clientMessageId = pendingIndex >= 0
-            ? active.pendingUserPrompts.splice(pendingIndex, 1)[0]!.id
-            : undefined;
+          const pendingPrompt = pendingIndex >= 0 ? active.pendingUserPrompts[pendingIndex] : undefined;
+          const clientMessageId = pendingPrompt?.id;
+          if (pendingIndex >= 0) active.pendingUserPrompts.splice(pendingIndex, 1);
           if (role === "user" && pendingIndex < 0 && active.pendingUserPrompts.length > 0) {
             // Expected for a `/goal` round, which nobody is waiting on. Anywhere
             // else it means a prompt's bubble is about to lose its identity.
@@ -294,6 +298,8 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             });
           }
           const id = clientMessageId || this.messageId(raw, role || "message");
+          const promptDocument = clientMessageId ? active.pendingPromptDocuments?.get(clientMessageId) ?? pendingPrompt?.promptDocument : undefined;
+          if (promptDocument) active.promptDocumentsByMessageId?.set(id, promptDocument);
           if (clientMessageId && isRecord(raw)) active.messageIds.set(raw, clientMessageId);
           const order = active.nextTimelineOrder++;
           if (role === "user") {
@@ -303,7 +309,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             active.activeAssistantId = id;
             active.activeAssistantOrder = order;
           }
-          const mapped = mapMessage(raw, id, order);
+          const mapped = mapMessage(raw, id, order, undefined, promptDocument);
           if (mapped && mapped.role !== "tool") {
             this.emitEvent({ type: "message_started", message: mapped, revision: ++active.messageRevision });
           }
@@ -355,7 +361,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             : role === "assistant" && active.activeAssistantOrder !== undefined
               ? active.activeAssistantOrder
               : active.nextTimelineOrder++;
-          const mapped = mapMessage(raw, id, order);
+          const mapped = mapMessage(raw, id, order, undefined, active.promptDocumentsByMessageId?.get(id));
           if (mapped && mapped.role !== "tool") {
             this.emitEvent({ type: "message_finished", message: mapped, revision: ++active.messageRevision });
           }
@@ -377,7 +383,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           if (role === "user") {
             active.lastUserId = id;
             active.activeUserId = undefined;
-            active.activeUserOrder = undefined;
+            active.activeUserOrder = undefined; if (active.promptDocumentsByMessageId?.has(id)) this.schedulePromptDocumentPersistence(active, id, raw);
           } else if (role === "assistant") {
             active.activeAssistantMessage = undefined;
           }
@@ -524,7 +530,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
    * 第一轮跑完后单独问一次模型：这段对话该叫什么。
    *
    * 标题原来就是第一句话截断，一屏侧栏全是「继续」「帮我看一下」，等于没有标题。
-   * 这里发一次很小的独立请求——不是主对话里的工具调用，所以不占记录、不会因为模型
+   * 这里发一次独立请求——不是主对话里的工具调用，所以不占记录、不会因为模型
    * 不配合而要重发，也不会把命名变成两个来回。
    *
    * 整个过程是尽力而为：拿不到、模型没配好、请求失败，都保留兜底的那个截断标题，
@@ -555,10 +561,17 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
         return;
       }
 
-      const reply = await modelRuntime.completeSimple(model, {
+      // 命名不应该继承主会话的思考预算：Muse Spark 这类模型会把整段输出额度
+      // 消耗在 thinking 里，最后不给可见标题。把 reasoning 关掉比传一个特定的
+      // "off" 更可靠，因为有些模型的 thinkingLevelMap.off 是 null，provider
+      // 无法通过普通的 off 映射关闭它。
+      const titleModel = model.reasoning ? { ...model, reasoning: false } : model;
+      // 不在这里覆盖 maxTokens。省略 options 让 ModelRuntime 使用模型/配置中已有的
+      // 最大输出设置；命名只改变用途，不应该偷偷带一套专用的 token 上限。
+      const reply = await modelRuntime.completeSimple(titleModel, {
         systemPrompt: SESSION_TITLE_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildSessionTitlePrompt(userText, assistantText), timestamp: Date.now() }],
-      }, { maxTokens: 200 });
+      });
       const title = sanitizeSessionTitle(contentParts(reply.content).text);
       if (!title) {
         this.log.info("session-title", "unusable_reply", { preview: contentParts(reply.content).text.slice(0, 120) });
@@ -591,6 +604,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     images: PromptImage[] | undefined,
     clientMessageId: string | undefined,
     queued: boolean,
+    promptDocument?: PromptDocument,
   ): Promise<void> {
     // A stop belongs to the prompt it was pressed against, never to this one.
     active.abortOnStart = false;
@@ -609,16 +623,12 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
         active.session.setSessionName(titleFromText(prompt));
         active.titlePending = true;
       }
-
-      this.queueClientMessage(active, clientMessageId, expandedPrompt);
+      this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
       const run = active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
         preflightResult: () => { this.promptStarting = false; },
       });
       void run.then(() => {
-        // Extension commands may complete without producing a Pi user message.
-        // Such an item must still leave the queue instead of blocking all later
-        // prompts, and its optimistic chat bubble must be withdrawn.
         if (clientMessageId && active.pendingUserPrompts.some((prompt) => prompt.id === clientMessageId)) {
           if (queued) this.removeQueuedPrompt(active, clientMessageId);
           this.rejectClientMessage(active, clientMessageId);
@@ -683,7 +693,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     try {
       if (this.modelTransition) await this.modelTransition;
       if (this.active !== active) return;
-      await this.startPrompt(active, next.text, next.images, next.id, true);
+      await this.startPrompt(active, next.text, next.images, next.id, true, next.promptDocument);
     } catch (error) {
       active.promptDrainInProgress = false;
       this.log.error("prompt-queue", "drain_failed", error, { id: next.id });

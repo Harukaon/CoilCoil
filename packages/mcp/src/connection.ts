@@ -19,9 +19,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { McpServerConfiguration } from "@coilcoil/runtime-protocol";
 import { launchFor, type EnvironmentSource } from "./definition.js";
 import type { McpCredentialStore } from "./credential-store.js";
+import type { McpDiagnosticLogger } from "./diagnostic.js";
 import { McpOAuthProvider } from "./oauth-provider.js";
 
 /**
@@ -58,6 +61,8 @@ export interface McpConnectionOptions {
    */
   redirectUrl: string | (() => string);
   openAuthorization: (url: URL) => void | Promise<void>;
+  /** Optional sink for redacted authentication diagnostics. */
+  diagnostic?: McpDiagnosticLogger;
   environment?: EnvironmentSource;
   clientName?: string;
   clientVersion?: string;
@@ -66,6 +71,46 @@ export interface McpConnectionOptions {
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 /** Enough of a failing server's stderr to name the problem, not enough to fill the panel. */
 const STDERR_TAIL_LIMIT = 600;
+
+function tokenSummary(tokens: OAuthTokens | undefined): Record<string, unknown> {
+  const value = tokens as (OAuthTokens & { expires_in?: unknown; scope?: unknown; token_type?: unknown }) | undefined;
+  return {
+    hasAccessToken: typeof value?.access_token === "string" && value.access_token.length > 0,
+    hasRefreshToken: typeof value?.refresh_token === "string" && value.refresh_token.length > 0,
+    expiresIn: typeof value?.expires_in === "number" ? value.expires_in : undefined,
+    hasScope: typeof value?.scope === "string" && value.scope.length > 0,
+    tokenType: typeof value?.token_type === "string" ? value.token_type : undefined,
+  };
+}
+
+function requestGrantType(init?: RequestInit): string | undefined {
+  if (init?.body instanceof URLSearchParams) return init.body.get("grant_type") ?? undefined;
+  if (typeof init?.body !== "string") return undefined;
+  try {
+    return new URLSearchParams(init.body).get("grant_type") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeOAuthBody(text: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const record = parsed as Record<string, unknown>;
+    return {
+      oauthError: typeof record.error === "string" ? record.error : undefined,
+      oauthErrorDescription: typeof record.error_description === "string"
+        ? record.error_description.slice(0, 240)
+        : undefined,
+      hasAccessToken: typeof record.access_token === "string" && record.access_token.length > 0,
+      hasRefreshToken: typeof record.refresh_token === "string" && record.refresh_token.length > 0,
+      expiresIn: typeof record.expires_in === "number" ? record.expires_in : undefined,
+    };
+  } catch {
+    return { responseBody: text.trim() ? "non-json" : "empty" };
+  }
+}
 
 /**
  * Everything an error actually says, including what it is wrapping.
@@ -172,6 +217,38 @@ export class McpConnection {
     return this.oauth?.authorizationUrl;
   }
 
+  private diagnostic(level: "info" | "warn" | "error", event: string, data?: Record<string, unknown>): void {
+    this.options.diagnostic?.(level, event, { server: this.name, ...data });
+  }
+
+  private diagnosticFetch(serverUrl: string): FetchLike {
+    return async (input, init) => {
+      const url = input instanceof URL ? input : new URL(input);
+      const grantType = requestGrantType(init);
+      const requestKind = grantType === "refresh_token"
+        ? "token-refresh"
+        : grantType === "authorization_code"
+          ? "token-exchange"
+          : url.toString() === serverUrl
+            ? "mcp"
+            : "oauth-discovery";
+      const response = await fetch(input, init);
+      const shouldInspect = requestKind === "token-refresh"
+        || requestKind === "token-exchange"
+        || !response.ok;
+      if (!shouldInspect) return response;
+
+      const body = safeOAuthBody((await response.clone().text()).slice(0, 4096));
+      this.diagnostic(response.ok ? "info" : "warn", response.ok ? "oauth_request_succeeded" : "oauth_request_failed", {
+        requestKind,
+        status: response.status,
+        hasWwwAuthenticate: Boolean(response.headers.get("www-authenticate")),
+        ...body,
+      });
+      return response;
+    };
+  }
+
   private buildTransport(): Transport {
     const environment = this.options.environment ?? process.env;
     const launch = launchFor(this.options.definition, environment);
@@ -205,11 +282,13 @@ export class McpConnection {
         redirectUrl: typeof redirectUrl === "function" ? redirectUrl() : redirectUrl,
         openAuthorization: this.options.openAuthorization,
         clientName: this.options.clientName,
+        diagnostic: (level, event, data) => this.diagnostic(level, event, data),
       })
       : undefined;
     return new StreamableHTTPClientTransport(new URL(launch.url), {
       authProvider: this.oauth,
       requestInit: { headers: launch.headers },
+      fetch: this.diagnosticFetch(launch.url),
     });
   }
 
@@ -231,6 +310,7 @@ export class McpConnection {
     this.state = "connecting";
     this.lastFailure = undefined;
     this.lastFailureHttpStatus = undefined;
+    if (this.oauth) this.diagnostic("info", "oauth_connect_started", tokenSummary(this.oauth.tokens()));
     try {
       const client = new Client(
         { name: this.options.clientName ?? "CoilCoil", version: this.options.clientVersion ?? "0.1.0" },
@@ -252,11 +332,16 @@ export class McpConnection {
       if (error instanceof UnauthorizedError) {
         this.state = "needs-auth";
         this.lastFailure = undefined;
+        if (this.oauth) this.diagnostic("warn", "oauth_auth_required", tokenSummary(this.oauth.tokens()));
         return this.state;
       }
       this.state = "failed";
       this.lastFailure = this.failureText(error);
       this.lastFailureHttpStatus = httpStatusOf(error);
+      if (this.oauth) this.diagnostic("warn", "oauth_connect_failed", {
+        httpStatus: this.lastFailureHttpStatus,
+        ...tokenSummary(this.oauth.tokens()),
+      });
       return this.state;
     }
   }

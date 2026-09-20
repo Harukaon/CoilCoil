@@ -21,9 +21,8 @@ jobs:
     name: Open the draft release
     runs-on: ubuntu-latest
     steps:
-      # Created up front and left as a draft so the platform builds have
-      # somewhere to upload to. Nobody sees it until both have succeeded, which
-      # keeps the all-or-nothing behaviour the separate publish job used to give.
+      # Created up front and left as a draft so the Windows build has somewhere
+      # to upload to. Nobody sees it until the build succeeds.
       - name: Create the draft prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -38,42 +37,6 @@ jobs:
               --title "CoilCoil $TAG" \
               --notes "Automated desktop beta build from ${{ github.sha }}."
           fi
-
-  build-macos:
-    name: Build macOS arm64
-    needs: prepare-release
-    runs-on: macos-14
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            vendor/pi/package-lock.json
-
-      - name: Prepare dependencies and native modules
-        run: npm run setup
-
-      - name: Stamp beta version
-        run: npm run release:version -- "${{ github.run_number }}"
-
-      - name: Build DMG and ZIP
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run package --workspace @coilcoil/desktop -- --mac --arm64
-
-      - name: Verify macOS app signature
-        run: codesign --verify --deep --strict --verbose=2 apps/desktop/release/mac-arm64/CoilCoil.app
-
-      - name: Attach macOS installers to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: v0.1.0-beta.${{ github.run_number }}
-        run: gh release upload "$TAG" apps/desktop/release/*.dmg apps/desktop/release/*.zip --clobber --repo "${{ github.repository }}"
 
   build-windows:
     name: Build Windows x64 and arm64
@@ -123,7 +86,6 @@ jobs:
   finalize-release:
     name: Publish the release
     needs:
-      - build-macos
       - build-windows
     runs-on: ubuntu-latest
     steps:

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ClipboardCheck, Columns3, ListChecks, PanelLeft, Play, Plus, Rows3, Square } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Columns3, ListChecks, Play, Plus, Rows3, Square } from "lucide-react";
 import type { Issue, IssueStatus } from "../../../../shared/desktop-api";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { IssueCompose } from "./IssueCompose";
@@ -53,8 +53,7 @@ export function IssueBoard({
   issues,
   loading,
   run,
-  leftOpen,
-  onOpenLeft,
+  layoutPending,
   onClose,
   onChange,
   onStart,
@@ -64,8 +63,7 @@ export function IssueBoard({
   issues: Issue[];
   loading: boolean;
   run: IssueRunState;
-  leftOpen: boolean;
-  onOpenLeft(): void;
+  layoutPending: boolean;
   onClose(): void;
   onChange(next: Issue[]): void;
   onStart(): void;
@@ -112,15 +110,10 @@ export function IssueBoard({
   };
 
   return (
-    <section className="issue-board" aria-labelledby="issue-board-title">
+    <section className="shell-surface issue-board" style={{ visibility: layoutPending ? "hidden" : undefined }} aria-labelledby="issue-board-title">
       <header className="issue-board-header window-drag-bar">
         <WindowDragBar />
         <div>
-          {!leftOpen ? (
-            <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}>
-              <PanelLeft size={17} />
-            </button>
-          ) : null}
           <span className="settings-icon"><ListChecks size={17} /></span>
           <div>
             <h1 id="issue-board-title">任务</h1>

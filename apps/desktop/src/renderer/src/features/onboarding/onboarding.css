@@ -35,7 +35,7 @@
 .onboarding-drag { position: relative; z-index: 2; height: 52px; }
 [data-platform="darwin"] .onboarding-drag { height: 62px; }
 
-/* 四步共用同一套骨架：进度条、标题、正文各占固定的一行。以前是整块垂直居中，每一步
+/* 各步共用同一套骨架：进度条、标题、正文各占固定的一行。以前是整块垂直居中，每一步
    内容高度不同，标题就跟着上下跳，字号也各改各的——用户的原话是「文本一、二、三，
    为什么连大小都不一样？位置也不一样」。现在标题的大小和位置在四步里完全一样，
    换步只换正文那一块。 */
@@ -148,6 +148,51 @@
   background: hsl(var(--th) var(--ts) var(--l-1000) / 88%);
 }
 .onboarding-embed > * { min-height: 0; }
+
+/* 模型之后的配置步骤。它们复用设置页的控件，但在引导中保持一个可滚动的窄面板，
+   不让 Skill 列表或模型选择把底部操作条顶出窗口。 */
+.onboarding-setup-embed { overflow: auto; padding: 18px 20px; }
+.onboarding-config-grid, .onboarding-memory-config, .onboarding-integrations { display: grid; width: 100%; max-width: 760px; margin: 0 auto; gap: 18px; }
+.onboarding-config-section { display: grid; gap: 12px; }
+.onboarding-config-section > header { display: grid; gap: 3px; }
+.onboarding-config-section > header strong { display: inline-flex; align-items: center; gap: 6px; color: hsl(var(--th) var(--ts) var(--l-178)); font-size: 13px; font-weight: 620; }
+.onboarding-config-section > header small, .onboarding-config-actions > span, .onboarding-integrations-note { color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10.5px; line-height: 1.6; }
+.onboarding-agent-list { display: grid; gap: 8px; }
+.onboarding-agent-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 340px); gap: 14px; align-items: center; padding: 10px 12px; border-radius: var(--radius-xl); background: hsl(var(--th) var(--ts) var(--l-137) / 4%); }
+.onboarding-agent-row > span { display: grid; min-width: 0; gap: 3px; }
+.onboarding-agent-row > span strong { color: hsl(var(--th) var(--ts) var(--l-235)); font-size: 11.5px; }
+.onboarding-agent-row > span small { color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; }
+.onboarding-config-actions { display: flex; align-items: center; gap: 10px; }
+.onboarding-inline-save, .onboarding-inline-action { display: inline-flex; height: 30px; align-items: center; gap: 6px; padding: 0 12px; border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-198)); font-size: 10.5px; font-weight: 600; cursor: pointer; }
+.onboarding-inline-save:hover:not(:disabled), .onboarding-inline-action:hover { background: hsl(var(--th) var(--ts) var(--l-137)); }
+.onboarding-inline-save:disabled { opacity: .55; cursor: default; }
+.onboarding-setup-loading, .onboarding-empty-state { display: flex; min-height: 180px; align-items: center; justify-content: center; gap: 7px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 11px; }
+.onboarding-memory-config { gap: 16px; }
+.onboarding-memory-toggles { display: flex; flex-wrap: wrap; gap: 14px 22px; }
+.onboarding-memory-toggles label { display: inline-flex; align-items: center; gap: 7px; color: hsl(var(--th) var(--ts) var(--l-302)); font-size: 11px; }
+.onboarding-memory-toggles input { accent-color: var(--c-green-solid); }
+.onboarding-memory-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.onboarding-memory-fields label { display: grid; gap: 5px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; }
+.onboarding-memory-fields input { width: 100%; height: 32px; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: var(--radius-lg); outline: 0; background: hsl(var(--th) var(--ts) var(--l-1000) / 60%); font-size: 11px; }
+.onboarding-memory-fields small { margin-top: -22px; margin-right: 9px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 9px; justify-self: end; pointer-events: none; }
+.onboarding-memory-rules { display: grid; gap: 5px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; }
+.onboarding-memory-rules textarea { min-height: 84px; resize: vertical; padding: 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: var(--radius-lg); outline: 0; background: hsl(var(--th) var(--ts) var(--l-1000) / 60%); font-size: 10.5px; line-height: 1.6; }
+.onboarding-integrations-embed { overflow: auto; }
+.onboarding-integrations { gap: 22px; }
+.onboarding-mcp-summary { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.onboarding-mcp-summary > header { grid-column: 1; }
+.onboarding-mcp-summary > .onboarding-inline-action { grid-column: 2; grid-row: 1; }
+.onboarding-mcp-summary > .onboarding-integrations-note { grid-column: 1 / -1; }
+.onboarding-skills-embed { min-height: 260px; }
+.onboarding-skills-embed > header { display: flex; align-items: center; justify-content: space-between; }
+.onboarding-skills-embed .skills-settings { min-height: 0; }
+
+@media (max-width: 720px) {
+  .onboarding-agent-row { grid-template-columns: minmax(0, 1fr); }
+  .onboarding-memory-fields { grid-template-columns: minmax(0, 1fr); }
+  .onboarding-mcp-summary { grid-template-columns: minmax(0, 1fr); }
+  .onboarding-mcp-summary > .onboarding-inline-action { grid-column: 1; grid-row: auto; justify-self: start; }
+}
 
 /* 工作区。 */
 .onboarding-workspace { display: grid; align-content: start; justify-items: center; gap: 14px; }

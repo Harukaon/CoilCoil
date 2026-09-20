@@ -1,6 +1,7 @@
 import { Bot, BrainCircuit, Files, Globe2, LoaderCircle, Terminal } from "lucide-react";
 import { useCallback } from "react";
 import type { ProjectSnapshot, RuntimeConfiguration, SessionSnapshot } from "@coilcoil/runtime-protocol";
+import type { BrowserElementSelection } from "../../../../shared/desktop-api";
 import { BrowserPanel } from "../browser/BrowserPanel";
 import { useBrowserTabs } from "../browser/useBrowserTabs";
 import { FilesPanel } from "../files/FilesPanel";
@@ -53,7 +54,9 @@ export interface WorkspaceInspectorProps {
   onCloseTab(id: InspectorTabId): void;
   onRemovePath(path: string): void;
   onOpenOption(id: InspectorTabId): void;
-  onClose(): void;
+  onBrowserElementPicked(selection: BrowserElementSelection): void;
+  addControlTarget: HTMLElement | null;
+  showAddControl: boolean;
 }
 
 export function WorkspaceInspector({
@@ -76,7 +79,9 @@ export function WorkspaceInspector({
   onCloseTab,
   onRemovePath,
   onOpenOption,
-  onClose,
+  onBrowserElementPicked,
+  addControlTarget,
+  showAddControl,
 }: WorkspaceInspectorProps): React.JSX.Element {
   const filesVisible = activeTab?.kind === "files" || activeTab?.kind === "file";
   const hasFiles = tabs.some((item) => item.kind === "files" || item.kind === "file");
@@ -178,7 +183,8 @@ export function WorkspaceInspector({
       activeTab={activeTab?.kind === "browser" ? activeBrowserPaneTabId(browser.state) : activeTabId ?? ""}
       onSelectTab={selectPaneTab}
       onCloseTab={closePaneTab}
-      onClose={onClose}
+      addControlTarget={addControlTarget}
+      showAddControl={showAddControl}
       addOptions={addOptions}
       onAddTab={(id) => {
         if (id === "terminal") void openTerminal();
@@ -231,6 +237,7 @@ export function WorkspaceInspector({
             scopeId={scopeId}
             state={browser.state}
             onState={browser.setState}
+            onElementPicked={onBrowserElementPicked}
           />
         </div>
       ) : null}

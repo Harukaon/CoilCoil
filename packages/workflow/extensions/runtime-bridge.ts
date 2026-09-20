@@ -1,6 +1,8 @@
 import type { ContextEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { UNRESTRICTED_SYSTEM_PROMPT } from "./unrestricted-system-prompt.ts";
 
 type AgentMessage = ContextEvent["messages"][number];
+type AgentMode = "standard" | "unrestricted";
 
 export const RUNTIME_BRIDGE_COMMAND_EVENT = "coilcoil:runtime-bridge:command:v1";
 export const RUNTIME_BRIDGE_REPLY_PREFIX = "coilcoil:runtime-bridge:reply:v1:";
@@ -10,7 +12,8 @@ export const RUNTIME_BRIDGE_POLICY_ENTRY = "coilcoil-runtime-bridge-policy";
 interface RuntimeBridgeCommand {
   version: 1;
   requestId: string;
-  method: "get" | "set-system-prompt" | "set-skill-enabled";
+  method: "get" | "set-agent-mode" | "set-system-prompt" | "set-skill-enabled";
+  agentMode?: AgentMode;
   prompt?: string;
   filePath?: string;
   enabled?: boolean;
@@ -18,6 +21,7 @@ interface RuntimeBridgeCommand {
 
 export interface RuntimeBridgeState {
   version: 1;
+  agentMode: AgentMode;
   effectiveSystemPrompt?: string;
   systemPromptOverride?: string;
   disabledSkills: string[];
@@ -50,13 +54,14 @@ function commandFrom(raw: unknown): RuntimeBridgeCommand {
   if (!isRecord(raw) || raw.version !== 1 || typeof raw.requestId !== "string" || !raw.requestId.trim()) {
     throw new Error("运行时桥接请求无效。");
   }
-  if (raw.method !== "get" && raw.method !== "set-system-prompt" && raw.method !== "set-skill-enabled") {
+  if (raw.method !== "get" && raw.method !== "set-agent-mode" && raw.method !== "set-system-prompt" && raw.method !== "set-skill-enabled") {
     throw new Error("运行时桥接方法无效。");
   }
   return raw as unknown as RuntimeBridgeCommand;
 }
 
 function restorePolicy(entries: readonly unknown[]): {
+  agentMode: AgentMode;
   systemPromptOverride?: string;
   disabledSkills: string[];
 } {
@@ -64,6 +69,7 @@ function restorePolicy(entries: readonly unknown[]): {
     const entry = entries[index];
     if (!isRecord(entry) || entry.type !== "custom" || entry.customType !== RUNTIME_BRIDGE_POLICY_ENTRY || !isRecord(entry.data)) continue;
     return {
+      agentMode: entry.data.agentMode === "unrestricted" ? "unrestricted" : "standard",
       systemPromptOverride: typeof entry.data.systemPromptOverride === "string" && entry.data.systemPromptOverride.trim()
         ? entry.data.systemPromptOverride
         : undefined,
@@ -72,13 +78,14 @@ function restorePolicy(entries: readonly unknown[]): {
         : [],
     };
   }
-  return { disabledSkills: [] };
+  return { agentMode: "standard", disabledSkills: [] };
 }
 
 export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   let effectiveSystemPrompt: string | undefined;
   let baseSystemPrompt: string | undefined;
   let sessionContext: { getSystemPrompt(): string } | undefined;
+  let agentMode: AgentMode = "standard";
   let systemPromptOverride: string | undefined;
   let contextMessages: AgentMessage[] | undefined;
   const disabledSkills = new Set<string>();
@@ -102,6 +109,10 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   };
 
   const recomputeEffectiveSystemPrompt = (): void => {
+    if (agentMode === "unrestricted") {
+      effectiveSystemPrompt = UNRESTRICTED_SYSTEM_PROMPT;
+      return;
+    }
     const filteredBase = baseSystemPrompt === undefined
       ? undefined
       : filterDisabledSkillsFromPrompt(baseSystemPrompt, disabledSkills);
@@ -110,6 +121,7 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
 
   const state = (): RuntimeBridgeState => ({
     version: 1,
+    agentMode,
     effectiveSystemPrompt,
     systemPromptOverride,
     disabledSkills: [...disabledSkills],
@@ -120,6 +132,7 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   const publish = (): void => pi.events.emit(RUNTIME_BRIDGE_STATE_EVENT, state());
   const persistPolicy = (): void => pi.appendEntry(RUNTIME_BRIDGE_POLICY_ENTRY, {
     version: 1,
+    agentMode,
     systemPromptOverride,
     disabledSkills: [...disabledSkills].sort(),
   });
@@ -129,7 +142,14 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     try {
       const command = commandFrom(raw);
       requestId = command.requestId;
-      if (command.method === "set-system-prompt") {
+      if (command.method === "set-agent-mode") {
+        if (command.agentMode !== "standard" && command.agentMode !== "unrestricted") {
+          throw new Error("会话模式无效。");
+        }
+        agentMode = command.agentMode;
+        if (agentMode === "unrestricted") systemPromptOverride = undefined;
+      } else if (command.method === "set-system-prompt") {
+        if (agentMode === "unrestricted") throw new Error("Unrestricted 模式下不能编辑 System Prompt。");
         const value = command.prompt?.trim();
         systemPromptOverride = value || undefined;
       } else if (command.method === "set-skill-enabled") {
@@ -177,6 +197,7 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, context) => {
     const restored = restorePolicy(context.sessionManager.getBranch());
+    agentMode = restored.agentMode;
     systemPromptOverride = restored.systemPromptOverride;
     disabledSkills.clear();
     for (const path of restored.disabledSkills) disabledSkills.add(path);
@@ -187,6 +208,7 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   });
   pi.on("session_tree", async (_event, context) => {
     const restored = restorePolicy(context.sessionManager.getBranch());
+    agentMode = restored.agentMode;
     systemPromptOverride = restored.systemPromptOverride;
     disabledSkills.clear();
     for (const path of restored.disabledSkills) disabledSkills.add(path);

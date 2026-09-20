@@ -6,6 +6,7 @@ import runtimeBridgeExtension, {
   RUNTIME_BRIDGE_REPLY_PREFIX,
   filterDisabledSkillsFromPrompt,
 } from "../extensions/runtime-bridge.ts";
+import { UNRESTRICTED_SYSTEM_PROMPT } from "../extensions/unrestricted-system-prompt.ts";
 
 test("filters only the disabled Skill metadata block", () => {
   const prompt = `before
@@ -71,6 +72,62 @@ test("applies session prompt and Skill controls through the event bridge", async
   assert.equal(restored.systemPromptOverride, undefined);
   assert.equal(restored.effectiveSystemPrompt, "base");
   assert.equal(entries.length, 2);
+});
+
+test("applies and persists the fixed Unrestricted mode prompt", async () => {
+  const handlers = new Map<string, Function[]>();
+  const listeners = new Map<string, Set<(value: unknown) => void>>();
+  const emitted: Array<{ channel: string; value: any }> = [];
+  const entries: Array<{ type: "custom"; customType: string; data: unknown }> = [];
+  const pi = {
+    on(name: string, handler: Function) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
+    events: {
+      on(channel: string, listener: (value: unknown) => void) {
+        const values = listeners.get(channel) ?? new Set();
+        values.add(listener);
+        listeners.set(channel, values);
+        return () => values.delete(listener);
+      },
+      emit(channel: string, value: unknown) {
+        emitted.push({ channel, value });
+        for (const listener of listeners.get(channel) ?? []) listener(value);
+      },
+    },
+    appendEntry(customType: string, data: unknown) {
+      entries.push({ type: "custom", customType, data });
+    },
+  };
+  runtimeBridgeExtension(pi as any);
+
+  pi.events.emit(RUNTIME_BRIDGE_COMMAND_EVENT, {
+    version: 1,
+    requestId: "mode",
+    method: "set-agent-mode",
+    agentMode: "unrestricted",
+  });
+  const modeState = emitted.find((event) => event.channel === `${RUNTIME_BRIDGE_REPLY_PREFIX}mode`)?.value.state;
+  assert.equal(modeState.agentMode, "unrestricted");
+  assert.equal(modeState.effectiveSystemPrompt, UNRESTRICTED_SYSTEM_PROMPT);
+  assert.deepEqual(entries.at(-1)?.data, {
+    version: 1,
+    agentMode: "unrestricted",
+    systemPromptOverride: undefined,
+    disabledSkills: [],
+  });
+
+  const started = await handlers.get("before_agent_start")?.[0]({ systemPrompt: "ordinary prompt" }, {});
+  assert.equal(started.systemPrompt, UNRESTRICTED_SYSTEM_PROMPT);
+  assert.doesNotMatch(started.systemPrompt, /ordinary prompt/);
+
+  pi.events.emit(RUNTIME_BRIDGE_COMMAND_EVENT, {
+    version: 1,
+    requestId: "edit",
+    method: "set-system-prompt",
+    prompt: "must not apply",
+  });
+  const rejected = emitted.find((event) => event.channel === `${RUNTIME_BRIDGE_REPLY_PREFIX}edit`)?.value;
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /不能编辑 System Prompt/);
 });
 
 test("restores the latest persisted session prompt and Skill policy", async () => {

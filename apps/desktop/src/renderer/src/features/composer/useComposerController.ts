@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ClipboardEvent as ReactClipboardEvent,
   KeyboardEvent,
@@ -6,36 +6,60 @@ import type {
 } from "react";
 import type {
   ModelOption,
+  PromptBrowserElementPart,
+  PromptDocument,
   PromptImage,
   RuntimeConfiguration,
-  SessionSnapshot,
 } from "@coilcoil/runtime-protocol";
-import { insertPathsAtCaret } from "./pathInsert";
-import { clipboardImage } from "./promptImages";
+import type { BrowserElementSelection } from "../../../../shared/desktop-api";
+import { quotePath } from "./pathInsert";
+import { appendPromptImages, clipboardImage, MAX_PROMPT_IMAGE_DATA_CHARS, MAX_PROMPT_IMAGES } from "./promptImages";
+import {
+  browserElementPart,
+  clonePromptDocument,
+  emptyPromptDocument,
+  insertPartAtOffset,
+  promptDocumentFromText,
+  promptDocumentHasContent,
+  promptDocumentText,
+  replaceTextRange,
+} from "./promptDocument";
+import type { PromptEditorHandle } from "./PromptEditor";
+
+interface CachedComposerDraft {
+  document: PromptDocument;
+  images: PromptImage[];
+}
 
 export interface ComposerController {
+  document: PromptDocument;
   draft: string;
   images: PromptImage[];
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  inputRef: RefObject<PromptEditorHandle | null>;
   modelMenuOpen: boolean;
   modelChanging: boolean;
+  setDocument: (document: PromptDocument) => void;
   setDraft: (value: string) => void;
   restoreDraft: (value: string) => void;
+  restoreDocument: (document: PromptDocument) => void;
   setImages: React.Dispatch<React.SetStateAction<PromptImage[]>>;
   setModelMenuOpen: (open: boolean) => void;
   reset: () => void;
   focus: () => void;
   insertPaths: (paths: string[]) => void;
-  handlePaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
+  replaceTextRange: (start: number, end: number, replacement: string) => void;
+  insertBrowserElement: (selection: BrowserElementSelection) => void;
+  handlePaste: (event: ReactClipboardEvent<HTMLDivElement>) => void;
   handleCompositionStart: () => void;
   handleCompositionEnd: () => void;
-  handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  handleKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   selectModel: (model: ModelOption) => Promise<void>;
   configureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow?: number) => Promise<void>;
   setFast: (enabled: boolean) => Promise<void>;
 }
 
 export function useComposerController({
+  sessionKey,
   configuration,
   runtimeId,
   sessionThinkingLevel,
@@ -43,45 +67,68 @@ export function useComposerController({
   onEmptyEnter,
   onError,
 }: {
+  sessionKey: string;
   configuration?: RuntimeConfiguration;
   runtimeId?: string;
   sessionThinkingLevel?: RuntimeConfiguration["thinkingLevel"];
   onConfigurationChange: (configuration: RuntimeConfiguration) => void;
-  /**
-   * Enter on an empty composer. Returning true consumes the key, which is how
-   * a second Enter promotes the message the first one queued.
-   */
   onEmptyEnter?: () => boolean;
   onError: (message?: string) => void;
 }): ComposerController {
-  const [draft, setDraft] = useState("");
+  const [document, setDocumentState] = useState<PromptDocument>(emptyPromptDocument);
   const [images, setImages] = useState<PromptImage[]>([]);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelChanging, setModelChanging] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<PromptEditorHandle>(null);
   const composingRef = useRef(false);
+  const documentRef = useRef(document);
+  documentRef.current = document;
+  const draft = promptDocumentText(document);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const imagesRef = useRef(images);
   imagesRef.current = images;
   const emptyEnterRef = useRef(onEmptyEnter);
   emptyEnterRef.current = onEmptyEnter;
+  const cacheRef = useRef(new Map<string, CachedComposerDraft>());
+  const activeSessionKeyRef = useRef(sessionKey);
+
+  const cacheCurrent = useCallback((key: string): void => {
+    cacheRef.current.set(key, {
+      document: clonePromptDocument(documentRef.current),
+      images: imagesRef.current.map((image) => ({ ...image })),
+    });
+  }, []);
+
+  useEffect(() => {
+    const previousKey = activeSessionKeyRef.current;
+    if (previousKey === sessionKey) return;
+    cacheCurrent(previousKey);
+    activeSessionKeyRef.current = sessionKey;
+    const cached = cacheRef.current.get(sessionKey);
+    setDocumentState(clonePromptDocument(cached?.document ?? emptyPromptDocument()));
+    setImages(cached?.images?.map((image) => ({ ...image })) ?? []);
+  }, [cacheCurrent, sessionKey]);
+
+  const setDocument = useCallback((next: PromptDocument): void => {
+    setDocumentState(clonePromptDocument(next));
+  }, []);
 
   const reset = useCallback((): void => {
-    setDraft("");
+    setDocumentState(emptyPromptDocument());
+    cacheRef.current.delete(activeSessionKeyRef.current);
     setImages([]);
   }, []);
 
-  /**
-   * Put a message the runtime handed back into the composer.
-   *
-   * Stopping a run gives back the steered message Pi had not delivered yet. It
-   * belongs where the user can edit and resend it, but never on top of
-   * something they have already started typing since.
-   */
   const restoreDraft = useCallback((value: string): void => {
     if (!value.trim()) return;
-    setDraft((current) => (current.trim() ? current : value));
+    setDocumentState((current) => promptDocumentText(current).trim() ? current : promptDocumentFromText(value));
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  const restoreDocument = useCallback((value: PromptDocument): void => {
+    if (promptDocumentHasContent(documentRef.current)) return;
+    setDocumentState(clonePromptDocument(value));
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
@@ -89,34 +136,81 @@ export function useComposerController({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
+  const replaceTextRangeInDocument = useCallback((start: number, end: number, replacement: string): void => {
+    const next = replaceTextRange(documentRef.current, start, end, replacement);
+    setDocumentState(next);
+    requestAnimationFrame(() => inputRef.current?.setCaretOffset(start + replacement.length));
+  }, []);
+
   const insertPaths = useCallback((paths: string[]): void => {
     if (!paths.length) return;
-    const input = inputRef.current;
-    const start = input?.selectionStart ?? draft.length;
-    const end = input?.selectionEnd ?? start;
-    const result = insertPathsAtCaret(draft, paths, start, end);
-    setDraft(result.value);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(result.caret, result.caret);
-    });
-  }, [draft]);
+    const current = documentRef.current;
+    const start = inputRef.current?.getCaretOffset() ?? promptDocumentText(current).length;
+    const plain = promptDocumentText(current);
+    const before = plain.slice(0, start);
+    const after = plain.slice(start);
+    const leadingSpace = before.length && !/\s$/.test(before) ? " " : "";
+    const trailingSpace = after.length && !/^\s/.test(after) ? " " : "";
+    const insertion = `${leadingSpace}${paths.map(quotePath).join(" ")}${trailingSpace}`;
+    replaceTextRangeInDocument(start, start, insertion);
+  }, [replaceTextRangeInDocument]);
 
-  const handlePaste = useCallback((event: ReactClipboardEvent<HTMLTextAreaElement>): void => {
+  const insertBrowserElement = useCallback((selection: BrowserElementSelection): void => {
+    const imageMatch = selection.screenshot?.match(/^data:([^;,]+);base64,([\s\S]+)$/);
+    const image = imageMatch ? {
+      id: globalThis.crypto?.randomUUID?.() ?? `browser-element-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: `网页元素 · ${selection.selector}`,
+      mimeType: imageMatch[1],
+      data: imageMatch[2],
+    } : undefined;
+    if (image && image.data.length > MAX_PROMPT_IMAGE_DATA_CHARS) {
+      onError("网页截图太大，单张图片不能超过约 7.5 MB。");
+      return;
+    }
+    if (image && imagesRef.current.length >= MAX_PROMPT_IMAGES) {
+      onError(`最多只能附加 ${MAX_PROMPT_IMAGES} 张图片。`);
+      return;
+    }
+    const current = documentRef.current;
+    const ordinal = current.parts.filter((part): part is PromptBrowserElementPart => part.type === "browser-element").length + 1;
+    const part = browserElementPart(selection, image?.id, ordinal);
+    const offset = inputRef.current?.getCaretOffset() ?? promptDocumentText(current).length;
+    setDocumentState(insertPartAtOffset(current, part, offset));
+    if (image) {
+      setImages((existing) => {
+        try {
+          return appendPromptImages(existing, [image]);
+        } catch (caught) {
+          onError(caught instanceof Error ? caught.message : String(caught));
+          return existing;
+        }
+      });
+    }
+    requestAnimationFrame(() => inputRef.current?.setCaretOffset(offset + part.label.length));
+  }, [onError]);
+
+  const handlePaste = useCallback((event: ReactClipboardEvent<HTMLDivElement>): void => {
     const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
     if (!files.length) return;
     event.preventDefault();
     void Promise.all(files.map(clipboardImage))
-      .then((nextImages) => setImages((current) => [...current, ...nextImages]))
+      .then((nextImages) => setImages((current) => {
+        try {
+          return appendPromptImages(current, nextImages);
+        } catch (caught) {
+          onError(caught instanceof Error ? caught.message : String(caught));
+          return current;
+        }
+      }))
       .catch((caught) => onError(caught instanceof Error ? caught.message : String(caught)));
   }, [onError]);
 
-  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>): void => {
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>): void => {
     if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       if (!draftRef.current.trim() && !imagesRef.current.length && emptyEnterRef.current?.()) return;
-      event.currentTarget.form?.requestSubmit();
+      event.currentTarget.closest("form")?.requestSubmit();
     }
   }, []);
 
@@ -178,18 +272,23 @@ export function useComposerController({
   }, [modelChanging, onError, runtimeId]);
 
   return {
+    document,
     draft,
     images,
     inputRef,
     modelMenuOpen,
     modelChanging,
-    setDraft,
+    setDocument,
+    setDraft: (value: string) => setDocumentState(promptDocumentFromText(value)),
     restoreDraft,
+    restoreDocument,
     setImages,
     setModelMenuOpen,
     reset,
     focus,
     insertPaths,
+    replaceTextRange: replaceTextRangeInDocument,
+    insertBrowserElement,
     handlePaste,
     handleCompositionStart: () => { composingRef.current = true; },
     handleCompositionEnd: () => { composingRef.current = false; },

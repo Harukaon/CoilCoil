@@ -39,6 +39,7 @@ export type Tone = LightTone | DarkTone;
  */
 export type UiFont = "system" | "helvetica" | "serif" | "mono";
 export type MonoFont = "sf-mono" | "menlo" | "monaco" | "pt-mono";
+export type TransparencyMode = "off" | "sidebar" | "window";
 
 export interface FontDefinition<Id extends string> {
   id: Id;
@@ -90,12 +91,14 @@ export const LIGHT_TONE_STORAGE_KEY = "coilcoil.light-tone";
 export const UI_FONT_STORAGE_KEY = "coilcoil.font-ui";
 export const MONO_FONT_STORAGE_KEY = "coilcoil.font-mono";
 export const WINDOW_OPACITY_STORAGE_KEY = "coilcoil.window-opacity";
+export const TRANSPARENCY_MODE_STORAGE_KEY = "coilcoil.transparency-mode";
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
 export const DEFAULT_SURFACE_STYLE: SurfaceStyle = "layered";
 export const DEFAULT_DARK_TONE: DarkTone = "graphite";
 export const DEFAULT_LIGHT_TONE: LightTone = "paper";
 export const DEFAULT_UI_FONT: UiFont = "system";
 export const DEFAULT_MONO_FONT: MonoFont = "sf-mono";
+export const DEFAULT_TRANSPARENCY_MODE: TransparencyMode = "off";
 
 export const THEME_MODES: ThemeModeDefinition[] = [
   { id: "light", name: "浅色", description: "暖纸色调的明亮界面。" },
@@ -222,6 +225,12 @@ export const SURFACE_STYLES: SurfaceStyleDefinition[] = [
   { id: "layered", name: "分栏", description: "左侧栏压深，会话区与右栏提亮。" },
 ];
 
+export const TRANSPARENCY_MODES: Array<{ id: TransparencyMode; name: string; description: string }> = [
+  { id: "off", name: "不透明", description: "内容保持实心，文字和边界最清楚。" },
+  { id: "sidebar", name: "仅左侧栏", description: "只让左侧栏透出后面的窗口，并使用毛玻璃。" },
+  { id: "window", name: "整窗毛玻璃", description: "整扇窗口使用强模糊，正文仍保持实心可读。" },
+];
+
 function darkMedia(): MediaQueryList | undefined {
   return typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : undefined;
 }
@@ -288,6 +297,31 @@ export function uiFontStack(id: UiFont): string {
 
 export function monoFontStack(id: MonoFont): string {
   return (MONO_FONTS.find((font) => font.id === id) ?? MONO_FONTS[0]).stack;
+}
+
+export function resolveTransparencyMode(value: string | null | undefined): TransparencyMode {
+  return value === "sidebar" || value === "window" ? value : DEFAULT_TRANSPARENCY_MODE;
+}
+
+export function storedTransparencyMode(): TransparencyMode {
+  try {
+    return resolveTransparencyMode(window.localStorage.getItem(TRANSPARENCY_MODE_STORAGE_KEY));
+  } catch {
+    return DEFAULT_TRANSPARENCY_MODE;
+  }
+}
+
+export function applyTransparencyMode(mode: TransparencyMode): TransparencyMode {
+  const next = resolveTransparencyMode(mode);
+  document.documentElement.dataset.transparency = next;
+  try {
+    window.localStorage.setItem(TRANSPARENCY_MODE_STORAGE_KEY, next);
+  } catch {
+    // 持久化失败不影响本次生效。
+  }
+  // 旧版本曾用 setOpacity 淡化整扇窗；切换到表面毛玻璃时恢复文字的不透明度。
+  void window.coilcoil?.setWindowOpacity?.(1);
+  return next;
 }
 
 /**
@@ -374,6 +408,7 @@ function paint(mode: ThemeMode, surface: SurfaceStyle, lightTone: LightTone, dar
   else delete root.dataset.surface;
   root.dataset.lightTone = lightTone;
   root.dataset.darkTone = darkTone;
+  root.dataset.transparency = storedTransparencyMode();
   // 窗口是半透明的，露出的画布底色归主进程管。读实际生效的令牌而不是自己再算
   // 一遍，色调改了这里不会漏掉。
   const fill = getComputedStyle(root).getPropertyValue("--shell-fill").trim();
@@ -446,6 +481,7 @@ export function applyMonoFont(font: MonoFont): void {
 /** 启动时在 React 渲染前应用持久化主题与字体，避免闪烁。 */
 export function initTheme(): void {
   paint(storedThemeMode(), storedSurfaceStyle(), storedLightTone(), storedDarkTone());
+  applyTransparencyMode(storedTransparencyMode());
   paintFonts(storedUiFont(), storedMonoFont());
   // 跟随系统时，系统切换要立刻反映出来。
   darkMedia()?.addEventListener("change", () => {

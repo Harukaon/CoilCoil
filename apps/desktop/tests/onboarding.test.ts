@@ -12,19 +12,19 @@ import {
   stepIndex,
 } from "../src/renderer/src/features/onboarding/onboardingSteps.ts";
 
-test("四步的顺序是固定的，第一步是介绍，最后一步是挂工作区", () => {
-  assert.deepEqual([...ONBOARDING_STEPS], ["intro", "model", "permissions", "workspace"]);
+test("引导顺序固定，第一步是介绍，最后一步是挂工作区", () => {
+  assert.deepEqual([...ONBOARDING_STEPS], ["intro", "model", "agents", "memory", "integrations", "permissions", "workspace"]);
   assert.equal(INITIAL_ONBOARDING.step, "intro");
   assert.equal(isLastStep("workspace"), true);
   assert.equal(isLastStep("permissions"), false);
 });
 
 test("任何一步都走得下去，引导不会把人卡住", () => {
-  // 第一版的权限页要求四项权限逐项选「给」或「不给」，选满才放行，而那个「不用」点完
+  // 权限页只介绍每项用途，不要求逐项表态；配置页也都允许跳过。
   // 之后我们什么也不做——等于造了一个没有作用的选择，再拿它把用户挡在门外。用户卡在
   // 那一页出不去：「为什么必须让我选一个场景继续啊？这些是可选的」。
   let progress: OnboardingProgress = INITIAL_ONBOARDING;
-  for (const expected of ["model", "permissions", "workspace"] as const) {
+  for (const expected of ["model", "agents", "memory", "integrations", "permissions", "workspace"] as const) {
     const next = advance(progress);
     assert.notDeepEqual(next, progress, `${progress.step} 这一步走不下去了`);
     assert.equal(next.step, expected);
@@ -47,6 +47,9 @@ test("权限页只是介绍：四项彼此独立，每项都要说清用途", ()
 test("只有真的有事情要做的那两步才摆「跳过」", () => {
   // 介绍页和权限页看一眼就够，一个「继续」就行；再摆一个「跳过」反而让人以为漏了什么。
   assert.equal(canSkip("model"), true);
+  assert.equal(canSkip("agents"), true);
+  assert.equal(canSkip("memory"), true);
+  assert.equal(canSkip("integrations"), true);
   assert.equal(canSkip("workspace"), true);
   assert.equal(canSkip("intro"), false);
   assert.equal(canSkip("permissions"), false);

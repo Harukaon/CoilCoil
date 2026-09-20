@@ -1,5 +1,6 @@
 import type {
   DiagnosticLogBatch,
+  BrowserElementSnapshot,
   FileNode,
   ProjectSelection,
   PromptImage,
@@ -155,6 +156,18 @@ export interface BrowserGuestRoster {
 export interface BrowserUiViewport {
   width: number;
   height: number;
+}
+
+export interface BrowserElementSourceLocation {
+  file: string;
+  line?: number;
+  column?: number;
+}
+
+/** One element explicitly picked by the user from the visible built-in page. */
+export interface BrowserElementSelection extends BrowserElementSnapshot {
+  /** A viewport screenshot captured while Chromium's selected-node highlight is visible. */
+  screenshot?: string;
 }
 
 /** A browser CoilCoil can import an existing signed-in state from. */
@@ -418,6 +431,9 @@ export interface CoilCoilDesktopApi {
    * `<webview>` the desktop window renders the page into.
    */
   captureBrowserTab(scopeId: string): Promise<string | undefined>;
+  /** Enter Chromium's native element picker and resolve after a click or cancel. */
+  pickBrowserElement(scopeId: string): Promise<BrowserElementSelection | undefined>;
+  cancelBrowserElementPick(): Promise<void>;
   createBrowserTab(scopeId: string, url?: string): Promise<BrowserStateSnapshot>;
   selectBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
   closeBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;

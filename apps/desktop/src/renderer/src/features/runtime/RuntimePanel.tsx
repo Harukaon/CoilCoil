@@ -137,6 +137,7 @@ export function RuntimePanel({
   const [namingModel, setNamingModel] = useState(inspection?.sessionNaming?.model ?? "");
   const [namingSaving, setNamingSaving] = useState(false);
   const [subagentSaving, setSubagentSaving] = useState(false);
+  const canEditSystemPrompt = inspection?.capabilities.editSystemPrompt !== false;
   const summaries = inspection?.summaryEvents ?? [];
   const activeTools = useMemo(() => inspection?.tools.filter((tool) => tool.active) ?? [], [inspection?.tools]);
   const availableModels = useMemo(() => configuration?.models.filter((model) => model.configured) ?? [], [configuration?.models]);
@@ -156,6 +157,10 @@ export function RuntimePanel({
   useEffect(() => {
     if (!editingPrompt) setPromptDraft(inspection?.effectiveSystemPrompt ?? "");
   }, [editingPrompt, inspection?.effectiveSystemPrompt]);
+
+  useEffect(() => {
+    if (!canEditSystemPrompt) setEditingPrompt(false);
+  }, [canEditSystemPrompt]);
 
   useEffect(() => {
     setSubagentModels(inspection?.subagent?.models ?? emptySubagentModels());
@@ -518,14 +523,16 @@ export function RuntimePanel({
       <Modal
         open={promptOpen}
         title="当前会话的系统提示词"
-        description="查看真正生效的 System Prompt；修改只影响当前会话，并可能降低提示缓存命中率。"
+        description={canEditSystemPrompt
+          ? "查看真正生效的 System Prompt；修改只影响当前会话，并可能降低提示缓存命中率。"
+          : "Unrestricted 模式使用固定的 System Prompt，当前会话中仅可查看。"}
         size="lg"
         onClose={() => { setPromptOpen(false); setEditingPrompt(false); }}
-        footer={<>
+        footer={canEditSystemPrompt ? <>
           {inspection?.systemPromptOverride ? <button className="coil-modal-button" type="button" disabled={busyAction === "system-prompt"} onClick={() => { void restoreSystemPrompt(); }}><RotateCcw size={12} /> 恢复默认</button> : null}
           {editingPrompt ? <button className="coil-modal-button" type="button" onClick={() => setEditingPrompt(false)}>取消编辑</button> : null}
           {editingPrompt ? <button className="coil-modal-button primary" type="button" disabled={busyAction === "system-prompt" || !promptDraft.trim()} onClick={() => { void saveSystemPrompt(); }}><Save size={12} /> 保存</button> : <button className="coil-modal-button primary" type="button" disabled={!inspection?.effectiveSystemPrompt} onClick={() => setEditingPrompt(true)}>编辑当前会话</button>}
-        </>}
+        </> : undefined}
       >
         <div className="runtime-prompt-modal">
           {inspection?.effectiveSystemPrompt ? editingPrompt

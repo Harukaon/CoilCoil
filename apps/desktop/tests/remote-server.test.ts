@@ -3,6 +3,7 @@ import { request as httpRequest } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import vm from "node:vm";
 import test from "node:test";
 import { WebSocket } from "ws";
 import { isTrustedAddress } from "../src/main/remote/remote-auth";
@@ -142,7 +143,7 @@ test("the socket relays allowed channels and refuses everything else", async (t)
   assert.equal(allowed.ok, true);
   assert.deepEqual(seen, ["runtime:request"]);
 
-  const refused = await reply({ id: "2", channel: "terminal:create", args: ["/tmp"] });
+  const refused = await reply({ id: "2", channel: "remote:not-a-real-channel", args: [] });
   assert.equal(refused.ok, false);
   assert.match(refused.error, /不支持/);
   assert.deepEqual(seen, ["runtime:request"]);
@@ -295,7 +296,18 @@ test("手机能看图、也能看到 Mac 上已经开着的网页标签", () => 
   const script = bridgeScript("darwin");
   assert.match(script, /openFilePreview: function \(input\) \{ return invoke\("preview:open"/);
   assert.doesNotMatch(script, /openFilePreview: rejects/, "文件预览又被回绝了");
-  // 空状态会让手机以为一个标签都没有，于是每次打开面板都在 Mac 上多建一个。
-  assert.match(script, /setBrowserScope: function \(scopeId\) \{ return invoke\("browser:get-state"/);
+  // 先设置远程客户端自己的 scope，再单独读取 Mac 上这个 scope 的真实状态。
+  assert.match(script, /setBrowserScope: function \(scopeId, workspacePath\) \{ return invoke\("browser:set-scope"/);
+  assert.match(script, /getBrowserState: function \(scopeId\) \{ return invoke\("browser:get-state"/);
   assert.match(script, /onBrowserStateUpdated: subscribe\("browser:state"\)/);
+});
+
+test("Electron 自己的原生 bridge 不会被浏览器 bridge 覆盖", () => {
+  const nativeBridge = { isRemote: false };
+  const context = {
+    window: { coilcoil: nativeBridge },
+    console,
+  };
+  vm.runInNewContext(bridgeScript("darwin"), context);
+  assert.equal(context.window.coilcoil, nativeBridge);
 });

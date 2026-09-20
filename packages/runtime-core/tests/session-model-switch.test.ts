@@ -52,6 +52,7 @@ function snapshot(session: ModelSessionDouble): SessionSnapshot {
       updatedAt: new Date(0).toISOString(),
       messageCount: 0,
     },
+    agentMode: "standard",
     messages: [],
     promptQueue: [],
     steering: [],

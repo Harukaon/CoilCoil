@@ -1,5 +1,7 @@
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+export type AgentMode = "standard" | "unrestricted";
+
 export interface ProjectSelection {
   name: string;
   path: string;
@@ -616,12 +618,71 @@ export interface PromptImage {
   mimeType: string;
   data: string;
   name?: string;
+  /**
+   * Extra model context that belongs to this image but should not be pasted into
+   * the editable composer. Browser element picks use this for the selected DOM
+   * identity while the image carries the spatial context.
+   */
+  context?: string;
+}
+
+/** Serializable page data kept with an atomic browser-element prompt node. */
+export interface BrowserElementSnapshot {
+  pageUrl: string;
+  pageTitle: string;
+  tagName: string;
+  selector: string;
+  xpath: string;
+  outerHtml: string;
+  text?: string;
+  attributes: Record<string, string>;
+  styles: Record<string, string>;
+  component?: string;
+  componentProps?: Record<string, string | number | boolean | null>;
+  source?: { file: string; line?: number; column?: number };
+  bounds?: { x: number; y: number; width: number; height: number };
+}
+
+export interface PromptTextPart {
+  type: "text";
+  text: string;
+}
+
+export interface PromptBrowserElementPart {
+  type: "browser-element";
+  id: string;
+  label: string;
+  element: BrowserElementSnapshot;
+  screenshotId?: string;
+}
+
+export type PromptPart = PromptTextPart | PromptBrowserElementPart;
+
+/** The single source of truth for a composer/history message with atomic nodes. */
+export interface PromptDocument {
+  version: 1;
+  parts: PromptPart[];
+}
+
+export function emptyPromptDocument(): PromptDocument {
+  return { version: 1, parts: [] };
+}
+
+/** Text shown by the editor and used as the natural-language message body. */
+export function promptDocumentText(document: PromptDocument | undefined): string {
+  if (!document) return "";
+  return document.parts.map((part) => part.type === "text" ? part.text : part.label).join("");
+}
+
+export function promptDocumentHasContent(document: PromptDocument | undefined): boolean {
+  return Boolean(document?.parts.some((part) => part.type === "browser-element" || part.text.trim()));
 }
 
 /** A user prompt accepted by the runtime but not started by Pi yet. */
 export interface QueuedPrompt {
   id: string;
   text: string;
+  promptDocument?: PromptDocument;
   images?: PromptImage[];
   queuedAt: number;
   /** The user asked this one to interject and the steer has not landed yet. */
@@ -637,6 +698,7 @@ export interface QueuedPrompt {
 export interface SteeringMessage {
   id: string;
   text: string;
+  promptDocument?: PromptDocument;
   images?: PromptImage[];
   timestamp: number;
 }
@@ -657,6 +719,7 @@ export interface ChatMessage {
   custom?: ChatMessageCustom;
   model?: Pick<ModelOption, "provider" | "id">;
   text: string;
+  promptDocument?: PromptDocument;
   images?: PromptImage[];
   thinking?: string;
   timestamp: number;
@@ -1163,6 +1226,8 @@ export interface SessionSnapshot {
   /** Monotonic within one live runtime; prevents an older async snapshot from replacing newer message events. */
   messageRevision?: number;
   session: SessionSummary;
+  /** Fixed when the session is created; changing modes requires a new session. */
+  agentMode: AgentMode;
   messages: ChatMessage[];
   promptQueue: QueuedPrompt[];
   /** 已交给 Pi、等这一轮结束才会落地的介入消息；切换会话后要靠它把界面恢复回来。 */
@@ -1301,12 +1366,12 @@ export type RuntimeCommand =
   | { type: "pin_session"; cwd: string; sessionPath: string; pinned: boolean }
   | { type: "fork_session"; cwd: string; sessionPath: string }
   | { type: "move_session"; cwd: string; sessionPath: string; targetCwd: string }
-  | { type: "create_session"; cwd: string; model?: SessionModelSelection }
+  | { type: "create_session"; cwd: string; model?: SessionModelSelection; agentMode?: AgentMode }
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "open_workspace"; cwd: string }
-  | { type: "prompt"; text: string; images?: PromptImage[]; clientMessageId?: string }
-  | { type: "rewind_prompt"; entryId: string; text: string; images?: PromptImage[]; clientMessageId?: string }
-  | { type: "steer"; text: string; images?: PromptImage[]; clientMessageId?: string }
+  | { type: "prompt"; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
+  | { type: "rewind_prompt"; entryId: string; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
+  | { type: "steer"; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
   | { type: "abort" }
   | { type: "stop_goal" }
   | { type: "cancel_queued_prompt"; id: string }
@@ -1327,9 +1392,9 @@ export type RuntimeEvent =
   | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; revision: number }
   | { type: "message_finished"; message: ChatMessage; revision: number }
   /** `text` is present when the runtime is handing the message back for the composer to keep. */
-  | { type: "message_rejected"; id: string; revision: number; text?: string }
+  | { type: "message_rejected"; id: string; revision: number; text?: string; promptDocument?: PromptDocument }
   /** A steered message Pi took for the running turn; it lands when the turn ends. */
-  | { type: "message_steering"; id: string; text: string; images?: PromptImage[]; timestamp: number; revision: number }
+  | { type: "message_steering"; id: string; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; timestamp: number; revision: number }
   | { type: "tool_started"; tool: ToolRun }
   | { type: "tool_updated"; tool: ToolRun }
   | { type: "tool_finished"; tool: ToolRun }

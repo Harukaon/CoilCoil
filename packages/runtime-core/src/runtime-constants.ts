@@ -28,6 +28,9 @@ export const WORKFLOW_AUDIT_ENTRY_TYPE = "coilcoil-tool-purpose-audit";
 
 export const RESPONSE_METRICS_ENTRY_TYPE = "coilcoil-response-metrics";
 
+/** Editor-only metadata for restoring atomic browser nodes without changing Pi's prompt. */
+export const PROMPT_DOCUMENT_ENTRY_TYPE = "coilcoil-prompt-document-v1";
+
 export const PROJECT_MEMORY_STATUS_EVENT = "coilcoil:project-memory:status:v1";
 /** Where context-clearing announces each batch of tool results it drops. */
 export const CONTEXT_CLEARING_EVENT = "coilcoil:context-clearing:v1";

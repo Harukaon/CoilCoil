@@ -12,6 +12,25 @@ function user(id: string, text: string, order: number): ChatMessage {
   return { id, role: "user", text, order, timestamp: order, status: "succeeded" };
 }
 
+const elementDocument = {
+  version: 1 as const,
+  parts: [{
+    type: "browser-element" as const,
+    id: "element-1",
+    label: "元素一",
+    element: {
+      pageUrl: "https://example.test",
+      pageTitle: "Example",
+      tagName: "button",
+      selector: "button.login",
+      xpath: "/html/body/button",
+      outerHtml: "<button>登录</button>",
+      attributes: {},
+      styles: {},
+    },
+  }],
+};
+
 test("新会话创建期间空快照不会清掉已排队的首条消息", () => {
   const local = user("client-1", "你好", 10);
   let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, { type: "queue", message: local });
@@ -27,6 +46,25 @@ test("正式消息使用同一 client id 确认本地消息而不是追加第二
   state = conversationMessagesReducer(state, { type: "runtime_message", message: authoritative, revision: 1 });
   assert.deepEqual(selectConversationMessages(state), [authoritative]);
   assert.equal(state.pending.length, 0);
+});
+
+test("权威回显缺少 promptDocument 时保留本地富节点", () => {
+  const local = { ...user("client-1", "元素一", 10), promptDocument: elementDocument };
+  let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, { type: "queue", message: local });
+  state = conversationMessagesReducer(state, {
+    type: "runtime_message",
+    message: user("client-1", "元素一\n\n<image name=\"网页元素\">...", 1),
+    revision: 1,
+  });
+  assert.deepEqual(selectConversationMessages(state)[0]?.promptDocument, elementDocument);
+
+  state = conversationMessagesReducer(state, {
+    type: "snapshot",
+    sessionPath: "",
+    messages: [user("client-1", "元素一\n\n<image name=\"网页元素\">...", 1)],
+    revision: 2,
+  });
+  assert.deepEqual(selectConversationMessages(state)[0]?.promptDocument, elementDocument);
 });
 
 test("同一运行时事件重复投递仍只产生一条消息", () => {

@@ -23,6 +23,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { credentialKey, type McpCredentialStore } from "./credential-store.js";
+import type { McpDiagnosticLogger } from "./diagnostic.js";
 
 export interface McpOAuthOptions {
   /** The MCP server this authorization belongs to. */
@@ -40,6 +41,8 @@ export interface McpOAuthOptions {
   /** Shown on the authorization server's consent screen. */
   clientName?: string;
   clientUri?: string;
+  /** Optional sink for redacted authentication lifecycle diagnostics. */
+  diagnostic?: McpDiagnosticLogger;
 }
 
 const DEFAULT_CLIENT_NAME = "CoilCoil";
@@ -115,6 +118,17 @@ export class McpOAuthProvider implements OAuthClientProvider {
     return this.options.store.get(this.key)?.tokens as OAuthTokens | undefined;
   }
 
+  private tokenSummary(tokens: OAuthTokens): Record<string, unknown> {
+    const value = tokens as OAuthTokens & { expires_in?: unknown; scope?: unknown; token_type?: unknown };
+    return {
+      hasAccessToken: typeof value.access_token === "string" && value.access_token.length > 0,
+      hasRefreshToken: typeof value.refresh_token === "string" && value.refresh_token.length > 0,
+      expiresIn: typeof value.expires_in === "number" ? value.expires_in : undefined,
+      hasScope: typeof value.scope === "string" && value.scope.length > 0,
+      tokenType: typeof value.token_type === "string" ? value.token_type : undefined,
+    };
+  }
+
   /**
    * Keep what came back from the token endpoint.
    *
@@ -129,10 +143,14 @@ export class McpOAuthProvider implements OAuthClientProvider {
       codeVerifier: undefined,
       state: undefined,
     });
+    this.options.diagnostic?.("info", "oauth_tokens_saved", this.tokenSummary(tokens));
   }
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     this.lastAuthorizationUrl = authorizationUrl;
+    this.options.diagnostic?.("info", "oauth_authorization_started", {
+      hasState: Boolean(authorizationUrl.searchParams.get("state")),
+    });
     await this.options.openAuthorization(authorizationUrl);
   }
 
@@ -143,6 +161,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
   saveCodeVerifier(codeVerifier: string): void {
     this.options.store.update(this.key, { url: this.options.serverUrl, codeVerifier });
+    this.options.diagnostic?.("info", "oauth_authorization_prepared");
   }
 
   codeVerifier(): string {
@@ -160,6 +179,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
    * leaving a registration the user believes they discarded.
    */
   invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): void {
+    this.options.diagnostic?.("warn", "oauth_credentials_invalidated", { scope });
     if (scope === "all") {
       this.options.store.clear(this.key);
       return;

@@ -3,7 +3,8 @@ import { FileCode2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 import { summarizeCacheUsage } from "@coilcoil/runtime-protocol";
-import type { ContextUsage, ProjectSelection, ResponseMetrics, RuntimeTokenBreakdown } from "@coilcoil/runtime-protocol";
+import type { AgentMode, ContextUsage, ProjectSelection, ResponseMetrics, RuntimeTokenBreakdown } from "@coilcoil/runtime-protocol";
+import { AgentModePicker } from "./AgentModePicker";
 
 function pathLabel(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
@@ -31,12 +32,18 @@ function performanceGrade(metrics: ResponseMetrics): "excellent" | "good" | "fai
 
 export function WorkspaceStatus({
   project,
+  agentMode,
+  agentModeLocked,
+  onAgentModeChange,
   responseMetrics,
   responseMetricsHistory,
   contextUsage,
   tokenBreakdown,
 }: {
   project: ProjectSelection | null;
+  agentMode?: AgentMode;
+  agentModeLocked?: boolean;
+  onAgentModeChange?: (mode: AgentMode) => void;
   responseMetrics?: ResponseMetrics;
   responseMetricsHistory: ResponseMetrics[];
   contextUsage?: ContextUsage;
@@ -53,20 +60,23 @@ export function WorkspaceStatus({
   const latestCache = summarizeCacheUsage(responseMetrics?.inputTokens, responseMetrics?.cacheReadTokens, responseMetrics?.cacheWriteTokens);
   return (
     <div className="workspace-status">
-      <Popover.Root open={pathOpen} onOpenChange={setPathOpen}>
-        <Popover.Trigger asChild>
-          <button className="workspace-path" type="button" title={project?.path ?? "未选择项目"}>
-            <FileCode2 size={13} />
-            <span>{project ? pathLabel(project.path) : "未选择项目"}</span>
-          </button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content className="path-popover" side="top" align="start" sideOffset={7}>
-            {project?.path ?? "未选择项目"}
-            <Popover.Arrow className="model-popover-arrow" />
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
+      <div className="workspace-status-left">
+        <Popover.Root open={pathOpen} onOpenChange={setPathOpen}>
+          <Popover.Trigger asChild>
+            <button className="workspace-path" type="button" title={project?.path ?? "未选择项目"}>
+              <FileCode2 size={13} />
+              <span>{project ? pathLabel(project.path) : "未选择项目"}</span>
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content className="path-popover" side="top" align="start" sideOffset={7}>
+              {project?.path ?? "未选择项目"}
+              <Popover.Arrow className="model-popover-arrow" />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+        {agentMode ? <AgentModePicker mode={agentMode} locked={agentModeLocked} side="top" onChange={onAgentModeChange} /> : null}
+      </div>
       <div className="composer-metrics">
         {metricSummary ? <span className="response-metrics">{metricSummary}</span> : null}
         {responseMetrics || hasPerformanceHistory ? <Popover.Root>

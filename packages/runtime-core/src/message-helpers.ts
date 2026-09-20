@@ -4,11 +4,15 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   type ChatMessage,
+  type PromptBrowserElementPart,
+  type PromptDocument,
+  type PromptPart,
   type PromptImage,
   type SessionSummary,
   type SubagentActivity,
   type SubagentTimelineEntry,
   type TodoItem,
+  promptDocumentText,
 } from "@coilcoil/runtime-protocol";
 import {
   existsSync,
@@ -25,6 +29,8 @@ export interface PendingUserPrompt {
   id: string;
   /** Exactly the text passed to Pi, before Pi's own skill/template expansion. */
   text: string;
+  /** The local display document, used when Pi normalizes image prompt text. */
+  promptDocument?: PromptDocument;
 }
 
 /**
@@ -48,6 +54,18 @@ export interface PendingUserPrompt {
 export function matchPendingUserPrompt(pending: readonly PendingUserPrompt[], text: string): number {
   const exact = pending.findIndex((prompt) => prompt.text === text);
   if (exact >= 0) return exact;
+  const normalized = text.trim();
+  if (normalized) {
+    const fuzzy = pending.findIndex((prompt) => {
+      const candidates = (prompt.promptDocument ? [prompt.text, promptDocumentText(prompt.promptDocument)] : [])
+        .map((candidate) => candidate.trim())
+        .filter(Boolean);
+      return candidates.some((candidate) => candidate === normalized
+        || candidate.includes(normalized)
+        || normalized.includes(candidate));
+    });
+    if (fuzzy >= 0) return fuzzy;
+  }
   return pending[0]?.text.startsWith("/") ? 0 : -1;
 }
 
@@ -68,6 +86,74 @@ export function contentParts(content: unknown): { text: string; thinking: string
     }
   }
   return { text: text.join("\n"), thinking: thinking.join("\n"), images };
+}
+
+const LEGACY_ELEMENT_IMAGE = /<image\b[^>]*\bname=(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/image\s*>/gi;
+
+function decodeMarkup(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function legacyElementField(body: string, label: string): string {
+  const match = body.match(new RegExp(`(?:^|\\n)${label}:\\s*([\\s\\S]*?)(?=\\n(?:页面|URL|标签|选择器|XPath|属性|样式|组件|源码位置|可见文本|outerHTML):|$)`));
+  return decodeMarkup(match?.[1]?.trim() ?? "");
+}
+
+/**
+ * Older sessions only retained Pi's expanded image hint. Recover its visible
+ * atomic label when the private prompt-document entry is not present yet.
+ * This is deliberately narrow: ordinary user text containing an image tag is
+ * left untouched unless it is recognizably a CoilCoil browser-element hint.
+ */
+export function legacyPromptDocumentFromText(text: string): PromptDocument | undefined {
+  const matches = [...text.matchAll(LEGACY_ELEMENT_IMAGE)];
+  if (!matches.length) return undefined;
+  const parsed = matches.flatMap((match) => {
+    const name = decodeMarkup(match[1] ?? match[2] ?? "");
+    const body = match[3] ?? "";
+    const label = body.match(/^\[([^\]\n]+)\]/m)?.[1]?.trim();
+    const selectorFromName = name.replace(/^网页元素\s*[·:-]\s*/, "").trim();
+    const selector = legacyElementField(body, "选择器") || selectorFromName;
+    if (!label || !selector || !body.includes("页面:") || !body.includes("URL:")) return [];
+    return [{
+      label,
+      element: {
+        pageUrl: legacyElementField(body, "URL"),
+        pageTitle: legacyElementField(body, "页面"),
+        tagName: legacyElementField(body, "标签"),
+        selector,
+        xpath: legacyElementField(body, "XPath"),
+        outerHtml: legacyElementField(body, "outerHTML"),
+        text: legacyElementField(body, "可见文本") || undefined,
+        attributes: {},
+        styles: {},
+      },
+    }];
+  });
+  if (!parsed.length) return undefined;
+  const visible = text.replace(LEGACY_ELEMENT_IMAGE, "").replace(/\n{3,}/g, "\n\n");
+  const parts: PromptPart[] = [];
+  let cursor = 0;
+  for (const [index, item] of parsed.entries()) {
+    const position = visible.indexOf(item.label, cursor);
+    if (position < 0) continue;
+    if (position > cursor) parts.push({ type: "text", text: visible.slice(cursor, position) });
+    parts.push({
+      type: "browser-element",
+      id: `legacy-browser-element-${index + 1}`,
+      label: item.label,
+      element: item.element,
+    });
+    cursor = position + item.label.length;
+  }
+  if (!parts.length) return undefined;
+  if (cursor < visible.length) parts.push({ type: "text", text: visible.slice(cursor) });
+  return { version: 1, parts };
 }
 
 export function toolResultText(result: unknown): string {
@@ -253,13 +339,23 @@ export function assistantToolCalls(message: unknown): AssistantToolCall[] {
   });
 }
 
-export function mapMessage(message: unknown, id: string, order: number, entryId?: string): ChatMessage | undefined {
+export function mapMessage(message: unknown, id: string, order: number, entryId?: string, promptDocument?: PromptDocument): ChatMessage | undefined {
   if (!isRecord(message) || typeof message.role !== "string") return undefined;
   const role = message.role;
   const parts = contentParts(message.content);
 
   if (role === "user") {
-    return { id, entryId, order, role: "user", text: parts.text, images: parts.images.length ? parts.images : undefined, timestamp: messageTimestamp(message) };
+    const recovered = promptDocument ?? legacyPromptDocumentFromText(parts.text);
+    return {
+      id,
+      entryId,
+      order,
+      role: "user",
+      text: recovered ? promptDocumentText(recovered) : parts.text,
+      promptDocument: recovered,
+      images: parts.images.length ? parts.images : undefined,
+      timestamp: messageTimestamp(message),
+    };
   }
   if (role === "assistant") {
     const stopReason = stringValue(message.stopReason);
@@ -321,6 +417,108 @@ export function mapMessage(message: unknown, id: string, order: number, entryId?
   return undefined;
 }
 
+function browserElementContext(part: PromptBrowserElementPart): string {
+  const element = part.element;
+  const attributes = Object.entries(element.attributes).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(" ");
+  const styles = Object.entries(element.styles).map(([name, value]) => `${name}: ${value}`).join("; ");
+  const source = element.source ? `${element.source.file}${element.source.line ? `:${element.source.line}` : ""}${element.source.column ? `:${element.source.column}` : ""}` : "";
+  return [
+    `[${part.label}]`,
+    `页面: ${element.pageTitle || "未命名页面"}`,
+    `URL: ${element.pageUrl}`,
+    `标签: ${element.tagName}`,
+    `选择器: ${element.selector}`,
+    `XPath: ${element.xpath}`,
+    attributes ? `属性: ${attributes}` : "",
+    styles ? `样式: ${styles}` : "",
+    element.component ? `组件: ${element.component}` : "",
+    source ? `源码位置: ${source}` : "",
+    element.text ? `可见文本: ${clampText(element.text, 8_000)}` : "",
+    element.outerHtml ? `outerHTML:\n${clampText(element.outerHtml, 16_000)}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+/**
+ * Convert the editor's private atomic nodes into the ordinary prompt Pi accepts.
+ * The document itself never goes into the model protocol; only this natural
+ * text and optional image context do.
+ */
+export function promptDocumentPrompt(
+  document: PromptDocument | undefined,
+  images: PromptImage[] | undefined,
+): { text: string; images?: PromptImage[] } {
+  if (!document) return { text: "", images };
+  const parts = document.parts.filter((part): part is PromptBrowserElementPart => part.type === "browser-element");
+  if (!parts.length) return { text: document.parts.map((part) => part.type === "text" ? part.text : part.label).join(""), images };
+  const imageIds = new Set(parts.map((part) => part.screenshotId).filter((id): id is string => Boolean(id)));
+  const contexts = parts
+    .filter((part) => !part.screenshotId || !images?.some((image) => image.id === part.screenshotId))
+    .map(browserElementContext);
+  const text = document.parts.map((part) => part.type === "text" ? part.text : part.label).join("");
+  const nextImages = images?.map((image) => {
+    if (!image.id || !imageIds.has(image.id)) return image;
+    const matching = parts.filter((part) => part.screenshotId === image.id).map(browserElementContext);
+    return { ...image, context: [image.context, ...matching].filter(Boolean).join("\n\n") };
+  });
+  return {
+    text: [text, contexts.length ? `以下是用户选中元素的 DOM 上下文：\n\n${contexts.join("\n\n")}` : ""].filter(Boolean).join("\n\n"),
+    images: nextImages,
+  };
+}
+
+/** Decode persisted composer metadata defensively; malformed custom entries are ignored. */
+export function promptDocumentFromUnknown(value: unknown): PromptDocument | undefined {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.parts)) return undefined;
+  const parts: PromptPart[] = [];
+  for (const raw of value.parts) {
+    if (!isRecord(raw) || (raw.type !== "text" && raw.type !== "browser-element")) continue;
+    if (raw.type === "text" && typeof raw.text === "string") {
+      parts.push({ type: "text", text: raw.text });
+      continue;
+    }
+    if (raw.type !== "browser-element" || typeof raw.id !== "string" || typeof raw.label !== "string" || !isRecord(raw.element)) continue;
+    const element = raw.element;
+    if (typeof element.pageUrl !== "string" || typeof element.pageTitle !== "string" || typeof element.tagName !== "string"
+      || typeof element.selector !== "string" || typeof element.xpath !== "string" || typeof element.outerHtml !== "string") continue;
+    const recordOfStrings = (candidate: unknown): Record<string, string> => {
+      if (!isRecord(candidate)) return {};
+      const result: Record<string, string> = {};
+      for (const [key, item] of Object.entries(candidate)) if (typeof item === "string") result[key] = item;
+      return result;
+    };
+    parts.push({
+      type: "browser-element",
+      id: raw.id,
+      label: raw.label,
+      element: {
+        pageUrl: element.pageUrl,
+        pageTitle: element.pageTitle,
+        tagName: element.tagName,
+        selector: element.selector,
+        xpath: element.xpath,
+        outerHtml: element.outerHtml,
+        text: typeof element.text === "string" ? element.text : undefined,
+        attributes: recordOfStrings(element.attributes),
+        styles: recordOfStrings(element.styles),
+        component: typeof element.component === "string" ? element.component : undefined,
+        componentProps: isRecord(element.componentProps) ? element.componentProps as Record<string, string | number | boolean | null> : undefined,
+        source: isRecord(element.source) && typeof element.source.file === "string" ? {
+          file: element.source.file,
+          line: typeof element.source.line === "number" ? element.source.line : undefined,
+          column: typeof element.source.column === "number" ? element.source.column : undefined,
+        } : undefined,
+        bounds: isRecord(element.bounds) && typeof element.bounds.x === "number" && typeof element.bounds.y === "number"
+          && typeof element.bounds.width === "number" && typeof element.bounds.height === "number"
+          ? { x: element.bounds.x, y: element.bounds.y, width: element.bounds.width, height: element.bounds.height }
+          : undefined,
+      },
+      screenshotId: typeof raw.screenshotId === "string" ? raw.screenshotId : undefined,
+    });
+  }
+  if (!parts.length && value.parts.length > 0) return undefined;
+  return { version: 1, parts };
+}
+
 export function titleFromText(text: string): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
   if (!oneLine) return "新建对话";
@@ -335,8 +533,19 @@ export async function preparePromptImages(images: PromptImage[] | undefined): Pr
     if (!image.mimeType.startsWith("image/") || !image.data) throw new Error("粘贴的图片数据无效。");
     const processed = await processImage(Buffer.from(image.data, "base64"), image.mimeType, { autoResizeImages: true });
     if (!processed.ok) throw new Error(`第 ${index + 1} 张图片无法处理：${processed.message}`);
-    prepared.push({ id: image.id, name: image.name, mimeType: processed.mimeType, data: processed.data });
-    if (processed.hints.length) hints.push(`<image name="${image.name || `pasted-${index + 1}`}">${processed.hints.join("\n")}</image>`);
+    const context = typeof image.context === "string" && image.context.trim()
+      ? image.context.slice(0, 30_000)
+        .replace(/<image\b/gi, "&lt;image")
+        .replace(/<\/image\s*>/gi, "&lt;/image&gt;")
+      : undefined;
+    prepared.push({ id: image.id, name: image.name, context, mimeType: processed.mimeType, data: processed.data });
+    const details = [...processed.hints, ...(context ? [context] : [])];
+    if (details.length) {
+      const name = (image.name || `pasted-${index + 1}`).replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+      })[character] ?? character);
+      hints.push(`<image name="${name}">${details.join("\n")}</image>`);
+    }
   }
   return { images: prepared, hints: hints.join("\n") };
 }

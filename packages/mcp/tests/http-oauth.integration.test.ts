@@ -139,12 +139,14 @@ test("HTTP 服务器的整条 OAuth 流程，从头到尾不需要任何会话",
   const credentialFile = defaultCredentialFile(join(directory, "agent"));
   const store = new McpCredentialStore(credentialFile);
   const opened: URL[] = [];
+  const diagnostics: Array<{ event: string; data?: Record<string, unknown> }> = [];
   const definition = httpServer("oauth", fixture.ready.mcpServerUrl);
   const manager = new McpManager({
     loadServers: () => [definition],
     store,
     callback: new McpAuthCallbackServer([0]),
     openAuthorization: (url) => { opened.push(url); },
+    diagnostic: (_level, event, data) => { diagnostics.push({ event, data }); },
   });
   t.after(() => manager.close());
 
@@ -170,6 +172,19 @@ test("HTTP 服务器的整条 OAuth 流程，从头到尾不需要任何会话",
   const authorized = await manager.awaitAuth("oauth");
   assert.equal(authorized.status, "connected");
   assert.ok(authorized.toolCount >= 1, "认证之后应该发现得到工具");
+  assert.ok(
+    diagnostics.some((entry) => entry.event === "oauth_request_succeeded"
+      && entry.data?.requestKind === "token-exchange"
+      && entry.data.hasAccessToken === true),
+    "诊断日志应该记录成功的授权码换令牌请求，但不记录令牌值",
+  );
+  assert.ok(
+    diagnostics.some((entry) => entry.event === "oauth_tokens_saved"
+      && entry.data?.hasAccessToken === true
+      && !Object.hasOwn(entry.data, "access_token")
+      && !Object.hasOwn(entry.data, "refresh_token")),
+    "诊断日志应该记录令牌是否存在，但不记录令牌值",
+  );
 
   // 4. 令牌进的是 CoilCoil 自己的文件——这就是钥匙串弹窗消失的原因。
   const record = store.get(credentialKey(fixture.ready.mcpServerUrl));

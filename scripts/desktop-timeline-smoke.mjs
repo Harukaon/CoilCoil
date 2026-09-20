@@ -45,6 +45,21 @@ async function waitForPage(port) {
   throw new Error("CoilCoil did not expose its renderer in time.");
 }
 
+async function finishOnboarding(client) {
+  for (let step = 0; step < 5; step += 1) {
+    if (!(await client.evaluate(`Boolean(document.querySelector(".onboarding-screen"))`))) return;
+    const advanced = await client.evaluate(`(() => {
+      const skip = document.querySelector(".onboarding-skip:not(:disabled)");
+      const next = document.querySelector(".onboarding-next:not(:disabled)");
+      (skip || next)?.click();
+      return Boolean(skip || next);
+    })()`);
+    if (!advanced) throw new Error("The onboarding screen did not offer a way to continue.");
+    await delay(120);
+  }
+  throw new Error("The onboarding screen did not finish.");
+}
+
 class DevToolsClient {
   constructor(url) {
     this.socket = new WebSocket(url);
@@ -130,7 +145,7 @@ function probe(html, measure) {
 }
 
 const bubble = (text, extra = "") =>
-  `<article class="timeline-message user-message"><button class="user-bubble user-bubble-button"><span class="user-bubble-text">${text}</span>${extra}</button></article>`;
+  `<article class="timeline-message user-message"><button class="user-bubble user-bubble-button">${extra}<span class="user-bubble-text">${text}</span></button></article>`;
 
 // A 300x300 grey square, so the aspect ratio is obvious if anything crops it.
 const TALL_IMAGE = `<span class="message-images"><span class="message-image"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzk5OSIvPjwvc3ZnPg=="></span></span>`;
@@ -146,6 +161,7 @@ async function checkUserBubble(client) {
         clampedLines: Number(getComputedStyle(node.querySelector(".user-bubble-text")).webkitLineClamp),
         imageFit: image ? getComputedStyle(image).objectFit : undefined,
         imageRatio: image ? Number((image.getBoundingClientRect().width / image.getBoundingClientRect().height).toFixed(2)) : undefined,
+        imageBeforeText: image ? [...node.children].findIndex((child) => child.classList.contains("message-images")) < [...node.children].findIndex((child) => child.classList.contains("user-bubble-text")) : undefined,
       };
     })`,
   ));
@@ -164,6 +180,7 @@ async function checkUserBubble(client) {
   assert.ok(withImage.height > 142, `The image bubble should be free to grow (was ${withImage.height}px).`);
   assert.equal(withImage.imageFit, "contain", "Message images must scale down rather than crop.");
   assert.equal(withImage.imageRatio, 1, `A square image rendered at ratio ${withImage.imageRatio}.`);
+  assert.equal(withImage.imageBeforeText, true, "Attached images must stay above the sent prompt text.");
   return { shortHeight: short.height, clampedHeight: long.height, imageHeight: withImage.height };
 }
 
@@ -249,7 +266,16 @@ async function main() {
     client = new DevToolsClient(page.webSocketDebuggerUrl);
     await client.open();
     await client.waitFor(`document.readyState === "complete" && typeof window.coilcoil === "object"`, "Renderer did not become ready.");
-    await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]'))`, "Composer did not render.", 45_000);
+    await finishOnboarding(client);
+    await client.waitFor(
+      `Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]')) || Boolean(document.querySelector('button[aria-label="返回工作区"]'))`,
+      "Composer or first-run settings did not render.",
+      45_000,
+    );
+    if (await client.evaluate(`Boolean(document.querySelector('button[aria-label="返回工作区"]'))`)) {
+      await client.evaluate(`document.querySelector('button[aria-label="返回工作区"]')?.click()`);
+    }
+    await client.waitFor(`Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]'))`, "Composer did not return.", 10_000);
 
     const bubbleResult = await checkUserBubble(client);
     const iconResult = await checkQueueRowIcons(client);

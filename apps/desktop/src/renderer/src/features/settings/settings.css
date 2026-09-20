@@ -32,6 +32,10 @@
   border-right: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 45%);
   background: var(--side-glass);
 }
+:root[data-transparency="sidebar"] .settings-sidebar { backdrop-filter: blur(28px) saturate(1.16); }
+:root[data-transparency="window"] .settings-screen,
+:root[data-transparency="window"] .settings-sidebar,
+:root[data-transparency="window"] .settings-page { backdrop-filter: blur(42px) saturate(1.18); }
 .settings-window-drag { height: 52px; flex: 0 0 52px; }
 /* 图标和文字在 40px 里居中。以前这里写的是 `padding: 0 10px 6px` —— 那 6px 是
    想跟下面的栏目列表拉开距离，但它是内边距，撑的是按钮自己的内容盒：内容被挤
@@ -202,7 +206,7 @@
   cursor: pointer;
 }
 .settings-page-content { min-width: 0; min-height: 0; overflow: hidden; }
-.settings-icon { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid hsl(var(--th) var(--ts) var(--l-841)); border-radius: var(--radius-2xl); background: hsl(var(--th) var(--ts) var(--l-1000)); }
+.settings-icon { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border: 1px solid hsl(var(--th) var(--ts) var(--l-841)); border-radius: var(--radius-2xl); background: hsl(var(--th) var(--ts) var(--l-1000)); }
 /* 这一段管的是表单里的排版（字号、行距、内边距）。以前只挂在 .settings-screen 上，
    于是模型面板一旦被搬到别的容器里（引导页第二步），这些规则一条都不生效——label 和
    input 掉回浏览器默认的 16px，紧挨着 10~12px 的字，整块看上去大大小小全乱。
@@ -259,7 +263,7 @@
 .provider-model-toolbar-top small { min-width: 0; flex: 1; color: hsl(var(--th) var(--ts) var(--l-531)); font-size: 9px; line-height: 1.45; }
 .provider-model-toolbar-top code { font-size: 9px; }
 .provider-baseurl-hint { margin: 0; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 9px; font-weight: 400; line-height: 1.45; }
-.provider-editor { min-width: 0; min-height: 0; overflow: auto; }
+.provider-editor { min-width: 0; min-height: 0; overflow: auto; container: provider-editor / inline-size; }
 .provider-editor > form { max-width: 1060px; }
 .provider-editor-empty { display: grid; max-width: 380px; gap: 8px; margin: 18vh auto 0; padding: 26px; place-items: center; color: hsl(var(--th) var(--ts) var(--l-527)); text-align: center; }
 .provider-editor-empty strong { color: hsl(var(--th) var(--ts) var(--l-322)); font-size: 13px; }
@@ -269,6 +273,11 @@
 .provider-editor-heading strong { color: hsl(var(--th) var(--ts) var(--l-182)); font-size: 14px; }
 .provider-editor-heading small { color: hsl(var(--th) var(--ts) var(--l-543)); font-size: 9px; font-weight: 400; line-height: 1.5; }
 .provider-editor-heading code, .provider-advanced code, .provider-editor-empty code, .provider-help code, .provider-builtins-summary code { padding: 1px 3px; border-radius: var(--radius-xs); background: hsl(var(--th) var(--ts) var(--l-914)); font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace); }
+@container provider-editor (max-width: 720px) {
+  .provider-editor-heading { display: grid; gap: 12px; }
+  .provider-editor-heading > div:first-child { min-width: 0; }
+  .provider-editor-actions { justify-content: flex-start; }
+}
 .danger-text-button { display: inline-flex; height: 34px; align-items: center; gap: 6px; padding: 0 10px; border-radius: var(--radius-xl); color: var(--c-red-muted); background: var(--c-red-subtle); font-size: 10px; cursor: pointer; }
 .danger-text-button.armed { color: hsl(var(--th) var(--ts) var(--l-1000)); background: var(--c-red-muted); }
 .provider-heading-tags { display: flex; align-items: center; gap: 5px; }
@@ -398,6 +407,18 @@ label.provider-model-search { display: inline-flex; min-width: 180px; flex: 1 1 
 .provider-default-model .coil-select > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .provider-default-actions { grid-area: action; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; align-self: end; }
 .provider-default-actions .secondary-button { height: 34px; white-space: nowrap; }
+.provider-test-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid hsl(var(--th) var(--ts) var(--l-861));
+  border-radius: var(--radius-3xl);
+  background: hsl(var(--th) var(--ts) var(--l-963));
+}
+.provider-test-card > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.provider-test-card > div:first-child strong { color: hsl(var(--th) var(--ts) var(--l-275)); font-size: 11px; }
+.provider-test-card > div:first-child small { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 9px; line-height: 1.45; }
+.provider-test-card .settings-grid { grid-template-columns: minmax(0, 1fr) 160px; min-width: 0; }
 .provider-runtime-note { display: none; }
 .mcp-settings { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: 230px minmax(0, 1fr); }
 .mcp-server-list { min-width: 0; min-height: 0; overflow: auto; padding: 10px; border-right: 1px solid hsl(var(--th) var(--ts) var(--l-882)); background: hsl(var(--th) var(--ts) var(--l-951)); }
@@ -528,6 +549,10 @@ label.provider-model-search { display: inline-flex; min-width: 180px; flex: 1 1 
   font-size: 11px;
   font-weight: 400;
 }
+.upstream-model-search:focus-within {
+  border-color: hsl(var(--th) var(--ts) var(--l-735));
+  box-shadow: 0 0 0 2px rgb(110 130 106 / 10%);
+}
 .upstream-model-search input {
   display: block;
   width: auto;
@@ -540,6 +565,11 @@ label.provider-model-search { display: inline-flex; min-width: 180px; flex: 1 1 
   background: transparent;
   font-size: 11px;
   line-height: 32px;
+}
+.upstream-model-search input:focus-visible {
+  outline: none;
+  outline-offset: 0;
+  box-shadow: none;
 }
 .upstream-model-search svg {
   flex: 0 0 auto;
@@ -956,14 +986,15 @@ label.provider-model-search { display: inline-flex; min-width: 180px; flex: 1 1 
 .remote-notes { min-height: 96px; padding: 9px 11px; border: 1px solid hsl(var(--th) var(--ts) var(--l-859)); border-radius: var(--radius-2xl); outline: 0; color: hsl(var(--th) var(--ts) var(--l-262)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace); font-size: 11px; line-height: 1.7; resize: vertical; }
 .remote-notes:focus { border-color: hsl(var(--th) var(--ts) var(--l-735)); box-shadow: 0 0 0 2px rgb(110 130 106 / 10%); }
 
-/* 侧栏底部：重新走一遍首次启动的引导。放在版本号上面，和「返回工作区」同一列。 */
+/* 设置导航的辅助入口：和其他栏目保持同一条布局流。 */
 .settings-sidebar-replay {
   display: flex;
   width: 100%;
   height: 34px;
   align-items: center;
   gap: 8px;
-  margin-top: auto;
+  /* 这是导航中的最后一项，和其他设置入口共享同一条布局流。 */
+  margin: 0;
   padding: 0 10px;
   border-radius: var(--radius-xl);
   color: hsl(var(--th) var(--ts) var(--l-527));

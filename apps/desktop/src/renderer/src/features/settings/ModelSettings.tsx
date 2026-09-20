@@ -934,7 +934,6 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           </header>
           {draft.disabled ? <div className="provider-action-message">已禁用：保存后该服务商不会出现在模型列表中，配置与凭据仍会保留。</div> : null}
           {isBuiltinProvider ? <>
-            <div className="provider-native-summary"><strong>内置服务商</strong><p>“内置”只表示请求实现和模型目录由产品内置提供，并不表示只填一把密钥。Azure、Vertex、Bedrock 和 Cloudflare 会在下方显示各自真实需要的参数。</p></div>
             <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>

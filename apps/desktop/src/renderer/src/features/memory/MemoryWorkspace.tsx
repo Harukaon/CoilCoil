@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle, PanelLeft, RefreshCw, Save, Sparkles } from "lucide-react";
+import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle, RefreshCw, Save, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   MemoryConfigurationSnapshot,
@@ -65,14 +65,12 @@ function statusLabel(inspection?: RuntimeInspectionSnapshot): string {
 export function MemoryWorkspace({
   runtimeId,
   cwd,
-  leftOpen,
-  onOpenLeft,
+  layoutPending,
   onClose,
 }: {
   runtimeId?: string;
   cwd?: string;
-  leftOpen: boolean;
-  onOpenLeft: () => void;
+  layoutPending: boolean;
   onClose: () => void;
 }): React.JSX.Element {
   const [configuration, setConfiguration] = useState<MemoryConfigurationSnapshot>();
@@ -185,11 +183,10 @@ export function MemoryWorkspace({
   };
 
   return (
-    <section className="memory-workspace" aria-labelledby="memory-workspace-title">
+    <section className="shell-surface memory-workspace" style={{ visibility: layoutPending ? "hidden" : undefined }} aria-labelledby="memory-workspace-title">
       <header className="memory-workspace-header window-drag-bar">
         <WindowDragBar />
         <div>
-          {!leftOpen ? <button className="icon-button no-drag" type="button" aria-label="展开侧栏" onClick={onOpenLeft}><PanelLeft size={17} /></button> : null}
           <span className="settings-icon"><BookOpen size={17} /></span>
           <div>
             <h1 id="memory-workspace-title">记忆星云</h1>

@@ -403,6 +403,15 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
         return browser ? [...withoutRivalBrowserConfigurations(configured), browser] : configured;
       },
       store: new McpCredentialStore(defaultCredentialFile(this.agentDir)),
+      diagnostic: (level, event, data, error) => {
+        if (level === "error") {
+          this.log.error("mcp-auth", event, error ?? new Error(event), data);
+        } else if (level === "warn") {
+          this.log.warn("mcp-auth", event, data);
+        } else {
+          this.log.info("mcp-auth", event, data);
+        }
+      },
       // The renderer opens the authorization page itself, so that it can show
       // the dialog and the browser in the right order; the manager only has to
       // arm the loopback listener before handing the address back.

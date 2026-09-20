@@ -118,7 +118,7 @@ export function buildRuntimeInspectionSnapshot(active: ActiveSession): RuntimeIn
     mcp: active.mcpStatus,
     memory: memoryStatus ? hydrateProjectMemoryStatus(memoryStatus) : undefined,
     capabilities: {
-      editSystemPrompt: true,
+      editSystemPrompt: active.bridgeState?.agentMode !== "unrestricted",
       removeOriginalSessionItems: false,
       removeOriginalSessionItemsReason: ORIGINAL_SESSION_MUTATION_UNSUPPORTED,
     },

@@ -1,7 +1,7 @@
 import * as Popover from "@radix-ui/react-popover";
-import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Minus, Plus, RotateCw, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Minus, MousePointer2, Plus, RotateCw, Search } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { BrowserStateSnapshot } from "../../../../shared/desktop-api";
+import type { BrowserElementSelection, BrowserStateSnapshot } from "../../../../shared/desktop-api";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
 import { toastError } from "../../ui/toast";
 import { BrowserDataMenu } from "./BrowserDataMenu";
@@ -17,14 +17,17 @@ const REMOTE_FRAME_INTERVAL_MS = 1_200;
  * 由 WorkspaceInspector 画（见 features/inspector/inspectorTabs.ts）。所以这里
  * 永远只显示当前标签页，标签集合和当前标签由主进程说了算。
  */
-export function BrowserPanel({ active, scopeId, state, onState }: {
+export function BrowserPanel({ active, scopeId, state, onState, onElementPicked }: {
   active: boolean;
   scopeId: string;
   state: BrowserStateSnapshot;
   onState(next: BrowserStateSnapshot): void;
+  onElementPicked(selection: BrowserElementSelection): void;
 }): React.JSX.Element {
   const [address, setAddress] = useState("");
   const [zoomOpen, setZoomOpen] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const pickRequestRef = useRef(0);
   const hostRef = useRef<HTMLDivElement>(null);
   const mobile = useMobileRemote();
   const [frame, setFrame] = useState<string>();
@@ -36,6 +39,17 @@ export function BrowserPanel({ active, scopeId, state, onState }: {
   useEffect(() => setAddress(activeTab?.url === "about:blank" ? "" : activeTab?.url ?? ""), [activeTab?.id, activeTab?.url]);
 
   const activeTabId = activeTab?.id;
+
+  useEffect(() => {
+    pickRequestRef.current += 1;
+    setPicking(false);
+    void window.coilcoil.cancelBrowserElementPick();
+  }, [activeTabId]);
+
+  useEffect(() => () => {
+    pickRequestRef.current += 1;
+    void window.coilcoil.cancelBrowserElementPick();
+  }, []);
 
   /**
    * On the phone the page is captured on the Mac and shown as frames.
@@ -121,6 +135,25 @@ export function BrowserPanel({ active, scopeId, state, onState }: {
     apply(window.coilcoil.navigateBrowser(scopeId, address));
   };
 
+  const toggleElementPicker = (): void => {
+    if (picking) {
+      pickRequestRef.current += 1;
+      setPicking(false);
+      void window.coilcoil.cancelBrowserElementPick();
+      return;
+    }
+    const request = ++pickRequestRef.current;
+    setPicking(true);
+    void window.coilcoil.pickBrowserElement(scopeId).then((selection) => {
+      if (pickRequestRef.current !== request || !selection) return;
+      onElementPicked(selection);
+    }).catch((error: unknown) => {
+      if (pickRequestRef.current === request) toastError(error instanceof Error ? error.message : String(error));
+    }).finally(() => {
+      if (pickRequestRef.current === request) setPicking(false);
+    });
+  };
+
   return (
     <section className="browser-panel">
       <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
@@ -128,6 +161,19 @@ export function BrowserPanel({ active, scopeId, state, onState }: {
         <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => apply(window.coilcoil.browserForward(scopeId))}><ArrowRight size={13} /></button>
         <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => apply(window.coilcoil.reloadBrowser(scopeId))}><RotateCw size={12} /></button>
         <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} onChange={(event) => setAddress(event.target.value)} />
+        {mobile ? null : (
+          <button
+            className={`browser-element-picker ${picking ? "active" : ""}`}
+            type="button"
+            aria-label={picking ? "取消选择网页元素" : "选择网页元素"}
+            aria-pressed={picking}
+            title={picking ? "取消选择" : "选择页面元素并附加到对话"}
+            disabled={!activeTab || activeTab.loading}
+            onClick={toggleElementPicker}
+          >
+            <MousePointer2 size={13} />
+          </button>
+        )}
         {/* 缩放是整个内置浏览器的字号，所以按钮平时只是个图标；调过之后它自己把
             当前倍数写在旁边，用户一眼知道现在不是 100%，不用点开确认。 */}
         <Popover.Root open={zoomOpen} onOpenChange={setZoomOpen}>

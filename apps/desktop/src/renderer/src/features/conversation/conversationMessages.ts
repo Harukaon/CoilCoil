@@ -36,9 +36,27 @@ function byOrder(left: ChatMessage, right: ChatMessage): number {
   return left.order - right.order || left.timestamp - right.timestamp || left.id.localeCompare(right.id);
 }
 
+function preserveUserPromptMetadata(current: ChatMessage | undefined, next: ChatMessage): ChatMessage {
+  if (!current || current.role !== "user" || next.role !== "user") return next;
+  return {
+    ...current,
+    ...next,
+    // Pi stores the model-facing serialization, not the editor's private node
+    // document. Keep the local/history document if an authoritative event
+    // arrives before the runtime metadata entry has been reconstructed.
+    ...(next.promptDocument || current.promptDocument
+      ? { promptDocument: next.promptDocument ?? current.promptDocument }
+      : {}),
+    ...(next.images || current.images
+      ? { images: next.images ?? current.images }
+      : {}),
+  };
+}
+
 function upsert(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  const current = messages.find((item) => item.id === message.id);
   const withoutCurrent = messages.filter((item) => item.id !== message.id);
-  return [...withoutCurrent, message].sort(byOrder);
+  return [...withoutCurrent, preserveUserPromptMetadata(current, message)].sort(byOrder);
 }
 
 function queuedMessages(queue: QueuedPrompt[]): ChatMessage[] {
@@ -47,6 +65,7 @@ function queuedMessages(queue: QueuedPrompt[]): ChatMessage[] {
     order: item.queuedAt,
     role: "user",
     text: item.text,
+    promptDocument: item.promptDocument,
     images: item.images,
     timestamp: item.queuedAt,
     // A promoted entry stays in the queue until its steer actually lands, so the
@@ -102,6 +121,7 @@ export function conversationMessagesReducer(
           order: item.timestamp,
           role: "user" as const,
           text: item.text,
+          promptDocument: item.promptDocument,
           images: item.images,
           timestamp: item.timestamp,
           status: "steering" as const,
@@ -120,10 +140,14 @@ export function conversationMessagesReducer(
         ...restored.filter((item) => !queuedIds.has(item.message.id)
           && !action.messages.some((message) => message.id === item.message.id)),
       ];
+      const previousById = new Map<string, ChatMessage>([
+        ...state.committed,
+        ...state.pending.map((item) => item.message),
+      ].map((message) => [message.id, message]));
       return {
         sessionPath: action.sessionPath,
         revision: action.revision,
-        committed: [...action.messages].sort(byOrder),
+        committed: action.messages.map((message) => preserveUserPromptMetadata(previousById.get(message.id), message)).sort(byOrder),
         queued,
         pending,
       };
@@ -143,10 +167,12 @@ export function conversationMessagesReducer(
     case "runtime_message":
       if (action.sessionPath && state.sessionPath && action.sessionPath !== state.sessionPath) return state;
       if (action.revision < state.revision) return state;
+      const existing = state.committed.find((message) => message.id === action.message.id)
+        ?? state.pending.find((item) => item.message.id === action.message.id)?.message;
       return {
         ...state,
         revision: action.revision,
-        committed: upsert(state.committed, action.message),
+        committed: upsert(state.committed, preserveUserPromptMetadata(existing, action.message)),
         queued: state.queued.filter((message) => message.id !== action.message.id),
         pending: state.pending.filter((item) => item.message.id !== action.message.id),
       };

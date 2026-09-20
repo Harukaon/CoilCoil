@@ -23,6 +23,7 @@ import type {
 import { McpAuthCallbackServer, sharedAuthCallbackServer, type McpAuthCallback } from "./auth-callback.js";
 import { McpConnection, type McpConnectionStatus, type McpToolSummary } from "./connection.js";
 import { credentialKey, type McpCredentialStore } from "./credential-store.js";
+import type { McpDiagnosticLogger } from "./diagnostic.js";
 import { launchFor, type EnvironmentSource } from "./definition.js";
 
 export interface McpManagerOptions {
@@ -32,6 +33,8 @@ export interface McpManagerOptions {
   callback?: McpAuthCallbackServer;
   /** Put the authorization page in front of the user. */
   openAuthorization: (url: URL) => void | Promise<void>;
+  /** Optional sink for redacted authentication diagnostics. */
+  diagnostic?: McpDiagnosticLogger;
   environment?: EnvironmentSource;
   clientVersion?: string;
 }
@@ -245,6 +248,7 @@ export class McpManager {
       // an app that never touches OAuth never opens a port.
       redirectUrl: () => this.callback.redirectUrl,
       openAuthorization: (url) => this.recordAuthorization(name, url),
+      diagnostic: this.options.diagnostic,
       environment: this.options.environment,
       clientVersion: this.options.clientVersion,
     });

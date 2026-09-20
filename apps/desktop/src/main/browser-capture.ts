@@ -1,5 +1,12 @@
 import type { WebContents } from "electron";
 
+export interface BrowserElementBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** Wide enough to read a page on a phone, small enough to push every second. */
 const DEFAULT_MAX_WIDTH = 900;
 
@@ -24,4 +31,36 @@ export async function captureGuestFrame(
   const { width } = image.getSize();
   const scaled = width > maxWidth ? image.resize({ width: maxWidth }) : image;
   return `data:image/jpeg;base64,${scaled.toJPEG(QUALITY).toString("base64")}`;
+}
+
+/** Capture only the selected DOM rectangle through CDP, never the whole page. */
+export async function captureGuestElement(
+  guest: WebContents | undefined,
+  bounds: BrowserElementBounds | undefined,
+): Promise<string | undefined> {
+  if (!guest || guest.isDestroyed() || !bounds || bounds.width <= 0 || bounds.height <= 0) return undefined;
+  if (!guest.debugger.isAttached()) return undefined;
+  const padding = 8;
+  const clip = {
+    x: Math.max(0, bounds.x - padding),
+    y: Math.max(0, bounds.y - padding),
+    width: Math.max(1, bounds.width + padding * 2),
+    height: Math.max(1, bounds.height + padding * 2),
+    scale: 1,
+  };
+  try {
+    const result = await guest.debugger.sendCommand("Page.captureScreenshot", {
+      format: "png",
+      fromSurface: true,
+      captureBeyondViewport: false,
+      clip,
+    }) as { data?: unknown };
+    if (typeof result.data !== "string" || !result.data) return undefined;
+    return `data:image/png;base64,${result.data}`;
+  } catch {
+    // A browser that is in the middle of navigation can reject one CDP frame;
+    // the caller will still receive the DOM metadata and can continue without an
+    // image rather than accidentally attaching a full-screen screenshot.
+    return undefined;
+  }
 }

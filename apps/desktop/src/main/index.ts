@@ -50,7 +50,7 @@ import { closeAllFilePreviews, closeFilePreview, openFilePreview, windowPreviewO
 import { installHostNavigationGuard } from "./host-navigation";
 import { currentPlatform, trashLabel } from "../shared/platform-labels";
 import { applicationMenuTemplate, windowBackgroundColor, windowChromeOptions } from "./window-chrome";
-import { readStoredWindowOpacity, writeStoredWindowOpacity } from "./window-opacity";
+import { writeStoredWindowOpacity } from "./window-opacity";
 import { migrateLegacyUserData } from "./data-migration";
 import {
   DIAGNOSTIC_LEVEL_ENV,
@@ -141,6 +141,8 @@ const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
 const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
 const BROWSER_CAPTURE_CHANNEL = "browser:capture";
+const BROWSER_PICK_ELEMENT_CHANNEL = "browser:pick-element";
+const BROWSER_CANCEL_PICK_CHANNEL = "browser:cancel-pick";
 const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
@@ -775,8 +777,8 @@ async function createWindow(): Promise<void> {
   }));
   const initialIcon = iconForCurrentTheme();
   const mainWindow = new BrowserWindow({
-    width: 915,
-    height: 700,
+    width: 1024,
+    height: 720,
     minWidth: 395,
     minHeight: 500,
     show: false,
@@ -826,10 +828,40 @@ async function createWindow(): Promise<void> {
   // 照那个信号停就会在用户正浏览网页时把界面上的动画停掉。BrowserWindow 的
   // focus/blur 只在整个窗口失去焦点时才触发，正是我们要的那个语义。
   const publishFocus = (focused: boolean) => (): void => {
-    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(WINDOW_FOCUS_CHANNEL, focused);
+    if (mainWindow.isDestroyed()) return;
+    diagnosticLog().info("window-drag", focused ? "window_focus" : "window_blur", {
+      focused,
+      bounds: mainWindow.getBounds(),
+      minimized: mainWindow.isMinimized(),
+      maximized: mainWindow.isMaximized(),
+      fullScreen: mainWindow.isFullScreen(),
+    });
+    mainWindow.webContents.send(WINDOW_FOCUS_CHANNEL, focused);
   };
   mainWindow.on("focus", publishFocus(true));
   mainWindow.on("blur", publishFocus(false));
+
+  // A renderer can only tell us about presses that escape the native drag
+  // region. These main-process events are the other half of the record: if a
+  // user reports a failed drag but there is no renderer press, we can now see
+  // whether the native window ever entered a move sequence. Throttle the live
+  // `move` stream so a long drag does not drown out the useful state changes.
+  let lastWindowMoveLogAt = 0;
+  const logWindowMove = (event: "move" | "moved"): void => {
+    const now = Date.now();
+    if (event === "move" && now - lastWindowMoveLogAt < 250) return;
+    lastWindowMoveLogAt = now;
+    if (mainWindow.isDestroyed()) return;
+    diagnosticLog().info("window-drag", `window_${event}`, {
+      bounds: mainWindow.getBounds(),
+      focused: mainWindow.isFocused(),
+      minimized: mainWindow.isMinimized(),
+      maximized: mainWindow.isMaximized(),
+      fullScreen: mainWindow.isFullScreen(),
+    });
+  };
+  mainWindow.on("move", () => logWindowMove("move"));
+  mainWindow.on("moved", () => logWindowMove("moved"));
 
   const webviewHostId = mainWindow.webContents.id;
   webviewHostIds.add(webviewHostId);
@@ -941,7 +973,9 @@ async function createWindow(): Promise<void> {
   // background made the app show itself, raising it over whatever the user was
   // doing. Showing the window is a startup step; it happens exactly once.
   // 透明度在 show() 之前落下去，否则窗口会先按不透明画出来再跳一下。
-  mainWindow.setOpacity(readStoredWindowOpacity(windowOpacityFile()));
+  // 不再用 BrowserWindow.setOpacity() 做透明：它会连同文字一起变淡。
+  // 透明效果由渲染层的表面毛玻璃控制，窗口本身保持不透明，避免启动时出现一帧旧透明度。
+  mainWindow.setOpacity(1);
   mainWindow.once("ready-to-show", () => {
     markDeliberateReveal();
     mainWindow.show();
@@ -1204,6 +1238,8 @@ app.whenReady().then(async () => {
     browserFor(event).setUiScope(scopeId, workspacePath));
   ipcMain.handle(BROWSER_GET_STATE_CHANNEL, (event, scopeId: string) => browserFor(event).state(scopeId));
   ipcMain.handle(BROWSER_CAPTURE_CHANNEL, (event, scopeId: string) => browserFor(event).captureTab(scopeId));
+  ipcMain.handle(BROWSER_PICK_ELEMENT_CHANNEL, (event, scopeId: string) => browserFor(event).pickElement(scopeId));
+  ipcMain.handle(BROWSER_CANCEL_PICK_CHANNEL, (event): void => browserFor(event).cancelElementPick());
   ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string) => browserFor(event).createTab(url, true, scopeId));
   ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).selectTab(id, scopeId));
   ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).closeTab(id, scopeId));

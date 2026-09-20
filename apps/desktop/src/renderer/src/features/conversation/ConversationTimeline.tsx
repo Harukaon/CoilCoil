@@ -11,6 +11,7 @@ import type {
   ModelOption,
   PlanApprovalState,
   ProjectSelection,
+  PromptDocument,
   PromptImage,
   RuntimeConfiguration,
   SessionSnapshot,
@@ -18,7 +19,9 @@ import type {
   ToolRun,
 } from "@coilcoil/runtime-protocol";
 import { ConversationComposer } from "../composer/ConversationComposer";
-import { clipboardImage, imageDataUrl } from "../composer/promptImages";
+import type { PromptEditorHandle } from "../composer/PromptEditor";
+import { appendPromptImages, clipboardImage, imageDataUrl } from "../composer/promptImages";
+import { promptDocumentFromText, promptDocumentText, replaceTextRange } from "../composer/promptDocument";
 import { inAppBrowserModifierLabel, markdownBrowserUrl } from "../browser/useInAppBrowserLinks";
 import { ConfirmDialog } from "../../ui/dialog";
 import { CollapsibleCodeBlock } from "./CollapsibleCodeBlock";
@@ -212,6 +215,24 @@ function ImageStrip({ images }: { images: PromptImage[] }): React.JSX.Element | 
   );
 }
 
+function PromptDocumentView({ document }: { document: PromptDocument }): React.JSX.Element {
+  return (
+    <span className="user-bubble-text">
+      {document.parts.map((part, index) => part.type === "text" ? (
+        <Fragment key={`text-${index}`}>{part.text}</Fragment>
+      ) : (
+        <span
+          className="prompt-editor-element prompt-history-element"
+          key={part.id}
+          title={`${part.element.pageTitle || "网页元素"}\n${part.element.selector}`}
+        >
+          {part.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function isInsideComposerChrome(target: EventTarget | null, shell: HTMLElement | null): boolean {
   if (!(target instanceof Node)) return false;
   if (shell?.contains(target)) return true;
@@ -239,11 +260,14 @@ export function MessageView({
   selectedModel,
   thinkingLevel,
   modelChanging,
+  fast,
   runtimeId,
   onEditingChange,
   onRewind,
   onError,
   onSelectModel,
+  onConfigureModelOptions,
+  onFastChange,
   onOpenSettings,
 }: {
   message: ChatMessage;
@@ -254,26 +278,29 @@ export function MessageView({
   selectedModel?: SessionSnapshot["model"];
   thinkingLevel?: RuntimeConfiguration["thinkingLevel"];
   modelChanging: boolean;
+  fast?: boolean;
   runtimeId?: string;
   onEditingChange: (editing: boolean) => void;
-  onRewind: (message: ChatMessage, text: string, images: PromptImage[]) => Promise<void>;
+  onRewind: (message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument) => Promise<void>;
   onError: (message: string) => void;
   onSelectModel: (model: ModelOption) => void;
+  onConfigureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow?: number) => Promise<void>;
+  onFastChange: (enabled: boolean) => Promise<void>;
   onOpenSettings: () => void;
 }): React.JSX.Element {
-  const [value, setValue] = useState(message.text);
+  const [documentValue, setDocumentValue] = useState<PromptDocument>(() => message.promptDocument ?? promptDocumentFromText(message.text));
   const [images, setImages] = useState<PromptImage[]>(message.images ?? []);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<PromptEditorHandle>(null);
   const composingRef = useRef(false);
 
   useEffect(() => {
     if (editing) return;
-    setValue(message.text);
+    setDocumentValue(message.promptDocument ?? promptDocumentFromText(message.text));
     setImages(message.images ?? []);
-  }, [editing, message.images, message.text]);
+  }, [editing, message.images, message.promptDocument, message.text]);
 
   useEffect(() => {
     if (!editing) {
@@ -290,26 +317,33 @@ export function MessageView({
   }, [confirmOpen, editing, modelMenuOpen, onEditingChange]);
 
   const proceed = (remember: boolean): void => {
-    const prompt = value.trim();
+    const prompt = promptDocumentText(documentValue).trim();
     if ((!prompt && !images.length) || !message.entryId) return;
     if (remember) window.localStorage.setItem(REWIND_WARNING_DISMISSED_KEY, "true");
     setConfirmOpen(false);
     onEditingChange(false);
-    void onRewind(message, prompt, images);
+    void onRewind(message, prompt, images, documentValue);
   };
 
   const requestRewind = (): void => {
-    if ((!value.trim() && !images.length) || !message.entryId) return;
+    if ((!promptDocumentText(documentValue).trim() && !images.length) || !message.entryId) return;
     if (window.localStorage.getItem(REWIND_WARNING_DISMISSED_KEY) === "true") proceed(false);
     else setConfirmOpen(true);
   };
 
-  const pasteImages = (event: ReactClipboardEvent<HTMLTextAreaElement>): void => {
+  const pasteImages = (event: ReactClipboardEvent<HTMLDivElement>): void => {
     const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
     if (!files.length) return;
     event.preventDefault();
     void Promise.all(files.map(clipboardImage))
-      .then((next) => setImages((current) => [...current, ...next]))
+      .then((next) => setImages((current) => {
+        try {
+          return appendPromptImages(current, next);
+        } catch (caught) {
+          onError(caught instanceof Error ? caught.message : String(caught));
+          return current;
+        }
+      }))
       .catch((caught) => onError(caught instanceof Error ? caught.message : String(caught)));
   };
 
@@ -324,12 +358,14 @@ export function MessageView({
               running={false}
               loading={false}
               startingSession={false}
-              draft={value}
+              draft={promptDocumentText(documentValue)}
+              document={documentValue}
               images={images}
               inputRef={textareaRef}
               configuration={configuration}
               selectedModel={selectedModel}
               thinkingLevel={thinkingLevel}
+              fast={fast}
               modelMenuOpen={modelMenuOpen}
               modelChanging={modelChanging}
               autoFocus
@@ -337,7 +373,8 @@ export function MessageView({
                 event.preventDefault();
                 requestRewind();
               }}
-              onDraftChange={setValue}
+              onDocumentChange={setDocumentValue}
+              onReplaceTextRange={(start, end, replacement) => setDocumentValue((current) => replaceTextRange(current, start, end, replacement))}
               onImagesChange={setImages}
               onPaste={pasteImages}
               onCompositionStart={() => { composingRef.current = true; }}
@@ -346,7 +383,7 @@ export function MessageView({
                 if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
+                  event.currentTarget.closest("form")?.requestSubmit();
                 }
               }}
               onModelMenuOpenChange={setModelMenuOpen}
@@ -354,6 +391,8 @@ export function MessageView({
                 setModelMenuOpen(false);
                 onSelectModel(model);
               }}
+              onConfigureModelOptions={onConfigureModelOptions}
+              onFastChange={onFastChange}
               onOpenSettings={() => {
                 setModelMenuOpen(false);
                 onOpenSettings();
@@ -367,12 +406,12 @@ export function MessageView({
             className={`user-bubble user-bubble-button ${message.status === "queued" ? "queued" : ""} ${message.status === "steering" ? "steering" : ""}`}
             type="button"
             title={message.entryId ? "点击编辑并从这里重新开始" : undefined}
-            data-prompt-value={value}
+            data-prompt-value={promptDocumentText(documentValue)}
             disabled={disabled || !message.entryId}
             onClick={() => onEditingChange(true)}
           >
-            {value ? <span className="user-bubble-text">{value}</span> : null}
             <ImageStrip images={images} />
+            {message.promptDocument ? <PromptDocumentView document={message.promptDocument} /> : promptDocumentText(documentValue) ? <span className="user-bubble-text">{promptDocumentText(documentValue)}</span> : null}
             {message.status === "queued" ? (
               <span className="user-message-queue-status"><LoaderCircle className="spin" size={12} />排队中</span>
             ) : null}

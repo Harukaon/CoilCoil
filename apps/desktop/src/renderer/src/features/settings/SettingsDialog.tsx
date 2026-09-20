@@ -99,7 +99,7 @@ function ToolPurposePolicyToggle({ configuration, runtimeId, onSaved }: {
       type="checkbox"
       aria-label="强制工具调用填写目的"
       checked={enabled}
-      disabled={saving || !runtimeId}
+      disabled={saving}
       onChange={(event) => { void toggle(event.target.checked); }}
     />
     <span>工具目的</span>
@@ -753,12 +753,12 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
               时把这个按钮放回去即可。 */}
           {mobile ? null : <button className={section === "remote" ? "active" : ""} type="button" onClick={() => setSection("remote")}><Smartphone size={15} />远程控制</button>}
           <button className={section === "appearance" ? "active" : ""} type="button" onClick={() => setSection("appearance")}><Palette size={15} />外观</button>
+          {onReplayOnboarding && !mobile ? (
+            <button className="settings-sidebar-replay" type="button" onClick={onReplayOnboarding}>
+              <Compass size={14} />重新查看引导
+            </button>
+          ) : null}
         </nav>
-        {onReplayOnboarding && !mobile ? (
-          <button className="settings-sidebar-replay" type="button" onClick={onReplayOnboarding}>
-            <Compass size={14} />重新查看引导
-          </button>
-        ) : null}
         <div className="settings-version" title={appVersion ? `CoilCoil ${appVersion}` : undefined}>
           {appVersion ? `CoilCoil ${appVersion}` : ""}
         </div>

@@ -99,6 +99,10 @@ export const REMOTE_PUSH_CHANNELS = [
 export function bridgeScript(platform: DesktopPlatform): string {
   return `(function () {
   "use strict";
+  // The Vite dev page is also loaded by Electron itself. Its preload bridge is
+  // the real desktop transport; never replace it with the browser WebSocket
+  // bridge or the desktop window would compete with the phone for the lease.
+  if (window.coilcoil && !window.coilcoil.isRemote) return;
   var pending = new Map();
   var listeners = new Map();
   var queue = [];
@@ -255,6 +259,8 @@ export function bridgeScript(platform: DesktopPlatform): string {
     setBrowserScope: function (scopeId, workspacePath) { return invoke("browser:set-scope", [scopeId, workspacePath]); },
     getBrowserState: function (scopeId) { return invoke("browser:get-state", [scopeId]); },
     captureBrowserTab: function (scopeId) { return invoke("browser:capture", [scopeId]); },
+    pickBrowserElement: resolves(undefined),
+    cancelBrowserElementPick: resolves(undefined),
     createBrowserTab: function (scopeId, url) { return invoke("browser:create-tab", [scopeId, url]); },
     selectBrowserTab: function (scopeId, id) { return invoke("browser:select-tab", [scopeId, id]); },
     closeBrowserTab: function (scopeId, id) { return invoke("browser:close-tab", [scopeId, id]); },

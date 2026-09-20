@@ -1579,7 +1579,7 @@
       "body": "我加了一个mcp，这个mcp需要oauth ，但是我发现我 浏览器登录后没有回调回去，这里肯定是有问题的，而且不直观，我希望只要是涉及认证的，我们都可以点击认证后，出现一个弹窗（如果是浏览器oauth） 打开浏览器，并且提示用户在浏览器登录后，之类的",
       "area": "未分类",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r4b",
@@ -1608,7 +1608,8 @@
         }
       ],
       "createdBy": "user",
-      "createdAt": "2026-09-05T15:06:40.120Z"
+      "createdAt": "2026-09-05T15:06:40.120Z",
+      "statusAt": "2026-09-08T08:27:05.032Z"
     },
     {
       "id": 39,
@@ -1616,7 +1617,7 @@
       "body": "现在需要关闭这个功能，暂时这个功能不完善也没啥用",
       "area": "未分类",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r4c",
@@ -1638,7 +1639,8 @@
         }
       ],
       "createdBy": "user",
-      "createdAt": "2026-09-05T15:07:23.111Z"
+      "createdAt": "2026-09-05T15:07:23.111Z",
+      "statusAt": "2026-09-08T08:27:32.553Z"
     },
     {
       "id": 40,
@@ -1646,7 +1648,7 @@
       "body": "这个图标需要也同步换到左下角那个地方",
       "area": "未分类",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r4c",
@@ -1670,7 +1672,8 @@
         }
       ],
       "createdBy": "user",
-      "createdAt": "2026-09-05T15:08:10.460Z"
+      "createdAt": "2026-09-05T15:08:10.460Z",
+      "statusAt": "2026-09-08T08:27:36.636Z"
     },
     {
       "id": 41,
@@ -1711,7 +1714,7 @@
       "body": "这个模块是有问题的绝对不可能每一轮就检查\n肯定 是多轮才检查，默认可以配置为30轮检查一次，然后这里的 30是可以配置的",
       "area": "未分类",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r5b",
@@ -1751,7 +1754,8 @@
         }
       ],
       "createdBy": "user",
-      "createdAt": "2026-09-05T15:13:05.504Z"
+      "createdAt": "2026-09-05T15:13:05.504Z",
+      "statusAt": "2026-09-08T08:27:49.098Z"
     },
     {
       "id": 43,
@@ -1759,7 +1763,7 @@
       "body": "是否在每一轮都有 注入？ 没有注入todo的话，ai创建了todo后面很容易忘记更新之类的",
       "area": "未分类",
       "priority": "medium",
-      "status": "review",
+      "status": "done",
       "agentNotes": [
         {
           "by": "r5c",
@@ -1780,7 +1784,8 @@
         }
       ],
       "createdBy": "user",
-      "createdAt": "2026-09-05T15:15:10.431Z"
+      "createdAt": "2026-09-05T15:15:10.431Z",
+      "statusAt": "2026-09-08T08:27:55.148Z"
     }
   ]
 }

@@ -212,12 +212,28 @@ async function dismissFirstRunSettings(client, required) {
   await client.waitFor(`Boolean(document.querySelector('.conversation-pane'))`, "The workspace did not return after closing first-run settings.", 10_000);
 }
 
+async function finishOnboarding(client) {
+  for (let step = 0; step < 5; step += 1) {
+    const active = await client.evaluate(`Boolean(document.querySelector(".onboarding-screen"))`);
+    if (!active) return;
+    const advanced = await client.evaluate(`(() => {
+      const skip = document.querySelector(".onboarding-skip:not(:disabled)");
+      const next = document.querySelector(".onboarding-next:not(:disabled)");
+      (skip || next)?.click();
+      return Boolean(skip || next);
+    })()`);
+    if (!advanced) throw new Error("The onboarding screen did not offer a way to continue.");
+    await delay(120);
+  }
+  throw new Error("The onboarding screen did not finish.");
+}
+
 async function fillComposer(client, prompt) {
   const filled = await client.evaluate(`(() => {
-    const input = document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]');
+    const input = document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]');
     if (!input) return false;
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(input, ${JSON.stringify(prompt)});
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.textContent = ${JSON.stringify(prompt)};
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: ${JSON.stringify(prompt)} }));
     input.dispatchEvent(new Event("keyup", { bubbles: true }));
     return true;
   })()`);
@@ -228,7 +244,7 @@ async function fillComposer(client, prompt) {
 async function fillAndSubmitComposer(client, prompt) {
   await fillComposer(client, prompt);
   return client.evaluate(`(() => {
-    const input = document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]');
+    const input = document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]');
     const form = input?.closest("form");
     if (!form) return false;
     form.requestSubmit();
@@ -415,8 +431,9 @@ async function main() {
       `document.readyState === "complete" && typeof window.coilcoil === "object"`,
       "The renderer or preload bridge did not become ready.",
     );
+    await finishOnboarding(client);
     await client.waitFor(
-      `document.querySelector(".project-name")?.textContent === "Home" && Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]'))`,
+      `document.querySelector(".project-name")?.textContent === "Home" || Boolean(document.querySelector('button[aria-label="返回工作区"]'))`,
       "The desktop app did not initialize its private Home workspace.",
       45_000,
     );
@@ -556,7 +573,7 @@ async function main() {
       10_000,
     );
     const slashUi = await client.evaluate(`(() => ({
-      draft: document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]')?.value || "",
+      draft: document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]')?.textContent || "",
       commandsHeader: document.querySelector(".composer-activity-header strong")?.textContent || "",
       commandsTab: [...document.querySelectorAll('.composer-activity [role="tab"]')].some((tab) => tab.textContent.includes("命令") && tab.getAttribute("aria-selected") === "true"),
       commandRows: document.querySelectorAll(".composer-command-list button").length,
@@ -1029,23 +1046,30 @@ async function main() {
     }
     await client.evaluate(`document.querySelector(".agent-mode")?.click()`);
     await client.waitFor(`!document.querySelector(".model-popover") && !document.querySelector(".model-submenu")`, "The model menu did not close.");
-    // 拖动改成「标题栏里铺一层 .window-drag-layer，交互元素在它上面挖洞」之后
-    // （#5），.inspector-drag-surface 不再自己是拖动区，它是那条永远不会被标签条吃
-    // 掉的空带。所以这里验的是：拖动层在、真的可拖，空带还留着宽度。
+    // 拖动改成「标题栏里铺一层 .window-drag-layer，交互元素在它上面挖洞」之后，
+    // 不再额外渲染一个 .inspector-drag-surface。这里验证拖动层覆盖标题栏，
+    // 标签条仍然是 no-drag 的交互区域。
     const inspectorDragSurface = await client.evaluate(`(() => {
       const header = document.querySelector(".inspector-header");
       const layer = header?.querySelector(".window-drag-layer");
-      const spacer = document.querySelector(".inspector-drag-surface");
-      if (!header || !layer || !spacer) return null;
+      const nav = header?.querySelector(".inspector-nav");
+      if (!(header instanceof HTMLElement) || !(layer instanceof HTMLElement) || !(nav instanceof HTMLElement)) return null;
+      const headerBox = header.getBoundingClientRect();
+      const layerBox = layer.getBoundingClientRect();
       return {
         region: getComputedStyle(layer).webkitAppRegion,
-        layerWidth: layer.getBoundingClientRect().width,
-        spacerWidth: spacer.getBoundingClientRect().width,
+        layerWidth: layerBox.width,
+        layerHeight: layerBox.height,
+        headerWidth: headerBox.width,
+        headerHeight: headerBox.height,
+        navRegion: getComputedStyle(nav).webkitAppRegion,
       };
     })()`);
     assert.equal(inspectorDragSurface?.region, "drag", "右侧栏标题条没有可拖动的那一层。");
     assert.ok(inspectorDragSurface.layerWidth > 0, "拖动层没有铺开。");
-    assert.ok(inspectorDragSurface.spacerWidth >= 40, `标签条把拖动空带吃没了：${inspectorDragSurface.spacerWidth}px`);
+    assert.equal(inspectorDragSurface.layerWidth, inspectorDragSurface.headerWidth, "拖动层没有覆盖整个右侧栏标题条。");
+    assert.equal(inspectorDragSurface.layerHeight, inspectorDragSurface.headerHeight, "拖动层没有覆盖整个右侧栏标题条。");
+    assert.equal(inspectorDragSurface.navRegion, "no-drag", "右侧栏标签条必须保留交互区域。");
     const runtimeIsolation = await client.evaluate(`(async () => {
       const first = await window.coilcoil.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryA)} });
       const second = await window.coilcoil.request({ type: "create_session", cwd: ${JSON.stringify(concurrentDirectoryB)} });
@@ -1450,14 +1474,15 @@ async function main() {
       "The conversation sidebar did not restore after its minimum-width drag test.",
     );
     const openInspectorDragSurface = await client.evaluate(`(() => {
-      const surface = document.querySelector(".inspector-drag-surface");
-      const bounds = surface?.getBoundingClientRect();
-      if (!surface || !bounds) return null;
-      const center = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
-      return { width: bounds.width, hit: center === surface };
+      const header = document.querySelector(".inspector-header");
+      const layer = header?.querySelector(".window-drag-layer");
+      const bounds = layer?.getBoundingClientRect();
+      if (!(layer instanceof HTMLElement) || !bounds) return null;
+      return { width: bounds.width, height: bounds.height, region: getComputedStyle(layer).webkitAppRegion };
     })()`);
     assert.ok((openInspectorDragSurface?.width ?? 0) >= 12);
-    assert.equal(openInspectorDragSurface?.hit, true);
+    assert.ok((openInspectorDragSurface?.height ?? 0) >= 12);
+    assert.equal(openInspectorDragSurface?.region, "drag");
     const rightHandle = await client.evaluate(`(() => {
       const bounds = document.querySelector(".right-resizer")?.getBoundingClientRect();
       return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;
@@ -1570,7 +1595,7 @@ async function main() {
     await client.waitFor(`typeof window.__coilcoilSmokeReloading === "undefined"`, "The packaged renderer did not finish the project reload.", 45_000);
     await dismissFirstRunSettings(client, !hasConfiguredProvider);
     await client.waitFor(
-      `Boolean(document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]')) && [...document.querySelectorAll(".project-name")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
+      `Boolean(document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]')) && [...document.querySelectorAll(".project-name")].some((item) => item.textContent === ${JSON.stringify(basename(projectDirectory))}) && Boolean(document.querySelector(".conversation-header"))`,
       "The packaged app could not create a project session through IPC.",
       45_000,
     );
@@ -1616,7 +1641,7 @@ async function main() {
         pendingTitle: document.querySelector(".conversation-title strong")?.textContent || "",
         pendingRow: Boolean(tree?.querySelector(".conversation-row.pending")),
         loading: Boolean(document.querySelector(".loading-state")),
-        textareaDisabled: document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]')?.disabled ?? true,
+        textareaDisabled: document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]')?.getAttribute("contenteditable") !== "true",
         conversationPane: Boolean(document.querySelector(".conversation-pane")),
         activeProjects: [...document.querySelectorAll(".project-tree.active .project-name")].map((item) => item.textContent),
       };
@@ -1632,8 +1657,8 @@ async function main() {
       const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (value) => value.charCodeAt(0));
       const transfer = new DataTransfer();
       transfer.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
-      const textarea = document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]');
-      textarea?.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
+      const editor = document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]');
+      editor?.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
     })()`);
     await client.waitFor(`Boolean(document.querySelector(".composer-images img"))`, "Pasted images did not appear in the composer.");
     await client.evaluate(`(() => {
@@ -1745,9 +1770,9 @@ async function main() {
     assert.match(draggedPaths?.value ?? "", /'\/[^']+\/lazy-folder\/lazy-child\.txt'/);
     assert.equal(draggedPaths?.overlay, false);
     await client.evaluate(`(() => {
-      const editor = document.querySelector('textarea[aria-label="发送消息给 CoilCoil"]');
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(editor, "");
-      editor.dispatchEvent(new Event("input", { bubbles: true }));
+      const editor = document.querySelector('[contenteditable="true"][aria-label="发送消息给 CoilCoil"]');
+      if (editor) editor.textContent = "";
+      editor?.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
     })()`);
     await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="文件"]')?.click()`);
     await client.evaluate(`[...document.querySelectorAll(".file-leaf")].find((item) => item.textContent.includes("lazy-child.txt"))?.click()`);
@@ -1867,9 +1892,9 @@ async function main() {
       assert.equal(restoredConversationTitle.tooltip, expectedConversationTitle, "The conversation title tooltip did not preserve the full title.");
       assert.ok(restoredConversationTitle.visibleWidth > 0 && restoredConversationTitle.visibleWidth <= 620, `The conversation title did not respect the available header width: ${JSON.stringify(restoredConversationTitle)}`);
       await client.evaluate(`document.querySelector(".user-bubble-button")?.click()`);
-      await client.waitFor(`Boolean(document.querySelector('textarea[aria-label="编辑历史消息"]'))`, "The historical message did not enter edit mode.");
+      await client.waitFor(`Boolean(document.querySelector('[contenteditable="true"][aria-label="编辑历史消息"]'))`, "The historical message did not enter edit mode.");
       const historicalImageBeforePaste = await client.evaluate(`(() => {
-        const editor = document.querySelector('textarea[aria-label="编辑历史消息"]');
+        const editor = document.querySelector('[contenteditable="true"][aria-label="编辑历史消息"]');
         const before = document.querySelectorAll(".user-message-editor-shell .composer-images img").length;
         const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (value) => value.charCodeAt(0));
         const transfer = new DataTransfer();
@@ -1882,7 +1907,7 @@ async function main() {
       await client.evaluate(`document.querySelector('.user-message-editor-shell button[aria-label="移除图片"]')?.click()`);
       await client.waitFor(`document.querySelectorAll(".user-message-editor-shell .composer-images img").length === 1`, "The historical image was not removed from the editor.");
       await client.evaluate(`document.querySelector(".conversation-header")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))`);
-      await client.waitFor(`!document.querySelector('textarea[aria-label="编辑历史消息"]') && document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The edited historical image state did not return to the message bubble.");
+      await client.waitFor(`!document.querySelector('[contenteditable="true"][aria-label="编辑历史消息"]') && document.querySelectorAll(".user-bubble-button .message-image img").length === 1`, "The edited historical image state did not return to the message bubble.");
       await client.waitFor(`Boolean(document.querySelector(".tool-activity-row"))`, "The packaged renderer did not restore the historical tool run.", 60_000);
       const preservedProviderFailure = await client.evaluate(`({
         tool: Boolean(document.querySelector(".tool-activity-row")),

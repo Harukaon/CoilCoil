@@ -294,7 +294,11 @@ export class RuntimeServer {
     return { sessions, snapshot: await this.openSession(cwd, sessionPath) };
   }
 
-  private async createSession(cwd: string, model?: Extract<RuntimeCommand, { type: "create_session" }>["model"]): Promise<SessionSnapshot> {
+  private async createSession(
+    cwd: string,
+    model?: Extract<RuntimeCommand, { type: "create_session" }>["model"],
+    agentMode?: Extract<RuntimeCommand, { type: "create_session" }>["agentMode"],
+  ): Promise<SessionSnapshot> {
     // Creating a blank conversation is a newer navigation intent than any
     // historical restore that may still be queued or running.
     this.desiredSessionPath = undefined;
@@ -302,7 +306,7 @@ export class RuntimeServer {
     const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
     this.runtimes.set(runtimeId, runtime);
     try {
-      const snapshot = this.decorateSnapshot(runtimeId, await runtime.createSession(cwd, model));
+      const snapshot = this.decorateSnapshot(runtimeId, await runtime.createSession(cwd, model, agentMode));
       this.defaultRuntimeId = runtimeId;
       this.retireExcessIdleRuntimes(runtimeId);
       return snapshot;
@@ -375,7 +379,7 @@ export class RuntimeServer {
   }
 
   private async dispatch(command: RuntimeCommand, runtimeId?: string): Promise<unknown> {
-    if (command.type === "create_session") return this.createSession(command.cwd, command.model);
+    if (command.type === "create_session") return this.createSession(command.cwd, command.model, command.agentMode);
     if (command.type === "open_session") return this.openSession(command.cwd, command.sessionPath);
     if (command.type === "open_workspace") return this.openWorkspace(command.cwd);
     // 任务面板那条运行不属于任何会话，也不该借用某个会话的运行时：它自己起、自己
@@ -588,11 +592,11 @@ export class RuntimeServer {
       case "move_session":
         return runtime.moveSession(command.cwd, command.sessionPath, command.targetCwd);
       case "prompt":
-        return runtime.prompt(command.text, command.images, command.clientMessageId);
+        return runtime.prompt(command.text, command.images, command.clientMessageId, command.promptDocument);
       case "rewind_prompt":
-        return runtime.rewindPrompt(command.entryId, command.text, command.images, command.clientMessageId);
+        return runtime.rewindPrompt(command.entryId, command.text, command.images, command.clientMessageId, command.promptDocument);
       case "steer":
-        return runtime.steer(command.text, command.images, command.clientMessageId);
+        return runtime.steer(command.text, command.images, command.clientMessageId, command.promptDocument);
       case "abort":
         return runtime.abort();
       case "stop_goal":

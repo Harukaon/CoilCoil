@@ -10,6 +10,7 @@ import {
   createEventBus,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type AgentMode,
   type ContextClearingRecord,
   type GoalState,
   type MoveSessionResult,
@@ -46,6 +47,8 @@ import {
   CONTEXT_SUMMARY_TRIM_EVENT,
   MAX_CONTEXT_CLEARINGS,
   PROJECT_MEMORY_STATUS_EVENT,
+  RUNTIME_BRIDGE_COMMAND_EVENT,
+  RUNTIME_BRIDGE_REPLY_PREFIX,
   RUNTIME_BRIDGE_STATE_EVENT,
   SUBAGENT_ACTIVITY_CHANNEL,
   projectMemoryStatusByCwd,
@@ -295,12 +298,12 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       : { sessions };
   }
 
-  async createSession(cwd: string, selection?: SessionModelSelection): Promise<SessionSnapshot> {
+  async createSession(cwd: string, selection?: SessionModelSelection, agentMode?: AgentMode): Promise<SessionSnapshot> {
     const resolvedCwd = safeRealPath(cwd);
     if (!existsSync(resolvedCwd) || !statSync(resolvedCwd).isDirectory()) {
       throw new Error(`Project directory does not exist: ${resolvedCwd}`);
     }
-    return this.installSession(resolvedCwd, SessionManager.create(resolvedCwd, this.sessionDir), selection);
+    return this.installSession(resolvedCwd, SessionManager.create(resolvedCwd, this.sessionDir), selection, agentMode);
   }
 
   async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
@@ -314,6 +317,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     cwd: string,
     sessionManager: SessionManager,
     initialModel?: SessionModelSelection,
+    initialAgentMode?: AgentMode,
   ): Promise<SessionSnapshot> {
     const timingEnabled = process.env.COILCOIL_RUNTIME_TIMING === "1";
     const timingStartedAt = Date.now();
@@ -548,6 +552,34 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     compactionModelSource = created.session;
     await created.session.bindExtensions({});
     markTiming("bindExtensions");
+    if (initialAgentMode) {
+      const requestId = `coilcoil-runtime-mode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const replyChannel = `${RUNTIME_BRIDGE_REPLY_PREFIX}${requestId}`;
+      try {
+        await new Promise<void>((resolvePromise, rejectPromise) => {
+          const unsubscribe = eventBus.on(replyChannel, (raw) => {
+            if (!isRecord(raw)) return;
+            clearTimeout(timer);
+            unsubscribe();
+            if (raw.ok === true) resolvePromise();
+            else rejectPromise(new Error(typeof raw.error === "string" ? raw.error : "设置会话模式失败。"));
+          });
+          const timer = setTimeout(() => {
+            unsubscribe();
+            rejectPromise(new Error("设置会话模式超时。"));
+          }, 8_000);
+          eventBus.emit(RUNTIME_BRIDGE_COMMAND_EVENT, {
+            version: 1,
+            requestId,
+            method: "set-agent-mode",
+            agentMode: initialAgentMode,
+          });
+        });
+      } catch (error) {
+        await shutdownAgentSession(created.session, "quit").catch(() => undefined);
+        throw error;
+      }
+    }
     if (created.session.model) {
       const effectiveModel = this.modelWithRuntimeOptions(created.session.model);
       if (effectiveModel !== created.session.model) await created.session.setModel(effectiveModel);
@@ -586,6 +618,9 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       plan: reconstructed.plan,
       project,
       messageIds: new WeakMap(),
+      pendingPromptDocuments: new Map(),
+      promptDocumentsByMessageId: new Map(),
+      promptDocumentsByEntryId: reconstructed.promptDocumentsByEntryId,
       messageRevision: 0,
       pendingUserPrompts: [],
       promptQueue: [],

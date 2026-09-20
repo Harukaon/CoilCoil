@@ -9,11 +9,20 @@ import {
   monoFontStack,
   MONO_FONTS,
   resolveMonoFont,
+  resolveTransparencyMode,
   resolveUiFont,
   SURFACE_STYLES,
   uiFontStack,
   UI_FONTS,
 } from "../src/renderer/src/theme.ts";
+
+test("透明效果只允许关闭、左侧栏或整窗毛玻璃", () => {
+  assert.equal(resolveTransparencyMode("off"), "off");
+  assert.equal(resolveTransparencyMode("sidebar"), "sidebar");
+  assert.equal(resolveTransparencyMode("window"), "window");
+  assert.equal(resolveTransparencyMode("0.96"), "off");
+  assert.equal(resolveTransparencyMode(null), "off");
+});
 
 test("new installations default to the layered surface style", () => {
   assert.equal(DEFAULT_SURFACE_STYLE, "layered");

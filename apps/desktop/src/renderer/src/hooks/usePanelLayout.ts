@@ -52,6 +52,11 @@ export function panelOpenGrowth(windowWidth: number): number {
 /**
  * Fit the panels to the window while honouring the user's preferred widths.
  *
+ * A collapsed panel keeps its fitted width so its grid track never compresses
+ * while it is hidden. The chat pane is layered over that track instead. Open
+ * panels are the only ones that consume the visible conversation budget, so a
+ * very wide hidden inspector cannot prevent the chat from filling the window.
+ *
  * The inspector keeps the width the user dragged it to; it is only narrowed
  * when the window cannot otherwise leave the conversation its 315px floor.
  * The inspector never drops below its 200px minimum while open, so on a window
@@ -65,22 +70,20 @@ export function fitPanelWidths({ windowWidth, leftOpen, rightOpen, preferredLeft
   preferredLeftWidth: number;
   preferredRightWidth: number;
 }): { leftWidth: number; rightWidth: number } {
-  let leftWidth = Math.max(MINIMUM_LEFT_PANEL_WIDTH, preferredLeftWidth);
-  let rightWidth = Math.max(MINIMUM_RIGHT_PANEL_WIDTH, preferredRightWidth);
+  const leftFloor = MINIMUM_LEFT_PANEL_WIDTH;
+  const rightFloor = MINIMUM_RIGHT_PANEL_WIDTH;
+  let leftWidth = Math.max(leftFloor, preferredLeftWidth);
+  let rightWidth = Math.max(rightFloor, preferredRightWidth);
 
   if (rightOpen) {
     const shared = windowWidth - (leftOpen ? leftWidth : 0);
-    rightWidth = Math.max(
-      MINIMUM_RIGHT_PANEL_WIDTH,
-      Math.min(rightWidth, shared - MINIMUM_CONVERSATION_WIDTH),
-    );
+    rightWidth = Math.max(rightFloor, Math.min(rightWidth, shared - MINIMUM_CONVERSATION_WIDTH));
   }
 
-  const deficit = Math.max(
-    0,
-    (leftOpen ? leftWidth : 0) + (rightOpen ? rightWidth : 0) + MINIMUM_CONVERSATION_WIDTH - windowWidth,
-  );
-  if (deficit > 0 && leftOpen) leftWidth -= Math.min(deficit, Math.max(0, leftWidth - MINIMUM_LEFT_PANEL_WIDTH));
+  const visibleLeftWidth = leftOpen ? leftWidth : 0;
+  const visibleRightWidth = rightOpen ? rightWidth : 0;
+  const deficit = Math.max(0, visibleLeftWidth + visibleRightWidth + MINIMUM_CONVERSATION_WIDTH - windowWidth);
+  if (deficit > 0 && leftOpen) leftWidth -= Math.min(deficit, Math.max(0, leftWidth - leftFloor));
 
   return { leftWidth: Math.round(leftWidth), rightWidth: Math.round(rightWidth) };
 }
@@ -129,8 +132,11 @@ export function usePanelLayout(options: {
         preferredLeftWidth: preferredLeftWidthRef.current,
         preferredRightWidth: preferredRightWidthRef.current,
       });
-      setLeftWidth(leftOpen ? fitted.leftWidth : Math.round(preferredLeftWidthRef.current));
-      setRightWidth(rightOpen ? fitted.rightWidth : Math.round(preferredRightWidthRef.current));
+      // Keep the CSS tracks stable while a panel is hidden. The pane is
+      // visually covered by the chat, and its preferred width remains ready
+      // for reopening without compressing internal content.
+      setLeftWidth(fitted.leftWidth);
+      setRightWidth(fitted.rightWidth);
       void window.coilcoil.setWindowMinimumWidth(minimumWindowWidth(leftOpen, rightOpen));
     };
     fitPanelsToWindow();
@@ -148,6 +154,9 @@ export function usePanelLayout(options: {
     document.body.classList.add("resizing-panels");
     const move = (pointer: PointerEvent): void => {
       const raw = side === "left" ? startWidth + pointer.clientX - startX : startWidth + startX - pointer.clientX;
+      // A hidden panel must not consume the visible panel's resize budget. Use
+      // the open state as well as the fitted width to avoid the one render
+      // between toggling a panel and the fitting effect collapsing its track.
       const oppositeWidth = side === "left"
         ? (rightOpen ? rightWidth : 0)
         : (leftOpen ? leftWidth : 0);

@@ -42,6 +42,8 @@ const DRAG_BAR_HOSTS = [
   "memory-workspace-header",
   "issue-board-header",
   "sidebar-drag",
+  "app-sidebar-control-bar",
+  "conversation-inspector-control-bar",
 ];
 
 test("拖动层铺满标题栏，并且排在内容下面", () => {
@@ -52,12 +54,42 @@ test("拖动层铺满标题栏，并且排在内容下面", () => {
   assert.match(declarations(".window-drag-layer ~ *"), /z-index:\s*1/);
 });
 
+test("左侧栏顶部的拖动区覆盖整个宽度", () => {
+  const region = declarations(".sidebar-drag-region");
+  assert.match(region, /inset:\s*0(?:;|$)/);
+  assert.doesNotMatch(region, /50px/, "顶部拖动区不应再为旧按钮预留不可拖动的空带");
+});
+
+test("窗口顶栏拖动层固定覆盖整个窗口，不跟随三栏移动", () => {
+  const appView = readFileSync(resolve(rendererRoot, "AppView.tsx"), "utf8");
+  assert.match(appView, /<WindowDragBar className="app-window-drag-region" \/>/);
+  const region = declarations(".app-window-drag-region");
+  assert.match(region, /top:\s*0/);
+  assert.match(region, /right:\s*0/);
+  assert.match(region, /left:\s*0/);
+  assert.match(region, /height:\s*56px/);
+  assert.doesNotMatch(region, /border:\s*1px dashed rgb\(170 170 170 \/ 72%\)/, "顶部拖动区不应显示调试虚线");
+});
+
 test("宿主标题栏都给拖动层建立了定位上下文", () => {
   assert.match(declarations(".window-drag-bar"), /position:\s*relative/);
   for (const host of DRAG_BAR_HOSTS) {
     if (host === "issue-board-header") continue; // 它的样式在 features/issues/issues.css 里。
-    assert.match(declarations(`.${host}`), /position:\s*relative/, `.${host} 需要 position: relative`);
+    assert.match(declarations(`.${host}`), /position:\s*(?:relative|absolute)/, `.${host} 需要定位上下文`);
   }
+});
+
+test("左侧栏的拖动层排在滚动内容之后，顶部仍由占位高度让出", () => {
+  const sidebar = readFileSync(resolve(rendererRoot, "features/workspaces/WorkspaceSidebar.tsx"), "utf8");
+  const spacer = sidebar.indexOf('className="sidebar-drag-spacer"');
+  const projectSection = sidebar.indexOf('className="project-section"');
+  const dragBar = sidebar.lastIndexOf('className="sidebar-drag window-drag-bar"');
+  assert.ok(spacer >= 0, "侧栏需要单独的顶部布局占位");
+  assert.ok(projectSection > spacer, "滚动内容应当排在顶部占位之后");
+  assert.ok(dragBar > projectSection, "侧栏拖动层必须排在滚动内容之后");
+  assert.match(declarations(".sidebar-drag-spacer"), /flex:\s*0\s*0\s*56px/);
+  assert.match(declarations(".sidebar-drag"), /position:\s*absolute/);
+  assert.match(declarations(".sidebar-drag"), /height:\s*56px/);
 });
 
 test("挂了拖动层的标题栏，标记类必须写在标记里", () => {
@@ -88,22 +120,49 @@ test("拖动区只由拖动层提供，标题栏元素自己不写 app-region", 
   assert.deepEqual(dragRules, [".window-drag"]);
 });
 
-test("右侧栏标签条让出的宽度，正好够按钮、间距和那条拖动带", () => {
+test("左右悬浮开关排在会话和右栏的拖动层之后", () => {
+  // Electron 按 DOM 顺序合并 drag / no-drag 矩形，最后覆盖同一点的声明获胜。
+  // 两个按钮虽然视觉上有更高 z-index，但若写在会话或右栏前面，折叠后移动过来的
+  // 标题栏拖动层仍会把鼠标按下截走，表现为「看得到、悬停有效、就是点不了」。
+  const appView = readFileSync(resolve(rendererRoot, "AppView.tsx"), "utf8");
+  const lastPane = Math.max(appView.lastIndexOf("<ConversationPane"), appView.lastIndexOf("<WorkspaceInspector"));
+  assert.ok(lastPane >= 0, "AppView 里应当渲染会话区和右栏");
+  assert.ok(appView.lastIndexOf('className="app-sidebar-control"') > lastPane);
+  assert.ok(appView.lastIndexOf('className="conversation-inspector-control"') > lastPane);
+});
+
+test("所有工作区共用 AppView 的左侧栏开关", () => {
+  const workspaceFiles = [
+    resolve(rendererRoot, "features/settings/SkillsWorkspace.tsx"),
+    resolve(rendererRoot, "features/memory/MemoryWorkspace.tsx"),
+    resolve(rendererRoot, "features/issues/IssueBoard.tsx"),
+  ];
+  for (const file of workspaceFiles) {
+    const source = readFileSync(file, "utf8");
+    assert.doesNotMatch(source, /PanelLeft|leftOpen|onOpenLeft/, `${file} 不应再实现自己的左侧栏开关`);
+  }
+  const appView = readFileSync(resolve(rendererRoot, "AppView.tsx"), "utf8");
+  assert.equal((appView.match(/className="app-sidebar-control"/g) ?? []).length, 1);
+  assert.match(appView, /className="icon-button app-sidebar-toggle no-drag"/);
+});
+
+test("右侧栏标签条按内容取宽，并给右侧按钮留位", () => {
   const header = declarations(".inspector-header");
   const horizontalPadding = 2 * Number.parseFloat(/padding:\s*[\d.]+(?:px)?\s+([\d.]+)px/.exec(header)?.[1] ?? "NaN");
-  const gaps = 2 * Number.parseFloat(/gap:\s*([\d.]+)px/.exec(header)?.[1] ?? "NaN");
-  // 右侧永远是「打开面板」+「收起右侧栏」两个 icon-button，中间 2px。
-  const actions = 2 * pixels(".icon-button", "width") + Number.parseFloat(/gap:\s*([\d.]+)px/.exec(declarations(".inspector-actions"))?.[1] ?? "NaN");
-  const band = pixels(".inspector-drag-surface", "min-width");
+  const gap = Number.parseFloat(/gap:\s*([\d.]+)px/.exec(header)?.[1] ?? "NaN");
+  // 桌面端两个按钮现在属于同一个固定槽：左右各 8px，中间 2px。标题栏标签条仍要
+  // 给这两个按钮以及 nav 到按钮之间的一个 7px 间距留位。
+  const controlWidth = pixels(".conversation-inspector-control", "width");
+  const actions = controlWidth - 16;
 
   const reserved = Number.parseFloat(
     /max-width:\s*calc\(100% - ([\d.]+)px\)/.exec(declarations(".inspector-nav"))?.[1] ?? "NaN",
   );
   assert.ok(Number.isFinite(reserved), ".inspector-nav 必须用 calc(100% - Npx) 限宽");
-  // 标签一多就会顶到 max-width；剩下的必须还够右侧按钮和整条拖动带，
-  // 少一px 都会让标题栏先没得拖、再把按钮挤出可视区。
-  assert.equal(reserved, band + actions + gaps + horizontalPadding);
-  assert.ok(band >= 48, "拖动带留得太窄，按不住");
+  assert.equal(reserved, actions + gap);
+  assert.match(declarations(".inspector-nav"), /width:\s*max-content/);
+  assert.match(declarations(".inspector-nav"), /flex:\s*0 1 auto/);
+  assert.equal(horizontalPadding, 16);
 });
 
 test("标题栏里的选择器不能用 :first-child——拖动层永远排在第一个", () => {

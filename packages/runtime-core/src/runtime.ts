@@ -1,6 +1,7 @@
 import {
   type FileNode,
   type ProjectSnapshot,
+  type PromptDocument,
   type PromptImage,
   type RuntimeInspectionSnapshot,
   type SessionSnapshot,
@@ -20,6 +21,7 @@ import {
 } from "node:path";
 import {
   preparePromptImages,
+  promptDocumentPrompt,
   titleFromText,
 } from "./message-helpers.js";
 import {
@@ -49,17 +51,19 @@ import {
 } from "./session-values.js";
 
 export class CoilCoilRuntime extends RuntimeSessionEvents {
-  async prompt(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true; }> {
+  async prompt(text: string, images?: PromptImage[], clientMessageId?: string, promptDocument?: PromptDocument): Promise<{ accepted: true; }> {
     const active = this.requireActive();
     if (this.modelTransition) await this.modelTransition;
-    const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
+    const documentPrompt = promptDocumentPrompt(promptDocument, images);
+    const promptImages = documentPrompt.images;
+    const prompt = documentPrompt.text.trim() || text.trim() || (promptImages?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (prompt === "/memory" && !images?.length) return this.runMemoryNow();
     // A goal loop starts the next round as soon as this one settles, so a
     // queued message would sit behind rounds that keep coming. Everything the
     // user sends during goal mode joins the turn that is running instead.
     if (this.goalSteers(active)) {
-      await this.steerNow(active, prompt, images, clientMessageId);
+      await this.steerNow(active, prompt, promptImages, clientMessageId, promptDocument);
       return { accepted: true };
     }
     if (
@@ -68,14 +72,14 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       || active.promptDrainInProgress
       || active.promptQueue.length > 0
     ) {
-      this.enqueuePrompt(active, prompt, images, clientMessageId);
+      this.enqueuePrompt(active, prompt, promptImages, clientMessageId, promptDocument);
       // Nothing else is guaranteed to come along: the run this prompt is
       // queueing behind may already have settled, in which case its `finally`
       // will never fire again. Ask for a drain now and let the guard decide.
       queueMicrotask(() => { void this.drainPromptQueue(active); });
       return { accepted: true };
     }
-    await this.startPrompt(active, prompt, images, clientMessageId, false);
+    await this.startPrompt(active, prompt, promptImages, clientMessageId, false, promptDocument);
     return { accepted: true };
   }
 
@@ -103,10 +107,12 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     return { cancelled: true };
   }
 
-  async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true; }> {
+  async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string, promptDocument?: PromptDocument): Promise<{ accepted: true; }> {
     const active = this.requireActive();
     if (this.modelTransition) await this.modelTransition;
-    const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
+    const documentPrompt = promptDocumentPrompt(promptDocument, images);
+    const promptImages = documentPrompt.images;
+    const prompt = documentPrompt.text.trim() || text.trim() || (promptImages?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (active.session.isStreaming) throw new Error("请等待当前回复结束后再回溯。");
     if (this.promptStarting) throw new Error("上一条消息正在启动，请稍候。");
@@ -119,7 +125,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       if (result.cancelled) throw new Error("未能回溯到所选消息。");
       active.sessionRevision += 1;
       active.summaryActivity = undefined;
-      const prepared = await preparePromptImages(images);
+      const prepared = await preparePromptImages(promptImages);
       const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
       const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
       if (!hasUserMessage) {
@@ -131,7 +137,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       // Pi branch. Rewinding changes that branch, so refresh the right-hand
       // runtime inspector without blocking the new prompt on MCP discovery.
       void this.refreshRuntimeInspectionSources(active);
-      this.queueClientMessage(active, clientMessageId, expandedPrompt);
+      this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
       void active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
         preflightResult: () => { this.promptStarting = false; },
@@ -156,16 +162,18 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
    * terminals, or subagents the way stopping does. With nothing streaming there
    * is no turn to interject into, and the message takes the ordinary path.
    */
-  async steer(text: string, images?: PromptImage[], clientMessageId?: string): Promise<{ accepted: true; steered: boolean; }> {
+  async steer(text: string, images?: PromptImage[], clientMessageId?: string, promptDocument?: PromptDocument): Promise<{ accepted: true; steered: boolean; }> {
     const active = this.requireActive();
     if (this.modelTransition) await this.modelTransition;
-    const prompt = text.trim() || (images?.length ? "请查看附加的图片。" : "");
+    const documentPrompt = promptDocumentPrompt(promptDocument, images);
+    const promptImages = documentPrompt.images;
+    const prompt = documentPrompt.text.trim() || text.trim() || (promptImages?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (!this.canSteer(active)) {
-      await this.prompt(text, images, clientMessageId);
+      await this.prompt(text, promptImages, clientMessageId, promptDocument);
       return { accepted: true, steered: false };
     }
-    await this.steerNow(active, prompt, images, clientMessageId);
+    await this.steerNow(active, prompt, promptImages, clientMessageId, promptDocument);
     return { accepted: true, steered: true };
   }
 
@@ -184,10 +192,11 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     prompt: string,
     images: PromptImage[] | undefined,
     clientMessageId: string | undefined,
+    promptDocument?: PromptDocument,
   ): Promise<void> {
     const prepared = await preparePromptImages(images);
     const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-    this.queueClientMessage(active, clientMessageId, expandedPrompt);
+    this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
     try {
       await active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
@@ -205,6 +214,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       const steering = {
         id: clientMessageId,
         text: expandedPrompt,
+        promptDocument: promptDocument ? structuredClone(promptDocument) : undefined,
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ mimeType, data })) : undefined,
         timestamp: Date.now(),
       };
@@ -252,7 +262,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     item.promoting = true;
     this.publishPromptQueue(active);
     try {
-      const result = await this.steer(item.text, item.images, item.id);
+      const result = await this.steer(item.text, item.images, item.id, item.promptDocument);
       // A steer that could not join a live turn fell back to the queue, which
       // re-uses this very entry; removing it would drop the message instead.
       if (result.steered) this.removeQueuedPrompt(active, id);
@@ -548,13 +558,16 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     return {
       messageRevision: active.messageRevision,
       session: summary,
+      agentMode: active.bridgeState?.agentMode ?? "standard",
       messages,
       promptQueue: active.promptQueue.map((item) => ({
         ...item,
+        promptDocument: item.promptDocument ? structuredClone(item.promptDocument) : undefined,
         images: item.images?.map((image) => ({ ...image })),
       })),
       steering: active.steeringMessages.map((item) => ({
         ...item,
+        promptDocument: item.promptDocument ? structuredClone(item.promptDocument) : undefined,
         images: item.images?.map((image: PromptImage) => ({ ...image })),
       })),
       tools: [...projectedTools.values()].sort((a, b) => a.order - b.order),

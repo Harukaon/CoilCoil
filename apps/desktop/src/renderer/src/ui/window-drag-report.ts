@@ -19,6 +19,13 @@
  * 失效正在发生。这是唯一不需要改变任何状态就能观测到它的办法。
  *
  * 这里不做任何补救。想知道为什么不补救，看 ui/WindowDragBar.tsx 的文件头。
+ *
+ * ## 重要：不要用 DOM 遍历顺序冒充屏幕上的层级
+ *
+ * `-webkit-app-region` 的矩形清单和实际绘制顺序不是一回事。悬浮按钮可以在 DOM
+ * 前面、靠 z-index 压在标题栏上；旧版记录器只按 DOM 顺序取最后一个矩形，曾把按钮
+ * 自己的点击误报成拖拽失效。现在同时用 `elementsFromPoint()` 记录屏幕上的真实命中栈，
+ * 只有实际最上层仍是 drag 时才报 `drag_press_reached_page`。
  */
 import { diagnostics } from "../diagnostics";
 
@@ -34,11 +41,55 @@ export interface DragRegion {
 
 /** 两次记录之间至少隔这么久，按不动时连按几下不至于刷屏。 */
 export const REPORT_INTERVAL_MS = 2_000;
+const TITLE_STRIP_HEIGHT = 72;
 
 function label(element: Element): string {
   const raw = typeof element.className === "string" ? element.className : "";
   const classes = raw.trim().split(/\s+/).filter(Boolean).slice(0, 3).join(".");
   return element.tagName.toLowerCase() + (classes ? `.${classes}` : "");
+}
+
+function regionForElement(target: Document, element: Element): DragRegion | undefined {
+  const style = target.defaultView?.getComputedStyle(element);
+  const mode = style?.getPropertyValue("-webkit-app-region");
+  if (!style || !mode || mode === "none" || style.visibility !== "visible") return undefined;
+  if (style.display === "inline" || style.display === "contents" || style.display === "none") return undefined;
+  const box = element.getBoundingClientRect();
+  return {
+    element: label(element),
+    draggable: mode === "drag",
+    left: box.left,
+    top: box.top,
+    right: box.right,
+    bottom: box.bottom,
+  };
+}
+
+/** The app-region declaration on the topmost painted element at a point. */
+function paintedRegionAt(target: Document, x: number, y: number): { region?: DragRegion; stack: string[] } {
+  const elements = target.elementsFromPoint?.(x, y) ?? [];
+  for (const element of elements) {
+    const region = regionForElement(target, element);
+    if (region) return { region, stack: elements.slice(0, 8).map(label) };
+  }
+  return { stack: elements.slice(0, 8).map(label) };
+}
+
+function guestSnapshot(target: Document): Array<Record<string, unknown>> {
+  return [...target.querySelectorAll("webview")].slice(0, 12).map((element) => {
+    const box = element.getBoundingClientRect();
+    const style = target.defaultView?.getComputedStyle(element);
+    return {
+      element: label(element),
+      className: element.className,
+      visibleClass: element.classList.contains("visible"),
+      pointerEvents: style?.pointerEvents,
+      left: Math.round(box.left),
+      top: Math.round(box.top),
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+    };
+  });
 }
 
 /**
@@ -70,7 +121,7 @@ export function collectDragRegions(target: Document = document): DragRegion[] {
 }
 
 /**
- * 这一点归谁。
+ * 这一点归谁（仅用于和历史日志/测试对照；真实命中请用 paintedRegionAt）。
  *
  * Electron 把这串矩形按顺序做并集（drag）/差集（no-drag）落成一个区域，对单点来说
  * 就等于：**最后一个盖住它的矩形说了算**。
@@ -101,16 +152,39 @@ export function installWindowDragFailureReport(target: Document = document): () 
     if (!(event instanceof MouseEvent)) return;
     const now = performance.now();
     if (now - reportedAt < REPORT_INTERVAL_MS) return;
+    if (event.button !== 0 || event.ctrlKey || event.clientY < 0 || event.clientY > TITLE_STRIP_HEIGHT) return;
     const regions = collectDragRegions(target);
-    const winner = regionAt(regions, event.clientX, event.clientY);
-    if (!isDragPressLeak(event.button, event.ctrlKey, winner)) return;
+    const modelWinner = regionAt(regions, event.clientX, event.clientY);
+    const painted = paintedRegionAt(target, event.clientX, event.clientY);
+    const winner = painted.region;
+    // A button/input/no-drag overlay is expected to receive the press. The old
+    // DOM-order model often called this a drag failure when z-index put the
+    // overlay above a later drag rectangle.
+    if (!isDragPressLeak(event.button, event.ctrlKey, winner)) {
+      if (modelWinner?.draggable && winner && !winner.draggable) {
+        reportedAt = now;
+        diagnostics.info("window-drag", "drag_region_model_mismatch", {
+          point: { x: Math.round(event.clientX), y: Math.round(event.clientY) },
+          modelWinner,
+          paintedWinner: winner,
+          paintStack: painted.stack,
+          target: event.target instanceof Element ? label(event.target) : undefined,
+          nativeWindowFocused: undefined,
+          guests: guestSnapshot(target),
+        });
+      }
+      return;
+    }
     reportedAt = now;
     const view = target.defaultView;
     const scroller = target.scrollingElement;
     diagnostics.warn("window-drag", "drag_press_reached_page", {
       point: { x: Math.round(event.clientX), y: Math.round(event.clientY) },
-      // 我们这边算出来它该是可拖的，可这一下还是落到了网页上。
+      // 屏幕上最上层和事件都表明这里应该是可拖的，可这一下还是落到了网页上。
       expected: winner,
+      modelWinner,
+      paintStack: painted.stack,
+      target: event.target instanceof Element ? label(event.target) : undefined,
       regionCount: regions.length,
       dragRegions: regions.filter((region) => region.draggable),
       // 下面这些是用来找「窗口那边那份为什么会对不上」的线索。
@@ -120,11 +194,12 @@ export function installWindowDragFailureReport(target: Document = document): () 
       devicePixelRatio: view?.devicePixelRatio,
       rootScroll: { top: scroller?.scrollTop ?? 0, left: scroller?.scrollLeft ?? 0 },
       visibility: target.visibilityState,
-      focused: target.hasFocus(),
+      rendererFocused: target.hasFocus(),
       // 全屏时 Electron 本来就不接拖动，这一条能把那种情况摘出去。
       looksFullscreen: view ? view.outerHeight >= view.screen.height : undefined,
       activeElement: target.activeElement ? label(target.activeElement) : undefined,
       selectionEmpty: view?.getSelection()?.isCollapsed ?? true,
+      guests: guestSnapshot(target),
     });
   };
   target.addEventListener("mousedown", onMouseDown, { capture: true, passive: true });

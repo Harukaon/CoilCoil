@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type {
+  AgentMode,
   ChatMessage,
   MoveSessionResult,
   PlanApprovalState,
   PlanExecutionTarget,
   ProjectSelection,
   ProjectSnapshot,
+  PromptDocument,
   RuntimeBootstrap,
   RuntimeConfiguration,
   PromptImage,
@@ -80,6 +82,7 @@ export default function App(): React.JSX.Element {
   const inspector = useWorkspaceInspector(project?.path);
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivityState>>({});
   const [pendingProjectPath, setPendingProjectPath] = useState<string>();
+  const [pendingAgentMode, setPendingAgentMode] = useState<AgentMode>("standard");
   const [expandedSessionLimits, setExpandedSessionLimits] = useState<Record<string, number>>({});
   const [startingSession, setStartingSession] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
@@ -96,7 +99,10 @@ export default function App(): React.JSX.Element {
   const [settingsSection, setSettingsSection] = useState<"models" | "mcp" | "skills" | "appearance">("models");
   const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("conversation");
   const [loading, setLoading] = useState(true);
+  const composerSessionKey = snapshot?.session.path
+    ?? (pendingProjectPath ? `pending:${pendingProjectPath}` : project?.path ? `pending:${project.path}` : "pending:empty");
   const composer = useComposerController({
+    sessionKey: composerSessionKey,
     configuration,
     runtimeId: snapshot?.runtimeId,
     sessionThinkingLevel: snapshot?.pendingModel?.thinkingLevel ?? snapshot?.thinkingLevel ?? configuration?.thinkingLevel,
@@ -113,17 +119,19 @@ export default function App(): React.JSX.Element {
   });
   const {
     draft,
+    document: draftDocument,
     images: draftImages,
     inputRef,
     modelMenuOpen,
     modelChanging,
-    setDraft,
     restoreDraft,
+    restoreDocument,
     setImages: setDraftImages,
     setModelMenuOpen,
     reset: resetComposer,
     focus: focusComposer,
     insertPaths: insertComposerPaths,
+    setDocument: setDraftDocument,
   } = composer;
   const timelineRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -188,6 +196,7 @@ export default function App(): React.JSX.Element {
     setTools([]);
     setSubagents([]);
     setProjectState({ ...EMPTY_PROJECT, cwd: selection.path });
+    setPendingAgentMode("standard");
     resetComposer();
     setLoading(false);
     shouldAutoScrollRef.current = true;
@@ -202,6 +211,7 @@ export default function App(): React.JSX.Element {
     applySnapshot,
     dispatchConversationMessages,
     restoreDraft,
+    restoreDocument,
     setSnapshot,
     setSessionActivity,
     setConfiguration,
@@ -222,7 +232,6 @@ export default function App(): React.JSX.Element {
     window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, selection.path);
     setExpandedProjects((current) => new Set(current).add(selection.path));
     setPendingProjectPath(undefined);
-    setDraftImages([]);
     setLoading(true);
     setPendingProjectPath(undefined);
     snapshotRef.current = undefined;
@@ -251,7 +260,7 @@ export default function App(): React.JSX.Element {
         focusComposer();
       }
     }
-  }, [applySnapshot, focusComposer, setDraftImages]);
+  }, [applySnapshot, focusComposer]);
 
   useEffect(() => {
     document.documentElement.dataset.platform = window.coilcoil.platform;
@@ -386,7 +395,6 @@ export default function App(): React.JSX.Element {
     const cached = snapshotCacheRef.current.get(session.path);
     setLoading(!cached);
     setPendingProjectPath(undefined);
-    resetComposer();
     shouldAutoScrollRef.current = true;
     try {
       projectRef.current = owner;
@@ -419,7 +427,7 @@ export default function App(): React.JSX.Element {
   } = useSessionControls(snapshot?.runtimeId);
   promoteQueuedPromptRef.current = promoteQueuedPrompt;
 
-  const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[]): Promise<void> => {
+  const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[], promptDocument: PromptDocument): Promise<void> => {
     if (!message.entryId || !snapshot?.runtimeId) return;
     const previousConversationMessages = conversationMessages;
     const previousTools = tools;
@@ -429,6 +437,7 @@ export default function App(): React.JSX.Element {
       order: message.order,
       role: "user",
       text,
+      promptDocument,
       images,
       timestamp: Date.now(),
       status: snapshotRef.current?.running ? "queued" : "succeeded",
@@ -438,7 +447,7 @@ export default function App(): React.JSX.Element {
     setTools((current) => current.filter((item) => item.order < message.order));
     shouldAutoScrollRef.current = true;
     try {
-      await window.coilcoil.request({ type: "rewind_prompt", entryId: message.entryId, text, images, clientMessageId }, snapshot.runtimeId);
+      await window.coilcoil.request({ type: "rewind_prompt", entryId: message.entryId, text, promptDocument, images, clientMessageId }, snapshot.runtimeId);
     } catch (caught) {
       dispatchConversationMessages({ type: "restore", state: previousConversationMessages });
       setTools(previousTools);
@@ -472,6 +481,7 @@ export default function App(): React.JSX.Element {
     event?.preventDefault();
     const fromComposer = override === undefined;
     const prompt = (override ?? draft).trim();
+    const promptDocument = fromComposer ? draftDocument : undefined;
     const images = overrideImages ?? (fromComposer ? draftImages : []);
     const runtimeCommand = prompt === "/memory" && images.length === 0;
     if ((!prompt && !images.length) || !project || startingSession) return;
@@ -492,7 +502,7 @@ export default function App(): React.JSX.Element {
       toastError("当前模型不支持图片输入，请切换到支持图片的模型。");
       return;
     }
-    if (fromComposer) { setDraft(""); setDraftImages([]); }
+    if (fromComposer) resetComposer();
     if (runtimeCommand) {
       inspector.openRuntimeTab();
     }
@@ -503,6 +513,7 @@ export default function App(): React.JSX.Element {
       order: Date.now(),
       role: "user",
       text: prompt,
+      promptDocument,
       images,
       timestamp: Date.now(),
       status: "succeeded",
@@ -522,6 +533,7 @@ export default function App(): React.JSX.Element {
         const created = await window.coilcoil.request<SessionSnapshot>({
           type: "create_session",
           cwd: project.path,
+          agentMode: pendingAgentMode,
           model: selectedModel && configuration ? {
             provider: selectedModel.provider,
             modelId: selectedModel.id,
@@ -558,10 +570,13 @@ export default function App(): React.JSX.Element {
         target = activeSnapshot;
       }
       if (runtimeCommand) await window.coilcoil.request({ type: "run_memory_now" }, target.runtimeId);
-      else if (intent === "steer") await window.coilcoil.request({ type: "steer", text: prompt, images, clientMessageId }, target.runtimeId);
-      else await window.coilcoil.request({ type: "prompt", text: prompt, images, clientMessageId }, target.runtimeId);
+      else if (intent === "steer") await window.coilcoil.request({ type: "steer", text: prompt, promptDocument, images, clientMessageId }, target.runtimeId);
+      else await window.coilcoil.request({ type: "prompt", text: prompt, promptDocument, images, clientMessageId }, target.runtimeId);
     } catch (caught) {
-      if (fromComposer) { setDraft(prompt); setDraftImages(images); }
+      if (fromComposer) {
+        setDraftDocument(promptDocument ?? { version: 1, parts: [] });
+        setDraftImages(images);
+      }
       dispatchConversationMessages({ type: "reject", id: clientMessageId });
       if (createdSessionPath) {
         const failedSessionPath = createdSessionPath;
@@ -579,7 +594,7 @@ export default function App(): React.JSX.Element {
   if (onboarding.active) {
     return <OnboardingScreen
       configuration={configuration} onConfigurationSaved={setConfiguration}
-      runtimeId={snapshot?.runtimeId} projects={projects}
+      runtimeId={snapshot?.runtimeId} cwd={project?.path} projects={projects}
       onOpenProject={() => { void openProject(); }} onDone={onboarding.finish}
     />;
   }
@@ -601,6 +616,7 @@ export default function App(): React.JSX.Element {
         leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
         timeline, queuedPrompts, running, activityLine, projectState, subagents,
         startingSession, configuration, selectedModel, fileDragActive, timelineRef,
+        agentMode: snapshot?.agentMode ?? pendingAgentMode, agentModeLocked: Boolean(snapshot) || startingSession, setPendingAgentMode,
         shouldAutoScrollRef, composer, inspector, setExpandedProjects,
         setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,
         setSettingsOpen, setSettingsSection, setLeftOpen, beginResize,

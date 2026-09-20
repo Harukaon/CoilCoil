@@ -1,8 +1,9 @@
 import * as Popover from "@radix-ui/react-popover";
-import { PanelRight, Plus, X } from "lucide-react";
-import { useState } from "react";
+import { Plus, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { isMiddleClickClose, MIDDLE_MOUSE_BUTTON } from "./inspectorTabs";
 
@@ -21,7 +22,8 @@ export function InspectorPane<T extends string>({
   activeTab,
   onSelectTab,
   onCloseTab,
-  onClose,
+  addControlTarget,
+  showAddControl,
   addOptions,
   onAddTab,
   emptyState,
@@ -31,20 +33,94 @@ export function InspectorPane<T extends string>({
   activeTab: T;
   onSelectTab: (tab: T) => void;
   onCloseTab?: (tab: T) => void;
-  onClose: () => void;
+  addControlTarget: HTMLElement | null;
+  showAddControl: boolean;
   addOptions?: InspectorTab<T>[];
   onAddTab?: (tab: T) => void;
   emptyState?: ReactNode;
   children: ReactNode;
 }): React.JSX.Element {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  const scrollbarRef = useRef<HTMLDivElement>(null);
+  const [scrollbar, setScrollbar] = useState({ visible: false, thumbRatio: 1, offsetRatio: 0 });
+  const addControl = showAddControl && addOptions?.length && onAddTab ? (
+    <Popover.Root open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+      <Popover.Trigger asChild>
+        <button className="icon-button inspector-add-tab" type="button" aria-label="打开面板" title="打开面板"><Plus size={15} /></button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="inspector-add-popover" role="menu" side="bottom" align="end" sideOffset={5} collisionPadding={8}>
+          {addOptions.map((item) => {
+            const Icon = item.icon;
+            return <button key={item.id} type="button" role="menuitem" disabled={item.disabled} onClick={() => { onAddTab(item.id); setAddMenuOpen(false); }}><Icon size={13} /><span>{item.label}</span></button>;
+          })}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  ) : null;
+  const updateScrollbar = useCallback((): void => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const maxScroll = Math.max(0, nav.scrollWidth - nav.clientWidth);
+    if (!maxScroll) {
+      setScrollbar({ visible: false, thumbRatio: 1, offsetRatio: 0 });
+      return;
+    }
+    const thumbRatio = Math.min(1, Math.max(0.18, nav.clientWidth / nav.scrollWidth));
+    const scrollRatio = nav.scrollLeft / maxScroll;
+    setScrollbar({
+      visible: true,
+      thumbRatio,
+      offsetRatio: scrollRatio * (1 - thumbRatio),
+    });
+  }, []);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const update = (): void => updateScrollbar();
+    update();
+    nav.addEventListener("scroll", update, { passive: true });
+    const resizeObserver = new ResizeObserver(update);
+    resizeObserver.observe(nav);
+    const mutationObserver = new MutationObserver(update);
+    mutationObserver.observe(nav, { childList: true, subtree: true, characterData: true });
+    return () => {
+      nav.removeEventListener("scroll", update);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [tabs.length, updateScrollbar]);
+
+  const dragScrollbar = useCallback((event: ReactPointerEvent<HTMLSpanElement>): void => {
+    const nav = navRef.current;
+    const track = scrollbarRef.current;
+    if (!nav || !track || !scrollbar.visible) return;
+    const startX = event.clientX;
+    const startScrollLeft = nav.scrollLeft;
+    const maxScroll = Math.max(0, nav.scrollWidth - nav.clientWidth);
+    const travel = Math.max(1, track.clientWidth * (1 - scrollbar.thumbRatio));
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const move = (next: PointerEvent): void => {
+      nav.scrollLeft = Math.max(0, Math.min(maxScroll, startScrollLeft + ((next.clientX - startX) * maxScroll) / travel));
+    };
+    const end = (): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  }, [scrollbar]);
+
   return (
     <aside className="inspector-pane">
-      {/* 拖动层排在最前，标签条和右侧按钮在它上面挖洞；.inspector-drag-surface 是给它
-          留出的那条永远不会被标签占掉的空带，见 ui/window-drag.ts。 */}
+      {/* 拖动层排在最前，标签条和右侧按钮在它上面挖洞。 */}
       <header className="inspector-header window-drag-bar">
         <WindowDragBar />
-        <nav className="inspector-nav no-drag" aria-label="右侧面板">
+        <nav ref={navRef} className="inspector-nav no-drag" aria-label="右侧面板">
           {tabs.map((item) => {
             const Icon = item.icon;
             return (
@@ -80,26 +156,18 @@ export function InspectorPane<T extends string>({
             );
           })}
         </nav>
-        <div className="inspector-drag-surface" aria-hidden="true" />
-        <div className="inspector-actions no-drag">
-          {addOptions?.length && onAddTab ? (
-            <Popover.Root open={addMenuOpen} onOpenChange={setAddMenuOpen}>
-              <Popover.Trigger asChild>
-                <button className="icon-button inspector-add-tab" type="button" aria-label="打开面板" title="打开面板"><Plus size={15} /></button>
-              </Popover.Trigger>
-              <Popover.Portal>
-                <Popover.Content className="inspector-add-popover" role="menu" side="bottom" align="end" sideOffset={5} collisionPadding={8}>
-                  {addOptions.map((item) => {
-                    const Icon = item.icon;
-                    return <button key={item.id} type="button" role="menuitem" disabled={item.disabled} onClick={() => { onAddTab(item.id); setAddMenuOpen(false); }}><Icon size={13} /><span>{item.label}</span></button>;
-                  })}
-                </Popover.Content>
-              </Popover.Portal>
-            </Popover.Root>
-          ) : null}
-          <button className="icon-button" type="button" aria-label="收起右侧栏" onClick={onClose}><PanelRight size={17} /></button>
-        </div>
+        {scrollbar.visible ? (
+          <div ref={scrollbarRef} className="inspector-scrollbar no-drag" aria-hidden="true">
+            <span
+              className="inspector-scrollbar-thumb"
+              style={{ left: `${scrollbar.offsetRatio * 100}%`, width: `${scrollbar.thumbRatio * 100}%` }}
+              onPointerDown={dragScrollbar}
+            />
+          </div>
+        ) : null}
+        {!addControlTarget && addControl ? <div className="inspector-actions no-drag">{addControl}</div> : null}
       </header>
+      {addControlTarget && addControl ? createPortal(addControl, addControlTarget) : null}
       <section className={`inspector-content inspector-content-${activeTab}`}>
         {tabs.length ? children : <div className="inspector-empty-tabs">{emptyState}</div>}
       </section>
