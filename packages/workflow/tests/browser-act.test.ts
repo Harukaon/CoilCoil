@@ -87,3 +87,27 @@ test("browser_click 失败时带回新快照而不是吞错", async () => {
   assert.match(result.content[0]?.text ?? "", /已重取快照/, "失败要带回新快照");
   assert.match(result.content[0]?.text ?? "", /fresh-snapshot/, "新快照内容要交出去");
 });
+
+test("browser-act 工具名与描述锁死：描述里提到的工具必须真实存在", async () => {
+  // 防模型猜名：描述里写的每一个工具名，必须是本文件或 coilcoil-browser 真实提供的。
+  const { tools } = collectTools();
+  const known = new Set([
+    ...tools.keys(),
+    // coilcoil-browser 调试层（chrome-devtools-mcp 1.7.0 实际提供）：
+    "list_pages", "new_page", "select_page", "close_page", "navigate_page",
+    "take_snapshot", "take_screenshot", "click", "fill", "type_text",
+    "press_key", "wait_for", "evaluate_script",
+    "list_console_messages", "get_console_message",
+    "list_network_requests", "get_network_request",
+    "performance_start_trace", "performance_stop_trace",
+    "lighthouse_audit",
+  ]);
+  const mentioned = new Set<string>();
+  for (const tool of tools.values()) {
+    for (const match of tool.description.matchAll(/`?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`?/g)) {
+      mentioned.add(match[1]);
+    }
+  }
+  const unknown = [...mentioned].filter((name) => !known.has(name));
+  assert.deepEqual(unknown, [], `描述里提到了不存在的工具：${unknown.join(", ")}`);
+});
