@@ -246,6 +246,10 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .nav-button:hover:not(:disabled), .conversation-row:hover { background: hsl(var(--th) var(--ts) var(--l-888)); }
 .nav-button.active { color: hsl(var(--th) var(--ts) var(--l-171)); background: hsl(var(--th) var(--ts) var(--l-888)); }
 .project-section { min-height: 0; padding: 0 11px; overflow-x: hidden; overflow-y: auto; }
+/* 滚到底多留一段：最后一个项目贴着底边时手指没地方落，滚一下就到头，
+   留白让末尾内容能再往上顶一段，方便点开/滚动。 */
+.project-section { padding-bottom: 48px; }
+.project-section::after { content: ""; display: block; height: 0; }
 .pinned-sessions-section { min-width: 0; padding: 4px 0 5px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 55%); }
 .pinned-conversation-list { padding-left: 5px; }
 .pinned-conversation-row-wrap { min-width: 0; }
