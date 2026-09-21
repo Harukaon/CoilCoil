@@ -926,6 +926,8 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .prompt-editor.tiptap p { margin: 0; }
 .prompt-editor.tiptap .prompt-editor-element { display: inline; white-space: nowrap; }
 .prompt-editor:empty::before { content: attr(data-placeholder); color: hsl(var(--th) var(--ts) var(--l-622)); pointer-events: none; }
+/* Tiptap 空段落：官方 Placeholder 扩展往空 p 打标记，样式与旧 :empty 版同色。 */
+.prompt-editor.tiptap p.is-empty::before { content: attr(data-placeholder); float: left; height: 0; color: hsl(var(--th) var(--ts) var(--l-622)); pointer-events: none; }
 .prompt-editor:disabled, .prompt-editor[contenteditable="false"] { cursor: default; }
 .prompt-editor-element { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 7px; border: 1px solid hsl(214 78% 62% / 55%); border-radius: var(--radius-lg); color: hsl(214 72% 42%); background: hsl(214 86% 93%); font-size: .92em; line-height: 1.35; white-space: nowrap; user-select: none; vertical-align: baseline; }
 .prompt-history-element { margin: 0 3px; }

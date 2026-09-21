@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { ClipboardEvent, KeyboardEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import Placeholder from "@tiptap/extension-placeholder";
 import type { PromptDocument } from "@coilcoil/runtime-protocol";
 import { promptDocumentText } from "@coilcoil/runtime-protocol";
 import { BrowserElementNode } from "./tiptapPromptExtensions";
@@ -64,6 +65,9 @@ export const TiptapPromptEditor = forwardRef<TiptapPromptEditorHandle, TiptapPro
         hardBreak: { keepMarks: false },
       }),
       BrowserElementNode,
+      // 空文档时显示 data-placeholder：Tiptap 空段落里有 <br>，:empty 永远不成立，
+      // 必须用官方 Placeholder 扩展（往空段落打 .is-empty 标记 + data-placeholder）。
+      Placeholder.configure({ placeholder }),
     ],
     content: promptDocumentToTiptap(documentValue),
     editable: !disabled,
