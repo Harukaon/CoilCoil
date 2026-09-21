@@ -12,9 +12,8 @@ export interface PromptKeyboardEventLike {
 
 /**
  * Enter submits the composer unless it is an IME confirmation or Shift+Enter.
- * The footer editor is Tiptap-based and supplies a native KeyboardEvent, while
- * the inline editor still supplies React's SyntheticEvent, so both shapes are
- * intentionally accepted here.
+ * Tiptap supplies a native KeyboardEvent, while the legacy PromptEditor supplies
+ * React's SyntheticEvent, so both shapes remain accepted during the migration.
  */
 export function isPromptSendKey(event: PromptKeyboardEventLike): boolean {
   const nativeEvent = event.nativeEvent ?? event;

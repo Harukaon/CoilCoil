@@ -27,7 +27,7 @@ interface TiptapPromptEditorProps {
 }
 
 /**
- * 底部主输入框的 Tiptap 实现（Phase 1：只换 footer，inline 历史编辑保持旧版）。
+ * 主输入框和历史消息编辑态共用的 Tiptap 实现。
  *
  * 与旧 PromptEditor 同一 handle 接口：focus/getCaretOffset/setCaretOffset，
  * caret offset 仍按纯文本长度（pill 算 label 长度），斜杠菜单可直接复用。
@@ -90,7 +90,10 @@ export const TiptapPromptEditor = forwardRef<TiptapPromptEditorHandle, TiptapPro
       },
       handleKeyDown: (_view, event) => {
         onKeyDown(event as unknown as KeyboardEvent<HTMLDivElement>);
-        return false;
+        // Let ProseMirror know when the composer already handled the key.
+        // This preserves Shift+Enter's hard break while preventing a second
+        // paragraph after submit, slash selection, or Escape.
+        return event.defaultPrevented;
       },
     },
     onUpdate: ({ editor: current }) => {

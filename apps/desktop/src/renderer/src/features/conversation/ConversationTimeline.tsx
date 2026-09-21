@@ -23,6 +23,7 @@ import { PromptImagePreview } from "../composer/PromptImagePreview";
 import type { PromptEditorHandle } from "../composer/PromptEditor";
 import { appendPromptImages, clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { promptDocumentFromText, promptDocumentText, replaceTextRange } from "../composer/promptDocument";
+import { isPromptSendKey } from "../composer/promptKeyboard";
 import { inAppBrowserModifierLabel, markdownBrowserUrl } from "../browser/useInAppBrowserLinks";
 import { ConfirmDialog } from "../../ui/dialog";
 import { CollapsibleCodeBlock } from "./CollapsibleCodeBlock";
@@ -384,11 +385,10 @@ export function MessageView({
               onCompositionStart={() => { composingRef.current = true; }}
               onCompositionEnd={() => { composingRef.current = false; }}
               onKeyDown={(event) => {
-                if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.closest("form")?.requestSubmit();
-                }
+                if (composingRef.current || !isPromptSendKey(event)) return;
+                event.preventDefault();
+                const currentTarget = event.currentTarget as unknown as HTMLElement | null;
+                currentTarget?.closest("form")?.requestSubmit();
               }}
               onModelMenuOpenChange={setModelMenuOpen}
               onSelectModel={(model) => {

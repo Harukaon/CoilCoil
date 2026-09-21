@@ -10,7 +10,7 @@ import type {
 } from "@coilcoil/runtime-protocol";
 import { carriesPaths, droppedPaths, quotePath } from "./pathInsert";
 import { ModelPicker } from "./ModelPicker";
-import { PromptEditor, type PromptEditorHandle } from "./PromptEditor";
+import type { PromptEditorHandle } from "./PromptEditor";
 import { PromptImagePreview } from "./PromptImagePreview";
 import { TiptapPromptEditor } from "./TiptapPromptEditor";
 
@@ -157,36 +157,20 @@ export function ConversationComposer({
           ))}
         </div>
       ) : null}
-      {/* Phase 1 只换底部主输入框：inline 历史编辑保持旧 PromptEditor。 */}
-      {inline ? (
-        <PromptEditor
-          ref={inputRef}
-          document={document}
-          onChange={onDocumentChange}
-          ariaLabel="编辑历史消息"
-          placeholder="编辑历史消息…"
-          disabled={!project || loading || startingSession || modelChanging}
-          onPasteImages={onPaste}
-          onCompositionStart={onCompositionStart}
-          onCompositionEnd={onCompositionEnd}
-          onKeyDown={handleKeyDown}
-          autoFocus={autoFocus}
-        />
-      ) : (
-        <TiptapPromptEditor
-          ref={inputRef as never}
-          document={document}
-          onChange={onDocumentChange}
-          ariaLabel="发送消息给 CoilCoil"
-          placeholder="让 CoilCoil 处理这个项目…"
-          disabled={!project || loading || startingSession || modelChanging}
-          onPasteImages={onPaste}
-          onCompositionStart={onCompositionStart}
-          onCompositionEnd={onCompositionEnd}
-          onKeyDown={handleKeyDown}
-          autoFocus={autoFocus}
-        />
-      )}
+      {/* 主输入框和历史消息编辑态共用同一套 Tiptap 文档与键盘行为。 */}
+      <TiptapPromptEditor
+        ref={inputRef as never}
+        document={document}
+        onChange={onDocumentChange}
+        ariaLabel={inline ? "编辑历史消息" : "发送消息给 CoilCoil"}
+        placeholder={inline ? "编辑历史消息…" : "让 CoilCoil 处理这个项目…"}
+        disabled={!project || loading || startingSession || modelChanging}
+        onPasteImages={onPaste}
+        onCompositionStart={onCompositionStart}
+        onCompositionEnd={onCompositionEnd}
+        onKeyDown={handleKeyDown}
+        autoFocus={autoFocus}
+      />
       <div className="composer-toolbar">
         <ModelPicker
           configuration={configuration}
