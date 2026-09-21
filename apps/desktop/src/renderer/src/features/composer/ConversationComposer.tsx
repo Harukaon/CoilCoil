@@ -178,11 +178,7 @@ export function ConversationComposer({
           document={document}
           onChange={onDocumentChange}
           ariaLabel="发送消息给 CoilCoil"
-          placeholder={
-            project
-              ? (running ? (goalActive ? "消息会介入当前轮次…" : "消息将排队发送…") : "让 CoilCoil 处理这个项目…")
-              : "请先打开项目"
-          }
+          placeholder="让 CoilCoil 处理这个项目…"
           disabled={!project || loading || startingSession || modelChanging}
           onPasteImages={onPaste}
           onCompositionStart={onCompositionStart}
