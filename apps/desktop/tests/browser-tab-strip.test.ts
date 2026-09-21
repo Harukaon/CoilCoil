@@ -50,22 +50,27 @@ test("主进程说的 activeTabId 失效时退回第一个标签", () => {
   assert.equal(activeBrowserPaneTabId(state), "browser:a");
 });
 
-test("别的会话开的标签页也画在这一排上，并且标得出来", () => {
-  // 这是「应用在背后做的事都要让用户看得见」那一条：agent 在别的 scope 里开的页面
-  // 会加载、会跑脚本、会写 cookie，它不能在用户屏幕上不存在。
+test("其他文件夹的 activeTabId 不会让当前面板显示旧页", () => {
   const state: BrowserStateSnapshot = {
-    scopeId: "runtime-1",
-    tabs: [page("mine", "我的页"), page("theirs", "另一个会话的页", false, true)],
+    scopeId: "文件夹 B",
+    tabs: [page("a", "A文件夹", false, true)],
+    activeTabId: "a",
+  };
+  assert.equal(activeBrowserPaneTabId(state), BROWSER_PLACEHOLDER_TAB_ID);
+});
+
+test("其他文件夹的标签页不会出现在当前标签条", () => {
+  const state: BrowserStateSnapshot = {
+    scopeId: "文件夹 A",
+    tabs: [page("mine", "我的页"), page("theirs", "另一个文件夹的页", false, true)],
     activeTabId: "mine",
   };
 
   assert.deepEqual(browserPaneTabs(state), [
     { id: "browser:mine", label: "我的页", loading: false, foreign: false },
-    { id: "browser:theirs", label: "另一个会话的页", loading: false, foreign: true },
   ]);
-  // 「补建一张」和「收起浏览器」都只数自己的那几张。
   assert.equal(ownBrowserTabCount(state), 1);
-  assert.equal(ownBrowserTabCount({ scopeId: "runtime-1", tabs: [page("theirs", "只有别人的", false, true)] }), 0);
+  assert.equal(ownBrowserTabCount({ scopeId: "文件夹 A", tabs: [page("theirs", "只有其他文件夹", false, true)] }), 0);
 });
 
 test("标签条 id 认得出哪个是网页标签", () => {
@@ -102,13 +107,10 @@ test("顶部标签条对浏览器的操作还是走原来那几个 IPC", () => {
   assert.ok(!state.includes("browserTabId"), "网页标签不应该进 useWorkspaceInspector 的状态");
 });
 
-test("只剩别的会话开的标签页时，浏览器面板不能自己折叠", () => {
+test("只剩其他文件夹的标签页时，当前浏览器入口会收起", () => {
   const mine = page("mine", "我的页");
-  const theirs = page("theirs", "另一个会话的页", false, true);
-  // 关掉自己最后一张：标签条上还列着别人的那张，面板就不能撤。
-  assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [theirs], activeTabId: "theirs" }), false);
-  // 真的一张都不剩了才撤。
+  const theirs = page("theirs", "另一个文件夹的页", false, true);
+  assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [theirs], activeTabId: "theirs" }), true);
   assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [], activeTabId: undefined }), true);
-  // 自己的还在当然也不撤。
   assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [mine, theirs], activeTabId: "mine" }), false);
 });

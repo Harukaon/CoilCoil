@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserElementSelection, BrowserStateSnapshot } from "../../../../shared/desktop-api";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
 import { platformComputerLabel, rendererPlatform } from "../../platform";
+import { visibleBrowserTabs } from "../inspector/inspectorTabs";
 import { toastError } from "../../ui/toast";
 import { BrowserDataMenu } from "./BrowserDataMenu";
 import { setGuestPlacement } from "./guestLayer";
@@ -33,7 +34,10 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   const hostRef = useRef<HTMLDivElement>(null);
   const mobile = useMobileRemote();
   const [frame, setFrame] = useState<string>();
-  const activeTab = useMemo(() => state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0], [state]);
+  const activeTab = useMemo(() => {
+    const tabs = visibleBrowserTabs(state);
+    return tabs.find((tab) => tab.id === state.activeTabId) ?? tabs[0];
+  }, [state]);
 
   const scopeRef = useRef(scopeId);
   scopeRef.current = scopeId;

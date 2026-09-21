@@ -148,23 +148,17 @@ export class BrowserRuntimeManager {
   }
 
   /**
-   * 用户那一侧看到的是全部标签页，不只是这个 scope 自己的那几个。
+   * 用户只看到当前工作区的标签页。
    *
-   * 作用域是给 CDP 客户端划的：一个后台会话的 agent 不该发现、更不该操作另一个会话
-   * 的页面。但这条边界被原样套在了界面上，于是 agent 在别的 scope 里开的标签页对用户
-   * 就是隐形的——页面在加载、脚本在跑、cookie 在写，用户屏幕上什么都没有，也没处点、
-   * 没处关。那不是隔离，那是应用背着用户做事。
-   *
-   * 所以这里分成两件事：**发现**仍然按 scope 关（`cdpTabs` 一个字没动），**用户**
-   * 则看得见全部。自己的排在前面，别人的跟在后面并标成 `foreign`，让上面那一排既
-   * 保持原来的顺序，又多出那几个本来看不见的。
+   * CDP 发现仍然按 scope 隔离，后台 Agent 可以继续操作自己的页面；界面快照也按同一
+   * 个 scope 过滤，避免切换挂载文件夹时把别的工作区的页面显示成当前页面。
    */
   state(scopeId = this.uiScopeId): BrowserStateSnapshot {
     return {
       scopeId,
       tabs: orderTabsForUi(this.tabs.values(), scopeId)
-        .map(({ tab, foreign }) => foreign ? { ...this.tabSnapshot(tab), foreign } : this.tabSnapshot(tab)),
-      activeTabId: this.activeTabIds.get(scopeId),
+        .map(({ tab }) => this.tabSnapshot(tab)),
+      activeTabId: this.activeTab(scopeId)?.id,
       zoom: this.zoomFor(scopeId),
     };
   }
@@ -468,16 +462,13 @@ export class BrowserRuntimeManager {
   }
 
   /**
-   * scope 不再是这里的门槛——因为进得来的人都已经过了门。
-   *
-   * CDP 那一侧的每一条路径（`Target.activateTarget`、`Target.closeTarget`…）都先用
-   * `findTabByTarget(…, client.scopeId)` 把目标解出来，而它只在 `cdpTabs(scopeId)`
-   * 里找，所以走到这里的标签页一定是这个客户端自己的，再查一遍 scope 什么也拦不住。
-   * 剩下的调用方就是界面，而界面要能点开、关掉它看得见的每一个标签页——包括别的
-   * 会话开的那几个。发现边界在 `cdpTabs`，不在这两个方法里。
+   * CDP 调用已经在 `findTabByTarget` 处按 client scope 限定；界面调用则再按当前
+   * 工作区校验一次，避免一个旧快照或竞态请求选择、关闭其他文件夹的标签页。
    */
   selectTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
-    if (!this.tabs.has(id)) throw new Error("浏览器标签页不存在。");
+    const tab = this.tabs.get(id);
+    if (!tab) throw new Error("浏览器标签页不存在。");
+    if (tab.scopeId !== scopeId) return this.state(scopeId);
     this.elementPicker.cancel();
     this.activeTabIds.set(scopeId, id);
     this.refreshViewportOverrides();
@@ -485,13 +476,13 @@ export class BrowserRuntimeManager {
     return this.state(scopeId);
   }
 
-  /** 同 `selectTab`：能点到它的人已经过了发现这一关。 */
+  /** 同 `selectTab`：跨工作区的旧标签请求直接返回当前工作区快照。 */
   closeTab(id: string, scopeId = this.uiScopeId): BrowserStateSnapshot {
     const tab = this.tabs.get(id);
-    if (!tab) return this.state(scopeId);
+    if (!tab || tab.scopeId !== scopeId) return this.state(scopeId);
     this.elementPicker.cancel();
-    // 接替的那一张只从「自己的」里面挑：关掉的如果是别的会话那张，index 落到 -1，
-    // 于是挑中自己的第一张。绝不能让一个 agent 的当前页变成另一个会话的页面。
+    // 接替的那一张只从当前工作区里面挑，绝不能让一个 Agent 的当前页变成另一个
+    // 文件夹的页面。
     const order = this.tabsForScope(scopeId).map((item) => item.id);
     const index = order.indexOf(id);
     this.closeTabRecord(tab);
@@ -630,7 +621,8 @@ export class BrowserRuntimeManager {
 
   private activeTab(scopeId: string): BrowserTab | undefined {
     const id = this.activeTabIds.get(scopeId);
-    return id ? this.tabs.get(id) : undefined;
+    const tab = id ? this.tabs.get(id) : undefined;
+    return tab?.scopeId === scopeId ? tab : undefined;
   }
 
   /** The active tab only when it can actually serve a command. */
