@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { rendererPlatform } from "../../platform";
 
 /**
  * Whether this click asked for the built-in browser rather than the real one.
@@ -9,12 +10,12 @@ import { useCallback, useEffect } from "react";
  * would fire a navigation every time someone opened the context menu.
  */
 export function wantsInAppBrowser(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
-  return window.coilcoil.platform === "darwin" ? event.metaKey : event.ctrlKey;
+  return rendererPlatform() === "darwin" ? event.metaKey : event.ctrlKey;
 }
 
 /** The key to name in a tooltip, spelled the way the platform spells it. */
 export function inAppBrowserModifierLabel(): string {
-  return window.coilcoil.platform === "darwin" ? "⌘" : "Ctrl";
+  return rendererPlatform() === "darwin" ? "⌘" : "Ctrl";
 }
 
 export function markdownBrowserUrl(href: string | null): string | undefined {

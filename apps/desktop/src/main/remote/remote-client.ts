@@ -96,7 +96,12 @@ export const REMOTE_PUSH_CHANNELS = [
  * the phone's browser but ships inside the main process bundle; keeping it here
  * avoids a second build target and a packaging rule for one file.
  */
+function computerLabel(platform: DesktopPlatform): string {
+  return platform === "darwin" ? "Mac" : platform === "win32" ? "Windows" : "Linux";
+}
+
 export function bridgeScript(platform: DesktopPlatform): string {
+  const hostLabel = computerLabel(platform);
   return `(function () {
   "use strict";
   // The Vite dev page is also loaded by Electron itself. Its preload bridge is
@@ -113,6 +118,7 @@ export function bridgeScript(platform: DesktopPlatform): string {
   var socket = null;
   var open = false;
   var nextId = 1;
+  var hostLabel = ${JSON.stringify(hostLabel)};
 
   function fanOut(channel, payload) {
     var set = listeners.get(channel);
@@ -173,7 +179,7 @@ export function bridgeScript(platform: DesktopPlatform): string {
     title.textContent = "已在其他设备上接管";
     var hint = document.createElement("div");
     hint.setAttribute("style", "font-size:14px;line-height:1.7;opacity:.7;max-width:22em");
-    hint.textContent = "同一时间只允许一台设备遥控这台 Mac。要在这台设备上继续，点下面重新接管。";
+    hint.textContent = "同一时间只允许一台设备遥控这台 " + hostLabel + "。要在这台设备上继续，点下面重新接管。";
     var button = document.createElement("button");
     button.setAttribute("style", [
       "font:inherit", "font-size:16px", "padding:12px 28px", "border:0",
@@ -324,8 +330,9 @@ export function bridgeScript(platform: DesktopPlatform): string {
  * from anywhere and survives a restart. A connection from the user's own
  * tailnet or LAN never reaches this page at all.
  */
-export function pairingPage(username?: string): string {
+export function pairingPage(username?: string, platform: DesktopPlatform = "darwin"): string {
   const account = username ? JSON.stringify(username) : "null";
+  const hostLabel = computerLabel(platform);
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -366,20 +373,20 @@ export function pairingPage(username?: string): string {
 </head>
 <body>
 <main>
-  <h1>登录以遥控这台 Mac</h1>
+  <h1>登录以遥控这台 ${hostLabel}</h1>
   <div class="tabs" role="tablist">
     <button id="tab-code" role="tab" aria-selected="true" type="button">配对码</button>
     <button id="tab-account" role="tab" aria-selected="false" type="button">账号密码</button>
   </div>
 
   <form id="form-code">
-    <p>在 Mac 上的 CoilCoil 设置里查看六位配对码。用过一次就失效。</p>
+    <p>在 ${hostLabel} 上的 CoilCoil 设置里查看六位配对码。用过一次就失效。</p>
     <input class="code" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" required>
     <button class="go" type="submit">配对</button>
   </form>
 
   <form id="form-account" hidden>
-    <p id="account-hint">用 Mac 上设置好的账号登录。</p>
+    <p id="account-hint">用 ${hostLabel} 上设置好的账号登录。</p>
     <input id="username" autocomplete="username" placeholder="用户名" required>
     <input id="password" type="password" autocomplete="current-password" placeholder="密码" required>
     <button class="go" type="submit">登录</button>
@@ -397,9 +404,9 @@ export function pairingPage(username?: string): string {
 
   if (account) {
     document.getElementById("username").value = account;
-    document.getElementById("account-hint").textContent = "用 Mac 上设置好的账号登录。";
+    document.getElementById("account-hint").textContent = "用 ${hostLabel} 上设置好的账号登录。";
   } else {
-    document.getElementById("account-hint").textContent = "Mac 上还没有设置账号，请先在设置里添加，或改用配对码。";
+    document.getElementById("account-hint").textContent = "${hostLabel} 上还没有设置账号，请先在设置里添加，或改用配对码。";
   }
 
   function show(which) {
@@ -422,7 +429,7 @@ export function pairingPage(username?: string): string {
     }).then(function (response) {
       if (response.ok) { location.replace("/"); return; }
       return response.json().then(function (body) { error.textContent = body.error || "登录失败。"; });
-    }).catch(function () { error.textContent = "无法连接到 Mac。"; });
+    }).catch(function () { error.textContent = "无法连接到 ${hostLabel}。"; });
   }
 
   formCode.addEventListener("submit", function (event) {

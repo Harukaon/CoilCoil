@@ -235,7 +235,7 @@ export class RemoteServer {
     }
 
     if (!this.allowed(request)) {
-      send(response, 200, MIME[".html"], pairingPage(this.auth.username()));
+      send(response, 200, MIME[".html"], pairingPage(this.auth.username(), this.options.platform));
       return;
     }
 

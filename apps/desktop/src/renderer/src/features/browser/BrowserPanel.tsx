@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Minus, MousePointer2, Plus
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserElementSelection, BrowserStateSnapshot } from "../../../../shared/desktop-api";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
+import { platformComputerLabel, rendererPlatform } from "../../platform";
 import { toastError } from "../../ui/toast";
 import { BrowserDataMenu } from "./BrowserDataMenu";
 import { setGuestPlacement } from "./guestLayer";
@@ -24,6 +25,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   onState(next: BrowserStateSnapshot): void;
   onElementPicked(selection: BrowserElementSelection): void;
 }): React.JSX.Element {
+  const platformLabel = platformComputerLabel(rendererPlatform());
   const [address, setAddress] = useState("");
   const [zoomOpen, setZoomOpen] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -200,7 +202,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
         {mobile && activeTab ? (
           frame
             ? <img className="browser-remote-frame" src={frame} alt={activeTab.title} />
-            : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取 Mac 上的页面…</strong></div>
+            : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取 {platformLabel} 上的页面…</strong></div>
         ) : null}
       </div>
     </section>

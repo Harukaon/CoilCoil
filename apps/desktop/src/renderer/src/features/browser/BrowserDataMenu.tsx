@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { BrowserDataStats, ImportableProfile } from "../../../../shared/desktop-api";
 import { ConfirmDialog } from "../../ui/dialog";
 import { toastError, toastInfo, toastSuccess } from "../../ui/toast";
+import { rendererPlatform } from "../../platform";
 
 function profileKey(profile: ImportableProfile): string {
   return `${profile.browser}:${profile.id}`;
@@ -37,7 +38,8 @@ function describeProfile(profile: ImportableProfile): string {
  * away from it: handing an agent live sessions is only reasonable when taking
  * them back is just as easy.
  */
-export function BrowserDataMenu(): React.JSX.Element {
+export function BrowserDataMenu(): React.JSX.Element | null {
+  const supported = rendererPlatform() === "darwin";
   const [open, setOpen] = useState(false);
   const [profiles, setProfiles] = useState<ImportableProfile[]>();
   const [stats, setStats] = useState<BrowserDataStats>();
@@ -61,6 +63,8 @@ export function BrowserDataMenu(): React.JSX.Element {
     if (!open) return;
     void refresh().catch((caught: unknown) => toastError(caught instanceof Error ? caught.message : String(caught)));
   }, [open, refresh]);
+
+  if (!supported) return null;
 
   const importFrom = async (profile: ImportableProfile): Promise<void> => {
     setBusy(profileKey(profile));

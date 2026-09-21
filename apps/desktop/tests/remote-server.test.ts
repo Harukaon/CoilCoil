@@ -7,7 +7,7 @@ import vm from "node:vm";
 import test from "node:test";
 import { WebSocket } from "ws";
 import { isTrustedAddress } from "../src/main/remote/remote-auth";
-import { REMOTE_INVOKE_CHANNELS, bridgeScript } from "../src/main/remote/remote-client";
+import { REMOTE_INVOKE_CHANNELS, bridgeScript, pairingPage } from "../src/main/remote/remote-client";
 import { RemoteServer } from "../src/main/remote/remote-server";
 
 const APP_HTML = "<!doctype html>\n<html>\n  <head>\n    <title>CoilCoil</title>\n  </head>\n  <body></body>\n</html>\n";
@@ -57,6 +57,13 @@ test("an unpaired device only ever gets the pairing page", async (t) => {
   const body = await response.text();
   assert.match(body, /登录以遥控这台 Mac/);
   assert.doesNotMatch(body, /<title>CoilCoil<\/title>/);
+});
+
+test("Windows remote login uses Windows wording instead of Mac wording", () => {
+  const page = pairingPage(undefined, "win32");
+  assert.match(page, /登录以遥控这台 Windows/);
+  assert.doesNotMatch(page, /Mac/);
+  assert.match(bridgeScript("win32"), /hostLabel = "Windows"/);
 });
 
 test("a wrong pairing code is rejected and hands out no cookie", async (t) => {

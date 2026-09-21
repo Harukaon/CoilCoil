@@ -1,4 +1,4 @@
-import type { MacPermissionId } from "../../../../shared/desktop-api";
+import type { DesktopPlatform, MacPermissionId } from "../../../../shared/desktop-api";
 
 /**
  * 首次启动的引导：有哪几步、每一步讲什么。
@@ -17,6 +17,11 @@ export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
   "permissions",
   "workspace",
 ];
+
+/** Windows/Linux 没有 macOS 那套权限开关，引导里不应展示一个无效的权限页。 */
+export function onboardingStepsFor(platform: DesktopPlatform): readonly OnboardingStepId[] {
+  return platform === "darwin" ? ONBOARDING_STEPS : ONBOARDING_STEPS.filter((step) => step !== "permissions");
+}
 
 /**
  * 引导里会介绍到的系统权限。
@@ -49,12 +54,12 @@ export interface OnboardingProgress {
 
 export const INITIAL_ONBOARDING: OnboardingProgress = { step: "intro" };
 
-export function stepIndex(step: OnboardingStepId): number {
-  return ONBOARDING_STEPS.indexOf(step);
+export function stepIndex(step: OnboardingStepId, steps: readonly OnboardingStepId[] = ONBOARDING_STEPS): number {
+  return steps.indexOf(step);
 }
 
-export function isLastStep(step: OnboardingStepId): boolean {
-  return stepIndex(step) === ONBOARDING_STEPS.length - 1;
+export function isLastStep(step: OnboardingStepId, steps: readonly OnboardingStepId[] = ONBOARDING_STEPS): boolean {
+  return stepIndex(step, steps) === steps.length - 1;
 }
 
 /**
@@ -68,13 +73,13 @@ export function canSkip(step: OnboardingStepId): boolean {
   return step === "model" || step === "agents" || step === "memory" || step === "integrations" || step === "workspace";
 }
 
-export function advance(progress: OnboardingProgress): OnboardingProgress {
-  const next = ONBOARDING_STEPS[stepIndex(progress.step) + 1];
+export function advance(progress: OnboardingProgress, steps: readonly OnboardingStepId[] = ONBOARDING_STEPS): OnboardingProgress {
+  const next = steps[stepIndex(progress.step, steps) + 1];
   return next ? { step: next } : progress;
 }
 
-export function goBack(progress: OnboardingProgress): OnboardingProgress {
-  const previous = ONBOARDING_STEPS[stepIndex(progress.step) - 1];
+export function goBack(progress: OnboardingProgress, steps: readonly OnboardingStepId[] = ONBOARDING_STEPS): OnboardingProgress {
+  const previous = steps[stepIndex(progress.step, steps) - 1];
   return previous ? { step: previous } : progress;
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { rendererPlatform } from "../platform";
 
 /**
  * Minimise, maximise and close, drawn by the app.
@@ -15,7 +16,7 @@ import { useEffect, useState } from "react";
  * to close it is worse than any of them.
  */
 export function WindowControls(): React.JSX.Element | null {
-  const platform = window.coilcoil?.platform;
+  const platform = rendererPlatform();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {

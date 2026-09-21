@@ -44,6 +44,7 @@ import { useAgentActivityLine } from "./hooks/useAgentActivityLine";
 import { useConversationViewport } from "./hooks/useConversationViewport";
 import { useFilePathDrop } from "./hooks/useFilePathDrop";
 import { toastError } from "./ui/toast";
+import { rendererPlatform } from "./platform";
 import type { AgentPhase } from "./features/conversation/agentActivity";
 import {
   ACTIVE_PROJECT_STORAGE_KEY,
@@ -263,7 +264,7 @@ export default function App(): React.JSX.Element {
   }, [applySnapshot, focusComposer]);
 
   useEffect(() => {
-    document.documentElement.dataset.platform = window.coilcoil.platform;
+    document.documentElement.dataset.platform = rendererPlatform();
     const unsubscribe = window.coilcoil.onRuntimeEvent(handleRuntimeEvent);
     void (async () => {
       try {
