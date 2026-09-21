@@ -128,7 +128,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       const prepared = await preparePromptImages(promptImages);
       const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
       const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
-      if (!hasUserMessage) {
+      if (!hasUserMessage && !active.titleManuallySet && !active.titleAttempted) {
         active.session.setSessionName(titleFromText(prompt));
         active.titlePending = true;
       }

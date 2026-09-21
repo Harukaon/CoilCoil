@@ -85,8 +85,12 @@ export interface ActiveSession {
   /** Prompts handed to Pi whose user message it has not echoed back yet. */
   pendingUserPrompts: PendingUserPrompt[];
   promptQueue: QueuedPrompt[];
-  /** 第一轮结束后要去单独问一次模型要标题；命名跑完（或放弃）就清掉。 */
+  /** 第一轮结束后要去单独问一次模型要标题。 */
   titlePending?: boolean;
+  /** This session has already claimed its one automatic naming attempt. */
+  titleAttempted?: boolean;
+  /** A human title owns this session; automatic naming must never overwrite it. */
+  titleManuallySet?: boolean;
   /** 已交给 Pi、还没落进对话的介入消息；快照带着它，切换会话后界面才恢复得回来。 */
   steeringMessages: SteeringMessage[];
   promptDrainInProgress: boolean;

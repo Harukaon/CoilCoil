@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildSessionTitlePrompt,
+  claimSessionTitleAttempt,
   sanitizeSessionTitle,
+  sessionTitleMarkers,
+  SESSION_TITLE_ATTEMPT_ENTRY_TYPE,
+  SESSION_TITLE_MANUAL_ENTRY_TYPE,
   SESSION_TITLE_MAX_CHARS,
 } from "../src/session-title.js";
 
@@ -47,4 +51,20 @@ test("超长原文会被截断，不会把整段对话塞进命名请求", () =>
   const prompt = buildSessionTitlePrompt(huge, huge);
   assert.ok(prompt.length < 6_000, `命名请求不该这么大：${prompt.length}`);
   assert.match(prompt, /已截断/);
+});
+
+test("手动标题和自动命名尝试会从会话标记中恢复", () => {
+  assert.deepEqual(sessionTitleMarkers([
+    { type: "custom", customType: SESSION_TITLE_MANUAL_ENTRY_TYPE },
+    { type: "custom", customType: SESSION_TITLE_ATTEMPT_ENTRY_TYPE },
+    { type: "custom", customType: "other" },
+  ]), { titleAttempted: true, titleManuallySet: true });
+});
+
+test("自动命名只能被同一个会话抢占一次，手动标题直接拒绝", () => {
+  const state = { titlePending: true };
+  assert.equal(claimSessionTitleAttempt(state), true);
+  assert.equal(claimSessionTitleAttempt(state), false);
+  assert.deepEqual(state, { titlePending: false, titleAttempted: true });
+  assert.equal(claimSessionTitleAttempt({ titlePending: true, titleManuallySet: true }), false);
 });

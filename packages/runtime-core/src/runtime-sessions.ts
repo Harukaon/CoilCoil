@@ -79,6 +79,10 @@ import {
 } from "./runtime-utils.js";
 import { rewriteSessionHeaderCwd } from "./session-relocation.js";
 import { systemPromptLayerFiles } from "./system-prompt-layers.js";
+import {
+  SESSION_TITLE_MANUAL_ENTRY_TYPE,
+  sessionTitleMarkers,
+} from "./session-title.js";
 
 export abstract class RuntimeSessions extends RuntimeMcpConfig {
   private readonly sessionListings = new SessionListingCache<SessionListEntry>();
@@ -226,10 +230,16 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
     const activeFile = this.active?.session.sessionFile ? safeRealPath(this.active.session.sessionFile) : undefined;
     if (activeFile && activeFile === safeRealPath(resolvedSession)) {
-      this.active!.session.setSessionName(nextName);
+      const active = this.active!;
+      active.titleManuallySet = true;
+      active.titlePending = false;
+      active.session.setSessionName(nextName);
+      active.session.sessionManager.appendCustomEntry(SESSION_TITLE_MANUAL_ENTRY_TYPE, { version: 1 });
       this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
     } else {
-      SessionManager.open(resolvedSession, this.sessionDir).appendSessionInfo(nextName);
+      const session = SessionManager.open(resolvedSession, this.sessionDir);
+      session.appendSessionInfo(nextName);
+      session.appendCustomEntry(SESSION_TITLE_MANUAL_ENTRY_TYPE, { version: 1 });
     }
     return this.listSessions(resolvedCwd);
   }
@@ -608,6 +618,10 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       planApproval: reconstructed.planApproval ?? pendingPlanApproval,
       refreshedAt: Date.now(),
     };
+    const titleMarkers = sessionTitleMarkers(created.session.sessionManager.getEntries());
+    // Older sessions have no marker. An existing persisted name is still user-owned
+    // for safety; only a truly unnamed session may enter automatic naming.
+    const titleManuallySet = titleMarkers.titleManuallySet || Boolean(created.session.sessionManager.getSessionName()?.trim());
     const active: ActiveSession = {
       cwd,
       session: created.session,
@@ -627,6 +641,8 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       steeringMessages: [],
       promptDrainInProgress: false,
       nextTimelineOrder: reconstructed.nextTimelineOrder,
+      titleAttempted: titleMarkers.titleAttempted,
+      titleManuallySet,
       toolRunIds: reconstructed.toolRunIds,
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
