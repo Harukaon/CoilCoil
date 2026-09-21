@@ -14,8 +14,14 @@ import {
 } from "../extensions/setup-guide.ts";
 import {
   COILCOIL_TOOL_NAME,
+  CoilcoilParams,
+  isDisableOp,
+  resolveMcpMethod,
+  resolveSkillMethod,
+  sessionMcpText,
   SETUP_RPC_REPLY_PREFIX,
   SETUP_RPC_REQUEST_CHANNEL,
+  skillDoneText,
 } from "../extensions/setup-tool.ts";
 // 通道常量按值断言，不跨包导入 runtime-core（strip-types 下 .js 后缀跨包解析不了）。
 const CORE_REQUEST_CHANNEL = "coilcoil:setup:rpc:v1:request";
@@ -93,3 +99,74 @@ test("文档按名读，超长截断标出来", () => {
   }
 });
 
+
+test("save 的 server 参数有完整字段，不是一个空 schema", () => {
+  // 空 schema（Type.Any）序列化成 {}：模型看不出要填什么，provider 也可能直接把
+  // 这个参数丢掉——save 于是永远收到「缺少 server」，唯一合规的配置通道是坏的。
+  const schema = CoilcoilParams as unknown as { properties: Record<string, Record<string, unknown>> };
+  const server = schema.properties.server as { properties?: Record<string, unknown>; type?: string };
+  assert.equal(server.type, "object");
+  for (const field of ["name", "scope", "transport", "command", "url", "env", "headers", "args"]) {
+    assert.ok(server.properties?.[field], `server.${field} 必须在 schema 里`);
+  }
+  const servers = schema.properties.servers as { type?: string };
+  const imports = schema.properties.imports as { type?: string };
+  assert.equal(servers.type, "array");
+  assert.equal(imports.type, "array");
+});
+
+test("guide 里写的 op 名字必须真的能调用", () => {
+  const guide = setupGuide("skill", "/agent");
+  const mentioned = [...guide.matchAll(/op=([a-z_]+)/g)].map((match) => match[1]!);
+  assert.ok(mentioned.length >= 4);
+  for (const op of mentioned) {
+    assert.ok(resolveSkillMethod(op), `教程提到的 skill op「${op}」必须存在`);
+  }
+  // 报告里踩的就是这条：教程写 disable_session，实际叫 session_disable。
+  assert.doesNotMatch(guide, /op=disable_session/);
+  assert.match(guide, /op=session_disable/);
+  // 旧名仍然认，免得别处的旧文案继续把人带沟里。
+  assert.equal(resolveSkillMethod("disable_session"), "skill_set_session_enabled");
+  assert.equal(resolveMcpMethod("disable_session"), "mcp_set_session_enabled");
+});
+
+test("开关类 op 不填 enabled 也能判断开还是关", () => {
+  assert.equal(isDisableOp("disable"), true);
+  assert.equal(isDisableOp("session_disable"), true);
+  assert.equal(isDisableOp("disable_session"), true);
+  assert.equal(isDisableOp("enable"), false);
+  assert.equal(isDisableOp("session_enable"), false);
+});
+
+test("删除类操作不再复用「装完」的文案", () => {
+  assert.match(skillDoneText("skill_install", true), /已装好/);
+  assert.match(skillDoneText("skill_delete", true), /已删除/);
+  assert.doesNotMatch(skillDoneText("skill_delete", true), /装完/);
+  // 移除是可逆的，必须把回头路说清楚，否则用户以为技能废了。
+  assert.match(skillDoneText("skill_remove", true), /op=enable/);
+  assert.match(skillDoneText("skill_remove", true), /op=delete/);
+  assert.match(skillDoneText("skill_set_enabled", false), /已停用/);
+  assert.equal(skillDoneText("skill_list", true), "");
+});
+
+test("会话级 MCP 开关说人话，救不回来的情况直说", () => {
+  const inspection = (server: Record<string, unknown>): unknown => ({ inspection: { mcp: { servers: [server] } } });
+  assert.match(
+    sessionMcpText(true, "ollama-search", inspection({ name: "ollama-search", disabled: true })),
+    /op=enable/,
+  );
+  assert.match(
+    sessionMcpText(true, "ollama-search", inspection({ name: "ollama-search", disabled: false })),
+    /恢复可见/,
+  );
+  assert.match(
+    sessionMcpText(false, "ollama-search", inspection({ name: "ollama-search", disabled: false })),
+    /当前会话已停用/,
+  );
+  assert.match(sessionMcpText(true, "typo", inspection({ name: "other" })), /没有「typo」/);
+  // 那句「做完了，但运行时没说什么」不该再出现在任何分支里。
+  assert.doesNotMatch(
+    sessionMcpText(true, "ollama-search", inspection({ name: "ollama-search" })),
+    /没说什么/,
+  );
+});

@@ -44,12 +44,18 @@ export function skillInstallGuide(agentDir: string): string {
     "步骤：",
     "1. 先读一遍来源目录，确认有 SKILL.md 且内容是想要的。",
     "2. 用 skill op=install + path（本地目录）拷进去——工具会先校验 SKILL.md，拷完自动 reload 会话，不用你再调别的。",
-    "3. 装完用 skill op=list 确认它在列表里且 enabled；想只给当前会话关掉，用 op=disable_session（不改配置）。",
+    "3. 装完用 skill op=list 确认它在列表里且 enabled；想只给当前会话关掉，用 op=session_disable（不改配置）。",
+    "",
+    "四个关系容易搞混的操作：",
+    "- op=disable：停用，还在列表里，op=enable 恢复。",
+    "- op=session_disable：只在当前对话里关掉，配置不动。",
+    "- op=remove：从列表里隐起来，文件不删；用 op=enable 加同一个 filePath 就能把它恢复回来。",
+    "- op=delete：连目录一起删，只能删自维护目录里的，删了就没了。",
     "",
     "坑：",
     "- 别用 bash/cp 自己拷：跳过校验，拷完会话也不 reload，装完 Skill 不会出现。",
     "- 别碰 bundled：传它的 filePath 会直接被拒绝。",
-    "- 删（remove）只是从列表拿掉，文件还在；彻底删文件用 op=delete，且只允许删自维护目录里的。",
+    "- Skill 按 SKILL.md 里的名字认人：同名的装不进去（会被直接拒掉），要换新版本先 op=delete 旧的。",
   ].join("\n");
 }
 
@@ -69,13 +75,15 @@ export function mcpSetupGuide(agentDir: string): string {
     "",
     "步骤：",
     "1. 用户给的配置先用 mcp op=parse_snippet 解析：README 里抄来的裸对象、VS Code 的 {servers} 写法都能认，返回规整的字段再填给 save。",
-    "2. 用 mcp op=save 写进去（带上 scope；name 只能是字母数字点下划线连字符）。",
+    "2. 用 mcp op=save 写进去：服务器定义放在 server 字段里（一个对象，含 name/transport/command 或 url 等），scope 单独传；name 只能是字母数字点下划线连字符。",
     "3. 用 mcp op=connect 真连一次：连上才算配好，连不上把服务器原话的第一行告诉用户（比如 Invalid API key），不要自己编原因。",
     "4. 机器上别的工具（Cursor/Claude/Codex…）配好的可以用 mcp op=discover 看看、op=import 抄过来；同名的会被跳过，不会覆盖用户改过的参数。",
+    "整文编辑走 op=get_json 读、op=save_json 写，全文放在 text 字段里（里面的敲码值原样留着就是不改）。",
     "",
     "坑：",
     `- 别用 bash 改 mcp.json：绕过校验不说，会话不 reload，配完 Agent 照样看不到；删和停用还有 removed/disabled 两套私账，手改文件会跟面板打架。`,
-    `- 敏感值（env/headers 里名字带 token/key/secret/password 的）读出来是 ${MASKED_SECRET_VALUE}，那是掩码不是值：原样传回去表示“不改”，真要换就填新值。`,
+    `- 敏感值（env/headers 里名字带 token/key/secret/password 的，以及地址里的密码与敏感参数）读出来都是 ${MASKED_SECRET_VALUE}，list 和 get_json 一样：那是掩码不是值，原样传回去表示“不改”，真要换就填新值；别把它当密钥读给用户。`,
+    "- 会话级开关（session_enable/session_disable）只管这次对话藏不藏，救不回配置里已停用的 Server；要真启用用 op=enable。",
     "- 需要登录的 Server 走 auth 那一套（见 topic=auth），不要让用户把 token 贴进配置文件。",
   ].join("\n");
 }

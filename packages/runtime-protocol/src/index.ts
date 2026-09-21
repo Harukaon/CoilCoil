@@ -595,6 +595,17 @@ export interface SkillConfigurationSnapshot {
   customSkillPaths: string[];
   enableSkillCommands: boolean;
   skills: SkillEntry[];
+  /**
+   * Skills CoilCoil was told to hide (`!` in settings), files still on disk.
+   *
+   * They are deliberately kept out of `skills` — that list is "what this
+   * workspace offers" and the settings panel renders it directly. But hiding
+   * used to mean *forgetting*: a removed skill could no longer be found by
+   * path, so deleting it, re-enabling it, or reinstalling it all failed with
+   * 「未找到技能」 and the folder stayed on disk forever. Listing them here is
+   * what makes removal reversible.
+   */
+  removedSkills?: SkillEntry[];
   diagnostics: SkillDiagnostic[];
 }
 

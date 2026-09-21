@@ -383,6 +383,8 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     const resolved = await packageManager.resolve(async () => "skip");
     const diagnostics: SkillDiagnostic[] = [];
     const skills: SkillEntry[] = [];
+    // Hidden, not forgotten: see `removedSkills` in the protocol.
+    const removedSkills: SkillEntry[] = [];
     const seen = new Set<string>();
     const skillPaths = settingsManager.getSkillPaths();
     const projectSkillPaths = [...(settingsManager.getProjectSettings().skills ?? [])];
@@ -411,7 +413,11 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
           disableModelInvocation: skill.disableModelInvocation,
           scope,
         };
-        if (!skillIsRemoved(configuredSkill, resolvedCwd, this.agentDir, skillPaths, projectSkillPaths)) skills.push(configuredSkill);
+        if (skillIsRemoved(configuredSkill, resolvedCwd, this.agentDir, skillPaths, projectSkillPaths)) {
+          removedSkills.push(configuredSkill);
+        } else {
+          skills.push(configuredSkill);
+        }
       }
     }
 
@@ -441,7 +447,11 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       }
     }
 
-    skills.sort((left, right) => left.name.localeCompare(right.name) || left.filePath.localeCompare(right.filePath));
+    const byName = (left: SkillEntry, right: SkillEntry): number => (
+      left.name.localeCompare(right.name) || left.filePath.localeCompare(right.filePath)
+    );
+    skills.sort(byName);
+    removedSkills.sort(byName);
     return {
       agentDir: this.agentDir,
       userSkillsDir: join(this.agentDir, "skills"),
@@ -452,16 +462,57 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       customSkillPaths: this.plainSkillPathEntries(skillPaths).map((path) => this.expandSkillPath(path)),
       enableSkillCommands: settingsManager.getEnableSkillCommands(),
       skills,
+      removedSkills,
       diagnostics,
     };
+  }
+
+  /**
+   * Find one skill by path, hidden ones included.
+   *
+   * A removed skill keeps its files and its settings entry; only the list it
+   * appears in changes. Looking only at `skills` is what turned 「移除」 into a
+   * one-way door: the entry was still on disk but no longer addressable, so
+   * delete, enable and reinstall all answered 「未找到技能」.
+   */
+  protected findSkillEntry(
+    snapshot: SkillConfigurationSnapshot,
+    filePath: string,
+  ): { skill: SkillEntry; removed: boolean } | undefined {
+    const visible = snapshot.skills.find((entry) => entry.filePath === filePath);
+    if (visible) return { skill: visible, removed: false };
+    const hidden = (snapshot.removedSkills ?? []).find((entry) => entry.filePath === filePath);
+    return hidden ? { skill: hidden, removed: true } : undefined;
+  }
+
+  /**
+   * Settings writes are queued, so the file is still the old one when the call
+   * returns. Re-reading without waiting is how every write answered with the
+   * state from before it — 「停用」 came back saying 「启用中」.
+   */
+  private async skillSnapshotAfterWrite(
+    settingsManager: SettingsManager,
+    resolvedCwd: string,
+  ): Promise<SkillConfigurationSnapshot> {
+    await settingsManager.flush();
+    this.reloadActiveSessionResources("Skills 重新加载失败");
+    const next = await this.getSkillConfiguration(resolvedCwd);
+    this.updateActiveSkillConfiguration(resolvedCwd, next);
+    return next;
   }
 
   async setSkillEnabled(filePath: string, enabled: boolean, cwd?: string): Promise<SkillConfigurationSnapshot> {
     const resolvedCwd = this.mcpCwd(cwd);
     const snapshot = await this.getSkillConfiguration(resolvedCwd);
-    const skill = snapshot.skills.find((entry) => entry.filePath === filePath);
-    if (!skill) throw new Error(`未找到技能：${filePath}`);
+    const found = this.findSkillEntry(snapshot, filePath);
+    if (!found) throw new Error(`未找到技能：${filePath}`);
+    const { skill, removed } = found;
     if (skill.source === "bundled") throw new Error("内置技能不能在此开关。");
+    // Enabling a hidden skill is the way back from 移除; disabling one would
+    // quietly un-hide it, which is not what anybody asked for.
+    if (removed && !enabled) {
+      throw new Error(`技能已处于移除状态：${filePath}。先用 enable 恢复，再停用。`);
+    }
 
     const settingsManager = this.skillSettingsManager(resolvedCwd);
     const pattern = skillOverridePattern(skill.filePath, skillPatternBaseDir(skill, resolvedCwd, this.agentDir));
@@ -472,18 +523,18 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     } else {
       settingsManager.setSkillPaths(rewriteSkillOverridePaths(settingsManager.getSkillPaths(), pattern, enabled));
     }
-    this.reloadActiveSessionResources("Skills 重新加载失败");
-    const next = await this.getSkillConfiguration(resolvedCwd);
-    this.updateActiveSkillConfiguration(resolvedCwd, next);
-    return next;
+    return this.skillSnapshotAfterWrite(settingsManager, resolvedCwd);
   }
 
   async removeSkill(filePath: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
     const resolvedCwd = this.mcpCwd(cwd);
     const snapshot = await this.getSkillConfiguration(resolvedCwd);
-    const skill = snapshot.skills.find((entry) => entry.filePath === filePath);
-    if (!skill) throw new Error(`未找到技能：${filePath}`);
+    const found = this.findSkillEntry(snapshot, filePath);
+    if (!found) throw new Error(`未找到技能：${filePath}`);
+    const { skill, removed } = found;
     if (skill.source === "bundled") throw new Error("内置技能不能从 CoilCoil 移除。");
+    // Already hidden: asking again is not an error, it is the same state.
+    if (removed) return snapshot;
 
     const settingsManager = this.skillSettingsManager(resolvedCwd);
     const pattern = skillOverridePattern(skill.filePath, skillPatternBaseDir(skill, resolvedCwd, this.agentDir));
@@ -493,22 +544,16 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     } else {
       settingsManager.setSkillPaths(removeSkillOverride(settingsManager.getSkillPaths(), pattern));
     }
-    this.reloadActiveSessionResources("Skills 重新加载失败");
-    const next = await this.getSkillConfiguration(resolvedCwd);
-    this.updateActiveSkillConfiguration(resolvedCwd, next);
-    return next;
+    return this.skillSnapshotAfterWrite(settingsManager, resolvedCwd);
   }
 
   async deleteSkill(filePath: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
     const resolvedCwd = this.mcpCwd(cwd);
     const snapshot = await this.getSkillConfiguration(resolvedCwd);
-    const skill = snapshot.skills.find((entry) => entry.filePath === filePath);
+    const skill = this.findSkillEntry(snapshot, filePath)?.skill;
     if (!skill) {
       if (!deleteInvalidManagedSkill(snapshot, filePath)) throw new Error(`未找到技能：${filePath}`);
-      this.reloadActiveSessionResources("Skills 重新加载失败");
-      const next = await this.getSkillConfiguration(resolvedCwd);
-      this.updateActiveSkillConfiguration(resolvedCwd, next);
-      return next;
+      return this.skillSnapshotAfterWrite(this.skillSettingsManager(resolvedCwd), resolvedCwd);
     }
     if (skill.source === "bundled") throw new Error("内置技能不能删除。");
     if (skill.source !== "user" || skill.scope !== "user") {
@@ -532,10 +577,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     if (nextPaths.length !== currentPaths.length) settingsManager.setSkillPaths(nextPaths);
 
     rmSync(skillRoot, { recursive: true, force: false });
-    this.reloadActiveSessionResources("Skills 重新加载失败");
-    const next = await this.getSkillConfiguration(resolvedCwd);
-    this.updateActiveSkillConfiguration(resolvedCwd, next);
-    return next;
+    return this.skillSnapshotAfterWrite(settingsManager, resolvedCwd);
   }
 
   async addSkillPath(path: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
@@ -550,6 +592,27 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     if (sourceRealPath === safeRealPath(managedRoot) || sourceRealPath.startsWith(`${safeRealPath(managedRoot)}${sep}`)) {
       throw new Error("所选目录已经位于 CoilCoil 自维护技能目录中。");
     }
+    // A second copy of a skill that is already installed is worse than
+    // useless: skills are keyed by the name inside SKILL.md, so the loader
+    // drops the duplicate as a collision and the folder just sits there taking
+    // space — which is exactly what the silent `-2` copy produced. Say so
+    // instead, and name the way out.
+    const importedNames = new Set(loadSkills({
+      cwd: resolvedCwd,
+      agentDir: this.agentDir,
+      skillPaths: [resolvedPath],
+      includeDefaults: false,
+    }).skills.map((skill) => skill.name));
+    const installed = await this.getSkillConfiguration(resolvedCwd);
+    const clash = [
+      ...installed.skills.map((entry) => ({ entry, removed: false })),
+      ...(installed.removedSkills ?? []).map((entry) => ({ entry, removed: true })),
+    ].find(({ entry }) => importedNames.has(entry.name));
+    if (clash) {
+      throw new Error(clash.removed
+        ? `同名技能「${clash.entry.name}」已被移除，但文件还在：${clash.entry.baseDir}。用 enable 恢复它，或先 delete 再重装。`
+        : `已经装过同名技能「${clash.entry.name}」：${clash.entry.baseDir}。要换新版本先 delete 它再装。`);
+    }
     mkdirSync(managedRoot, { recursive: true });
     const baseName = basename(resolvedPath).trim() || "imported-skill";
     let destination = join(managedRoot, baseName);
@@ -559,10 +622,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       suffix += 1;
     }
     cpSync(resolvedPath, destination, { recursive: true, force: false, errorOnExist: true });
-    this.reloadActiveSessionResources("Skills 重新加载失败");
-    const next = await this.getSkillConfiguration(resolvedCwd);
-    this.updateActiveSkillConfiguration(resolvedCwd, next);
-    return next;
+    return this.skillSnapshotAfterWrite(this.skillSettingsManager(resolvedCwd), resolvedCwd);
   }
 
   async removeSkillPath(path: string, cwd?: string): Promise<SkillConfigurationSnapshot> {
@@ -578,20 +638,14 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       }
     });
     settingsManager.setSkillPaths(next);
-    this.reloadActiveSessionResources("Skills 重新加载失败");
-    const snapshot = await this.getSkillConfiguration(resolvedCwd);
-    this.updateActiveSkillConfiguration(resolvedCwd, snapshot);
-    return snapshot;
+    return this.skillSnapshotAfterWrite(settingsManager, resolvedCwd);
   }
 
   async setEnableSkillCommands(enabled: boolean, cwd?: string): Promise<SkillConfigurationSnapshot> {
     const resolvedCwd = this.mcpCwd(cwd);
     const settingsManager = this.skillSettingsManager(resolvedCwd);
     settingsManager.setEnableSkillCommands(enabled);
-    this.reloadActiveSessionResources("Skills 重新加载失败");
-    const snapshot = await this.getSkillConfiguration(resolvedCwd);
-    this.updateActiveSkillConfiguration(resolvedCwd, snapshot);
-    return snapshot;
+    return this.skillSnapshotAfterWrite(settingsManager, resolvedCwd);
   }
 
   protected updateActiveSkillConfiguration(cwd: string, snapshot: SkillConfigurationSnapshot): void {

@@ -30,26 +30,55 @@ export const COILCOIL_TOOL_NAME = "coilcoil";
 const SETUP_RPC_TIMEOUT_MS = 120_000;
 const DOC_PREVIEW_CHARS = 8_000;
 
-const CoilcoilParams = Type.Object({
+export const CoilcoilParams = Type.Object({
   area: StringEnum(["guide", "mcp", "skill"], {
     description: "guide：先看教程（装 skill / 配 MCP / 认证怎么走）；mcp：查配改连 MCP（含认证）；skill：列装启停 Skill",
   }),
   op: Type.Optional(Type.String({
-    description: "guide: skill / mcp / auth / read_doc；mcp: list/save/get_json/save_json/remove/enable/discover/import/parse_snippet/connect/auth_start/auth_await_each/auth_finish/auth_cancel/auth_complete/logout/session_enable；skill: list/install/enable/disable/remove/delete/session_enable/session_disable",
+    description: "guide: skill / mcp / auth / read_doc；mcp: list/save/get_json/save_json/remove/enable/disable/discover/import/parse_snippet/connect/auth_start/auth_await_each/auth_finish/auth_cancel/auth_complete/logout/session_enable/session_disable；skill: list/install/enable/disable/remove/delete/session_enable/session_disable",
   })),
   topic: Type.Optional(Type.String({ description: "area=guide 且 op 不为 read_doc 时：skill / mcp / auth" })),
   doc: Type.Optional(Type.String({ description: "area=guide + op=read_doc 时：文档名，如 architecture、readme" })),
   name: Type.Optional(Type.String({ description: "mcp 的 Server 名（connect/认证/logout/enable/remove 用）" })),
   filePath: Type.Optional(Type.String({ description: "skill 的文件路径（enable/disable/remove/delete 用）" })),
   path: Type.Optional(Type.String({ description: "skill 的本地目录（install 用）" })),
-  server: Type.Optional(Type.Any({ description: "mcp save 时的服务器定义（name/scope/transport/command/url/env/headers…）" })),
+  // 字段必须逐个写出来。之前这里是 Type.Any，它序列化成一个空 schema `{}`，
+  // 模型看不出要填什么、provider 那边也容易直接把这个参数丢掉——结果就是 save
+  // 永远收到「缺少 server」，唯一合规的配置通道是坏的。
+  server: Type.Optional(Type.Object({
+    name: Type.Optional(Type.String({ description: "Server 名，只能是字母、数字、点、下划线、连字符" })),
+    scope: Type.Optional(StringEnum(["global", "project"], { description: "默认 global；project 只给当前工作区用" })),
+    transport: Type.Optional(StringEnum(["stdio", "http"], { description: "stdio 要 command；http 要 url" })),
+    command: Type.Optional(Type.String({ description: "stdio 的启动命令，如 npx" })),
+    args: Type.Optional(Type.Array(Type.String(), { description: "stdio 的命令参数" })),
+    env: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "stdio 的环境变量；敏感值用 ${VAR} 占位符" })),
+    cwd: Type.Optional(Type.String({ description: "stdio 的工作目录" })),
+    url: Type.Optional(Type.String({ description: "http 的服务器地址" })),
+    headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "http 的请求头；敏感值用 ${VAR} 占位符" })),
+    auth: Type.Optional(Type.Union([StringEnum(["oauth", "bearer"]), Type.Literal(false)], { description: "oauth 走浏览器认证；false 是明确不认证" })),
+    bearerTokenEnv: Type.Optional(Type.String({ description: "放令牌的环境变量名（别把令牌本体写进配置）" })),
+    lifecycle: Type.Optional(StringEnum(["lazy", "eager", "keep-alive"], { description: "默认 lazy：用到才连、闲置放手" })),
+    idleTimeout: Type.Optional(Type.Number({ description: "闲置多少分钟后断开" })),
+    requestTimeoutMs: Type.Optional(Type.Number({ description: "单次调用超时（毫秒）" })),
+    exposeResources: Type.Optional(Type.Boolean({ description: "是否把该 Server 的 resources 暴露给 Agent" })),
+    directTools: Type.Optional(Type.Union([Type.Boolean(), Type.Array(Type.String())], { description: "true 或工具名列表：把这几个工具直接注册给模型（每轮都占 token，慎用）" })),
+    excludeTools: Type.Optional(Type.Array(Type.String(), { description: "不暴露的工具名" })),
+    debug: Type.Optional(Type.Boolean({ description: "打开该 Server 的调试日志" })),
+    disabled: Type.Optional(Type.Boolean({ description: "保存后直接停用" })),
+  }, {
+    additionalProperties: true,
+    description: "mcp save 的服务器定义；stdio 至少给 name+command，http 至少给 name+url",
+  })),
   text: Type.Optional(Type.String({ description: "parse_snippet 的配置 JSON；save_json 的 mcp.json 全文；auth_complete 粘贴的回调内容" })),
   input: Type.Optional(Type.String({ description: "auth_complete 粘贴的回调内容的别名，和 text 二选一" })),
-  enabled: Type.Optional(Type.Boolean({ description: "enable/disable/session_enable/session_disable 的开关" })),
-  scope: Type.Optional(Type.String({ description: "save/remove 的作用域：global / project" })),
+  enabled: Type.Optional(Type.Boolean({ description: "enable/disable/session_enable/session_disable 的开关；省略时按 op 名字推断" })),
+  scope: Type.Optional(StringEnum(["global", "project"], { description: "save/remove 的作用域，默认 global" })),
   previousName: Type.Optional(Type.String({ description: "改名保存时填旧名" })),
-  servers: Type.Optional(Type.Any({ description: "import 时的 origin+name 列表" })),
-  imports: Type.Optional(Type.Any({ description: "enable_imports 时的来源列表" })),
+  servers: Type.Optional(Type.Array(Type.Object({
+    origin: Type.String({ description: "来源工具：cursor / claude-code / claude-desktop / codex / opencode / windsurf / vscode" }),
+    name: Type.String({ description: "该来源里的 Server 名" }),
+  }), { description: "import 时要搬过来的服务器，来自 discover 的结果" })),
+  imports: Type.Optional(Type.Array(Type.String(), { description: "enable_imports 要启用的来源列表" })),
 });
 
 type CoilcoilParamsValue = {
@@ -180,6 +209,37 @@ function renderSkillConfiguration(configuration: unknown): string {
   return ["已安装的 Skill：", ...lines].join("\n");
 }
 
+/**
+ * Say what a session toggle actually did.
+ *
+ * The old answer was 「做完了，但运行时没说什么」, which is the same sentence
+ * whether it worked or not — and it was printed while trying to session-enable
+ * a server that is disabled in the configuration, where the toggle genuinely
+ * cannot help: session state only hides an available server for one
+ * conversation, it does not override 停用.
+ */
+export function sessionMcpText(enabled: boolean, name: unknown, data: unknown): string {
+  const serverName = typeof name === "string" && name.trim() ? name.trim() : "该 Server";
+  const inspection = isRecord(data) ? (data as { inspection?: unknown }).inspection : undefined;
+  const mcp = isRecord(inspection) ? (inspection as { mcp?: unknown }).mcp : undefined;
+  const servers = isRecord(mcp) && Array.isArray((mcp as { servers?: unknown }).servers)
+    ? (mcp as { servers: Array<Record<string, unknown>> }).servers
+    : undefined;
+  const server = servers?.find((entry) => entry.name === serverName);
+  if (!server) {
+    return `MCP 列表里没有「${serverName}」，会话级开关无处可施。先用 op=list 核对名字。`;
+  }
+  if (enabled && server.disabled === true) {
+    return `「${serverName}」在配置里是停用状态，会话级开关救不回来——它只管「这次对话里临时藏起来」。要真的启用，用 op=enable（会写进配置并 reload）。`;
+  }
+  if (enabled && server.sessionDisabled === true) {
+    return `「${serverName}」仍在当前会话被藏着，这次恢复没有生效，请当成失败处理。`;
+  }
+  return enabled
+    ? `「${serverName}」在当前会话恢复可见（配置没动）。`
+    : `「${serverName}」在当前会话已停用（配置没动，换个会话就回来）。`;
+}
+
 function renderSnippets(snippets: unknown): string {
   if (!Array.isArray(snippets) || !snippets.length) return "这段配置里没认出 MCP 服务器：需要 command（stdio）或 url（HTTP）。";
   return [
@@ -194,7 +254,7 @@ function renderSnippets(snippets: unknown): string {
 }
 
 /** `op` aliases: what people actually type, mapped to the runtime method. */
-function resolveMcpMethod(op: string): string | undefined {
+export function resolveMcpMethod(op: string): string | undefined {
   const normalized = op.trim().toLowerCase();
   const table: Record<string, string> = {
     list: "mcp_list",
@@ -223,11 +283,38 @@ function resolveMcpMethod(op: string): string | undefined {
     logout: "mcp_logout",
     session_enable: "mcp_set_session_enabled",
     session_disable: "mcp_set_session_enabled",
+    // 动宾顺序反过来的那一半人会写成这样，而且教程曾经就是这么写的。
+    enable_session: "mcp_set_session_enabled",
+    disable_session: "mcp_set_session_enabled",
   };
   return table[normalized];
 }
 
-function resolveSkillMethod(op: string): string | undefined {
+/** Whether an op name asks for "off", so `enabled` rarely has to be spelled out. */
+export function isDisableOp(op: string): boolean {
+  return /^(disable|session_disable|disable_session)$/.test(op.trim().toLowerCase());
+}
+
+/**
+ * What just happened, in the words of the operation that happened.
+ *
+ * Every write used to end with 「装完自动 reload」 — including deletions, which
+ * read as if the delete had installed something. On top of a stale list that
+ * was two wrong signals in one answer.
+ */
+export function skillDoneText(method: string, enabled: boolean): string {
+  if (method === "skill_list") return "";
+  if (method === "skill_install") return "\n\n已装好并 reload，当前会话立刻生效。";
+  if (method === "skill_set_enabled") return `\n\n已${enabled ? "启用" : "停用"}并 reload，上面列表就是改完的状态。`;
+  if (method === "skill_remove") {
+    return "\n\n已从列表里移除并 reload。文件还在磁盘上：用 op=enable 加同一个 filePath 可以恢复，要连文件一起删就用 op=delete。";
+  }
+  if (method === "skill_delete") return "\n\n已删除目录和配置记录并 reload，磁盘上不再留残留。";
+  if (method === "skill_remove_path") return "\n\n已移除该技能目录并 reload。";
+  return "\n\n已生效并 reload。";
+}
+
+export function resolveSkillMethod(op: string): string | undefined {
   const normalized = op.trim().toLowerCase();
   const table: Record<string, string> = {
     list: "skill_list",
@@ -235,11 +322,15 @@ function resolveSkillMethod(op: string): string | undefined {
     add: "skill_install",
     enable: "skill_set_enabled",
     disable: "skill_set_enabled",
+    restore: "skill_set_enabled",
     remove: "skill_remove",
+    hide: "skill_remove",
     delete: "skill_delete",
     remove_path: "skill_remove_path",
     session_enable: "skill_set_session_enabled",
     session_disable: "skill_set_session_enabled",
+    enable_session: "skill_set_session_enabled",
+    disable_session: "skill_set_session_enabled",
   };
   return table[normalized];
 }
@@ -307,11 +398,17 @@ async function executeMcp(
   if (params.previousName?.trim()) callParams.previousName = params.previousName.trim();
   if (params.servers !== undefined) callParams.servers = params.servers;
   if (params.imports !== undefined) callParams.imports = params.imports;
+  // The document arrives as `text` — the one field the schema offers for free
+  // text — and the runtime asks for `content`. The names disagreed and nobody
+  // could save a mcp.json at all, because `content` was not even in the schema
+  // to be sent. One mapping, here, rather than two spellings in the schema.
+  if (method === "mcp_save_json") {
+    const document = params.text ?? params.input;
+    if (typeof document === "string") callParams.content = document;
+  }
   // `disable` / `session_disable` spell false without making the model say it.
   if ((method === "mcp_set_enabled" || method === "mcp_set_session_enabled") && params.enabled === undefined) {
-    const lowered = op.trim().toLowerCase();
-    if (lowered === "disable" || lowered === "session_disable") callParams.enabled = false;
-    if (lowered === "enable" || lowered === "session_enable") callParams.enabled = true;
+    callParams.enabled = !isDisableOp(op);
   }
   if (method === "mcp_auth_complete" && callParams.input === undefined && typeof callParams.text === "string") {
     callParams.input = callParams.text;
@@ -337,10 +434,24 @@ async function executeMcp(
     if (method === "mcp_save_server" || method === "mcp_save_json" || method === "mcp_remove"
       || method === "mcp_set_enabled" || method === "mcp_import" || method === "mcp_enable_imports") {
       const configuration = (data as { configuration?: unknown }).configuration;
+      const done = method === "mcp_remove"
+        ? "已移除并 reload。配置来自别的工具时只是在 CoilCoil 里隐起来，源文件不动；重新 save 同名即可恢复。"
+        : method === "mcp_set_enabled"
+          ? `已${callParams.enabled === false ? "停用" : "启用"}并 reload，Agent 侧已生效。`
+          : "已保存并 reload，Agent 侧已生效。";
       return textResult(
-        `${renderMcpConfiguration(configuration)}\n\n已保存并 reload，Agent 侧已生效。`,
+        `${renderMcpConfiguration(configuration)}\n\n${done}`,
         { area: "mcp", op, method, configuration },
       );
+    }
+    if (method === "mcp_set_session_enabled") {
+      return textResult(sessionMcpText(callParams.enabled !== false, callParams.name, data), {
+        area: "mcp",
+        op,
+        method,
+        name: callParams.name,
+        enabled: callParams.enabled !== false,
+      });
     }
     if (method === "mcp_discover") {
       const discovery = (data as { discovery?: { servers?: Array<{ origin?: string; name?: string; alreadyPresent?: boolean }> } }).discovery;
@@ -353,7 +464,10 @@ async function executeMcp(
       return textResult(text, { area: "mcp", op, method, discovery });
     }
     const result = (data as { result?: { text?: string; details?: unknown } }).result;
-    const text = typeof result?.text === "string" ? result.text : "做完了，但运行时没说什么。";
+    const text = typeof result?.text === "string"
+      ? result.text
+      // 一句「做完了但没说什么」请谁都判断不了成败。没话就是有问题，直说。
+      : `${op} 没有得到运行时的回应，请当成没做成，用 op=list 或 op=connect 核对当前状态。`;
     const details = isRecord(result?.details) ? result.details as Record<string, unknown> : {};
     if (method === "mcp_connect") {
       const error = typeof details.error === "string" ? details.error : undefined;
@@ -394,25 +508,23 @@ async function executeSkill(
   if (params.path?.trim()) callParams.path = params.path.trim();
   if (params.enabled !== undefined) callParams.enabled = params.enabled;
   if (method === "skill_set_enabled" || method === "skill_set_session_enabled") {
-    if (params.enabled === undefined) {
-      const lowered = op.trim().toLowerCase();
-      if (lowered === "disable" || lowered === "session_disable") callParams.enabled = false;
-      if (lowered === "enable" || lowered === "session_enable") callParams.enabled = true;
-    }
+    if (params.enabled === undefined) callParams.enabled = !isDisableOp(op);
   }
   try {
     const data = await setupRpc(pi, method, callParams, cwd);
     if (!isRecord(data)) return textResult("运行时回了个看不懂的应答。", { area: "skill", op, method }, true);
     if (method === "skill_set_session_enabled") {
-      const enabled = callParams.enabled === true;
+      const enabled = callParams.enabled !== false;
       return textResult(
         enabled ? "这个 Skill 在当前会话恢复启用（配置没动）。" : "这个 Skill 在当前会话已停用（配置没动，切个会话就回来）。",
         { area: "skill", op, method },
       );
     }
     const configuration = (data as { configuration?: unknown }).configuration;
-    const suffix = method === "skill_list" ? "" : "\n\n已生效（装完自动 reload，不用再调别的）。";
-    return textResult(`${renderSkillConfiguration(configuration)}${suffix}`, { area: "skill", op, method, configuration });
+    return textResult(
+      `${renderSkillConfiguration(configuration)}${skillDoneText(method, callParams.enabled !== false)}`,
+      { area: "skill", op, method, configuration },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return textResult(message, { area: "skill", op, method, error: "rpc_failed", message }, true);

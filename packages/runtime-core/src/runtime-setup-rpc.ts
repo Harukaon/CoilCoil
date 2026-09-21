@@ -17,6 +17,15 @@ import {
   stringValue,
 } from "./runtime-utils.js";
 import {
+  MASKED_SECRET_VALUE,
+  maskMcpJsonText,
+  maskSecretMap,
+  maskSecretUrl,
+  restoreMcpJsonText,
+  restoreSecretMap,
+  restoreSecretUrl,
+} from "./setup-secrets.js";
+import {
   redactSensitiveText,
 } from "./session-values.js";
 import type {
@@ -115,30 +124,14 @@ function setupRequestFrom(raw: unknown): SetupRpcRequest | undefined {
   };
 }
 
-/** The panel's mask value, repeated here so workflow stays dependency-free. */
-const MASKED_VALUE = "••••••";
-
 /** Secrets never reach the model: the whole point of handing it structured results. */
 function maskServerForAgent(server: McpServerConfiguration): McpServerConfiguration {
-  const mask = (value: Record<string, string>): Record<string, string> => (
-    Object.fromEntries(Object.entries(value).map(([key, entry]) => (
-      [key, sensitiveConfigurationKey(key) && entry ? MASKED_VALUE : entry]
-    )))
-  );
-  let url = server.url;
-  if (url) {
-    try {
-      const parsed = new URL(url);
-      if (parsed.password) parsed.password = MASKED_VALUE;
-      for (const [key, value] of [...parsed.searchParams]) {
-        if (sensitiveConfigurationKey(key) && value) parsed.searchParams.set(key, MASKED_VALUE);
-      }
-      url = parsed.toString();
-    } catch {
-      // An unparseable URL is the server's own words to keep, not ours to fix.
-    }
-  }
-  return { ...server, env: mask(server.env), headers: mask(server.headers), url };
+  return {
+    ...server,
+    env: maskSecretMap(server.env),
+    headers: maskSecretMap(server.headers),
+    url: maskSecretUrl(server.url),
+  };
 }
 
 function maskMcpSnapshot(snapshot: McpConfigurationSnapshot): McpConfigurationSnapshot {
@@ -152,35 +145,18 @@ async function unmaskServerForSave(
   previousName: string | undefined,
   cwd?: string,
 ): Promise<McpServerConfiguration> {
-  const needsResolve = Object.values(server.env).includes(MASKED_VALUE)
-    || Object.values(server.headers).includes(MASKED_VALUE)
-    || server.url?.includes(MASKED_VALUE);
+  const needsResolve = Object.values(server.env).includes(MASKED_SECRET_VALUE)
+    || Object.values(server.headers).includes(MASKED_SECRET_VALUE)
+    || server.url?.includes(MASKED_SECRET_VALUE);
   if (!needsResolve) return server;
   const current = (await host.getMcpConfiguration(cwd)).servers.find((entry) => entry.name === (previousName ?? server.name));
   if (!current) return server;
-  const restore = (next: Record<string, string>, prev: Record<string, string>): Record<string, string> => (
-    Object.fromEntries(Object.entries(next).map(([key, entry]) => (
-      [key, entry === MASKED_VALUE && prev[key] !== undefined ? prev[key]! : entry]
-    )))
-  );
-  let url = server.url;
-  if (url?.includes(MASKED_VALUE) && current.url) {
-    try {
-      const next = new URL(url);
-      const prev = new URL(current.url);
-      if (next.password === MASKED_VALUE) next.password = prev.password;
-      for (const [key, value] of [...next.searchParams]) {
-        if (value !== MASKED_VALUE) continue;
-        const prevValue = prev.searchParams.get(key);
-        if (prevValue === null) next.searchParams.delete(key);
-        else next.searchParams.set(key, prevValue);
-      }
-      url = next.toString();
-    } catch {
-      // Leave it: validation below reports it better than we can here.
-    }
-  }
-  return { ...server, env: restore(server.env, current.env), headers: restore(server.headers, current.headers), url };
+  return {
+    ...server,
+    env: restoreSecretMap(server.env, current.env),
+    headers: restoreSecretMap(server.headers, current.headers),
+    url: restoreSecretUrl(server.url, current.url),
+  };
 }
 
 function stringParam(params: Record<string, unknown> | undefined, key: string): string | undefined {
@@ -292,13 +268,21 @@ export function installSetupRpc(host: SetupRpcHost, eventBus: EventBusController
           return;
         }
         case "mcp_get_json": {
-          replyOk({ document: await host.getMcpJson() });
+          // The whole document, credentials masked — it lands in the transcript
+          // and in the session file, and a key read once is a key leaked.
+          const document = await host.getMcpJson();
+          replyOk({ document: { ...document, content: maskMcpJsonText(document.content) } });
           return;
         }
         case "mcp_save_json": {
-          const content = stringParam(params, "content");
+          // `text` is accepted as well: it is the field the tool schema offers
+          // for free text, and a mismatch here once made saving impossible.
+          const content = stringParam(params, "content") ?? stringParam(params, "text");
           if (typeof content !== "string") throw new Error("缺少 content（mcp.json 全文）。");
-          replyOk({ configuration: maskMcpSnapshot(await host.saveMcpJson(content, cwd)) });
+          const current = await host.getMcpJson();
+          replyOk({
+            configuration: maskMcpSnapshot(await host.saveMcpJson(restoreMcpJsonText(content, current.content), cwd)),
+          });
           return;
         }
         case "mcp_save_server": {
