@@ -474,6 +474,9 @@ try {
   // of them in the model's schema costs tokens on every turn. So what a session
   // toggle changes is which servers that tool can reach, not which tools exist.
   await waitForRuntimeInspection((inspection) => inspection.tools.some((tool) => tool.name === "mcp" && tool.active));
+  // The `coilcoil` setup tool is registered the same way: one tool with three
+  // areas (guide/mcp/skill), answering through the panel's own methods.
+  await waitForRuntimeInspection((inspection) => inspection.tools.some((tool) => tool.name === "coilcoil" && tool.active));
   const mcpConfigBeforeSessionToggle = readFileSync(savedMcp.configPath, "utf8");
   const sessionDisabledInspection = await request({ type: "set_session_mcp_server_enabled", name: "smoke-server", enabled: false });
   if (sessionDisabledInspection.mcp?.servers.find((server) => server.name === "smoke-server")?.sessionDisabled !== true) {

@@ -53,6 +53,7 @@ import {
   SUBAGENT_ACTIVITY_CHANNEL,
   projectMemoryStatusByCwd,
 } from "./runtime-constants.js";
+import { installSetupRpc } from "./runtime-setup-rpc.js";
 import { contextClearingRecord } from "./runtime-state.js";
 import { isRecord } from "./runtime-utils.js";
 import { installCompactionSettings } from "./compaction-settings.js";
@@ -657,6 +658,10 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     };
     installedActive = active;
     this.active = active;
+    // The `coilcoil` setup tool asks over this bus; installed here so it is
+    // in place before any tool call, and per-session so a late request after
+    // a switch answers for nobody. Every answer runs the panel's own method.
+    installSetupRpc(this, eventBus, () => { this.requireActive(); });
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
     eventBus.on(SUBAGENT_ACTIVITY_CHANNEL, (raw) => {
       if (this.active !== active) return;
