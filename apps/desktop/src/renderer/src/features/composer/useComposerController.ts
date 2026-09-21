@@ -13,6 +13,7 @@ import type {
 } from "@coilcoil/runtime-protocol";
 import type { BrowserElementSelection } from "../../../../shared/desktop-api";
 import { quotePath } from "./pathInsert";
+import { isPromptSendKey } from "./promptKeyboard";
 import { appendPromptImages, clipboardImage, MAX_PROMPT_IMAGE_DATA_CHARS, MAX_PROMPT_IMAGES } from "./promptImages";
 import {
   browserElementPart,
@@ -206,12 +207,13 @@ export function useComposerController({
   }, [onError]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>): void => {
-    if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      if (!draftRef.current.trim() && !imagesRef.current.length && emptyEnterRef.current?.()) return;
-      event.currentTarget.closest("form")?.requestSubmit();
-    }
+    // The Tiptap editor forwards the native KeyboardEvent, unlike the legacy
+    // editor which forwards React's SyntheticEvent. isPromptSendKey handles both.
+    if (composingRef.current || !isPromptSendKey(event)) return;
+    event.preventDefault();
+    if (!draftRef.current.trim() && !imagesRef.current.length && emptyEnterRef.current?.()) return;
+    const currentTarget = event.currentTarget as unknown as HTMLElement | null;
+    currentTarget?.closest("form")?.requestSubmit();
   }, []);
 
   const selectModel = useCallback(async (model: ModelOption): Promise<void> => {
