@@ -69,7 +69,7 @@ test("pinned rows ride along without taking a slot in recent", () => {
     [one.path]: [
       session({ id: "pin-a", pinned: true, updatedAt: "2026-08-28T00:00:00.000Z" }),
       session({ id: "pin-b", pinned: true, updatedAt: "2026-08-27T00:00:00.000Z" }),
-      ...Array.from({ length: 6 }, (_, index) => session({
+      ...Array.from({ length: DEFAULT_RECENT_ROWS + 2 }, (_, index) => session({
         id: `plain-${index}`,
         updatedAt: new Date(Date.UTC(2026, 7, 20 - index)).toISOString(),
       })),
@@ -78,7 +78,7 @@ test("pinned rows ride along without taking a slot in recent", () => {
   const view = visibleRecentSessions(entries, DEFAULT_RECENT_ROWS);
 
   assert.deepEqual(view.rows.map((entry) => entry.session.id), [
-    "pin-a", "pin-b", "plain-0", "plain-1", "plain-2", "plain-3",
+    "pin-a", "pin-b", ...Array.from({ length: DEFAULT_RECENT_ROWS }, (_, index) => `plain-${index}`),
   ]);
   // Only the unpinned leftovers are worth a "more" press.
   assert.equal(view.hiddenCount, 2);
@@ -129,7 +129,7 @@ test("the whole ordering is returned so the section can be expanded", () => {
   const recent = collectRecentSessions([one], { [one.path]: sessions });
 
   assert.equal(recent.length, DEFAULT_RECENT_ROWS + 3);
-  // One press of "more" reaches the rest; a second collapse returns to four.
+  // One press of "more" reaches the rest; collapse returns to the default.
   const grown = nextExpandedSessionLimit(DEFAULT_RECENT_ROWS, recent.length);
   assert.equal(grown, recent.length);
 });
