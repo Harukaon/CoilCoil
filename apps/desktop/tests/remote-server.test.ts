@@ -188,26 +188,32 @@ test("pairing a new device retires the previous one", async (t) => {
   assert.match(await current.text(), /__remote\/bridge\.js/);
 });
 
-test("a second connection takes over and tells the first why", async (t) => {
+// 本机回环（测试走 127.0.0.1）多端共存：两个连接都在，不互踢，都能收到推送。
+test("loopback connections coexist without displacing each other", async (t) => {
   const { address, server } = await startServer(t);
   const { cookie } = await pair(address, server.auth.pairingCode());
   const url = `${address.replace("http", "ws")}/__remote/ws`;
 
   const first = new WebSocket(url, { headers: { cookie: cookie! } });
+  t.after(() => first.close());
   await new Promise((ready) => first.once("open", ready));
-  const closed = new Promise<number>((done) => first.once("close", (code: number) => done(code)));
+  let firstClosed = false;
+  first.once("close", () => { firstClosed = true; });
 
   const second = new WebSocket(url, { headers: { cookie: cookie! } });
   t.after(() => second.close());
   await new Promise((ready) => second.once("open", ready));
+  await new Promise((resolve) => setTimeout(resolve, 100));
 
-  assert.equal(await closed, 4000);
-  assert.equal(server.connectedClients(), 1);
+  assert.equal(firstClosed, false);
+  assert.equal(server.connectedClients(), 2);
 
-  // The survivor keeps receiving everything the Mac pushes.
-  const pushed = new Promise<any>((done) => second.once("message", (raw) => done(JSON.parse(String(raw)))));
+  // 两边都收到 Mac 的推送。
+  const pushedFirst = new Promise<any>((done) => first.once("message", (raw) => done(JSON.parse(String(raw)))));
+  const pushedSecond = new Promise<any>((done) => second.once("message", (raw) => done(JSON.parse(String(raw)))));
   server.broadcast("runtime:event", { runtimeId: "r1", event: { type: "message_started" } });
-  assert.equal((await pushed).push, "runtime:event");
+  assert.equal((await pushedFirst).push, "runtime:event");
+  assert.equal((await pushedSecond).push, "runtime:event");
 });
 
 test("a tailnet or LAN peer skips the login screen, loopback never does", async (t) => {

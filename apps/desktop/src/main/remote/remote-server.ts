@@ -136,7 +136,7 @@ export class RemoteServer {
         socket.destroy();
         return;
       }
-      sockets.handleUpgrade(request, socket, head, (client) => this.accept(client));
+      sockets.handleUpgrade(request, socket, head, (client) => this.accept(client, isLoopbackAddress(request.socket.remoteAddress)));
     });
 
     await new Promise<void>((ready, failed) => {
@@ -158,13 +158,15 @@ export class RemoteServer {
     return address;
   }
 
-  private accept(client: WebSocket): void {
-    // Exactly one remote controller at a time. A newer connection wins and the
-    // older one is told why, so two devices can never drive the same session
-    // into different states.
-    for (const previous of this.clients) {
-      this.clients.delete(previous);
-      previous.close(DISPLACED_CODE, "displaced");
+  private accept(client: WebSocket, loopback: boolean): void {
+    // 本机回环（桌面 dev 页、7789 浏览器版）多端共存：都是同一台机器的同一双手，
+    // 不互踢。非回环（手机/远端）仍一次只留一个，新连接踢掉旧的，丢了被人捡到
+    // 也顶不掉正在用的那一台。
+    if (!loopback) {
+      for (const previous of this.clients) {
+        this.clients.delete(previous);
+        previous.close(DISPLACED_CODE, "displaced");
+      }
     }
     this.clients.add(client);
     this.options.log("info", "remote_client_connected", { clients: this.clients.size });

@@ -103,6 +103,10 @@ export function bridgeScript(platform: DesktopPlatform): string {
   // the real desktop transport; never replace it with the browser WebSocket
   // bridge or the desktop window would compete with the phone for the lease.
   if (window.coilcoil && !window.coilcoil.isRemote) return;
+  // dev 下 7789 服务和 Vite 插件会各插一次 bridge：同一页跑两个 socket 会
+  // 自己踢自己。第二个直接返回，吃第一份的 window.coilcoil。
+  if (window.__coilcoilRemoteBridge) return;
+  window.__coilcoilRemoteBridge = true;
   var pending = new Map();
   var listeners = new Map();
   var queue = [];
@@ -140,6 +144,10 @@ export function bridgeScript(platform: DesktopPlatform): string {
     socket.onclose = function (event) {
       open = false;
       if (event.code === 4000) {
+        // 非回环才会被踢：本机回环多端共存，误收 4000（旧服务端、并发边际）时
+        // 直接重连，不弹遮罩——回环本来就不该有“被接管”这回事。
+        var loopback = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+        if (loopback) { connect(); return; }
         // Another device took over. Reconnecting here would start a fight
         // between the two phones, so this one stops and says so.
         displaced();
