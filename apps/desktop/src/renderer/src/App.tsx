@@ -18,7 +18,7 @@ import type {
   WorkspaceSnapshot,
   ToolRun,
 } from "@coilcoil/runtime-protocol";
-import { SESSION_OPEN_SUPERSEDED_ERROR } from "@coilcoil/runtime-protocol";
+import { manualCompactionCommand, SESSION_OPEN_SUPERSEDED_ERROR } from "@coilcoil/runtime-protocol";
 import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { AppView } from "./AppView";
@@ -484,14 +484,18 @@ export default function App(): React.JSX.Element {
     const prompt = (override ?? draft).trim();
     const promptDocument = fromComposer ? draftDocument : undefined;
     const images = overrideImages ?? (fromComposer ? draftImages : []);
-    const runtimeCommand = prompt === "/memory" && images.length === 0;
+    // Two commands never become messages: `/memory` reports itself in the
+    // runtime panel, `/compact` draws its own rule across the transcript.
+    const memoryCommand = prompt === "/memory" && images.length === 0;
+    const compaction = images.length === 0 ? manualCompactionCommand(prompt) : undefined;
+    const runtimeCommand = memoryCommand || Boolean(compaction);
     if ((!prompt && !images.length) || !project || startingSession) return;
     if (runtimeCommand && (
       !snapshotRef.current
       || pendingProjectPath === project.path
       || snapshotRef.current.messages.length === 0
     )) {
-      toastError("当前会话还没有可供整理的历史记录。");
+      toastError(compaction ? "当前会话还没有可压缩的上下文。" : "当前会话还没有可供整理的历史记录。");
       return;
     }
     if (!modelConfigured) {
@@ -504,7 +508,9 @@ export default function App(): React.JSX.Element {
       return;
     }
     if (fromComposer) resetComposer();
-    if (runtimeCommand) {
+    // Only the memory run has nowhere else to report from; a compaction is
+    // already visible where the user is looking.
+    if (memoryCommand) {
       inspector.openRuntimeTab();
     }
     shouldAutoScrollRef.current = true;
@@ -570,7 +576,8 @@ export default function App(): React.JSX.Element {
         setPendingProjectPath(undefined);
         target = activeSnapshot;
       }
-      if (runtimeCommand) await window.coilcoil.request({ type: "run_memory_now" }, target.runtimeId);
+      if (compaction) await window.coilcoil.request({ type: "run_compaction_now", instructions: compaction.instructions }, target.runtimeId);
+      else if (memoryCommand) await window.coilcoil.request({ type: "run_memory_now" }, target.runtimeId);
       else if (intent === "steer") await window.coilcoil.request({ type: "steer", text: prompt, promptDocument, images, clientMessageId }, target.runtimeId);
       else await window.coilcoil.request({ type: "prompt", text: prompt, promptDocument, images, clientMessageId }, target.runtimeId);
     } catch (caught) {

@@ -88,6 +88,13 @@ export function buildSlashMenuItems(
       description: "立即在后台整理当前项目记忆",
       insert: "/memory",
     },
+    {
+      id: "command:compact",
+      kind: "command",
+      title: "/compact",
+      description: "立即压缩上下文，把较早的对话折叠成摘要；后面可以再补一句对摘要的要求",
+      insert: "/compact",
+    },
   ];
   /* 选一个 MCP 服务器，是「我想让 Agent 用这个去查」，不是「我想去设置页看看」。
      以前这一排每一条都跳去 MCP 设置，等于把人从正在写的那句话里踢出去，还得自己
