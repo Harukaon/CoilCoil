@@ -376,7 +376,9 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
       && currentModel.contextWindow === effectiveModel.contextWindow
       && active.session.thinkingLevel === effectiveThinkingLevel,
     );
-    const busy = active.session.isStreaming || this.promptStarting || (active.promptQueue?.length ?? 0) > 0 || active.promptDrainInProgress === true;
+    // A manual compaction is a model request of its own; swapping the model
+    // out from under it would move only the half that has not been sent yet.
+    const busy = active.session.isStreaming || this.promptStarting || (active.promptQueue?.length ?? 0) > 0 || active.promptDrainInProgress === true || active.compacting === true;
 
     if (busy) {
       // Never mutate the model object used by an in-flight AgentSession turn.

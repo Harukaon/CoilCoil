@@ -565,6 +565,8 @@ export class RuntimeServer {
         return runtime.rejectPlan(command.planId);
       case "run_memory_now":
         return runtime.runMemoryNow();
+      case "run_compaction_now":
+        return runtime.compactNow(command.instructions);
       case "remove_original_session_item":
         return runtime.removeOriginalSessionItem(command.entryId);
       case "stop_subagent":

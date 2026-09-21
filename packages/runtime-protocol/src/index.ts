@@ -689,6 +689,33 @@ export function promptDocumentHasContent(document: PromptDocument | undefined): 
   return Boolean(document?.parts.some((part) => part.type === "browser-element" || part.text.trim()));
 }
 
+/** `/compact` 带的额外要求，没写就是空对象。 */
+export interface ManualCompactionCommand {
+  instructions?: string;
+}
+
+const MANUAL_COMPACTION_COMMAND = "compact";
+
+/**
+ * 认出一句话是不是 `/compact`。
+ *
+ * 放在协议包里，是因为两边都要用：输入框靠它决定这句话不该变成一条对话消息，
+ * 运行时靠它拦下所有客户端（桌面、远程浏览器）发来的同一句话。两边各写一份
+ * 正则，迟早会分家。全角斜杠也认：中文输入法不问自己就会打出它。
+ */
+export function manualCompactionCommand(prompt: string): ManualCompactionCommand | undefined {
+  const trimmed = prompt.trim();
+  const slash = trimmed[0];
+  if (slash !== "/" && slash !== "／") return undefined;
+  const rest = trimmed.slice(1);
+  if (rest.slice(0, MANUAL_COMPACTION_COMMAND.length).toLowerCase() !== MANUAL_COMPACTION_COMMAND) return undefined;
+  const tail = rest.slice(MANUAL_COMPACTION_COMMAND.length);
+  // `/compactify 一下` 是一句话，不是这条命令。
+  if (tail && !/^\s/.test(tail)) return undefined;
+  const instructions = tail.trim();
+  return instructions ? { instructions } : {};
+}
+
 /** A user prompt accepted by the runtime but not started by Pi yet. */
 export interface QueuedPrompt {
   id: string;
@@ -1364,6 +1391,8 @@ export type RuntimeCommand =
   | { type: "approve_plan"; planId: string; target: PlanExecutionTarget; agent?: string }
   | { type: "reject_plan"; planId: string }
   | { type: "run_memory_now" }
+  /** 手动压缩上下文（`/compact`）；`instructions` 是用户对这份摘要的额外要求。 */
+  | { type: "run_compaction_now"; instructions?: string }
   | { type: "remove_original_session_item"; entryId: string }
   | { type: "stop_subagent"; id: string; background: boolean }
   | { type: "resume_subagent"; id: string }

@@ -668,9 +668,10 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
 
   protected async drainPromptQueue(active: ActiveSession): Promise<void> {
     if (this.active !== active || active.promptQueue.length === 0) return;
-    // Something already owns starting the next item; a second start would
-    // duplicate it.
-    if (active.promptDrainInProgress || this.promptStarting) return;
+    // Something already owns starting the next item, or a manual compaction is
+    // rewriting the history it would be added to (that one wakes the queue
+    // itself once it settles). Either way, not from here.
+    if (active.promptDrainInProgress || this.promptStarting || active.compacting) return;
     if (active.session.isStreaming) {
       this.scheduleDrainRetry(active);
       return;

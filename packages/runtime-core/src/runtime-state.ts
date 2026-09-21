@@ -119,6 +119,15 @@ export interface ActiveSession {
   planApproval?: PlanApprovalState;
   /** Live `/goal` loop state, mirrored from the workflow extension. */
   goal?: GoalState;
+  /**
+   * A manual `/compact` is summarizing this session right now.
+   *
+   * Pi's own `isStreaming` says nothing about compaction, so without this the
+   * interface looks idle while a minute-long summarization is in flight: no
+   * spinner, no stop button, and the next message races the compaction into
+   * the same session.
+   */
+  compacting?: boolean;
   /** A stop was delivered and the run has not settled yet. */
   aborting?: boolean;
   /** A stop that arrived before the run existed; it lands when the run starts. */

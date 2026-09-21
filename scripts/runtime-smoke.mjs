@@ -424,6 +424,16 @@ try {
   ) {
     throw new Error(`An empty /memory request did not leave structured runtime feedback: ${JSON.stringify(emptyMemoryInspection.memory)}`);
   }
+  await assert.rejects(
+    request({ type: "run_compaction_now" }),
+    /还没有可压缩的上下文/,
+    "手动压缩在空会话上要说人话，而不是把 Pi 的英文错误透出去",
+  );
+  // 输入框里敲的 /compact 走的是同一条路：它永远不应该变成发给模型的一句话。
+  await assert.rejects(
+    request({ type: "prompt", text: "/compact 保留接口改动细节" }),
+    /还没有可压缩的上下文/,
+  );
   const smokePromptOverride = "CoilCoil runtime inspection smoke prompt";
   const overriddenInspection = await request({ type: "set_session_system_prompt", prompt: smokePromptOverride });
   if (!overriddenInspection.systemPromptOverride || overriddenInspection.effectiveSystemPrompt !== smokePromptOverride) {
