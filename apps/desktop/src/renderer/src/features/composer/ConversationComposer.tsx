@@ -9,9 +9,9 @@ import type {
   SessionSnapshot,
 } from "@coilcoil/runtime-protocol";
 import { carriesPaths, droppedPaths, quotePath } from "./pathInsert";
-import { imageDataUrl } from "./promptImages";
 import { ModelPicker } from "./ModelPicker";
 import { PromptEditor, type PromptEditorHandle } from "./PromptEditor";
+import { PromptImagePreview } from "./PromptImagePreview";
 import { TiptapPromptEditor } from "./TiptapPromptEditor";
 
 export type ComposerVariant = "footer" | "inline";
@@ -149,7 +149,7 @@ export function ConversationComposer({
         <div className="composer-images">
           {images.map((image) => (
             <figure key={image.id ?? image.data.slice(0, 24)} title={image.name}>
-              <img src={imageDataUrl(image)} alt={image.name ?? "粘贴的图片"} />
+              <PromptImagePreview image={image} alt={image.name ?? "粘贴的图片"} className="composer-image-preview" />
               <button type="button" aria-label="移除图片" onClick={() => onImagesChange((current) => current.filter((item) => item !== image))}>
                 <X size={11} />
               </button>

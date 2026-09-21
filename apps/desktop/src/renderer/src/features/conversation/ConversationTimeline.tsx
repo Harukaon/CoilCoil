@@ -19,6 +19,7 @@ import type {
   ToolRun,
 } from "@coilcoil/runtime-protocol";
 import { ConversationComposer } from "../composer/ConversationComposer";
+import { PromptImagePreview } from "../composer/PromptImagePreview";
 import type { PromptEditorHandle } from "../composer/PromptEditor";
 import { appendPromptImages, clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { promptDocumentFromText, promptDocumentText, replaceTextRange } from "../composer/promptDocument";
@@ -207,9 +208,12 @@ function ImageStrip({ images }: { images: PromptImage[] }): React.JSX.Element | 
   return (
     <span className="message-images">
       {images.map((image) => (
-        <span className="message-image" key={image.id ?? image.data.slice(0, 24)}>
-          <img src={imageDataUrl(image)} alt={image.name ?? "附加图片"} />
-        </span>
+        <PromptImagePreview
+          className="message-image"
+          image={image}
+          alt={image.name ?? "附加图片"}
+          key={image.id ?? image.data.slice(0, 24)}
+        />
       ))}
     </span>
   );
