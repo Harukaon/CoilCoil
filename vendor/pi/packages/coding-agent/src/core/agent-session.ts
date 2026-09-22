@@ -329,6 +329,18 @@ export class AgentSession {
 	/** Context-only custom messages queued during a run, flushed once the current turn's tool results are in. */
 	private _pendingCustomMessages: CustomMessage[] = [];
 
+	/**
+	 * CoilCoil: which model writes the summaries. Unset means the session's own.
+	 *
+	 * Compaction and branch summarization are separate requests from the
+	 * conversation, and on a long session they are frequent and large. Embedders
+	 * that let the user run the conversation on an expensive model still want
+	 * those summaries on a cheap one, and nothing else about the request should
+	 * change: auth resolution, the embedder's stream function, retries and their
+	 * progress events all stay exactly as they are below.
+	 */
+	summarizationModel?: Model<any>;
+
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
@@ -899,6 +911,11 @@ export class AgentSession {
 	/** Current model (may be undefined if not yet selected) */
 	get model(): Model<any> | undefined {
 		return this.agent.state.model;
+	}
+
+	/** CoilCoil: the model summaries run on — the override, or this session's model. */
+	get effectiveSummarizationModel(): Model<any> | undefined {
+		return this.summarizationModel ?? this.agent.state.model;
 	}
 
 	/** Current thinking level */
@@ -1944,7 +1961,10 @@ export class AgentSession {
 				throw new Error(formatNoModelSelectedMessage());
 			}
 
-			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+			// CoilCoil: summaries may run on their own model; see `summarizationModel`.
+			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(
+				this.effectiveSummarizationModel ?? this.model,
+			);
 
 			const pathEntries = this.sessionManager.getBranch();
 			const settings = this.settingsManager.getCompactionSettings();
@@ -2245,7 +2265,10 @@ export class AgentSession {
 				return false;
 			}
 
-			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+			// CoilCoil: summaries may run on their own model; see `summarizationModel`.
+			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(
+				this.effectiveSummarizationModel ?? this.model,
+			);
 
 			const pathEntries = this.sessionManager.getBranch();
 
@@ -3235,7 +3258,8 @@ export class AgentSession {
 			let summaryDetails: unknown;
 			let summaryUsage: Usage | undefined;
 			if (options.summarize && entriesToSummarize.length > 0 && !extensionSummary) {
-				const model = this.model!;
+				// CoilCoil: branch summaries are summaries too; same override.
+				const model = this.effectiveSummarizationModel ?? this.model!;
 				const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(model);
 				const branchSummarySettings = this.settingsManager.getBranchSummarySettings();
 				const result = await generateBranchSummary(entriesToSummarize, {

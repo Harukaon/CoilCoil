@@ -44,6 +44,20 @@ embedded runtime requires a capability that cannot be implemented outside Pi.
   does. Regression test:
   `packages/coding-agent/test/suite/agent-session-model-extension.test.ts`.
 
+- `packages/coding-agent/src/core/agent-session.ts` adds an optional
+  `summarizationModel` (and the `effectiveSummarizationModel` getter), used by
+  manual compaction, automatic compaction and branch summarization in place of
+  the hard-coded `this.model`. Summaries are separate, frequent, and large
+  requests; CoilCoil lets the user run them on a cheap model while the
+  conversation stays on an expensive one. Everything else about those requests
+  is untouched — auth resolution, the embedder's stream function, retries and
+  their progress events — which is why this is a property rather than a
+  reimplementation of compaction inside an extension. Unset means Pi's own
+  behaviour. Regression guard:
+  `packages/runtime-core/tests/summarization-model.test.ts` asserts the getter
+  still exists, because losing the patch in an upgrade would silently send the
+  summaries back to the expensive model with the panel still claiming
+  otherwise.
 - `packages/coding-agent/src/core/settings-manager.ts` raises Pi's turn-retry
   defaults from 3 attempts / 2000 ms to 8 attempts / 1500 ms and adds a 30 s
   ceiling (`maxDelayMs`). An unstable gateway usually recovers, and giving up
