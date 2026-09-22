@@ -8,7 +8,10 @@ import {
   compactionSummaryPreview,
   COMPACTION_SUMMARY_PREVIEW_CHARS,
 } from "../src/renderer/src/features/conversation/compactionMarks.ts";
-import { buildConversationTimeline } from "../src/renderer/src/features/conversation/buildConversationTimeline.ts";
+import {
+  buildConversationTimeline,
+  hasRunningCompaction,
+} from "../src/renderer/src/features/conversation/buildConversationTimeline.ts";
 
 function message(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -37,6 +40,21 @@ const messages = [
   message({ id: "b", entryId: "e-b", order: 2, timestamp: 2_000, role: "assistant", text: "答" }),
   message({ id: "c", entryId: "e-c", order: 3, timestamp: 3_000 }),
 ];
+
+test("压缩在跑的时候，底下那个「正在思考」的转圈让位给横线", () => {
+  const running = buildConversationTimeline([...messages], [], [], undefined, {
+    summaryEvents: [compaction({ status: "running", timestamp: 4_000 })],
+  });
+  // 横线自己写着「正在整理上下文」；底下再转一圈是同一件事说两遍。
+  assert.equal(hasRunningCompaction(running), true);
+
+  // 普通对话不受影响：压缩做完了，或者压根本没压过，底下那圈照旧转。
+  const settled = buildConversationTimeline([...messages], [], [], undefined, {
+    summaryEvents: [compaction({ firstKeptEntryId: "e-c" })],
+  });
+  assert.equal(hasRunningCompaction(settled), false);
+  assert.equal(hasRunningCompaction(buildConversationTimeline([...messages], [])), false);
+});
 
 test("压缩的横线落在它保留的第一条消息前面", () => {
   const marks = buildCompactionMarks(messages, [compaction({ firstKeptEntryId: "e-c" })]);
