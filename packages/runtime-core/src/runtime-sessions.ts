@@ -658,6 +658,8 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     };
     installedActive = active;
     this.active = active;
+    // 总结跑在哪个模型上和对话是两件事；在第一次压缩之前就得就位。
+    await this.applySummarizationModel(active);
     // The `coilcoil` setup tool asks over this bus; installed here so it is
     // in place before any tool call, and per-session so a late request after
     // a switch answers for nobody. Every answer runs the panel's own method.

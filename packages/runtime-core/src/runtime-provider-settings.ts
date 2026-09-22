@@ -21,6 +21,8 @@ import {
   type ModelProviderSaveResult,
   type PendingSessionModel,
   type RuntimeConfiguration,
+  type SummarizationModelConfiguration,
+  type SummarizationModelConfigurationInput,
   type ThinkingLevel,
 } from "@coilcoil/runtime-protocol";
 import {
@@ -36,6 +38,11 @@ import {
 } from "./provider-helpers.js";
 import { RuntimeProviderCore } from "./runtime-provider-core.js";
 import {
+  parseModelReference,
+  readSummarizationModelConfiguration,
+  writeSummarizationModelConfiguration,
+} from "./summarization-model.js";
+import {
   cloneJson,
   errorMessage,
   isRecord,
@@ -45,6 +52,69 @@ import {
 import type { ActiveSession } from "./runtime-state.js";
 
 export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
+  /** 压缩和分支摘要跑在哪个模型上；空表示跟随会话模型。 */
+  async getSummarizationModelConfiguration(): Promise<SummarizationModelConfiguration> {
+    return this.summarizationModelState();
+  }
+
+  async saveSummarizationModelConfiguration(
+    input: SummarizationModelConfigurationInput,
+  ): Promise<SummarizationModelConfiguration> {
+    writeSummarizationModelConfiguration(this.agentDir, input);
+    await this.applySummarizationModel();
+    return this.summarizationModelState();
+  }
+
+  /** What the panel should show: what was configured, and whether it is usable. */
+  protected summarizationModelState(): SummarizationModelConfiguration {
+    const configured = readSummarizationModelConfiguration(this.agentDir);
+    if (!configured.model || !this.active) return configured;
+    return { ...configured, unavailable: this.active.summarizationModelUnavailable === true };
+  }
+
+  /**
+   * Point this session's summaries at the configured model.
+   *
+   * A model that cannot be resolved — deleted from the provider, credentials
+   * gone — must not take compaction down with it: the session falls back to its
+   * own model and says so in the panel. A compaction that does not happen is
+   * how a session walks into a context overflow.
+   */
+  protected async applySummarizationModel(active = this.active): Promise<void> {
+    if (!active) return;
+    const configured = readSummarizationModelConfiguration(this.agentDir).model;
+    const resolved = await this.resolveSummarizationModel(configured);
+    if (this.active !== active) return;
+    active.session.summarizationModel = resolved;
+    active.summarizationModelUnavailable = Boolean(configured) && !resolved;
+    if (active.summarizationModelUnavailable) {
+      this.log.warn("compaction", "summarization_model_unavailable", { configured });
+    } else if (resolved) {
+      this.log.info("compaction", "summarization_model_applied", { model: `${resolved.provider}/${resolved.id}` });
+    }
+    this.publishRuntimeInspection(active);
+  }
+
+  private async resolveSummarizationModel(configured: string) {
+    const reference = configured ? parseModelReference(configured) : undefined;
+    if (!reference) return undefined;
+    try {
+      const modelRuntime = await this.ready();
+      const model = modelRuntime.getModel(reference.provider, reference.id);
+      // Context-window overrides are CoilCoil metadata, not registry data; the
+      // summary model needs them for the same reason the session model does.
+      return model ? this.modelWithRuntimeOptions(model) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 模型表或凭证变了，配置的总结模型也要重新解析一次。 */
+  override refreshSessionModelFromRegistry(): void {
+    super.refreshSessionModelFromRegistry();
+    void this.applySummarizationModel().catch(() => undefined);
+  }
+
   async getModelProviderConfiguration(): Promise<ModelProviderConfigurationSnapshot> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();

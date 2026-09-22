@@ -1074,6 +1074,8 @@ export interface RuntimeInspectionSnapshot {
   subagent?: SubagentConfiguration;
   /** 会话自动命名用哪个模型；空表示跟随会话当前模型。 */
   sessionNaming?: SessionNamingConfiguration;
+  /** 压缩和分支摘要用哪个模型；空就是会话当前的那个。 */
+  summarizationModel?: SummarizationModelConfiguration;
   capabilities: {
     editSystemPrompt: boolean;
     removeOriginalSessionItems: false;
@@ -1199,6 +1201,22 @@ export interface SessionNamingConfiguration {
 }
 
 export interface SessionNamingConfigurationInput {
+  model: string;
+}
+
+/**
+ * 上下文总结（压缩、回溯时的分支摘要）跑在哪个模型上。
+ *
+ * 空字符串表示跟随会话当前的模型。总结是一发独立的、反复发生的大请求，主对话跑在
+ * 贵模型上的时候，很多人愿意让它跑在便宜模型上。
+ */
+export interface SummarizationModelConfiguration {
+  model: string;
+  /** 配了但现在找不到（模型被删、凭证没了）：总结已经回退到会话模型在跑。 */
+  unavailable?: boolean;
+}
+
+export interface SummarizationModelConfigurationInput {
   model: string;
 }
 
@@ -1357,6 +1375,8 @@ export type RuntimeCommand =
   | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
   | { type: "get_subagent_configuration" }
   | { type: "get_session_naming_configuration" }
+  | { type: "get_summarization_model_configuration" }
+  | { type: "save_summarization_model_configuration"; input: SummarizationModelConfigurationInput }
   /**
    * 跑任务面板上的一条任务。
    *

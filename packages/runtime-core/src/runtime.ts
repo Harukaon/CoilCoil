@@ -663,6 +663,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       ...snapshot,
       subagent: this.readSubagentConfiguration(),
       sessionNaming: this.readSessionNamingConfiguration(),
+      summarizationModel: this.summarizationModelState(),
     };
   }
 

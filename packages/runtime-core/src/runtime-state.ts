@@ -119,6 +119,8 @@ export interface ActiveSession {
   planApproval?: PlanApprovalState;
   /** Live `/goal` loop state, mirrored from the workflow extension. */
   goal?: GoalState;
+  /** 配置的总结模型当前解析不出来，这个会话的总结已回退到会话模型。 */
+  summarizationModelUnavailable?: boolean;
   /**
    * A manual `/compact` is summarizing this session right now.
    *
