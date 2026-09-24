@@ -12,6 +12,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import fileDiffExtension from "../file-diff.ts";
 import coilcoilMcpTools, { MCP_MANAGER_CHANNEL } from "../mcp-tools.ts";
 import { COILCOIL_WINDOWS_SHELL_STANDARDS } from "../system/engineering-standards.ts";
 import terminalExtension from "../terminal/extension.ts";
@@ -81,6 +82,9 @@ const CHILD_TOOL_EXTENSIONS: Record<string, { name: string; factory: ExtensionFa
   bash: { name: "coilcoil-subagent-terminal", factory: terminalExtension },
   terminal: { name: "coilcoil-subagent-terminal", factory: terminalExtension },
   mcp: { name: "coilcoil-subagent-mcp", factory: coilcoilMcpTools },
+  // edit / write 返回真实 diff，子 Agent 和主会话一样。
+  edit: { name: "coilcoil-subagent-file-diff", factory: fileDiffExtension },
+  write: { name: "coilcoil-subagent-file-diff", factory: fileDiffExtension },
 };
 
 /** 按子会话被授予的工具，挑出要加载的扩展；同一个扩展只加载一次。 */

@@ -32,6 +32,7 @@ import { markdownUrlTransform, parseMarkdownFileHref, type MarkdownFileTarget } 
 import { useFileLinkKind } from "./fileLinkKinds";
 import { TerminalNoticeCard } from "./TerminalNoticeCard";
 import { SubagentNoticeCard } from "./SubagentNoticeCard";
+import { parseFileDiffOutput, type FileDiffOutput } from "./fileDiffOutput";
 import { parseSubagentCompletion } from "./subagentNotice";
 import { compactionMarkDetail, compactionMarkLabel, compactionSummaryPreview, type CompactionMark } from "./compactionMarks";
 import { TERMINAL_NOTIFICATION_TYPE } from "./terminalNotice";
@@ -460,6 +461,8 @@ function AssistantSegment({ message }: { message: ChatMessage }): React.JSX.Elem
 }
 
 function lineStats(tool: ToolRun): { additions: number; deletions: number } {
+  const diff = parseFileDiffOutput(tool.name, tool.output);
+  if (diff) return { additions: diff.additions, deletions: diff.deletions };
   const args = tool.args;
   const added = String(args.newText ?? args.new_string ?? args.content ?? "");
   const removed = String(args.oldText ?? args.old_string ?? "");
@@ -517,14 +520,27 @@ function toolArgumentsText(tool: ToolRun): string {
   }
 }
 
+function DiffView({ diff }: { diff: FileDiffOutput }): React.JSX.Element {
+  return (
+    <pre className="tool-diff">
+      <span className="tool-diff-header">{diff.header}</span>
+      {diff.lines.map((line, index) => <span key={index} className={`tool-diff-line ${line.kind}`}>{line.text}</span>)}
+    </pre>
+  );
+}
+
 function ToolExecutionDetails({ tool }: { tool: ToolRun }): React.JSX.Element | null {
-  const input = toolArgumentsText(tool).trim();
+  const diff = parseFileDiffOutput(tool.name, tool.output);
+  // 有 diff 时参数只留路径：旧文本、新文本、整份写入内容都已经在 diff 里了。
+  const input = diff ? diff.path : toolArgumentsText(tool).trim();
   const output = tool.output.trim();
   if (!input && !output) return null;
   return (
     <div className="tool-execution-details">
       {input ? <section><span>调用参数</span><pre>{input}</pre></section> : null}
-      {output ? <section><span>{tool.status === "failed" ? "错误" : "执行结果"}</span><pre>{output}</pre></section> : null}
+      {diff
+        ? <section><span>改动</span><DiffView diff={diff} /></section>
+        : output ? <section><span>{tool.status === "failed" ? "错误" : "执行结果"}</span><pre>{output}</pre></section> : null}
     </div>
   );
 }
