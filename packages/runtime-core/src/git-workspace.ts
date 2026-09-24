@@ -23,14 +23,14 @@ class GitCommandError extends Error {
   }
 }
 
-function runGit(cwd: string, args: string[], options: { timeout?: number; allowExitCodes?: number[] } = {}): Promise<string> {
+export function runGit(cwd: string, args: string[], options: { timeout?: number; allowExitCodes?: number[]; env?: Record<string, string> } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", ["-C", cwd, ...args], {
       encoding: "utf8",
       maxBuffer: 32 * 1024 * 1024,
       timeout: options.timeout ?? LOCAL_TIMEOUT_MS,
       windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", ...options.env },
     }, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
       const code = typeof error.code === "number" ? error.code : undefined;

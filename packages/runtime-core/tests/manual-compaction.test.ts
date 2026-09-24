@@ -50,6 +50,7 @@ function createCompactionHarness(root: string) {
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     onEvent: (event) => events.push(event),
   });
   const internals = runtime as unknown as RuntimeInternals;

@@ -810,6 +810,16 @@ export interface ChatMessage {
   isError?: boolean;
   /** `steering` is a message Pi has accepted for the running turn but has not delivered yet. */
   status?: "queued" | "steering" | "running" | "succeeded" | "failed" | "aborted";
+  /** 用户消息：发出前存过工作区快照，编辑它重新发送时可以把代码退回那时的样子。 */
+  checkpoint?: boolean;
+}
+
+/** 编辑一条历史消息之前问一下：代码要不要回退、回退会动到哪些文件。 */
+export interface RewindPreview {
+  /** 这条消息有检查点。 */
+  checkpoint: boolean;
+  /** 从这条消息发出到现在，工作区里变过的文件；回退就是把它们恢复原样。 */
+  files: GitCommitFile[];
 }
 
 export interface TodoItem {
@@ -1583,7 +1593,9 @@ export type RuntimeCommand =
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "open_workspace"; cwd: string }
   | { type: "prompt"; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
-  | { type: "rewind_prompt"; entryId: string; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
+  /** `restoreCode`：先把工作区退回这条消息发出时的检查点，再重新发送。 */
+  | { type: "rewind_prompt"; entryId: string; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string; restoreCode?: boolean }
+  | { type: "rewind_preview"; entryId: string }
   | { type: "steer"; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
   | { type: "abort" }
   | { type: "stop_goal" }

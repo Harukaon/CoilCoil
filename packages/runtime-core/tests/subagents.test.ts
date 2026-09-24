@@ -35,6 +35,7 @@ function createRuntime(root: string, onEvent?: (event: RuntimeEvent) => void): C
   return new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     onEvent,
   });
 }

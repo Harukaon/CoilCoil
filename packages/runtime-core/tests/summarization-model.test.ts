@@ -34,6 +34,7 @@ function createHarness(root: string) {
   const runtime = new CoilCoilRuntime({
     agentDir,
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     onEvent: () => undefined,
   });
   const internals = runtime as unknown as RuntimeInternals;

@@ -13,6 +13,7 @@ import type {
   ProjectSelection,
   PromptDocument,
   PromptImage,
+  RewindPreview,
   RuntimeConfiguration,
   SessionSnapshot,
   SubagentActivity,
@@ -36,6 +37,7 @@ import { parseFileDiffOutput, type FileDiffOutput } from "./fileDiffOutput";
 import { parseSubagentCompletion } from "./subagentNotice";
 import { compactionMarkDetail, compactionMarkLabel, compactionSummaryPreview, type CompactionMark } from "./compactionMarks";
 import { TERMINAL_NOTIFICATION_TYPE } from "./terminalNotice";
+import { checkpointRewindDescription } from "./checkpointRewind";
 
 export type TimelineItem =
   | { kind: "message"; order: number; message: ChatMessage }
@@ -289,7 +291,7 @@ export function MessageView({
   fast?: boolean;
   runtimeId?: string;
   onEditingChange: (editing: boolean) => void;
-  onRewind: (message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument) => Promise<void>;
+  onRewind: (message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument, restoreCode: boolean) => Promise<void>;
   onError: (message: string) => void;
   onSelectModel: (model: ModelOption) => void;
   onConfigureModelOptions: (model: ModelOption, thinkingLevel: RuntimeConfiguration["thinkingLevel"], contextWindow?: number) => Promise<void>;
@@ -299,6 +301,8 @@ export function MessageView({
   const [documentValue, setDocumentValue] = useState<PromptDocument>(() => message.promptDocument ?? promptDocumentFromText(message.text));
   const [images, setImages] = useState<PromptImage[]>(message.images ?? []);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // 有检查点、而且那之后代码变过：问要不要把代码一起退回去。
+  const [codeChanges, setCodeChanges] = useState<RewindPreview["files"]>();
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<PromptEditorHandle>(null);
@@ -316,25 +320,39 @@ export function MessageView({
       return;
     }
     const closeOnOutsidePointer = (event: PointerEvent): void => {
-      if (confirmOpen || modelMenuOpen) return;
+      if (confirmOpen || codeChanges || modelMenuOpen) return;
       if (!shouldDismissHistoryEdit(event.target, editorRef.current)) return;
       onEditingChange(false);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-  }, [confirmOpen, editing, modelMenuOpen, onEditingChange]);
+  }, [codeChanges, confirmOpen, editing, modelMenuOpen, onEditingChange]);
 
-  const proceed = (remember: boolean): void => {
+  const proceed = (remember: boolean, restoreCode = false): void => {
     const prompt = promptDocumentText(documentValue).trim();
     if ((!prompt && !images.length) || !message.entryId) return;
     if (remember) window.localStorage.setItem(REWIND_WARNING_DISMISSED_KEY, "true");
     setConfirmOpen(false);
+    setCodeChanges(undefined);
     onEditingChange(false);
-    void onRewind(message, prompt, images, documentValue);
+    void onRewind(message, prompt, images, documentValue, restoreCode);
   };
 
-  const requestRewind = (): void => {
+  const requestRewind = async (): Promise<void> => {
     if ((!promptDocumentText(documentValue).trim() && !images.length) || !message.entryId) return;
+    if (message.checkpoint && runtimeId) {
+      // 代码变过就一定要问：回不回退是个不能默认替用户做的决定，「不再提醒」管不到这里。
+      try {
+        const preview = await window.coilcoil.request<RewindPreview>({ type: "rewind_preview", entryId: message.entryId }, runtimeId);
+        if (preview.checkpoint && preview.files.length) {
+          setCodeChanges(preview.files);
+          return;
+        }
+      } catch (caught) {
+        onError(caught instanceof Error ? caught.message : String(caught));
+        return;
+      }
+    }
     if (window.localStorage.getItem(REWIND_WARNING_DISMISSED_KEY) === "true") proceed(false);
     else setConfirmOpen(true);
   };
@@ -379,7 +397,7 @@ export function MessageView({
               autoFocus
               onSubmit={(event: FormEvent) => {
                 event.preventDefault();
-                requestRewind();
+                void requestRewind();
               }}
               onDocumentChange={setDocumentValue}
               onReplaceTextRange={(start, end, replacement) => setDocumentValue((current) => replaceTextRange(current, start, end, replacement))}
@@ -432,12 +450,23 @@ export function MessageView({
         <ConfirmDialog
           open={confirmOpen}
           title="从这里重新开始？"
-          description="对话将从这条消息重新开始。当前工作区中已经产生的文件修改不会被恢复。"
+          description={message.checkpoint ? "对话将从这条消息重新开始。代码和这条消息发出时一样，不需要回退。" : "对话将从这条消息重新开始。这条消息没有代码检查点，当前工作区中已经产生的文件修改不会被恢复。"}
           onClose={() => setConfirmOpen(false)}
           actions={[
             { label: "取消", onClick: () => setConfirmOpen(false) },
             { label: "不再提醒", onClick: () => proceed(true) },
             { label: "继续", variant: "primary", autoFocus: true, onClick: () => proceed(false) },
+          ]}
+        />
+        <ConfirmDialog
+          open={Boolean(codeChanges)}
+          title="代码也回退吗？"
+          description={checkpointRewindDescription(codeChanges ?? [])}
+          onClose={() => setCodeChanges(undefined)}
+          actions={[
+            { label: "取消", onClick: () => setCodeChanges(undefined) },
+            { label: "保留现在的代码", onClick: () => proceed(false, false) },
+            { label: "回退代码并重新发送", variant: "primary", autoFocus: true, onClick: () => proceed(false, true) },
           ]}
         />
       </article>

@@ -602,7 +602,9 @@ export class RuntimeServer {
       case "prompt":
         return runtime.prompt(command.text, command.images, command.clientMessageId, command.promptDocument);
       case "rewind_prompt":
-        return runtime.rewindPrompt(command.entryId, command.text, command.images, command.clientMessageId, command.promptDocument);
+        return runtime.rewindPrompt(command.entryId, command.text, command.images, command.clientMessageId, command.promptDocument, command.restoreCode === true);
+      case "rewind_preview":
+        return runtime.rewindPreview(command.entryId);
       case "steer":
         return runtime.steer(command.text, command.images, command.clientMessageId, command.promptDocument);
       case "abort":

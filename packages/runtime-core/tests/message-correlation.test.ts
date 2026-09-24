@@ -42,6 +42,7 @@ test("one client message id survives Pi user start and finish events", async (co
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     onEvent: (event) => events.push(event),
   });
   const internals = runtime as unknown as MessageRuntimeInternals;
@@ -103,6 +104,7 @@ test("图片提示被 Pi 重排时仍能把用户回显关联到富节点", asyn
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     onEvent: (event) => events.push(event),
   });
   const internals = runtime as unknown as MessageRuntimeInternals;
@@ -213,6 +215,7 @@ test("goal 轮次自己发的用户消息不会偷走排队消息的 client id",
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     onEvent: (event) => events.push(event),
   });
   const internals = runtime as unknown as MessageRuntimeInternals;

@@ -43,6 +43,7 @@ test("a mid-stream snapshot includes the in-progress assistant message instead o
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
   });
   const internals = runtime as unknown as RuntimeInternals;
   internals.active = {
@@ -137,6 +138,7 @@ test("assistant tool calls stay visible before a result and survive a live snaps
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     onEvent: (event) => events.push(event),
   });
   const internals = runtime as unknown as RuntimeInternals;

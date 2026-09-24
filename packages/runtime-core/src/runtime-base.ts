@@ -72,6 +72,9 @@ export abstract class RuntimeBase {
 
   readonly sessionDir: string;
 
+  /** 见 CoilCoilRuntimeOptions.checkpoints。 */
+  readonly checkpointsEnabled: boolean;
+
   readonly workflowDir: string;
 
 
@@ -112,6 +115,7 @@ export abstract class RuntimeBase {
     configureHttpDispatcher();
     this.agentDir = resolve(options.agentDir);
     this.sessionDir = resolve(options.sessionDir);
+    this.checkpointsEnabled = options.checkpoints !== false;
     this.log = options.log ?? new DiagnosticLog({
       directory: join(this.agentDir, DIAGNOSTIC_LOG_DIRECTORY),
       process: "runtime",
