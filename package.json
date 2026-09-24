@@ -38,6 +38,7 @@
     "smoke:concurrency:live": "npm run build --workspace @coilcoil/desktop && node scripts/runtime-concurrency-smoke.mjs --live",
     "smoke:issue": "npm run build --workspace @coilcoil/desktop && node scripts/issue-run-smoke.mjs",
     "smoke:desktop": "node scripts/desktop-smoke.mjs",
+    "e2e": "node scripts/e2e/run.mjs",
     "smoke:desktop:composer": "node scripts/desktop-composer-smoke.mjs",
     "smoke:desktop:layout": "node scripts/desktop-layout-smoke.mjs",
     "smoke:desktop:timeline": "node scripts/desktop-timeline-smoke.mjs",
@@ -60,5 +61,8 @@
     "esbuild@0.28.1": true,
     "node-pty@1.1.0": true,
     "protobufjs@7.6.5": true
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
   }
 }
