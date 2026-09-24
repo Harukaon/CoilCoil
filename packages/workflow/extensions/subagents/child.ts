@@ -13,12 +13,50 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import coilcoilMcpTools, { MCP_MANAGER_CHANNEL } from "../mcp-tools.ts";
+import { COILCOIL_WINDOWS_SHELL_STANDARDS } from "../system/engineering-standards.ts";
 import terminalExtension from "../terminal/extension.ts";
 import type { SubagentChildMeta } from "./types.ts";
 import { SUBAGENT_META_ENTRY_TYPE } from "./types.ts";
 
 export const DEFAULT_CHILD_TOOLS = ["read", "bash", "terminal", "edit", "write", "grep", "ls", "mcp"];
 export const CHILD_SESSION_SUBDIR = "subagents";
+
+const POWERSHELL_TOOL = "powershell";
+
+/**
+ * 按平台调整子会话的工具，规则和主会话一致（见 default-tools.ts）。
+ *
+ * Windows 上 shell 工作优先交给 powershell，所以被授予 bash 的子 Agent 同时拿到
+ * powershell；没给 shell 权限的 profile 不会因此放宽。其他平台上 pi 的 powershell
+ * 每次调用都会报「只在 Windows 上可用」，放进工具清单只会让模型白白试错，所以无论
+ * profile 怎么写、恢复的是哪个平台上保存的运行，一律去掉。
+ */
+export function childToolsForPlatform(
+  tools: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  if (platform !== "win32") return tools.filter((tool) => tool !== POWERSHELL_TOOL);
+  if (tools.includes("bash") && !tools.includes(POWERSHELL_TOOL)) return [...tools, POWERSHELL_TOOL];
+  return [...tools];
+}
+
+/**
+ * 追加到子会话系统提示词末尾的内容。
+ *
+ * 子会话不加载 default-tools，拿不到主会话那段 Windows shell 规范；给了 powershell
+ * 却不说优先用它，模型照样会去用 bash、跟 POSIX 引号较劲。profile 的提示词放最后。
+ */
+export function childPromptAdditions(
+  tools: readonly string[],
+  profilePrompt: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const additions: string[] = [];
+  if (platform === "win32" && tools.includes(POWERSHELL_TOOL)) additions.push(COILCOIL_WINDOWS_SHELL_STANDARDS);
+  const trimmed = profilePrompt?.trim();
+  if (trimmed) additions.push(trimmed);
+  return additions;
+}
 
 /**
  * 父会话的事件总线里，子会话需要的那一小部分。
@@ -103,15 +141,18 @@ async function buildChildSession(options: {
   parentEvents?: ParentEvents;
 }): Promise<{ session: AgentSession }> {
   const settingsManager = SettingsManager.create(options.cwd, options.agentDir, { projectTrusted: true });
-  const tools = options.tools ?? DEFAULT_CHILD_TOOLS;
-  const profilePrompt = options.systemPrompt?.trim();
+  // 平台调整放在这里而不只在派发时做：新建和恢复都经过这一处，恢复的运行可能是在
+  // 另一个平台上保存的。
+  const tools = childToolsForPlatform(options.tools ?? DEFAULT_CHILD_TOOLS);
+  const promptAdditions = childPromptAdditions(tools, options.systemPrompt);
   const extensionFactories: InlineExtension[] = childToolExtensions(tools);
-  if (profilePrompt) {
+  if (promptAdditions.length > 0) {
+    const appended = promptAdditions.join("\n\n");
     extensionFactories.push({
       name: "coilcoil-subagent-prompt",
       hidden: true,
       factory: (pi) => {
-        pi.on("before_agent_start", (event) => ({ systemPrompt: `${event.systemPrompt}\n\n${profilePrompt}` }));
+        pi.on("before_agent_start", (event) => ({ systemPrompt: `${event.systemPrompt}\n\n${appended}` }));
       },
     });
   }

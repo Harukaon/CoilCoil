@@ -5,13 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { MCP_MANAGER_CHANNEL } from "../extensions/mcp-tools.ts";
+import { COILCOIL_WINDOWS_SHELL_STANDARDS } from "../extensions/system/engineering-standards.ts";
 import {
   type ChildSessionHandle,
+  childPromptAdditions,
   childToolExtensions,
+  childToolsForPlatform,
   createChildSession,
   DEFAULT_CHILD_TOOLS,
   type ParentEvents,
 } from "../extensions/subagents/child.ts";
+import { loadProfiles } from "../extensions/subagents/profiles.ts";
 
 function childWorkspace(context: test.TestContext): { cwd: string; agentDir: string; sessionDir: string } {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-child-tools-"));
@@ -122,4 +126,48 @@ test("disposing a child stops the terminals it left running", { skip: process.pl
   const deadline = Date.now() + 5_000;
   while (processAlive(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.ok(!processAlive(pid), "dispose must stop the child's background terminals");
+});
+
+test("PowerShell is never granted to a child outside Windows", () => {
+  for (const platform of ["darwin", "linux"] as const) {
+    assert.ok(!childToolsForPlatform(DEFAULT_CHILD_TOOLS, platform).includes("powershell"));
+    assert.deepEqual(
+      childToolsForPlatform(["read", "bash", "powershell"], platform),
+      ["read", "bash"],
+      "an explicit grant, e.g. from a run saved on Windows, must still be dropped",
+    );
+  }
+});
+
+test("on Windows a child with shell access gets PowerShell, a narrow one does not", () => {
+  assert.ok(childToolsForPlatform(DEFAULT_CHILD_TOOLS, "win32").includes("powershell"));
+  assert.deepEqual(childToolsForPlatform(["read", "grep", "ls"], "win32"), ["read", "grep", "ls"]);
+  assert.deepEqual(childToolsForPlatform(["read", "powershell"], "win32"), ["read", "powershell"]);
+  assert.deepEqual(childToolsForPlatform(["bash", "powershell"], "win32"), ["bash", "powershell"], "no duplicates");
+});
+
+test("builtin profiles follow the platform rule for PowerShell", () => {
+  const builtinDir = join(import.meta.dirname, "..", "agents");
+  const profiles = loadProfiles({ builtinDir, userDir: join(builtinDir, "none"), projectDir: join(builtinDir, "none") });
+  for (const name of ["explore", "reviewer", "worker"]) {
+    const tools = profiles.get(name)?.tools ?? [];
+    assert.ok(childToolsForPlatform(tools, "win32").includes("powershell"), `${name} must get PowerShell on Windows`);
+    assert.ok(!childToolsForPlatform(tools, "darwin").includes("powershell"), `${name} must not get PowerShell on macOS`);
+  }
+});
+
+test("the Windows shell guidance goes to children that have PowerShell, before the profile prompt", () => {
+  assert.deepEqual(
+    childPromptAdditions(["bash", "powershell"], " 你是侦察子 Agent。 ", "win32"),
+    [COILCOIL_WINDOWS_SHELL_STANDARDS, "你是侦察子 Agent。"],
+  );
+  assert.deepEqual(childPromptAdditions(["bash"], "profile", "darwin"), ["profile"]);
+  assert.deepEqual(childPromptAdditions(["read"], undefined, "win32"), []);
+});
+
+test("a child session on this platform gets PowerShell exactly when Windows would allow it", async (context) => {
+  const { handle } = await openChild(context, { tools: ["read", "bash", "powershell"] });
+  const active = handle.session.getActiveToolNames();
+  if (process.platform === "win32") assert.ok(active.includes("powershell"));
+  else assert.ok(!active.includes("powershell"), `powershell must not be active on ${process.platform}: ${active.join(",")}`);
 });
