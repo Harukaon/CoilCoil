@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { GitBranch, GitDiff, GitStatus } from "@coilcoil/runtime-protocol";
+import type { GitBranch, GitDiff, GitLog, GitStatus } from "@coilcoil/runtime-protocol";
 import { runGitAction } from "../src/git-workspace.js";
 
 function git(cwd: string, ...args: string[]): string {
@@ -156,4 +156,111 @@ test("没有远程仓库时推送给出明白的报错", async (context) => {
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "init");
   await assert.rejects(runGitAction(repo, { op: "push" }), /还没有配置远程仓库/);
+});
+
+test("历史：拓扑顺序、父提交、引用标签；合并提交有两个父提交", async (context) => {
+  const { repo } = repository(context);
+  writeFileSync(join(repo, "a.txt"), "a\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "init", "-m", "正文第一段");
+  git(repo, "tag", "v1");
+  git(repo, "switch", "-q", "-c", "feature");
+  writeFileSync(join(repo, "b.txt"), "b\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "feature work");
+  git(repo, "switch", "-q", "main");
+  writeFileSync(join(repo, "a.txt"), "a2\n");
+  git(repo, "commit", "-q", "-am", "main work");
+  git(repo, "merge", "-q", "--no-ff", "-m", "merge feature", "feature");
+
+  const history = await runGitAction(repo, { op: "log" }) as GitLog;
+  assert.deepEqual(history.commits.map((commit) => commit.subject).slice(0, 1), ["merge feature"]);
+  assert.equal(history.commits.length, 4);
+  assert.equal(history.hasMore, false);
+  assert.equal(history.currentRef, "refs/heads/main");
+  const [merge] = history.commits;
+  assert.equal(merge!.parents.length, 2);
+  assert.equal(history.head, merge!.hash);
+  assert.deepEqual(merge!.refs, [{ name: "main", fullName: "refs/heads/main", kind: "branch" }]);
+  const initial = history.commits.at(-1)!;
+  assert.equal(initial.subject, "init");
+  assert.equal(initial.body, "正文第一段");
+  assert.deepEqual(initial.parents, []);
+  assert.deepEqual(initial.refs, [{ name: "v1", fullName: "refs/tags/v1", kind: "tag" }]);
+  // 子提交一定排在父提交前面。
+  const position = new Map(history.commits.map((commit, index) => [commit.hash, index]));
+  for (const commit of history.commits) for (const parent of commit.parents) assert.ok(position.get(parent)! > position.get(commit.hash)!);
+
+  const limited = await runGitAction(repo, { op: "log", limit: 2 }) as GitLog;
+  assert.equal(limited.commits.length, 2);
+  assert.equal(limited.hasMore, true);
+});
+
+test("历史：默认带上游分支，本地和远程分叉时两边的提交都在；all 时包含别的分支", async (context) => {
+  const { root, repo } = repository(context);
+  const remote = join(root, "remote.git");
+  execFileSync("git", ["init", "-q", "--bare", "-b", "main", remote]);
+  git(repo, "remote", "add", "origin", remote);
+  writeFileSync(join(repo, "a.txt"), "a\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "init");
+  git(repo, "push", "-q", "-u", "origin", "main");
+  const other = join(root, "other");
+  execFileSync("git", ["clone", "-q", remote, other]);
+  git(other, "config", "user.name", "Other");
+  git(other, "config", "user.email", "other@example.com");
+  writeFileSync(join(other, "a.txt"), "remote\n");
+  git(other, "commit", "-q", "-am", "remote work");
+  git(other, "push", "-q");
+  git(repo, "fetch", "-q");
+  writeFileSync(join(repo, "a.txt"), "local\n");
+  git(repo, "commit", "-q", "-am", "local work");
+  git(repo, "branch", "side", "HEAD~1");
+  git(repo, "switch", "-q", "side");
+  writeFileSync(join(repo, "c.txt"), "c\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "side work");
+  git(repo, "switch", "-q", "main");
+
+  const history = await runGitAction(repo, { op: "log" }) as GitLog;
+  assert.deepEqual(history.commits.map((commit) => commit.subject).sort(), ["init", "local work", "remote work"]);
+  assert.equal(history.upstreamRef, "refs/remotes/origin/main");
+  const remoteCommit = history.commits.find((commit) => commit.subject === "remote work")!;
+  assert.deepEqual(remoteCommit.refs.map((ref) => ref.name), ["origin/main"], "origin/HEAD 不重复列出");
+  const all = await runGitAction(repo, { op: "log", all: true }) as GitLog;
+  assert.ok(all.commits.some((commit) => commit.subject === "side work"));
+});
+
+test("历史提交的文件列表和 diff：改名带原路径，根提交是整份新增，合并提交和第一个父提交比", async (context) => {
+  const { repo } = repository(context);
+  writeFileSync(join(repo, "a.txt"), "one\ntwo\nthree\nfour\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "init");
+  const rootHash = git(repo, "rev-parse", "HEAD").trim();
+  git(repo, "mv", "a.txt", "renamed.txt");
+  writeFileSync(join(repo, "new.txt"), "new\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "rename");
+  const renameHash = git(repo, "rev-parse", "HEAD").trim();
+
+  assert.deepEqual(await runGitAction(repo, { op: "commit_files", hash: rootHash }), [{ path: "a.txt", state: "added" }]);
+  assert.deepEqual(await runGitAction(repo, { op: "commit_files", hash: renameHash }), [
+    { path: "new.txt", state: "added" },
+    { path: "renamed.txt", originalPath: "a.txt", state: "renamed" },
+  ]);
+  const rootDiff = await runGitAction(repo, { op: "commit_diff", hash: rootHash, path: "a.txt" }) as GitDiff;
+  assert.equal(rootDiff.commit, rootHash);
+  assert.match(rootDiff.patch, /\+one\n\+two/);
+  const newDiff = await runGitAction(repo, { op: "commit_diff", hash: renameHash, path: "new.txt" }) as GitDiff;
+  assert.match(newDiff.patch, /\+new/);
+
+  git(repo, "switch", "-q", "-c", "feature");
+  writeFileSync(join(repo, "feature.txt"), "f\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "feature");
+  git(repo, "switch", "-q", "main");
+  git(repo, "merge", "-q", "--no-ff", "-m", "merge", "feature");
+  const mergeHash = git(repo, "rev-parse", "HEAD").trim();
+  assert.deepEqual(await runGitAction(repo, { op: "commit_files", hash: mergeHash }), [{ path: "feature.txt", state: "added" }]);
+  await assert.rejects(runGitAction(repo, { op: "commit_files", hash: "--all" }), /不是提交哈希/);
 });

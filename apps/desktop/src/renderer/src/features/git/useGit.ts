@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GitAction, GitBranch, GitDiff, GitStatus } from "@coilcoil/runtime-protocol";
+import type { GitAction, GitBranch, GitCommitFile, GitDiff, GitLog, GitStatus } from "@coilcoil/runtime-protocol";
 
 /** 面板开着时隔多久重新问一次 git：Agent、终端、别的编辑器随时在改工作区。 */
 const REFRESH_INTERVAL_MS = 4000;
@@ -21,9 +21,12 @@ export function useGit(cwd: string | undefined, active: boolean): {
   error?: string;
   busy?: GitBusy;
   refresh: () => Promise<void>;
-  run: (action: Exclude<GitAction, { op: "status" | "diff" | "branches" }>) => Promise<boolean>;
+  run: (action: Exclude<GitAction, { op: "status" | "diff" | "branches" | "log" | "commit_files" | "commit_diff" }>) => Promise<boolean>;
   diff: (path: string, staged: boolean) => Promise<GitDiff>;
   branches: () => Promise<GitBranch[]>;
+  log: (limit: number, all: boolean) => Promise<GitLog>;
+  commitFiles: (hash: string) => Promise<GitCommitFile[]>;
+  commitDiff: (hash: string, path: string, originalPath?: string) => Promise<GitDiff>;
 } {
   const [status, setStatus] = useState<GitStatus>();
   const [error, setError] = useState<string>();
@@ -59,7 +62,7 @@ export function useGit(cwd: string | undefined, active: boolean): {
     };
   }, [active, cwd, refresh]);
 
-  const run = useCallback(async (action: Exclude<GitAction, { op: "status" | "diff" | "branches" }>): Promise<boolean> => {
+  const run = useCallback(async (action: Exclude<GitAction, { op: "status" | "diff" | "branches" | "log" | "commit_files" | "commit_diff" }>): Promise<boolean> => {
     const target = cwdRef.current;
     if (!target) return false;
     setBusy(action.op);
@@ -81,5 +84,11 @@ export function useGit(cwd: string | undefined, active: boolean): {
   const diff = useCallback((path: string, staged: boolean) => request<GitDiff>(cwdRef.current ?? "", { op: "diff", path, staged }), []);
   const branches = useCallback(() => request<GitBranch[]>(cwdRef.current ?? "", { op: "branches" }), []);
 
-  return { status, error, busy, refresh, run, diff, branches };
+  const log = useCallback((limit: number, all: boolean) => request<GitLog>(cwdRef.current ?? "", { op: "log", limit, all }), []);
+  const commitFiles = useCallback((hash: string) => request<GitCommitFile[]>(cwdRef.current ?? "", { op: "commit_files", hash }), []);
+  const commitDiff = useCallback((hash: string, path: string, originalPath?: string) => (
+    request<GitDiff>(cwdRef.current ?? "", { op: "commit_diff", hash, path, originalPath })
+  ), []);
+
+  return { status, error, busy, refresh, run, diff, branches, log, commitFiles, commitDiff };
 }

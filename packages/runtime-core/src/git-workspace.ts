@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import type { GitAction, GitBranch, GitDiff, GitFileChange, GitFileState, GitStatus } from "@coilcoil/runtime-protocol";
+import type { GitAction, GitBranch, GitCommit, GitCommitFile, GitCommitRef, GitDiff, GitFileChange, GitFileState, GitLog, GitStatus } from "@coilcoil/runtime-protocol";
 
 /**
  * 工作区的 git 操作，给界面上的 Git 面板用。
@@ -79,7 +79,10 @@ export function parseGitStatus(output: string, root: string): GitStatus {
     if (record.startsWith("# ")) {
       const [key, ...rest] = record.slice(2).split(" ");
       const value = rest.join(" ");
-      if (key === "branch.oid") status.unborn = value === "(initial)";
+      if (key === "branch.oid") {
+        status.unborn = value === "(initial)";
+        status.head = status.unborn ? undefined : value;
+      }
       else if (key === "branch.head") {
         status.detached = value === "(detached)";
         status.branch = status.detached ? undefined : value;
@@ -132,10 +135,15 @@ async function gitDiff(cwd: string, path: string, staged: boolean): Promise<GitD
     : ["diff", "--no-ext-diff", "--no-color", "-U3", ...staged ? ["--cached"] : [], "--", path];
   // --no-index 有差异时退出码是 1，这不是出错。
   const output = await runGit(root, args, { allowExitCodes: untracked ? [1] : [] });
+  return diffResult(path, staged, output);
+}
+
+function diffResult(path: string, staged: boolean, output: string, commit?: string): GitDiff {
   const truncated = Buffer.byteLength(output) > MAX_DIFF_BYTES;
   return {
     path,
     staged,
+    ...commit ? { commit } : {},
     patch: truncated ? output.slice(0, MAX_DIFF_BYTES) : output,
     binary: /^Binary files .* differ$/m.test(output),
     truncated,
@@ -241,8 +249,115 @@ async function createBranch(cwd: string, name: string): Promise<GitStatus> {
   return gitStatus(root);
 }
 
+const LOG_FIELDS = ["%H", "%h", "%P", "%an", "%ae", "%at", "%D", "%s", "%b"].join("%x1f");
+
+/** 解析 `--decorate=full` 下的 `%D`：「HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1」。 */
+export function parseCommitRefs(decoration: string): GitCommitRef[] {
+  const refs: GitCommitRef[] = [];
+  for (const raw of decoration.split(", ").map((part) => part.trim()).filter(Boolean)) {
+    if (raw === "HEAD") {
+      refs.push({ name: "HEAD", fullName: "HEAD", kind: "head" });
+      continue;
+    }
+    const fullName = raw.replace(/^HEAD -> /, "").replace(/^tag: /, "");
+    if (fullName.startsWith("refs/heads/")) refs.push({ name: fullName.slice(11), fullName, kind: "branch" });
+    // origin/HEAD 只是远程默认分支的别名，画出来只会和 origin/main 重复。
+    else if (fullName.startsWith("refs/remotes/") && !fullName.endsWith("/HEAD")) refs.push({ name: fullName.slice(13), fullName, kind: "remote" });
+    else if (fullName.startsWith("refs/tags/")) refs.push({ name: fullName.slice(10), fullName, kind: "tag" });
+  }
+  return refs;
+}
+
+export function parseGitLog(output: string): GitCommit[] {
+  return output.split("\0").filter((record) => record.trim()).map((record) => {
+    const [hash = "", shortHash = "", parents = "", author = "", email = "", time = "0", decoration = "", subject = "", body = ""] = record.replace(/^\n/, "").split("\x1f");
+    return {
+      hash,
+      shortHash,
+      parents: parents.split(" ").filter(Boolean),
+      author,
+      email,
+      date: Number(time) * 1000,
+      subject,
+      body: body.trim(),
+      refs: parseCommitRefs(decoration),
+    };
+  });
+}
+
+async function optionalGit(root: string, args: string[]): Promise<string | undefined> {
+  try {
+    return (await runGit(root, args)).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function log(cwd: string, limit: number, all: boolean): Promise<GitLog> {
+  const root = await requireRoot(cwd);
+  const status = await gitStatus(root);
+  if (status.unborn) return { commits: [], hasMore: false };
+  const currentRef = status.branch ? `refs/heads/${status.branch}` : undefined;
+  const upstreamRef = status.upstream ? await optionalGit(root, ["rev-parse", "--symbolic-full-name", "@{upstream}"]) : undefined;
+  const count = Math.max(1, Math.min(Math.floor(limit), 2000));
+  // 默认和 VS Code 的图一样只看当前分支和它的上游：本地和远程分叉时两条线都在。
+  const revisions = all ? ["--exclude=refs/stash", "--all"] : ["HEAD", ...upstreamRef ? [upstreamRef] : []];
+  const output = await runGit(root, ["log", "--topo-order", "--decorate=full", "-z", `--format=${LOG_FIELDS}`, "-n", String(count + 1), ...revisions, "--"]);
+  const commits = parseGitLog(output);
+  return { commits: commits.slice(0, count), hasMore: commits.length > count, head: status.head, currentRef, upstreamRef };
+}
+
+function requireHash(hash: string): string {
+  if (!/^[0-9a-f]{4,64}$/i.test(hash)) throw new Error(`「${hash}」不是提交哈希。`);
+  return hash;
+}
+
+async function commitParents(root: string, hash: string): Promise<string[]> {
+  const [, ...parents] = (await runGit(root, ["rev-list", "--parents", "-n", "1", requireHash(hash)])).trim().split(" ");
+  return parents;
+}
+
+/** 解析 `--name-status -z`：改名和复制带两个路径（原路径在前）。 */
+export function parseNameStatus(output: string): GitCommitFile[] {
+  const tokens = output.split("\0");
+  const files: GitCommitFile[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const code = tokens[index];
+    if (!code) continue;
+    const state = fileState(code[0] ?? "") ?? "modified";
+    if (code[0] === "R" || code[0] === "C") {
+      files.push({ path: tokens[index + 2] ?? "", originalPath: tokens[index + 1], state });
+      index += 2;
+    } else {
+      files.push({ path: tokens[index + 1] ?? "", state });
+      index += 1;
+    }
+  }
+  return files;
+}
+
+async function commitFiles(cwd: string, hash: string): Promise<GitCommitFile[]> {
+  const root = await requireRoot(cwd);
+  const parents = await commitParents(root, hash);
+  // 合并提交也只和第一个父提交比：看的是「这次合并给主线带来了什么」。
+  const output = parents[0]
+    ? await runGit(root, ["diff", "--no-ext-diff", "--name-status", "-z", "-M", parents[0], hash])
+    : await runGit(root, ["diff-tree", "--root", "-r", "--no-commit-id", "--name-status", "-z", "-M", hash]);
+  return parseNameStatus(output);
+}
+
+async function commitDiff(cwd: string, hash: string, path: string, originalPath?: string): Promise<GitDiff> {
+  const root = await requireRoot(cwd);
+  const parents = await commitParents(root, hash);
+  const paths = originalPath && originalPath !== path ? [originalPath, path] : [path];
+  const output = parents[0]
+    ? await runGit(root, ["diff", "--no-ext-diff", "--no-color", "-U3", "-M", parents[0], hash, "--", ...paths])
+    : await runGit(root, ["show", "--format=", "--no-ext-diff", "--no-color", "-U3", hash, "--", path]);
+  return diffResult(path, false, output, hash);
+}
+
 /** Git 面板的每个操作。改动类操作都返回改完之后的状态，面板不用再问一次。 */
-export async function runGitAction(cwd: string, action: GitAction): Promise<GitStatus | GitDiff | GitBranch[]> {
+export async function runGitAction(cwd: string, action: GitAction): Promise<GitStatus | GitDiff | GitBranch[] | GitLog | GitCommitFile[]> {
   switch (action.op) {
     case "status": return gitStatus(cwd);
     case "diff": return gitDiff(cwd, action.path, action.staged);
@@ -255,6 +370,9 @@ export async function runGitAction(cwd: string, action: GitAction): Promise<GitS
     case "branches": return branches(cwd);
     case "checkout": return checkout(cwd, action.branch);
     case "create_branch": return createBranch(cwd, action.name);
+    case "log": return log(cwd, action.limit ?? 50, action.all === true);
+    case "commit_files": return commitFiles(cwd, action.hash);
+    case "commit_diff": return commitDiff(cwd, action.hash, action.path, action.originalPath);
     default: {
       const exhaustive: never = action;
       throw new Error(`未知 git 操作：${(exhaustive as { op?: string }).op ?? "unknown"}`);
