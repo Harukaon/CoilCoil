@@ -24,6 +24,11 @@ interface Endpoint {
 }
 
 export function recycledTabsEndpoint(scope: string, env: NodeJS.ProcessEnv = process.env): Endpoint | undefined {
+  return browserBridgeEndpoint("recycled-tabs", scope, env);
+}
+
+/** 桌面端 CDP 桥上 CoilCoil 自己的 HTTP 接口（回收记录、接管标签页），和 CDP 连接同一套地址和令牌。 */
+export function browserBridgeEndpoint(path: string, scope: string, env: NodeJS.ProcessEnv = process.env): Endpoint | undefined {
   try {
     const args = JSON.parse(env.COILCOIL_BROWSER_MCP_ARGS ?? "") as unknown;
     if (!Array.isArray(args)) return undefined;
@@ -37,7 +42,7 @@ export function recycledTabsEndpoint(scope: string, env: NodeJS.ProcessEnv = pro
     const token = /^\/devtools\/browser\/([^/]+)$/.exec(socket.pathname)?.[1];
     if (!token) return undefined;
     const headers = JSON.parse(valueAfter("--wsHeaders") ?? "{}") as Record<string, string>;
-    const url = new URL(`http://${socket.host}/coilcoil/recycled-tabs/${token}`);
+    const url = new URL(`http://${socket.host}/coilcoil/${path}/${token}`);
     url.searchParams.set("scope", scope);
     return { url: url.toString(), headers };
   } catch {

@@ -13,6 +13,9 @@ export const AGENT_TAB_LIMIT = 5;
 
 export type BrowserTabOwner = "agent" | "user";
 
+/** 这张标签页现在归谁操作，见 BrowserTab.control。 */
+export type BrowserTabControl = "agent" | "user";
+
 export interface RecycledAgentTab {
   url: string;
   title: string;
@@ -37,13 +40,15 @@ export class RecycledAgentTabs {
  * 超出上限时该关哪几张。
  *
  * `keepIds` 是这次不能动的：刚开出来的那张，以及这个会话当前显示的那张。
+ * 只算 Agent 开的、而且现在还归 Agent 的：用户接管过去的那张正被用户用着，不收；
+ * 用户开的、被 Agent 接管的那张也不收，它本来就是用户的。
  */
-export function agentTabsToRecycle<T extends { id: string; owner: BrowserTabOwner; lastUsedAt: number }>(
+export function agentTabsToRecycle<T extends { id: string; owner: BrowserTabOwner; control: BrowserTabControl; lastUsedAt: number }>(
   tabs: readonly T[],
   keepIds: ReadonlySet<string>,
   limit = AGENT_TAB_LIMIT,
 ): T[] {
-  const agentTabs = tabs.filter((tab) => tab.owner === "agent");
+  const agentTabs = tabs.filter((tab) => tab.owner === "agent" && tab.control === "agent");
   const excess = agentTabs.length - limit;
   if (excess <= 0) return [];
   return agentTabs

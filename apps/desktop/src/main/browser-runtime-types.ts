@@ -1,5 +1,5 @@
-import type { WebContents } from "electron";
-import type { BrowserTabOwner } from "./browser-agent-tabs";
+import type { BrowserWindow, WebContents } from "electron";
+import type { BrowserTabControl, BrowserTabOwner } from "./browser-agent-tabs";
 
 export const DEFAULT_BROWSER_URL = "about:blank";
 export const DEFAULT_BROWSER_SCOPE_ID = "default";
@@ -19,8 +19,21 @@ export interface BrowserTab {
    * 区时不能拿窗口当前那份去套老标签页——各自带着自己那份活着，切回去还在。
    */
   partition: string;
-  /** 谁开的这张：Agent 开的会被上限收掉、在标签条上带 Agent 标识；用户开的永远不动。 */
+  /** 谁开的这张：只有 Agent 开的、而且现在还归 Agent 的，才会被上限收掉。 */
   owner: BrowserTabOwner;
+  /**
+   * 这张现在归谁操作。
+   *
+   * - agent：离屏渲染的页面（offscreen 窗口），Agent 通过 CDP 操作，用户只看画面；
+   *   Agent 点击、打字不会碰用户的焦点（见 browser-offscreen.ts）。
+   * - user：正常嵌在面板里的 <webview>，用户自己操作；Agent 看不到、也碰不了它。
+   *
+   * 两边都能「接管」：用户按接管按钮，Agent 调接管工具。接管时页面状态（网址、历史、
+   * 表单内容）原样搬过去。
+   */
+  control: BrowserTabControl;
+  /** control 是 agent 时，承载这个离屏页面的隐藏窗口。 */
+  offscreen?: BrowserWindow;
   /** 最近一次被 Agent 操作或被选中的时间，上限收页时先关最久没用的。 */
   lastUsedAt: number;
   tabTargetId: string;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import browserActExtension, { selectedPageId } from "../extensions/browser-act.ts";
+import browserActExtension, { pageIdForUrl, selectedPageId } from "../extensions/browser-act.ts";
 import { MCP_MANAGER_CHANNEL } from "../extensions/mcp-tools.ts";
 
 function fakePi(calls: Array<{ server: string; tool: string; args: Record<string, unknown> }>, behavior?: (server: string, tool: string) => unknown): {
@@ -42,7 +42,7 @@ function collectTools(): { tools: Map<string, { description: string; execute: (i
 
 test("browser-act 注册四个交互工具，描述里分清交互与调试", () => {
   const { tools } = collectTools();
-  for (const name of ["browser_open", "browser_navigate", "browser_click", "browser_type"]) {
+  for (const name of ["browser_open", "browser_navigate", "browser_click", "browser_type", "browser_user_tabs", "browser_take_over"]) {
     assert.ok(tools.has(name), `缺少 ${name}`);
   }
   const open = tools.get("browser_open")!;
@@ -184,4 +184,11 @@ test("句柄每个会话一份，两个会话的 btab-1 不会串", async () => 
   assert.equal(b.details.handle, "btab-1");
   await first.run("browser_navigate", { handle: "btab-1", url: "http://c" });
   assert.equal(first.calls.find((call) => call.tool === "navigate_page")?.args.pageId, 1);
+});
+
+test("接管后按网址认出新页面的编号；同一个网址有好几张时要最新的", () => {
+  const listing = "## Pages\n1: a (http://x/a.html)\n2: form (http://x/form.html)\n3: form again (http://x/form.html) [selected]";
+  assert.equal(pageIdForUrl(listing, "http://x/form.html"), 3);
+  assert.equal(pageIdForUrl(listing, "http://x/a.html"), 1);
+  assert.equal(pageIdForUrl(listing, "http://x/none.html"), undefined);
 });

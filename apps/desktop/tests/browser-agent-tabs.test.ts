@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { agentTabsToRecycle, isAgentTabUse } from "../src/main/browser-agent-tabs.ts";
 
-const tab = (id: string, owner: "agent" | "user", lastUsedAt: number) => ({ id, owner, lastUsedAt });
+const tab = (id: string, owner: "agent" | "user", lastUsedAt: number, control: "agent" | "user" = owner) => ({ id, owner, control, lastUsedAt });
 
 test("没超上限就一张都不收", () => {
   const tabs = [tab("a", "agent", 1), tab("b", "agent", 2), tab("u", "user", 0)];
@@ -11,6 +11,15 @@ test("没超上限就一张都不收", () => {
 
 test("超上限时只收 Agent 的、最久没用的那张；用户的再老也不动", () => {
   const tabs = [tab("u", "user", 0), ...[1, 2, 3, 4, 5, 6].map((n) => tab(`p${n}`, "agent", n))];
+  assert.deepEqual(agentTabsToRecycle(tabs, new Set(["p6"]), 5).map((t) => t.id), ["p1"]);
+});
+
+test("接管过的不收：用户接管走的 Agent 页、Agent 接管来的用户页都不算", () => {
+  const tabs = [
+    tab("taken-by-user", "agent", 0, "user"),
+    tab("taken-by-agent", "user", 0, "agent"),
+    ...[1, 2, 3, 4, 5, 6].map((n) => tab(`p${n}`, "agent", n)),
+  ];
   assert.deepEqual(agentTabsToRecycle(tabs, new Set(["p6"]), 5).map((t) => t.id), ["p1"]);
 });
 

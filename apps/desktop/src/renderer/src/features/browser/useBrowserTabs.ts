@@ -56,7 +56,7 @@ export function useBrowserTabs({ scopeId, workspacePath, open }: {
       if (cancelled) return;
       // 只数当前会话的标签；即使收到旧版本带 foreign 标记的快照，也不能拿别的
       // 会话的页面来阻止当前会话补建自己的首张标签。
-      const next = open && ownBrowserTabCount(current) === 0 ? await window.coilcoil.createBrowserTab(scopeId) : current;
+      const next = open && ownBrowserTabCount(current) === 0 ? await window.coilcoil.createBrowserTab(scopeId, undefined, true) : current;
       if (!cancelled) setState(next);
     });
     return () => { cancelled = true; };

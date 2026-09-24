@@ -38,7 +38,7 @@ import {
   runContextMenuAction,
   type GuestContextMenuParams,
 } from "./browser-context-menu";
-import { BROWSER_PARTITION, hardenGuestPreferences } from "./browser-webview-policy";
+import { BROWSER_PARTITION, hardenGuestPreferences, restoreTabIdFromSrc } from "./browser-webview-policy";
 import { configureBrowserIdentity } from "./browser-user-agent";
 import { readMountedProjects, writeMountedProjects } from "./mounted-projects";
 import { checkWorkspaceName, memoryBucketName, rememberedMemoryNames, workspaceNamePrompt } from "./workspace-name-guard";
@@ -147,6 +147,7 @@ const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
+const BROWSER_TAKE_OVER_CHANNEL = "browser:take-over";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
@@ -497,7 +498,7 @@ class RuntimeBridge {
       const { id, cwd } = event.snapshot.session;
       for (const runtime of browserRuntimes.values()) runtime.noteScopeWorkspace(id, cwd);
     }
-    for (const window of BrowserWindow.getAllWindows()) {
+    for (const window of appWindows()) {
       window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
     }
     // Remote clients are additional viewers of the same session, so they see
@@ -669,9 +670,10 @@ function remoteController(): RemoteAccessController {
           case BROWSER_SET_SCOPE_CHANNEL: return browser.setUiScope(args[0] as string, args[1] as string | undefined);
           case BROWSER_GET_STATE_CHANNEL: return browser.state(args[0] as string);
           case BROWSER_CAPTURE_CHANNEL: return browser.captureTab(args[0] as string);
-          case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, args[0] as string);
+          case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, args[0] as string, args[2] === true);
           case BROWSER_SELECT_TAB_CHANNEL: return browser.selectTab(args[1] as string, args[0] as string);
           case BROWSER_CLOSE_TAB_CHANNEL: return browser.closeTab(args[1] as string, args[0] as string);
+          case BROWSER_TAKE_OVER_CHANNEL: return browser.takeOverForUser(args[1] as string, args[0] as string);
           case BROWSER_NAVIGATE_CHANNEL: return browser.navigate(args[1] as string, args[0] as string);
           case BROWSER_ZOOM_CHANNEL: return browser.setZoom(args[1] as "in" | "out" | "reset", args[0] as string);
           case BROWSER_BACK_CHANNEL: return browser.back(args[0] as string);
@@ -701,7 +703,7 @@ function remoteController(): RemoteAccessController {
         return undefined;
       }
       if (channel === TERMINAL_CLOSE_CHANNEL) return primaryTerminalRuntime?.close(args[0] as string) ?? [];
-      if (channel === WINDOW_IS_MAXIMIZED_CHANNEL) return BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false;
+      if (channel === WINDOW_IS_MAXIMIZED_CHANNEL) return appWindows()[0]?.isMaximized() ?? false;
       if (channel === DIAGNOSTIC_LOG_CHANNEL) {
         const batch = args[0] as DiagnosticLogBatch;
         if (Array.isArray(batch?.entries)) diagnosticLog().writeEntries(batch.entries);
@@ -723,7 +725,7 @@ function remoteController(): RemoteAccessController {
     // The pairing code is shown in settings and nowhere else, so any change to
     // it has to reach an open settings screen on its own.
     onStateChanged: (state) => {
-      for (const window of BrowserWindow.getAllWindows()) {
+      for (const window of appWindows()) {
         window.webContents.send(REMOTE_STATE_CHANNEL, state);
       }
       remoteAccess?.broadcast(REMOTE_STATE_CHANNEL, state);
@@ -892,19 +894,38 @@ async function createWindow(): Promise<void> {
   // Capture the id up front: by the time "closed" fires the window is destroyed
   // and reading webContents throws.
   mainWindow.once("closed", () => webviewHostIds.delete(webviewHostId));
+  // 接管用的元素在 will-attach 里认出来，到 did-attach 才拿得到它的 guest。两个事件
+  // 对同一个元素是紧挨着同步发的，中间不会插进别的元素的事件，所以记一个就够。
+  let pendingRestoreAttach: string | undefined;
   mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
     const allowed = hardenGuestPreferences(
       webPreferences as unknown as Record<string, unknown>,
       params as unknown as Record<string, unknown>,
       (partition) => browserRuntime.expectsPartition(partition),
     );
-    if (!allowed) event.preventDefault();
+    if (!allowed) {
+      event.preventDefault();
+      return;
+    }
+    // 用户接管 Agent 标签页：确认真有这张在等，再清空 src，guest 什么都不加载，页面
+    // 状态由主进程恢复进去（见 browser-webview-policy.ts 的 restoreGuestSrc）。
+    const restoreTabId = restoreTabIdFromSrc(params.src);
+    if (!restoreTabId) return;
+    if (!browserRuntime.acceptsRestoreAttach(restoreTabId, params.partition)) {
+      event.preventDefault();
+      return;
+    }
+    params.src = "";
+    pendingRestoreAttach = restoreTabId;
   });
   // Baseline until the tab record claims the guest and installs its own handler;
   // a guest must never be able to open an OS window.
   mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
     guest.setWindowOpenHandler(() => ({ action: "deny" }));
     installGuestContextMenu(guest, mainWindow);
+    const restoreTabId = pendingRestoreAttach;
+    pendingRestoreAttach = undefined;
+    if (restoreTabId) browserRuntime.claimRestoreGuest(restoreTabId, guest);
   });
 
   const browserRuntime = new BrowserRuntimeManager(mainWindow, (state) => {
@@ -1035,6 +1056,17 @@ async function createWindow(): Promise<void> {
   });
 }
 
+/**
+ * CoilCoil 自己的窗口。
+ *
+ * 内置浏览器里 Agent 用的标签页是隐藏的离屏窗口（见 browser-offscreen.ts），装的是
+ * 任意网页。广播对话事件、设置状态这类消息只能发给 App 自己的窗口，不能落进网页的
+ * 渲染进程；「还有没有窗口」这类判断也只算 App 窗口。
+ */
+function appWindows(): BrowserWindow[] {
+  return BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed() && !window.webContents.isOffscreen());
+}
+
 function loadRendererInto(window: BrowserWindow, hash?: string): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(hash ? `${process.env.ELECTRON_RENDERER_URL}#${hash}` : process.env.ELECTRON_RENDERER_URL);
@@ -1056,7 +1088,7 @@ let offeredUpdate: string | undefined;
 function offerUpdate(update: UpdateAvailable): void {
   if (offeredUpdate === update.latest) return;
   offeredUpdate = update.latest;
-  for (const window of BrowserWindow.getAllWindows()) {
+  for (const window of appWindows()) {
     if (!window.isDestroyed()) window.webContents.send(UPDATE_AVAILABLE_CHANNEL, update);
   }
   remoteAccess?.broadcast(UPDATE_AVAILABLE_CHANNEL, update);
@@ -1264,9 +1296,10 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_CAPTURE_CHANNEL, (event, scopeId: string) => browserFor(event).captureTab(scopeId));
   ipcMain.handle(BROWSER_PICK_ELEMENT_CHANNEL, (event, scopeId: string) => browserFor(event).pickElement(scopeId));
   ipcMain.handle(BROWSER_CANCEL_PICK_CHANNEL, (event): void => browserFor(event).cancelElementPick());
-  ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string) => browserFor(event).createTab(url, true, scopeId));
+  ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string, placeholder?: boolean) => browserFor(event).createTab(url, true, scopeId, placeholder === true));
   ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).selectTab(id, scopeId));
   ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).closeTab(id, scopeId));
+  ipcMain.handle(BROWSER_TAKE_OVER_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).takeOverForUser(id, scopeId));
   ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, (event, scopeId: string, url: string) => browserFor(event).navigate(url, scopeId));
   ipcMain.handle(BROWSER_ZOOM_CHANNEL, (event, scopeId: string, step: "in" | "out" | "reset") => browserFor(event).setZoom(step, scopeId));
   ipcMain.handle(BROWSER_BACK_CHANNEL, (event, scopeId: string) => browserFor(event).back(scopeId));
@@ -1366,7 +1399,7 @@ app.whenReady().then(async () => {
   runtime.start();
   void remoteController().start();
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (appWindows().length === 0) {
       void createWindow()
         .then(() => runtime.start())
         .catch((error) => diagnosticLog().error("window", "reactivate_failed", error));

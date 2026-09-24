@@ -125,7 +125,7 @@ export function driver(page) {
     async browserTabs() {
       return page.locator(".inspector-tab-select").evaluateAll((elements) => elements.map((element) => ({
         label: element.textContent.trim(),
-        agent: (element.getAttribute("title") ?? "").includes("Agent 打开"),
+        agent: (element.getAttribute("title") ?? "").includes("Agent 在用"),
       })));
     },
     async openBrowserPanel() {

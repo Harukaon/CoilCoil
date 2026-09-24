@@ -1,4 +1,4 @@
-import type { BrowserGuestRoster } from "../../../../shared/desktop-api";
+import { BROWSER_RESTORE_SRC_PREFIX, type BrowserGuestRoster } from "../../../../shared/desktop-api";
 
 /**
  * Owns the `<webview>` elements backing the built-in browser.
@@ -60,11 +60,12 @@ function applyPlacement(tabId: string, entry: GuestEntry): void {
   style.height = "";
 }
 
-function createGuest(tabId: string, nonce: string, partition: string): GuestEntry {
+function createGuest(tabId: string, nonce: string, partition: string, restore: boolean): GuestEntry {
   const element = document.createElement("webview") as GuestElement;
   element.setAttribute("partition", partition);
   // A guest with no src never fires did-attach, so it can never be registered.
-  element.setAttribute("src", "about:blank");
+  // 从 Agent 手里接管的标签页带标记报到：主进程让它什么都不加载，再把页面恢复进去。
+  element.setAttribute("src", restore ? `${BROWSER_RESTORE_SRC_PREFIX}${tabId}` : "about:blank");
   // window.open is converted into an in-app tab by the guest's own handler in main.
   element.setAttribute("allowpopups", "");
   element.dataset.tabId = tabId;
@@ -115,7 +116,7 @@ function reconcile(roster: BrowserGuestRoster): void {
   for (const [tabId, slot] of wanted) {
     if (guests.has(tabId)) continue;
     // 分区按标签页给：同一个窗口里，不同工作区的标签页各用各的 cookie。
-    const entry = createGuest(tabId, slot.nonce, slot.partition);
+    const entry = createGuest(tabId, slot.nonce, slot.partition, slot.restore === true);
     guests.set(tabId, entry);
     layer.appendChild(entry.element);
     applyPlacement(tabId, entry);

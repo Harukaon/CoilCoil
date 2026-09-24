@@ -12,7 +12,6 @@ import {
   DEFAULT_BROWSER_URL,
   browserContextId,
   browserTargetInfo,
-  isReusableBlankTab,
   type BrowserTab,
 } from "./browser-runtime-types";
 
@@ -49,9 +48,17 @@ export interface BrowserCdpHost {
   noteAgentUse(tab: BrowserTab): void;
   /** 这个作用域里因为超过上限被关掉的 Agent 标签页，取一次就清空。 */
   takeRecycledTabs(scopeId: string): Array<{ url: string; title: string }>;
+  /** 用户在这个作用域里开着的标签页（Agent 碰不了，只能挑一张接管）。 */
+  userTabs(scopeId: string): Array<{ id: string; title: string; url: string; active: boolean }>;
+  /** Agent 接管用户的一张标签页，换成它能操作的离屏页面。 */
+  takeOverForAgent(id: string, scopeId: string): Promise<BrowserTab>;
   selectTab(id: string, scopeId: string): void;
   closeTab(id: string, scopeId: string): void;
   cdpTabs(scopeId: string): BrowserTab[];
+  /** 这个作用域里随便一张已经就绪的页面（Agent 的优先），只拿来答浏览器版本这种不碰页面的问题。 */
+  anyReadyTab(scopeId: string): BrowserTab | undefined;
+  /** 这个作用域里没人要过、还停在空白页上的那张占位标签页，不管现在归谁。 */
+  blankPlaceholder(scopeId: string): BrowserTab | undefined;
   tabById(id: string): BrowserTab | undefined;
   guestOf(tab: BrowserTab): WebContents;
   attachDebugger(tab: BrowserTab): void;
@@ -100,10 +107,26 @@ export class BrowserCdpBridge {
       // 运行时在每次调内置浏览器之后来取一次：上限收掉了哪些 Agent 标签页，好在那次
       // 工具返回里告诉 Agent。鉴权和 CDP 连接同一套：路径里的令牌加 Bearer。
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      const scopeId = requestUrl.searchParams.get("scope")?.trim() || DEFAULT_BROWSER_SCOPE_ID;
+      const json = (status: number, body: unknown): void => {
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify(body));
+      };
       if (request.method === "GET" && requestUrl.pathname === `/coilcoil/recycled-tabs/${this.pathToken}` && this.authorized(request)) {
-        const scopeId = requestUrl.searchParams.get("scope")?.trim() || DEFAULT_BROWSER_SCOPE_ID;
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ limit: AGENT_TAB_LIMIT, recycled: this.host.takeRecycledTabs(scopeId) }));
+        json(200, { limit: AGENT_TAB_LIMIT, recycled: this.host.takeRecycledTabs(scopeId) });
+        return;
+      }
+      // Agent 的接管工具：先列出用户开着的标签页，再挑一张接管。同一套鉴权。
+      if (request.method === "GET" && requestUrl.pathname === `/coilcoil/user-tabs/${this.pathToken}` && this.authorized(request)) {
+        json(200, { tabs: this.host.userTabs(scopeId) });
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === `/coilcoil/take-over/${this.pathToken}` && this.authorized(request)) {
+        const tabId = requestUrl.searchParams.get("tab") ?? "";
+        void this.host.takeOverForAgent(tabId, scopeId).then((tab) => {
+          const guest = tab.guest;
+          json(200, { url: guest?.getURL() ?? DEFAULT_BROWSER_URL, title: guest?.getTitle() ?? "", targetId: tab.pageTargetId });
+        }, (error: unknown) => json(400, { error: error instanceof Error ? error.message : String(error) }));
         return;
       }
       response.writeHead(404);
@@ -381,9 +404,10 @@ export class BrowserCdpBridge {
    * 那是他刚开的，替他导航走会很奇怪。
    */
   private async adoptBlankTab(url: string | undefined, activate: boolean, scopeId: string): Promise<BrowserTab | undefined> {
-    const blank = this.host.cdpTabs(scopeId).find((tab) =>
-      tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab(tab, tab.guest.getURL()));
+    let blank = this.host.blankPlaceholder(scopeId);
     if (!blank) return undefined;
+    // 面板打开时垫的那张空白页归用户：还没人用过它，Agent 直接接管过来用，免得多一张。
+    if (blank.control === "user") blank = await this.host.takeOverForAgent(blank.id, scopeId);
     blank.implicit = false;
     // 垫出来的空白页被 Agent 拿去用了，就是 Agent 的页。
     blank.owner = "agent";
@@ -397,16 +421,16 @@ export class BrowserCdpBridge {
   private async executeRootCommand(client: CdpClient, method: string, params: Record<string, unknown>): Promise<unknown> {
     if (method === "Target.getBrowserContexts") return { browserContextIds: [browserContextId(client.scopeId)] };
     if (method === "Browser.getVersion") {
-      const tab = await this.host.ensureActiveTab(client.scopeId);
-      this.installDebuggerRelay(client, tab);
+      // 只读的浏览器信息，哪张页面答都一样；借用户的页面答也不碰它的内容。一张页面都
+      // 没有时才给 Agent 开一张。
+      const tab = this.host.anyReadyTab(client.scopeId) ?? await this.host.ensureActiveTab(client.scopeId);
       return this.host.guestOf(tab).debugger.sendCommand(method, params);
     }
     if (method === "Target.setDiscoverTargets") {
+      // 不再为了「有个页面」先垫一张：Agent 还没有自己的标签页时，目标列表就是空的，
+      // 它要用浏览器会 new_page。垫一张只会在用户的标签条上多出一张没人要的空白页。
       client.discover = params.discover === true;
-      if (client.discover) {
-        await this.host.ensureActiveTab(client.scopeId);
-        this.announceAllTargets(client);
-      }
+      if (client.discover) this.announceAllTargets(client);
       return {};
     }
     if (method === "Target.setAutoAttach") {
@@ -476,7 +500,13 @@ export class BrowserCdpBridge {
       const tab = this.findTabByWindowId(params.windowId, client.scopeId) ?? await this.host.ensureActiveTab(client.scopeId);
       return this.host.setContentsSize(tab, params);
     }
-    const tab = await this.host.ensureActiveTab(client.scopeId);
+    // 其余的根命令转给一张 Agent 的页面答。点名了哪张就给哪张；没点名就用它现有的。
+    // 不为了答一条根命令凭空给它开一张：Puppeteer 会不停地问 Target.getDevToolsTarget
+    // 这类命令，每问一次就多一张空白页的话，Agent 的页被用户接管走之后标签条上会冒出
+    // 一张谁也没要的空白页。
+    const named = typeof params.targetId === "string" ? this.findTabByTarget(params.targetId, client.scopeId) : undefined;
+    const tab = named ?? this.host.cdpTabs(client.scopeId).find((item) => item.phase === "ready");
+    if (!tab) throw new Error("内置浏览器里还没有 Agent 的页面，先用 new_page 打开一个。");
     this.installDebuggerRelay(client, tab);
     this.host.attachDebugger(tab);
     return this.host.guestOf(tab).debugger.sendCommand(method, params);

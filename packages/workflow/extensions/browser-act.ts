@@ -10,12 +10,13 @@
  * - browser_navigate：导航含等待可加载，超时报错带当前状态
  * - browser_click：点击后自动重读快照；点不中时把新快照交回去，让模型用新 uid 再点
  * - browser_type：输入后回读确认
+ * - browser_user_tabs / browser_take_over：用户自己开的标签页 Agent 碰不了，要用就先接管
  *
  * 调试继续用 coilcoil-browser，两层分家。
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { drainBrowserNotice, noteBrowserCall } from "./browser-recycle-notice.ts";
+import { browserBridgeEndpoint, drainBrowserNotice, noteBrowserCall } from "./browser-recycle-notice.ts";
 import { requestMcpManager } from "./mcp-tools.ts";
 
 const BROWSER_SERVER = "coilcoil-browser";
@@ -30,6 +31,33 @@ const BROWSER_SERVER = "coilcoil-browser";
 export function selectedPageId(listing: string): number | undefined {
   const match = /^(\d+):[^\n]*\[selected\]/m.exec(listing);
   return match ? Number(match[1]) : undefined;
+}
+
+/** 在 chrome-devtools-mcp 的页面列表里找某个网址的页面编号；有好几张就要最新（编号最大）的。 */
+export function pageIdForUrl(listing: string, url: string): number | undefined {
+  let found: number | undefined;
+  for (const match of listing.matchAll(/^(\d+): .* \(([^()\s]+)\)/gm)) {
+    if (match[2] === url) found = Math.max(found ?? 0, Number(match[1]));
+  }
+  return found;
+}
+
+interface UserTab {
+  id: string;
+  title: string;
+  url: string;
+  active: boolean;
+}
+
+async function bridgeRequest<T>(path: string, scope: string | undefined, init: { method?: string; query?: Record<string, string> } = {}): Promise<T> {
+  const endpoint = scope ? browserBridgeEndpoint(path, scope) : undefined;
+  if (!endpoint) throw new Error("内置浏览器不可用（只有桌面端有）。");
+  const url = new URL(endpoint.url);
+  for (const [key, value] of Object.entries(init.query ?? {})) url.searchParams.set(key, value);
+  const response = await fetch(url, { method: init.method ?? "GET", headers: endpoint.headers, signal: AbortSignal.timeout(20_000) });
+  const body = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(body.error || `内置浏览器返回 ${response.status}`);
+  return body;
 }
 
 function textResult(text: string, details: Record<string, unknown>, isError = false): {
@@ -122,11 +150,12 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   registerTool({
     name: "browser_open",
     label: "Browser Open",
-    description: "打开一个网页并返回句柄。交互（点击/输入/导航）用 browser_navigate、browser_click、browser_type 拿句柄操作；调试（脚本/控制台/网络/性能）继续用 coilcoil-browser。",
+    description: "打开一个网页并返回句柄。交互（点击/输入/导航）用 browser_navigate、browser_click、browser_type 拿句柄操作；调试（脚本/控制台/网络/性能）继续用 coilcoil-browser。你只能操作自己开的、或者用 browser_take_over 接管过来的标签页。",
     promptSnippet: "browser_open: 打开网页拿句柄，后续交互拿句柄操作",
     promptGuidelines: [
       "需要像人一样点页面、填表单时用这一组；看 DOM、跑脚本、查控制台网络性能时用 coilcoil-browser。",
       "返回的 handle 贯穿后续操作，不要自己记 pageId 数字。",
+      "用户自己开着的网页你看不到也碰不了；用户让你看「这个页面」「我开的那个」时，先 browser_user_tabs 找到它，再 browser_take_over 接管。",
     ],
     parameters: Type.Object({
       url: Type.String({ description: "要打开的地址" }),
@@ -248,6 +277,56 @@ export default function browserActExtension(pi: ExtensionAPI): void {
           { error: "type_failed", message, handle: params.handle, pageId },
           true,
         );
+      }
+    },
+  });
+
+  registerTool({
+    name: "browser_user_tabs",
+    label: "Browser User Tabs",
+    description: "列出用户自己在内置浏览器里开着的标签页（标题、网址、是不是用户正看着的那张）。这些标签页你碰不了，要用哪一张就用 browser_take_over 接管。",
+    promptSnippet: "browser_user_tabs: 看用户开着哪些网页，要用再接管",
+    parameters: Type.Object({}),
+    async execute() {
+      try {
+        const { tabs } = await bridgeRequest<{ tabs: UserTab[] }>("user-tabs", sessionId);
+        if (!tabs.length) return textResult("用户现在没有开着的标签页。", { tabs });
+        const lines = tabs.map((tab) => `- tab=${tab.id}${tab.active ? "（用户正看着）" : ""}：${tab.title || "无标题"}（${tab.url}）`);
+        return textResult(`用户开着的标签页：\n${lines.join("\n")}\n要操作哪一张，用 browser_take_over 传它的 tab。`, { tabs });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return textResult(`读取失败：${message}`, { error: "user_tabs_failed", message }, true);
+      }
+    },
+  });
+
+  registerTool({
+    name: "browser_take_over",
+    label: "Browser Take Over",
+    description: "接管用户的一张标签页：它变成你的，页面原样保留（网址、前进后退、表单里填的内容；登录状态也在），之后拿返回的句柄操作。用户在界面上会看到这张标签页交给了你，随时可以再接管回去。",
+    promptSnippet: "browser_take_over: 接管用户的标签页，返回句柄",
+    parameters: Type.Object({
+      tab: Type.String({ description: "browser_user_tabs 列出来的 tab" }),
+    }),
+    async execute(_toolCallId, params, signal) {
+      try {
+        const taken = await bridgeRequest<{ url: string; title: string }>("take-over", sessionId, { method: "POST", query: { tab: params.tab } });
+        // 新页面刚出现在浏览器里，页面列表可能要等一下才列得到。
+        let pageId: number | undefined;
+        let listing = "";
+        for (let attempt = 0; attempt < 10 && pageId === undefined; attempt += 1) {
+          if (attempt) await new Promise((resolve) => setTimeout(resolve, 200));
+          listing = (await callBrowser(pi.events, "list_pages", {}, signal, sessionId)).text;
+          pageId = pageIdForUrl(listing, taken.url);
+        }
+        const handle = newHandle(pageId);
+        return textResult(
+          `已接管：${taken.title || "无标题"}（${taken.url}），句柄 ${handle}。${pageId !== undefined ? `（pageId ${pageId}）` : ""}\n${listing.slice(0, 1200)}`,
+          { handle, pageId, url: taken.url },
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return textResult(`接管失败：${message}`, { error: "take_over_failed", message }, true);
       }
     },
   });

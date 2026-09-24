@@ -12,8 +12,13 @@ const read = (path: string) => readFile(resolve(repositoryRoot, path), "utf8");
  * 内置浏览器先后加了缩放、每个工作区一份 cookie、新会话接手草稿标签页，
  * browser-runtime.ts 三次越线。为了这几十行把它拆开，只会让同一件事分散在两处——
  * 用户明确说过，宁可一个长文件，也不要为了压行数把复杂逻辑切开。所以抬上限，不动代码。
+ *
+ * 1150：Agent 的标签页改成离屏页面、用户和 Agent 互相接管之后又涨了两百多行。能独立
+ * 成块的已经各自成文件（离屏页面和画面推送 browser-offscreen.ts、接管用 guest 的认领
+ * 在 browser-guests.ts），剩下的是标签页在两种形态之间切换本身，和标签页生命周期是
+ * 同一件事，拆开反而要在两处对着看。
  */
-const MAX_LINES = 850;
+const MAX_LINES = 1150;
 
 test(`browser runtime source files stay within the ${MAX_LINES}-line architecture limit`, async () => {
   for (const path of [
