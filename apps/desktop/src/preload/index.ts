@@ -76,6 +76,7 @@ const PROJECT_FILE_SAVE_CHANNEL = "project-file:save";
 const PROJECT_DIRECTORY_LIST_CHANNEL = "project-directory:list";
 const BROWSER_STATE_CHANNEL = "browser:state";
 const BROWSER_AGENT_ACTIVATED_CHANNEL = "browser:agent-activated";
+const BROWSER_AGENT_INPUT_CHANNEL = "browser:agent-input";
 const BROWSER_GET_STATE_CHANNEL = "browser:get-state";
 const BROWSER_CAPTURE_CHANNEL = "browser:capture";
 const BROWSER_PICK_ELEMENT_CHANNEL = "browser:pick-element";
@@ -234,6 +235,11 @@ const api: CoilCoilDesktopApi = {
     const handler = (_event: Electron.IpcRendererEvent, scopeId: string): void => listener(scopeId);
     ipcRenderer.on(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
     return () => ipcRenderer.removeListener(BROWSER_AGENT_ACTIVATED_CHANNEL, handler);
+  },
+  onBrowserAgentInput: (listener: (holdMs: number) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, holdMs: number): void => listener(holdMs);
+    ipcRenderer.on(BROWSER_AGENT_INPUT_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(BROWSER_AGENT_INPUT_CHANNEL, handler);
   },
   getTerminalSessions: () => ipcRenderer.invoke(TERMINAL_GET_CHANNEL) as Promise<TerminalSessionSnapshot[]>,
   createTerminal: (cwd: string) => ipcRenderer.invoke(TERMINAL_CREATE_CHANNEL, cwd) as Promise<TerminalSessionSnapshot[]>,

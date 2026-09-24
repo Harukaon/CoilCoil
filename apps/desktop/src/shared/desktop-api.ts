@@ -465,6 +465,8 @@ export interface CoilCoilDesktopApi {
   onBrowserGuestRoster(listener: (roster: BrowserGuestRoster) => void): () => void;
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
   onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
+  /** Agent 正在往网页里输入：这段时间焦点归网页，`holdMs` 之内没有新的输入再还给用户。 */
+  onBrowserAgentInput(listener: (holdMs: number) => void): () => void;
   getTerminalSessions(): Promise<TerminalSessionSnapshot[]>;
   /** Always opens another shell: each one gets its own inspector tab. */
   createTerminal(cwd: string): Promise<TerminalSessionSnapshot[]>;
