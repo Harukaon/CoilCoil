@@ -1,4 +1,4 @@
-import { CoilCoilRuntime, type CoilCoilRuntimeOptions } from "@coilcoil/runtime-core";
+import { CoilCoilRuntime, runGitAction, type CoilCoilRuntimeOptions } from "@coilcoil/runtime-core";
 import {
   isRuntimeCommandEnvelope,
   SESSION_OPEN_SUPERSEDED_ERROR,
@@ -380,6 +380,8 @@ export class RuntimeServer {
 
   private async dispatch(command: RuntimeCommand, runtimeId?: string): Promise<unknown> {
     if (command.type === "create_session") return this.createSession(command.cwd, command.model, command.agentMode);
+    // Git 面板的操作只认工作区，不借用任何会话的运行时：会话被回收了也照样能用。
+    if (command.type === "git") return runGitAction(command.cwd, command.action);
     if (command.type === "open_session") return this.openSession(command.cwd, command.sessionPath);
     if (command.type === "open_workspace") return this.openWorkspace(command.cwd);
     // 任务面板那条运行不属于任何会话，也不该借用某个会话的运行时：它自己起、自己
@@ -617,6 +619,8 @@ export class RuntimeServer {
         return runtime.listProjectDirectory(command.path);
       case "read_file":
         return runtime.readProjectFile(command.path, command.maxBytes);
+      case "git":
+        return runGitAction(command.cwd, command.action);
       default: {
         const exhaustive: never = command;
         throw new Error(`未知运行时命令：${(exhaustive as { type?: string }).type ?? "unknown"}`);

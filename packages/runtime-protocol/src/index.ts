@@ -1299,6 +1299,62 @@ export interface ChangedFile {
   patch?: string;
 }
 
+/** 一个文件在暂存区或工作区里的状态；`undefined` 表示那一侧没有改动。 */
+export type GitFileState = "modified" | "added" | "deleted" | "renamed" | "copied" | "type-changed" | "untracked" | "conflicted";
+
+export interface GitFileChange {
+  /** 相对仓库根目录的路径。 */
+  path: string;
+  /** 改名 / 复制前的路径。 */
+  originalPath?: string;
+  staged?: GitFileState;
+  unstaged?: GitFileState;
+}
+
+export interface GitStatus {
+  /** 这个工作区不在 git 仓库里时为 false，其余字段都没有意义。 */
+  repository: boolean;
+  root?: string;
+  /** 当前分支；分离 HEAD 时是 undefined。 */
+  branch?: string;
+  detached: boolean;
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  /** 仓库里一个提交都还没有。 */
+  unborn: boolean;
+  files: GitFileChange[];
+}
+
+export interface GitBranch {
+  name: string;
+  upstream?: string;
+  current: boolean;
+}
+
+export interface GitDiff {
+  path: string;
+  staged: boolean;
+  patch: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
+export type GitAction =
+  | { op: "status" }
+  | { op: "diff"; path: string; staged: boolean }
+  | { op: "stage"; paths: string[] }
+  | { op: "unstage"; paths: string[] }
+  /** 丢弃工作区里的改动；未跟踪的文件会被删除。暂存区不动。 */
+  | { op: "discard"; paths: string[] }
+  /** `stageAll`：暂存区是空的就先把所有改动暂存再提交。 */
+  | { op: "commit"; message: string; stageAll?: boolean }
+  | { op: "push" }
+  | { op: "pull" }
+  | { op: "branches" }
+  | { op: "checkout"; branch: string }
+  | { op: "create_branch"; name: string };
+
 export interface FileNode {
   name: string;
   path: string;
@@ -1486,6 +1542,8 @@ export type RuntimeCommand =
   | { type: "cancel_queued_prompt"; id: string }
   | { type: "promote_queued_prompt"; id: string }
   | { type: "refresh_project" }
+  /** 工作区的 git 操作。不属于任何会话，结果类型见 GitAction 各分支的说明。 */
+  | { type: "git"; cwd: string; action: GitAction }
   | { type: "list_directory"; path: string }
   | { type: "read_file"; path: string; maxBytes?: number };
 
