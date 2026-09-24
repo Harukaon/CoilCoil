@@ -5,6 +5,7 @@ import {
 import {
   type CacheUsageSummary,
   type ContextUsage,
+  type ContextClearingRecord,
   type ResponseMetrics,
   type TokenUsage,
   summarizeCacheUsage,
@@ -213,10 +214,40 @@ export function believableContextUsage(usage: ContextUsage | undefined): Context
   return { ...usage, tokens: null, percent: null };
 }
 
-export function sessionUsage(session: AgentSession): { contextUsage?: ContextUsage; tokenUsage: TokenUsage; } {
+export function contextUsageAfterClearing(
+  usage: ContextUsage | undefined,
+  clearing: ContextClearingRecord | undefined,
+  lastAssistantTimestamp: number | undefined,
+): ContextUsage | undefined {
+  if (
+    !usage?.contextWindow ||
+    clearing?.projectedTokens === undefined ||
+    clearing.contextWindow !== usage.contextWindow ||
+    (lastAssistantTimestamp !== undefined && lastAssistantTimestamp >= clearing.at)
+  ) return usage;
+  const tokens = clearing.projectedTokens;
+  return { ...usage, tokens, percent: (tokens / usage.contextWindow) * 100, estimated: true };
+}
+
+export function sessionUsage(
+  session: AgentSession,
+  clearings?: readonly ContextClearingRecord[],
+): { contextUsage?: ContextUsage; tokenUsage: TokenUsage; } {
   const stats = session.getSessionStats();
+  const contextUsage = believableContextUsage(stats.contextUsage);
+  const latestClearing = clearings?.at(-1);
+  let lastAssistantTimestamp: number | undefined;
+  if (latestClearing?.projectedTokens !== undefined) {
+    const entries = session.sessionManager.getBranch();
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+      lastAssistantTimestamp = entry.message.timestamp;
+      break;
+    }
+  }
   return {
-    contextUsage: believableContextUsage(stats.contextUsage),
+    contextUsage: contextUsageAfterClearing(contextUsage, latestClearing, lastAssistantTimestamp),
     tokenUsage: { ...stats.tokens },
   };
 }

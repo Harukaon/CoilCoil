@@ -20,3 +20,12 @@ apps/desktop/release/
 *.tsbuildinfo
 
 .worktrees/
+
+# local scratch artifacts
+/out/
+/index.js
+/runtime.js
+/index-*.js
+/index-*.css
+/board-check.png
+.commandcode/

@@ -1,12 +1,13 @@
 /**
  * The Agent's door to CoilCoil itself: what this app can do, plus doing it.
  *
- * One tool, three areas — deliberately. Configuring an MCP server is a config
- * edit, installing a skill is a file copy, and the model already owns file
- * tools; what it lacks is *where* and *how*, plus the half no file edit can
- * do (reload the live session, connect the server, run the OAuth loop). So
- * `guide` serves that knowledge as text, and `mcp` / `skill` run the very
- * methods the settings panel uses, over an RPC channel the runtime answers.
+ * One tool, four areas — deliberately. Configuring an MCP server is a config
+ * edit, installing a skill is a file copy, and configuring a model/provider is
+ * another settings-panel operation; what it lacks is *where* and *how*, plus
+ * the half no file edit can do (reload the live session, run OAuth, refresh
+ * upstream metadata). So `guide` serves that knowledge as text, and `mcp` /
+ * `skill` / `model` run the very methods the settings panel uses, over an RPC
+ * channel the runtime answers.
  * Nothing here touches config files directly: writing the file without the
  * reload leaves the Agent staring at the old world, and the removed/disabled
  * bookkeeping disagrees with the panel.
@@ -30,14 +31,100 @@ export const COILCOIL_TOOL_NAME = "coilcoil";
 const SETUP_RPC_TIMEOUT_MS = 120_000;
 const DOC_PREVIEW_CHARS = 8_000;
 
+const ModelCostTierParams = Type.Object({
+  inputTokensAbove: Type.Number(),
+  input: Type.Number(),
+  output: Type.Number(),
+  cacheRead: Type.Number(),
+  cacheWrite: Type.Number(),
+});
+
+const ModelCostParams = Type.Object({
+  input: Type.Number(),
+  output: Type.Number(),
+  cacheRead: Type.Number(),
+  cacheWrite: Type.Number(),
+  tiers: Type.Optional(Type.Array(ModelCostTierParams)),
+});
+
+const ModelDefinitionParams = Type.Object({
+  id: Type.String({ description: "模型 ID，会原样发送给服务商" }),
+  name: Type.Optional(Type.String({ description: "显示名称" })),
+  api: Type.Optional(Type.String({ description: "该模型覆盖使用的请求协议" })),
+  baseUrl: Type.Optional(Type.String({ description: "该模型覆盖使用的 Base URL" })),
+  reasoning: Type.Optional(Type.Boolean({ description: "是否支持 Thinking / 推理" })),
+  thinkingLevelMap: Type.Optional(Type.Record(Type.String(), Type.Union([Type.String(), Type.Null()]), { description: "Thinking 级别到上游 effort 的映射；null 表示不支持" })),
+  input: Type.Optional(Type.Array(StringEnum(["text", "image"]), { description: "输入模态；要支持图片必须包含 image" })),
+  contextWindow: Type.Optional(Type.Number({ description: "最大上下文窗口 Token 数" })),
+  maxTokens: Type.Optional(Type.Number({ description: "最大输出 Token 数" })),
+  cost: Type.Optional(ModelCostParams),
+  samplingParams: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "temperature、top_p 等采样参数" })),
+  headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "模型专用请求头；已存在的敏感值用 •••••• 原样传回表示不改" })),
+  compat: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Pi provider 兼容性参数" })),
+}, { additionalProperties: false });
+
+const ModelCredentialParams = Type.Object({
+  method: Type.String({ description: "credential.methods 中的方式 ID" }),
+  values: Type.Record(Type.String(), Type.String(), { description: "凭据字段；明文 key 也可以填，会保存到本机凭据库" }),
+  preserveFields: Type.Optional(Type.Array(Type.String(), { description: "留空但仍保留的已配置凭据字段" })),
+});
+
+const ModelProviderParams = Type.Object({
+  id: Type.String({ description: "服务商 ID，只能是字母、数字、点、短横线、下划线" }),
+  name: Type.Optional(Type.String({ description: "服务商显示名称" })),
+  baseUrl: Type.Optional(Type.String({ description: "服务商 Base URL" })),
+  api: Type.Optional(Type.String({ description: "请求协议 ID；先从 model op=list 的 supportedApis 中选择" })),
+  oauth: Type.Optional(StringEnum(["radius"], { description: "订阅 OAuth 服务商类型" })),
+  headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "服务商请求头；敏感值可用 •••••• 原样保留" })),
+  compat: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "服务商兼容性 JSON" })),
+  authHeader: Type.Optional(Type.Boolean({ description: "是否由 Pi 自动写入 Authorization 请求头" })),
+  apiKeyReference: Type.Optional(Type.String({ description: "$环境变量或 !命令形式的 API Key 引用；普通明文 key 用 apiKey/credential；传空字符串可清除" })),
+  preserveApiKeyReference: Type.Optional(Type.Boolean({ description: "未提供新引用时是否保留 models.json 中已有的密钥引用" })),
+  disabled: Type.Optional(Type.Boolean({ description: "保留配置但从模型列表隐藏" })),
+  replaceModels: Type.Optional(Type.Boolean({ description: "是否用 models 替换 Pi 内置模型目录" })),
+  models: Type.Optional(Type.Array(ModelDefinitionParams, { description: "服务商模型目录；默认按 id 增量合并" })),
+  modelsMode: Type.Optional(StringEnum(["merge", "replace"], { description: "models 的处理方式，默认 merge" })),
+  removeModels: Type.Optional(Type.Array(Type.String(), { description: "按模型 ID 移除现有模型" })),
+  modelOverrides: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "按模型 ID 的运行时覆盖" })),
+  apiKey: Type.Optional(Type.String({ description: "明文 API Key；会写入本机私有凭据库，不会返回到工具结果" })),
+  credential: Type.Optional(ModelCredentialParams),
+}, { additionalProperties: false, description: "model op=save 的服务商增量配置；未提供的字段保持不变" });
+
+const ModelRequestParams = Type.Object({
+  baseUrl: Type.Optional(Type.String()),
+  api: Type.Optional(Type.String()),
+  apiKey: Type.Optional(Type.String({ description: "明文 API Key；只用于本次拉取/测试，不会由运行时返回" })),
+  headers: Type.Optional(Type.Record(Type.String(), Type.String())),
+  provider: Type.Optional(Type.String({ description: "已有服务商 ID；省略 apiKey 时使用其本机凭据" })),
+  modelId: Type.Optional(Type.String({ description: "测试连接时使用的模型 ID" })),
+});
+
+const WsConfigurationParams = Type.Object({
+  baseUrl: Type.String({ description: "OpenAI Responses WS 地址" }),
+  apiKey: Type.Optional(Type.String({ description: "明文 API Key；会写入本机私有配置，不会回显" })),
+  preserveApiKey: Type.Optional(Type.Boolean()),
+  fast: Type.Optional(Type.Boolean()),
+});
+
 export const CoilcoilParams = Type.Object({
-  area: StringEnum(["guide", "mcp", "skill"], {
-    description: "guide：先看教程（装 skill / 配 MCP / 认证怎么走）；mcp：查配改连 MCP（含认证）；skill：列装启停 Skill",
+  area: StringEnum(["guide", "mcp", "skill", "model"], {
+    description: "guide：先看教程；mcp：查配改连 MCP；skill：列装启停 Skill；model：配置模型服务商、模型能力、元数据和订阅登录",
   }),
   op: Type.Optional(Type.String({
-    description: "guide: skill / mcp / auth / read_doc；mcp: list/save/get_json/save_json/remove/enable/disable/discover/import/parse_snippet/connect/auth_start/auth_await_each/auth_finish/auth_cancel/auth_complete/logout/session_enable/session_disable；skill: list/install/enable/disable/remove/delete/session_enable/session_disable",
+    description: "guide: skill / mcp / auth / model / read_doc；mcp: list/save/get_json/save_json/remove/enable/disable/discover/import/parse_snippet/connect/auth_start/auth_await_each/auth_finish/auth_cancel/auth_complete/logout/session_enable/session_disable；skill: list/install/enable/disable/remove/delete/session_enable/session_disable；model: list/save/remove/enable/disable/fetch_models/catalog/test/auth_start/auth_status/auth_await/auth_respond/auth_cancel/logout/ws_get/ws_save",
   })),
-  topic: Type.Optional(Type.String({ description: "area=guide 且 op 不为 read_doc 时：skill / mcp / auth" })),
+  topic: Type.Optional(Type.String({ description: "area=guide 且 op 不为 read_doc 时：skill / mcp / auth / model" })),
+  providerId: Type.Optional(Type.String({ description: "model 服务商 ID；也可用 name 兼容填写" })),
+  provider: Type.Optional(ModelProviderParams),
+  request: Type.Optional(ModelRequestParams),
+  modelIds: Type.Optional(Type.Array(Type.String(), { description: "model op=catalog 的模型 ID 数组" })),
+  refresh: Type.Optional(Type.Boolean({ description: "model op=catalog 是否忽略 24 小时缓存重新抓取" })),
+  flowId: Type.Optional(Type.String({ description: "model OAuth flow ID" })),
+  promptId: Type.Optional(Type.String({ description: "model OAuth 当前交互提示 ID" })),
+  value: Type.Optional(Type.String({ description: "model OAuth 对当前提示的回答" })),
+  revision: Type.Optional(Type.Number({ description: "model op=auth_await 上一次收到的 revision" })),
+  timeoutMs: Type.Optional(Type.Number({ description: "model op=auth_await 最长等待毫秒数" })),
+  ws: Type.Optional(WsConfigurationParams),
   doc: Type.Optional(Type.String({ description: "area=guide + op=read_doc 时：文档名，如 architecture、readme" })),
   name: Type.Optional(Type.String({ description: "mcp 的 Server 名（connect/认证/logout/enable/remove 用）" })),
   filePath: Type.Optional(Type.String({ description: "skill 的文件路径（enable/disable/remove/delete 用）" })),
@@ -82,11 +169,22 @@ export const CoilcoilParams = Type.Object({
 });
 
 type CoilcoilParamsValue = {
-  area: "guide" | "mcp" | "skill";
+  area: "guide" | "mcp" | "skill" | "model";
   op?: string;
   topic?: string;
   doc?: string;
   name?: string;
+  providerId?: string;
+  provider?: unknown;
+  request?: unknown;
+  modelIds?: unknown;
+  refresh?: boolean;
+  flowId?: string;
+  promptId?: string;
+  value?: string;
+  revision?: number;
+  timeoutMs?: number;
+  ws?: unknown;
   filePath?: string;
   path?: string;
   server?: unknown;
@@ -335,6 +433,181 @@ export function resolveSkillMethod(op: string): string | undefined {
   return table[normalized];
 }
 
+export function resolveModelMethod(op: string): string | undefined {
+  const normalized = op.trim().toLowerCase();
+  const table: Record<string, string> = {
+    list: "model_list",
+    get: "model_list",
+    save: "model_save",
+    add: "model_save",
+    remove: "model_remove",
+    delete: "model_remove",
+    enable: "model_set_enabled",
+    disable: "model_set_enabled",
+    fetch: "model_fetch_models",
+    fetch_models: "model_fetch_models",
+    catalog: "model_catalog",
+    metadata: "model_catalog",
+    enrich: "model_catalog",
+    test: "model_test",
+    connect: "model_test",
+    auth_start: "model_auth_start",
+    login: "model_auth_start",
+    auth_status: "model_auth_status",
+    login_status: "model_auth_status",
+    auth_await: "model_auth_await",
+    login_await: "model_auth_await",
+    auth_respond: "model_auth_respond",
+    login_respond: "model_auth_respond",
+    auth_cancel: "model_auth_cancel",
+    login_cancel: "model_auth_cancel",
+    logout: "model_logout",
+    ws_get: "model_ws_get",
+    ws_save: "model_ws_save",
+  };
+  return table[normalized];
+}
+
+function renderModelConfiguration(configuration: unknown): string {
+  if (!isRecord(configuration) || !Array.isArray(configuration.providers)) return "没能读到模型服务商配置。";
+  const providers = configuration.providers as Array<Record<string, unknown>>;
+  const summary = providers.map((provider) => {
+    const id = typeof provider.id === "string" ? provider.id : "?";
+    const name = typeof provider.name === "string" ? provider.name : id;
+    const models = Array.isArray(provider.models) ? provider.models.length : 0;
+    const state = provider.disabled === true ? "已停用" : "启用中";
+    const auth = provider.authType === "oauth" ? "订阅已登录" : provider.apiKeyConfigured === true ? "凭据已配置" : "未配置凭据";
+    const source = typeof provider.source === "string" ? provider.source : "?";
+    return `- ${name}（${id} · ${source} · ${state} · ${auth} · ${models} 个模型）`;
+  });
+  const serialized = JSON.stringify(configuration, null, 2);
+  return [
+    "已配置的模型服务商：",
+    ...(summary.length ? summary : ["- 当前没有服务商配置。"]),
+    "",
+    "完整配置（凭据和敏感请求头已由运行时掩码）：",
+    "```json",
+    serialized ?? "{}",
+    "```",
+  ].join("\n");
+}
+
+function renderModelResult(data: unknown, operation: string): string {
+  if (!isRecord(data)) return `${operation} 没有得到运行时回应，请当成没做成。`;
+  const result = data.result;
+  if (isRecord(result) && isRecord(result.configuration)) return `${renderModelConfiguration(result.configuration)}\n\n已${operation}并 reload，Agent 侧已生效。`;
+  if (isRecord(data.configuration)) return `${renderModelConfiguration(data.configuration)}\n\n已${operation}并 reload，Agent 侧已生效。`;
+  return JSON.stringify(result ?? data, null, 2) ?? `${operation} 已完成。`;
+}
+
+function renderModelCatalog(data: unknown): string {
+  const metadata = isRecord(data) ? data.metadata : undefined;
+  return [
+    "模型元数据（来源优先级：models.dev → OpenRouter → LiteLLM）：",
+    "```json",
+    JSON.stringify(metadata ?? data, null, 2) ?? "{}",
+    "```",
+  ].join("\n");
+}
+
+function renderModelFetch(data: unknown): string {
+  const result = isRecord(data) ? data.result : undefined;
+  const metadata = isRecord(data) ? data.metadata : undefined;
+  return [
+    "上游模型列表和已匹配的元数据：",
+    "```json",
+    JSON.stringify({ models: result, metadata }, null, 2) ?? "{}",
+    "```",
+    "需要写入服务商时，把 models 里的 id 和 metadata 字段整理成 model op=save 的 provider.models；已有模型未提供的字段会保留。",
+  ].join("\n");
+}
+
+function renderModelAuth(data: unknown): string {
+  const result = isRecord(data) && isRecord(data.result) ? data.result : data;
+  if (!isRecord(result)) return "订阅登录没有得到状态。";
+  const state = isRecord(result.state) ? result.state : result;
+  const status = typeof state.status === "string" ? state.status : "unknown";
+  const flowId = typeof state.flowId === "string" ? state.flowId : "（无 flowId）";
+  const lines = [`订阅登录状态：${status} · flowId=${flowId}`];
+  if (typeof result.revision === "number") lines.push(`revision=${result.revision}`);
+  if (typeof state.message === "string" && state.message) lines.push(state.message);
+  if (isRecord(state.authUrl) && typeof state.authUrl.url === "string") lines.push(`浏览器授权链接：${state.authUrl.url}`);
+  if (isRecord(state.deviceCode)) lines.push(`设备码：${String(state.deviceCode.userCode ?? "")}；地址：${String(state.deviceCode.verificationUri ?? "")}`);
+  if (isRecord(state.prompt)) {
+    lines.push(`需要用户输入：${String(state.prompt.message ?? "")}`);
+    lines.push(`下一步用 op=auth_respond，传 flowId=${flowId}、promptId=${String(state.prompt.id ?? "")} 和 value。`);
+  }
+  if (typeof state.error === "string" && state.error) lines.push(`错误：${state.error}`);
+  if (status === "authorizing" || status === "starting") lines.push(`下一步用 op=auth_await，传 flowId=${flowId} 和上面的 revision 等待变化。`);
+  return lines.join("\n");
+}
+
+async function executeModel(
+  pi: ExtensionAPI,
+  params: CoilcoilParamsValue,
+  ctx: ExtensionContext,
+): Promise<{ content: Array<{ type: "text"; text: string }>; details: Record<string, unknown>; isError: boolean }> {
+  const op = (params.op ?? "list").trim();
+  const method = resolveModelMethod(op);
+  if (!method) {
+    return textResult(
+      `model 没有这个 op「${op}」。不提供 set_default、use 或 summarizer；这个 area 只配置服务商和模型目录。先用 area=guide + topic=model 看教程。`,
+      { area: "model", error: "bad_op", op },
+      true,
+    );
+  }
+  const callParams: Record<string, unknown> = {};
+  if (params.provider !== undefined) callParams.provider = params.provider;
+  if (params.providerId?.trim()) callParams.providerId = params.providerId.trim();
+  if (params.request !== undefined) callParams.request = params.request;
+  if (params.modelIds !== undefined) callParams.modelIds = params.modelIds;
+  if (params.refresh !== undefined) callParams.refresh = params.refresh;
+  if (params.flowId?.trim()) callParams.flowId = params.flowId.trim();
+  if (params.promptId?.trim()) callParams.promptId = params.promptId.trim();
+  if (params.value !== undefined) callParams.value = params.value;
+  if (params.revision !== undefined) callParams.revision = params.revision;
+  if (params.timeoutMs !== undefined) callParams.timeoutMs = params.timeoutMs;
+  if (params.ws !== undefined) callParams.ws = params.ws;
+  if (method === "model_set_enabled" && params.enabled !== undefined) callParams.enabled = params.enabled;
+  if (method === "model_set_enabled" && params.enabled === undefined) callParams.enabled = !isDisableOp(op);
+  try {
+    const data = await setupRpc(pi, method, callParams, ctx.cwd || undefined);
+    if (method === "model_list") {
+      const configuration = isRecord(data) ? data.configuration : undefined;
+      return textResult(renderModelConfiguration(configuration), { area: "model", op, method, configuration: configuration ?? null });
+    }
+    if (method === "model_fetch_models") {
+      return textResult(renderModelFetch(data), { area: "model", op, method, ...(isRecord(data) ? data : {}) });
+    }
+    if (method === "model_catalog") {
+      return textResult(renderModelCatalog(data), { area: "model", op, method, ...(isRecord(data) ? data : {}) });
+    }
+    if (method === "model_test") {
+      const result = isRecord(data) && isRecord(data.result) ? data.result : {};
+      const ok = result.ok === true;
+      const message = typeof result.message === "string" ? result.message : "没有测试结果。";
+      const detail = typeof result.detail === "string" ? `\n${result.detail}` : "";
+      return textResult(`${ok ? "连接测试成功" : "连接测试失败"}：${message}${detail}`, { area: "model", op, method, ...(isRecord(data) ? data : {}) }, !ok);
+    }
+    if (method === "model_auth_start" || method === "model_auth_status" || method === "model_auth_await" || method === "model_auth_respond") {
+      return textResult(renderModelAuth(data), { area: "model", op, method, ...(isRecord(data) ? data : {}) });
+    }
+    if (method === "model_auth_cancel") {
+      return textResult("订阅登录已取消。", { area: "model", op, method, ...(isRecord(data) ? data : {}) });
+    }
+    if (method === "model_ws_get") {
+      return textResult(`OpenAI Responses WS 配置：\n${JSON.stringify(isRecord(data) ? data.configuration : data, null, 2) ?? "{}"}`, { area: "model", op, method, ...(isRecord(data) ? data : {}) });
+    }
+    if (method === "model_ws_save") {
+      return textResult(`OpenAI Responses WS 已保存并 reload。\n${JSON.stringify(isRecord(data) ? data.ws : data, null, 2) ?? "{}"}`, { area: "model", op, method, ...(isRecord(data) ? data : {}) });
+    }
+    return textResult(renderModelResult(data, method === "model_logout" ? "退出登录" : op), { area: "model", op, method, ...(isRecord(data) ? data : {}) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return textResult(message, { area: "model", op, method, error: "rpc_failed", message }, true);
+  }
+}
+
 async function executeGuide(params: CoilcoilParamsValue): Promise<{ content: Array<{ type: "text"; text: string }>; details: Record<string, unknown>; isError: boolean }> {
   const op = (params.op ?? "mcp").trim().toLowerCase();
   if (op === "read_doc") {
@@ -356,9 +629,9 @@ async function executeGuide(params: CoilcoilParamsValue): Promise<{ content: Arr
     }
   }
   const topic = (params.topic ?? op) as GuideTopic;
-  if (topic !== "skill" && topic !== "mcp" && topic !== "auth") {
+  if (topic !== "skill" && topic !== "mcp" && topic !== "auth" && topic !== "model") {
     return textResult(
-      `topic 只能是 skill / mcp / auth；要读自带文档用 op=read_doc + doc=文档名。`,
+      `topic 只能是 skill / mcp / auth / model；要读自带文档用 op=read_doc + doc=文档名。`,
       { area: "guide", error: "bad_topic", topic: params.topic ?? params.op },
       true,
     );
@@ -536,13 +809,15 @@ export default function coilcoilSetupTool(pi: ExtensionAPI): void {
     name: COILCOIL_TOOL_NAME,
     label: "CoilCoil",
     description:
-      "CoilCoil 自己的说明书和配置口：guide 先看教程（装 skill / 配 MCP / 认证怎么走、自带文档怎么读），mcp 查配改连 MCP（含浏览器认证全套），skill 列装启停 Skill。配 MCP 改 Skill 永远走这个工具，不要自己 bash 改配置文件——写了文件不会 reload，Agent 照样看不到。",
-    promptSnippet: "coilcoil: CoilCoil 自己的配置（MCP/Skill）和自带文档",
+      "CoilCoil 自己的说明书和配置口：guide 先看教程（Skill / MCP / 模型服务商），mcp 查配改连 MCP（含浏览器认证），skill 列装启停 Skill，model 配服务商、模型能力、上游元数据、连通性和订阅 OAuth。不要自己 bash 改这些配置文件。",
+    promptSnippet: "coilcoil: CoilCoil 自己的配置（MCP/Skill/模型服务商）和自带文档",
     promptGuidelines: [
-      "用户让你配 MCP、装 Skill、登录某个 MCP，或问 CoilCoil 自己怎么用时，先用 area=guide 看对应教程，再动手；不要上来就 bash 改配置文件。",
+      "用户让你配 MCP、装 Skill、配模型服务商、补模型能力或登录订阅时，先用 area=guide 看对应教程，再动手；不要上来就 bash 改配置文件。",
+      "模型 area 只配置服务商和模型目录，不提供 set_default、use、session model 或 summarizer，不要尝试用它改变当前模型选择。",
       "自带文档（架构、需求、路线图）用 area=guide + op=read_doc 按名读，不要整目录扫。",
       "mcp op=connect 报 needs-auth 不是失败，是去走 auth_start → 拿链接给用户点 → auth_await_each → auth_finish 那四步；Agent 永远不要自己 curl 授权地址。",
-      "敏感值读出来是 ••••••（掩码，不是值）：原样传回去就是不改，真要换再填新值；永远不要把 token 明文写进配置文件，能用 bearerTokenEnv 就用它。",
+      "订阅模型用 model op=auth_start → 把 authUrl 给用户 → op=auth_await / auth_respond，和 MCP 一样走运行时 OAuth，不要自己 curl 授权地址。",
+      "敏感值读出来是 ••••••（掩码，不是值）：原样传回去就是不改，真要换再填新值；模型 API Key 可以按用户要求明文写入本机私有凭据库，但不要在回复里复述它。",
     ],
     parameters: CoilcoilParams,
     executionMode: "sequential",
@@ -551,6 +826,7 @@ export default function coilcoilSetupTool(pi: ExtensionAPI): void {
       const value = params as CoilcoilParamsValue;
       if (value.area === "guide") return executeGuide(value);
       if (value.area === "mcp") return executeMcp(pi, value, ctx);
+      if (value.area === "model") return executeModel(pi, value, ctx);
       return executeSkill(pi, value, ctx);
     },
   });

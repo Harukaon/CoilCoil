@@ -132,6 +132,8 @@ export interface ActiveSession {
   compacting?: boolean;
   /** A stop was delivered and the run has not settled yet. */
   aborting?: boolean;
+  /** The underlying Pi abort is still settling, even if it already emitted agent_settled. */
+  abortInFlight?: Promise<void>;
   /** A stop that arrived before the run existed; it lands when the run starts. */
   abortOnStart?: boolean;
   /** Model selected while a turn was already running; applied before the next prompt. */
@@ -414,6 +416,8 @@ export function contextClearingRecord(value: unknown): ContextClearingRecord | u
     at,
     clearedResults: Math.round(clearedResults),
     freedTokens: Math.max(0, Math.round(number(value.freedTokens) ?? 0)),
+    projectedTokens: number(value.projectedTokens),
+    contextWindow: number(value.contextWindow),
   };
 }
 

@@ -170,7 +170,7 @@ export default function App(): React.JSX.Element {
       sessionPath: next.session.path,
       messages: next.messages,
       promptQueue: next.promptQueue, steering: next.steering,
-      revision: next.messageRevision ?? 0,
+      revision: next.messageRevision ?? 0, runtimeId: next.runtimeId,
     });
     setTools(next.tools);
     setSubagents(next.subagents);
@@ -441,7 +441,7 @@ export default function App(): React.JSX.Element {
       promptDocument,
       images,
       timestamp: Date.now(),
-      status: snapshotRef.current?.running ? "queued" : "succeeded",
+      status: "running",
     };
     dispatchConversationMessages({ type: "truncate", order: message.order });
     dispatchConversationMessages({ type: "queue", message: pendingMessage, sessionPath: snapshot.session.path });

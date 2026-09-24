@@ -18,6 +18,8 @@ import {
   type ModelProviderConfiguration,
   type ModelProviderConfigurationInput,
   type ModelProviderConfigurationSnapshot,
+  type ModelProviderModelConfiguration,
+  type ModelProviderPatchInput,
   type ModelProviderSaveResult,
   type PendingSessionModel,
   type RuntimeConfiguration,
@@ -299,6 +301,79 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     const authStorage = AuthStorage.create(join(this.agentDir, "auth.json"));
     await authStorage.modify(providerId, async () => credential);
     await modelRuntime.refresh({ providers: [providerId], allowNetwork: false });
+  }
+
+  /**
+   * Apply the small edit an Agent normally has: "add this model" or "make
+   * contextWindow 200k". The panel posts a complete form draft; the Agent
+   * must not have to repeat every existing model just to change one field.
+   */
+  async saveModelProviderPatch(input: ModelProviderPatchInput): Promise<ModelProviderSaveResult> {
+    const id = assertProviderId(input.id);
+    const snapshot = await this.getModelProviderConfiguration();
+    const current = snapshot.providers.find((provider) => provider.id === id);
+    const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(input, key);
+    const currentModels = current?.models.map((model) => ({ ...model })) ?? [];
+    let models: ModelProviderModelConfiguration[] = currentModels;
+    if (input.modelsMode === "replace") {
+      models = (input.models ?? []).map((model) => ({ ...model }));
+    } else if (input.models) {
+      const byId = new Map(currentModels.map((model) => [model.id, model]));
+      for (const model of input.models) {
+        const previous = byId.get(model.id);
+        byId.set(model.id, previous ? { ...previous, ...model } : { ...model });
+      }
+      models = [...byId.values()];
+    }
+    if (input.removeModels?.length) {
+      const removed = new Set(input.removeModels);
+      models = models.filter((model) => !removed.has(model.id));
+    }
+
+    const provider: ModelProviderConfigurationInput["provider"] = {
+      id,
+      name: has("name") ? input.name : current?.name,
+      baseUrl: has("baseUrl") ? input.baseUrl : current?.baseUrl,
+      api: has("api") ? input.api : current?.api,
+      oauth: has("oauth") ? input.oauth : current?.oauth,
+      headers: has("headers") ? input.headers : current?.headers,
+      compat: has("compat") ? input.compat : current?.compat,
+      authHeader: has("authHeader") ? input.authHeader : current?.authHeader,
+      apiKeyReference: has("apiKeyReference") ? input.apiKeyReference?.trim() || undefined : current?.apiKeyReference,
+      disabled: has("disabled") ? input.disabled === true : current?.disabled === true,
+      replaceModels: has("replaceModels")
+        ? input.replaceModels === true
+        : current ? current.replaceModels === true : input.models !== undefined,
+      models,
+      modelOverrides: has("modelOverrides") ? input.modelOverrides : current?.modelOverrides,
+    };
+
+    let credential: ModelProviderConfigurationInput["credential"];
+    if (input.credential) {
+      const supplied = new Set(Object.keys(input.credential.values));
+      const automaticPreserveFields = current?.credential.methods
+        .flatMap((method) => method.fields)
+        .filter((field) => field.configured && !supplied.has(field.id))
+        .map((field) => field.id) ?? [];
+      credential = {
+        method: input.credential.method,
+        values: input.credential.values,
+        preserveFields: [...new Set([...automaticPreserveFields, ...(input.credential.preserveFields ?? [])])],
+      };
+    }
+
+    return this.saveModelProviderConfiguration({
+      provider,
+      credential,
+      apiKey: input.apiKey,
+      preserveApiKeyReference: has("preserveApiKeyReference")
+        ? input.preserveApiKeyReference === true
+        : !has("apiKeyReference"),
+    });
+  }
+
+  async setModelProviderEnabled(providerId: string, enabled: boolean): Promise<ModelProviderSaveResult> {
+    return this.saveModelProviderPatch({ id: providerId, disabled: !enabled });
   }
 
   async saveModelProviderConfiguration(input: ModelProviderConfigurationInput): Promise<ModelProviderSaveResult> {

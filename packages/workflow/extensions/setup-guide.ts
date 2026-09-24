@@ -5,14 +5,15 @@ import { join } from "node:path";
 /**
  * The setup guide: the written tutorial half of the `coilcoil` tool.
  *
- * A skill install is a file copy and an MCP change is a config edit — the
- * model already owns file tools, so what it is missing is *where* and *how*.
- * This serves that knowledge as text; the `mcp` / `skill` operations of the
- * tool then run the same methods the settings panel uses (write file + reload
- * the live session + connect), which no amount of bash can replace. Reading
- * this first is what keeps the model from hand-editing files the panel owns.
+ * A skill install is a file copy, an MCP change is a config edit, and a model
+ * provider change is a private models/auth edit — the model already owns file
+ * tools, so what it is missing is *where* and *how*. This serves that knowledge
+ * as text; the `mcp` / `skill` / `model` operations then run the same methods
+ * the settings panel calls (write, validate, reload and refresh), which no
+ * amount of bash can replace. Reading this first is what keeps the model from
+ * hand-editing files the panel owns.
  */
-export type GuideTopic = "skill" | "mcp" | "auth";
+export type GuideTopic = "skill" | "mcp" | "auth" | "model";
 
 const MASKED_SECRET_VALUE = "••••••";
 
@@ -108,10 +109,43 @@ export function mcpAuthGuide(): string {
   ].join("\n");
 }
 
+export function modelSetupGuide(): string {
+  return [
+    "在 CoilCoil 里配置模型，改的是服务商和模型目录，不是选择当前要用哪个模型。model area 不提供 set_default、use、session model 或 summarizer 操作。",
+    "",
+    "先用 op=list：",
+    "- 返回所有内置/自定义服务商、凭据状态、启停状态、supportedApis，以及每个模型的完整能力字段。",
+    "- contextWindow 是最大上下文窗口；maxTokens 是最大输出 Token；input 包含 image 表示支持图片；reasoning 和 thinkingLevelMap 控制 Thinking 及可用级别。",
+    "- 还会返回 cost（含 tiers）、samplingParams、模型/服务商 headers、compat 等面板高级字段；敏感 header 会显示 ••••••，原样传回表示不改。",
+    "",
+    "新建或修改服务商用 op=save + provider：",
+    "- 新自定义服务商至少需要 id、baseUrl、api 和 models；modelsMode=merge（默认）按模型 ID 增量合并，modelsMode=replace 才会替换整张目录。",
+    "- provider.models 每项可以填 id/name/api/baseUrl/reasoning/thinkingLevelMap/input/contextWindow/maxTokens/cost/samplingParams/headers/compat。只改一个模型字段时只传 id 和要改的字段，其他字段会保留。",
+    "- API Key 可以直接填 provider.apiKey 或 provider.credential.values；会进入本机私有凭据库，工具结果不会回显。也可以用 apiKeyReference=$ENV_VAR 或 !命令引用环境/命令凭据。",
+    "- 不要用 bash 改 models.json/auth.json：工具会做校验、reload 运行时，并让当前 Agent 立即看到新目录。",
+    "",
+    "上游模型和元数据：",
+    "1. 先用 op=fetch_models + request（baseUrl/api/headers/provider/apiKey）拉上游 /models，返回模型 ID 和匹配到的元数据。",
+    "2. 元数据统一从 models.dev、OpenRouter、LiteLLM 目录查 contextWindow、maxTokens、图片输入、reasoning 等字段；也可以用 op=catalog + modelIds 单独查询，refresh=true 强制刷新 24 小时缓存。",
+    "3. 把返回的字段整理进 provider.models 再 op=save；已有模型未传的字段不会被清空。",
+    "",
+    "其它面板功能：",
+    "- op=test + request 发送一次真实请求测试连接；request.modelId 必须是要测试的模型。",
+    "- op=enable / op=disable 只软切换服务商显示状态；op=remove 删除自定义目录，内置服务商用 op=logout 清凭据。",
+    "- OpenAI Responses WS 面板用 op=ws_get / op=ws_save，字段是 ws.baseUrl、ws.apiKey、ws.preserveApiKey、ws.fast。",
+    "",
+    "订阅登录也是 OAuth：",
+    "1. op=auth_start + providerId，返回 flowId；如果出现 authUrl，把链接给用户在浏览器打开。",
+    "2. op=auth_await + flowId + revision 等下一步状态；如果返回 prompt，就让用户提供内容，再 op=auth_respond 传 flowId/promptId/value。",
+    "3. 重复 auth_await 直到 succeeded/failed；中途放弃用 op=auth_cancel，清理凭据用 op=logout。设备码和浏览器链接都由运行时返回，Agent 不要自己 curl 授权地址。",
+  ].join("\n");
+}
+
 export function setupGuide(topic: GuideTopic, agentDir?: string): string {
   const dir = agentDir ?? agentDirFromEnv();
   if (topic === "skill") return skillInstallGuide(dir);
   if (topic === "auth") return mcpAuthGuide();
+  if (topic === "model") return modelSetupGuide();
   return mcpSetupGuide(dir);
 }
 

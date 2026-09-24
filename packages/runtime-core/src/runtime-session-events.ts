@@ -229,7 +229,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           this.publishRuntimeInspection(active);
           break;
         case "entry_appended":
-          if (event.entry.type === "message" && isRecord(event.entry.message) && event.entry.message.role === "user") {
+          if (event.entry.type === "message" && event.entry.message.role === "user") {
             const correlatedId = active.activeUserId ?? active.lastUserId;
             if (correlatedId) active.messageIds.set(event.entry.message, correlatedId);
             if (correlatedId && this.persistPromptDocument(active, event.entry.id, correlatedId)) {
@@ -237,13 +237,14 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             }
             active.lastUserId = undefined;
           }
-          if (event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE) {
-            const metrics = responseMetricsFromData(event.entry.data);
+          if ((event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE)
+            || (event.entry.type === "message" && event.entry.message.role === "assistant")) {
+            const metrics = event.entry.type === "custom" ? responseMetricsFromData(event.entry.data) : undefined;
             if (metrics) {
               active.responseMetrics = metrics;
               active.responseMetricsHistory = [...active.responseMetricsHistory, metrics].slice(-60);
             }
-            const usage = sessionUsage(active.session);
+            const usage = sessionUsage(active.session, active.contextClearings);
             // Pi emits this custom entry from message_end immediately before it
             // persists the assistant message. Include that just-finished response
             // so the UI is live without double-counting later session snapshots.
@@ -529,13 +530,13 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
       // Persist the claim before doing any model work so a reopened session cannot retry it.
       active.session.sessionManager.appendCustomEntry(SESSION_TITLE_ATTEMPT_ENTRY_TYPE, { version: 1 });
       const messages = active.session.messages;
-      const firstUser = messages.find((message) => isRecord(message) && message.role === "user");
+      const firstUser = messages.find((message) => message.role === "user");
       if (!firstUser) return;
-      const firstAssistant = messages.find((message) => isRecord(message) && message.role === "assistant");
-      const userText = contentParts(isRecord(firstUser) ? firstUser.content : undefined).text;
+      const firstAssistant = messages.find((message) => message.role === "assistant");
+      const userText = contentParts(firstUser.content).text;
       if (!userText.trim()) return;
       const assistantText = firstAssistant
-        ? contentParts(isRecord(firstAssistant) ? firstAssistant.content : undefined).text
+        ? contentParts(firstAssistant.content).text
         : "";
 
       const modelRuntime = await this.ready();
@@ -608,7 +609,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
       await this.applyPendingSessionModel(active);
       const prepared = await preparePromptImages(images);
       const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-      const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
+      const hasUserMessage = active.session.messages.some((message) => message.role === "user");
       if (!hasUserMessage && !active.titleManuallySet && !active.titleAttempted) {
         // 先用第一句话兜底，第一轮结束后再让模型起个像样的名字。
         active.session.setSessionName(titleFromText(prompt));

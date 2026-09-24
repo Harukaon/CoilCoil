@@ -7,6 +7,12 @@ export interface PendingUserMessage {
 
 export interface ConversationMessagesState {
   sessionPath?: string;
+  /**
+   * Message revisions are local to one runtime instance.  Opening the same
+   * session again creates a new runtime and starts its counter at zero, so a
+   * numeric revision cannot be compared across runtime ids.
+   */
+  runtimeId?: string;
   revision: number;
   committed: ChatMessage[];
   queued: ChatMessage[];
@@ -17,10 +23,10 @@ export type ConversationMessagesAction =
   | { type: "reset"; sessionPath?: string; messages?: ChatMessage[] }
   | { type: "queue"; message: ChatMessage; sessionPath?: string }
   | { type: "bind_session"; id: string; sessionPath: string }
-  | { type: "snapshot"; sessionPath: string; messages: ChatMessage[]; promptQueue?: QueuedPrompt[]; steering?: SteeringMessage[]; revision: number }
-  | { type: "prompt_queue"; queue: QueuedPrompt[]; revision: number; sessionPath?: string }
-  | { type: "runtime_message"; message: ChatMessage; revision: number; sessionPath?: string }
-  | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; timestamp: number; revision: number; sessionPath?: string }
+  | { type: "snapshot"; sessionPath: string; messages: ChatMessage[]; promptQueue?: QueuedPrompt[]; steering?: SteeringMessage[]; revision: number; runtimeId?: string }
+  | { type: "prompt_queue"; queue: QueuedPrompt[]; revision: number; sessionPath?: string; runtimeId?: string }
+  | { type: "runtime_message"; message: ChatMessage; revision: number; sessionPath?: string; runtimeId?: string }
+  | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; timestamp: number; revision: number; sessionPath?: string; runtimeId?: string }
   | { type: "reject"; id: string; revision?: number }
   | { type: "truncate"; order: number }
   | { type: "restore"; state: ConversationMessagesState };
@@ -39,11 +45,12 @@ function byOrder(left: ChatMessage, right: ChatMessage): number {
 function preserveUserPromptMetadata(current: ChatMessage | undefined, next: ChatMessage): ChatMessage {
   if (!current || current.role !== "user" || next.role !== "user") return next;
   return {
-    ...current,
     ...next,
     // Pi stores the model-facing serialization, not the editor's private node
-    // document. Keep the local/history document if an authoritative event
-    // arrives before the runtime metadata entry has been reconstructed.
+    // document. Keep only that local/history metadata if an authoritative event
+    // arrives before the runtime metadata entry has been reconstructed. Never
+    // carry optimistic UI fields such as `steering`, `queued`, or `running`
+    // into the committed message.
     ...(next.promptDocument || current.promptDocument
       ? { promptDocument: next.promptDocument ?? current.promptDocument }
       : {}),
@@ -88,6 +95,7 @@ export function conversationMessagesReducer(
     case "reset":
       return {
         sessionPath: action.sessionPath,
+        runtimeId: undefined,
         revision: 0,
         committed: [...(action.messages ?? [])].sort(byOrder),
         queued: [],
@@ -108,7 +116,12 @@ export function conversationMessagesReducer(
       };
     case "snapshot": {
       const sameSession = state.sessionPath === action.sessionPath;
-      if (sameSession && action.revision < state.revision) return state;
+      const sameRuntime = state.runtimeId === action.runtimeId;
+      // A session can be opened by more than one runtime over its lifetime.
+      // Their messageRevision counters each start at zero, so an older cached
+      // snapshot must not make every event from the newly opened runtime look
+      // stale.  The numeric guard is valid only inside one runtime epoch.
+      if (sameSession && sameRuntime && action.revision < state.revision) return state;
       const queued = queuedMessages(action.promptQueue ?? []);
       const queuedIds = new Set(queued.map((message) => message.id));
       /* 介入消息既不在队列里也不在记录里，切走时本地那份 pending 就没了。快照
@@ -146,6 +159,7 @@ export function conversationMessagesReducer(
       ].map((message) => [message.id, message]));
       return {
         sessionPath: action.sessionPath,
+        runtimeId: action.runtimeId,
         revision: action.revision,
         committed: action.messages.map((message) => preserveUserPromptMetadata(previousById.get(message.id), message)).sort(byOrder),
         queued,
@@ -154,7 +168,8 @@ export function conversationMessagesReducer(
     }
     case "prompt_queue": {
       if (action.sessionPath && state.sessionPath && action.sessionPath !== state.sessionPath) return state;
-      if (action.revision < state.revision) return state;
+      if (action.runtimeId && state.runtimeId && action.runtimeId !== state.runtimeId) return state;
+      if (action.runtimeId === state.runtimeId && action.revision < state.revision) return state;
       const queued = queuedMessages(action.queue);
       const queuedIds = new Set(queued.map((message) => message.id));
       return {
@@ -166,7 +181,8 @@ export function conversationMessagesReducer(
     }
     case "runtime_message":
       if (action.sessionPath && state.sessionPath && action.sessionPath !== state.sessionPath) return state;
-      if (action.revision < state.revision) return state;
+      if (action.runtimeId && state.runtimeId && action.runtimeId !== state.runtimeId) return state;
+      if (action.runtimeId === state.runtimeId && action.revision < state.revision) return state;
       const existing = state.committed.find((message) => message.id === action.message.id)
         ?? state.pending.find((item) => item.message.id === action.message.id)?.message;
       return {
@@ -178,7 +194,8 @@ export function conversationMessagesReducer(
       };
     case "message_delta": {
       if (action.sessionPath && state.sessionPath && action.sessionPath !== state.sessionPath) return state;
-      if (action.revision < state.revision) return state;
+      if (action.runtimeId && state.runtimeId && action.runtimeId !== state.runtimeId) return state;
+      if (action.runtimeId === state.runtimeId && action.revision < state.revision) return state;
       const current = state.committed.find((message) => message.id === action.id);
       const message: ChatMessage = current
         ? {

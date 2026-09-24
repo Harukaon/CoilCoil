@@ -9,6 +9,7 @@ import {
   type FetchProviderModelsInput,
   type FetchProviderModelsResult,
   type ModelProviderAuthPrompt,
+  type ModelProviderAuthSnapshot,
   type ModelProviderAuthState,
   type RuntimeConfiguration,
   type TestProviderConnectionInput,
@@ -35,8 +36,58 @@ import {
   errorDetail,
   errorMessage,
 } from "./runtime-utils.js";
+import type { ModelCatalogLookupResult } from "@coilcoil/runtime-protocol/model-catalog";
+import { lookupModelCatalogMeta } from "./model-catalog-source.js";
+
+function redactProviderSecret(value: string, secret: string | undefined): string {
+  const trimmed = secret?.trim();
+  return trimmed ? value.replaceAll(trimmed, "••••••") : value;
+}
 
 export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
+  private readonly providerAuthRevisions = new Map<string, number>();
+
+  private readonly providerAuthWaiters = new Map<string, Set<(snapshot: ModelProviderAuthSnapshot) => void>>();
+
+  private readonly completedProviderAuth = new Map<string, ModelProviderAuthSnapshot>();
+
+  private providerAuthSnapshot(flowId: string, state: ModelProviderAuthState, revision: number): ModelProviderAuthSnapshot {
+    return {
+      state: {
+        ...state,
+        prompt: state.prompt
+          ? state.prompt.type === "select"
+            ? { ...state.prompt, options: state.prompt.options.map((option) => ({ ...option })) }
+            : { ...state.prompt }
+          : undefined,
+        authUrl: state.authUrl ? { ...state.authUrl } : undefined,
+        deviceCode: state.deviceCode ? { ...state.deviceCode } : undefined,
+        links: state.links?.map((link) => ({ ...link })),
+      },
+      revision,
+    };
+  }
+
+  private isTerminalProviderAuth(state: ModelProviderAuthState): boolean {
+    return state.status === "succeeded" || state.status === "failed" || state.status === "cancelled";
+  }
+
+  private notifyProviderAuth(flow: ProviderAuthFlow, snapshot: ModelProviderAuthSnapshot): void {
+    const waiters = this.providerAuthWaiters.get(flow.state.flowId);
+    if (!waiters?.size) return;
+    for (const waiter of [...waiters]) waiter(snapshot);
+  }
+
+  private rememberCompletedProviderAuth(snapshot: ModelProviderAuthSnapshot): void {
+    if (!this.isTerminalProviderAuth(snapshot.state)) return;
+    this.completedProviderAuth.set(snapshot.state.flowId, snapshot);
+    const timer = setTimeout(() => {
+      this.completedProviderAuth.delete(snapshot.state.flowId);
+      this.providerAuthRevisions.delete(snapshot.state.flowId);
+    }, 10 * 60 * 1000);
+    timer.unref?.();
+  }
+
   protected publishProviderAuth(flow: ProviderAuthFlow): void {
     this.emitEvent({
       type: "model_provider_auth_updated",
@@ -56,7 +107,12 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
 
   protected updateProviderAuth(flow: ProviderAuthFlow, patch: Partial<ModelProviderAuthState>): void {
     flow.state = { ...flow.state, ...patch };
+    const revision = (this.providerAuthRevisions.get(flow.state.flowId) ?? 0) + 1;
+    this.providerAuthRevisions.set(flow.state.flowId, revision);
     this.publishProviderAuth(flow);
+    const snapshot = this.providerAuthSnapshot(flow.state.flowId, flow.state, revision);
+    this.rememberCompletedProviderAuth(snapshot);
+    this.notifyProviderAuth(flow, snapshot);
   }
 
   protected clearProviderAuthPrompt(flow: ProviderAuthFlow): ProviderAuthFlow["pendingPrompt"] {
@@ -162,6 +218,7 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
       },
     };
     this.providerAuthFlows.set(flow.state.flowId, flow);
+    this.providerAuthRevisions.set(flow.state.flowId, 1);
     this.publishProviderAuth(flow);
 
     void modelRuntime.login(providerId, "oauth", {
@@ -206,6 +263,50 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
       this.providerAuthFlows.delete(flow.state.flowId);
     });
     return { ...flow.state };
+  }
+
+  async getModelProviderOAuth(flowId: string): Promise<ModelProviderAuthSnapshot> {
+    const flow = this.providerAuthFlows.get(flowId);
+    if (flow) {
+      const revision = this.providerAuthRevisions.get(flowId) ?? 1;
+      return this.providerAuthSnapshot(flowId, flow.state, revision);
+    }
+    const completed = this.completedProviderAuth.get(flowId);
+    if (completed) return completed;
+    throw new Error("这次订阅登录不存在或已经过期，请重新发起登录。");
+  }
+
+  async awaitModelProviderOAuth(flowId: string, afterRevision?: number, timeoutMs = 110_000): Promise<ModelProviderAuthSnapshot> {
+    const current = await this.getModelProviderOAuth(flowId);
+    const after = afterRevision ?? current.revision;
+    if (current.state.status === "succeeded" || current.state.status === "failed" || current.state.status === "cancelled" || current.revision > after) {
+      return current;
+    }
+    const flow = this.providerAuthFlows.get(flowId);
+    if (!flow) return current;
+    const waitMs = Number.isFinite(timeoutMs) ? Math.max(1_000, Math.min(Math.round(timeoutMs), 110_000)) : 110_000;
+    return new Promise<ModelProviderAuthSnapshot>((resolve) => {
+      const waiters = this.providerAuthWaiters.get(flowId) ?? new Set<(snapshot: ModelProviderAuthSnapshot) => void>();
+      const finish = (snapshot: ModelProviderAuthSnapshot): void => {
+        clearTimeout(timer);
+        waiters.delete(finish);
+        if (!waiters.size) this.providerAuthWaiters.delete(flowId);
+        resolve(snapshot);
+      };
+      waiters.add(finish);
+      this.providerAuthWaiters.set(flowId, waiters);
+      const timer = setTimeout(() => finish(this.providerAuthSnapshot(flowId, flow.state, this.providerAuthRevisions.get(flowId) ?? current.revision)), waitMs);
+      timer.unref?.();
+      const latest = this.providerAuthRevisions.get(flowId) ?? current.revision;
+      if (latest > after) {
+        const snapshot = this.providerAuthSnapshot(flowId, flow.state, latest);
+        finish(snapshot);
+      }
+    });
+  }
+
+  async getModelCatalogMetadata(modelIds: readonly string[], refresh = false): Promise<ModelCatalogLookupResult> {
+    return lookupModelCatalogMeta(this.agentDir, modelIds, { refresh });
   }
 
   async respondModelProviderOAuth(flowId: string, promptId: string, value: string): Promise<void> {
@@ -284,12 +385,12 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
           }
           return { models };
         } catch (error) {
-          errors.push(`${url} → ${errorMessage(error)}`);
+          errors.push(`${url} → ${redactProviderSecret(errorMessage(error), apiKey)}`);
         }
       }
     }
 
-    const detail = errors.at(-1) ?? "未知错误";
+    const detail = redactProviderSecret(errors.at(-1) ?? "未知错误", apiKey);
     throw new Error(`拉取模型失败：已自动尝试有/无 /v1 的地址。最后一次：${detail}`);
   }
 
@@ -322,7 +423,7 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
           }),
         });
         const text = await response.text();
-        if (!response.ok) return { ok: false, message: `测试失败（HTTP ${response.status}）`, detail: truncateDetail(text) };
+        if (!response.ok) return { ok: false, message: `测试失败（HTTP ${response.status}）`, detail: redactProviderSecret(truncateDetail(text), apiKey) };
         return { ok: true, message: "已收到 Responses 回复。" };
       }
       const url = joinProviderUrl(baseUrl, "chat/completions");
@@ -336,10 +437,10 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
         }),
       });
       const text = await response.text();
-      if (!response.ok) return { ok: false, message: `测试失败（HTTP ${response.status}）`, detail: truncateDetail(text) };
+      if (!response.ok) return { ok: false, message: `测试失败（HTTP ${response.status}）`, detail: redactProviderSecret(truncateDetail(text), apiKey) };
       return { ok: true, message: "已收到 Chat Completions 回复。" };
     } catch (error) {
-      return { ok: false, message: "测试请求失败", detail: errorMessage(error) };
+      return { ok: false, message: "测试请求失败", detail: redactProviderSecret(errorMessage(error), apiKey) };
     }
   }
 

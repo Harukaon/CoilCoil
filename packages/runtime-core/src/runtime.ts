@@ -123,6 +123,11 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string, promptDocument?: PromptDocument): Promise<{ accepted: true; }> {
     const active = this.requireActive();
     if (this.modelTransition) await this.modelTransition;
+    // Stop returns before Pi settles; rewinding must wait before changing the branch.
+    if (active.abortInFlight) {
+      await active.abortInFlight;
+      if (this.active !== active) throw new Error("会话已切换，未能回溯消息。");
+    }
     const documentPrompt = promptDocumentPrompt(promptDocument, images);
     const promptImages = documentPrompt.images;
     const prompt = documentPrompt.text.trim() || text.trim() || (promptImages?.length ? "请查看附加的图片。" : "");
@@ -132,6 +137,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     // A stop belongs to the prompt it was pressed against, never to this one.
     active.abortOnStart = false;
     this.promptStarting = true;
+    this.publishRunning(true, "prompt_starting", { queued: false });
     try {
       await this.applyPendingSessionModel(active);
       const result = await active.session.navigateTree(entryId, { summarize: false });
@@ -140,7 +146,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       active.summaryActivity = undefined;
       const prepared = await preparePromptImages(promptImages);
       const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-      const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
+      const hasUserMessage = active.session.messages.some((message) => message.role === "user");
       if (!hasUserMessage && !active.titleManuallySet && !active.titleAttempted) {
         active.session.setSessionName(titleFromText(prompt));
         active.titlePending = true;
@@ -163,6 +169,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       return { accepted: true };
     } catch (error) {
       this.promptStarting = false;
+      if (this.active === active) this.publishRunState(active);
       throw error;
     }
   }
@@ -350,8 +357,6 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
    */
   async abort(): Promise<{ aborted: boolean; aborting: boolean; cancelledQueue: number; }> {
     const active = this.requireActive();
-    // Stopping is how a user ends a `/goal` loop: without this the loop would
-    // simply start the next round after the aborted turn settles.
     const requestedAt = Date.now();
     this.log.info("abort", "abort_requested", {
       streaming: active.session.isStreaming,
@@ -360,26 +365,17 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       runningTools: [...active.tools.values()].filter((tool) => tool.status === "running").map((tool) => tool.name),
     });
     const stoppedGoal = await this.stopGoalIfRunning(active);
-    // Stopping means the conversation stops. Anything still waiting — in this
-    // runtime's FIFO or in Pi's own steering queue — would otherwise be sent the
-    // moment the aborted turn settles, which looks exactly like the stop having
-    // been ignored.
     const cancelledQueue = this.dropQueuedPrompts(active) + this.clearSteeredQueue(active);
     const cancelledSummary = this.cancelSummarization(active);
+    if (active.abortInFlight) {
+      return { aborted: true, aborting: true, cancelledQueue };
+    }
     if (!active.session.isStreaming) {
-      // A summarization that runs before the prompt owns the window in which no
-      // run exists yet, and Pi sends that prompt as soon as it ends. Cancelling
-      // it here is only half a stop: the run it was preparing still has to be
-      // stopped, and it can only be stopped once it exists.
       const pending = this.promptStarting;
-      // Remembered, and shown as "正在停止" until it lands, so the composer does
-      // not look like it simply swallowed the press.
       if (pending) {
         active.abortOnStart = true;
         active.aborting = true;
       }
-      // A stop pressed against a run this session no longer has still has a job
-      // to do: publish what is actually true, so a stale spinner clears.
       this.log.info("abort", "abort_without_live_run", { cancelledQueue, stoppedGoal, cancelledSummary, pending });
       this.publishRunState(active);
       return {
@@ -392,12 +388,13 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     this.publishRunState(active);
     const stallNotice = setTimeout(() => this.reportSlowAbort(active), ABORT_STALL_NOTICE_MS);
     stallNotice.unref?.();
-    void active.session.abort()
+    const abortInFlight = active.session.abort()
       .catch((error) => {
         this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       })
       .finally(() => {
         clearTimeout(stallNotice);
+        if (active.abortInFlight === abortInFlight) active.abortInFlight = undefined;
         active.aborting = false;
         // The gap between this and `abort_requested` is the whole of "I pressed
         // stop and nothing happened": it is time spent inside a tool call that
@@ -405,6 +402,8 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
         this.log.info("abort", "abort_settled", { elapsedMs: Date.now() - requestedAt });
         if (this.active === active) this.publishRunState(active);
       });
+    active.abortInFlight = abortInFlight;
+    void abortInFlight;
     return { aborted: true, aborting: true, cancelledQueue };
   }
 
@@ -610,7 +609,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       messages.push({ ...active.activeAssistantMessage, order: maxOrder + 1 });
     }
     const model = active.session.model;
-    const usage = sessionUsage(active.session);
+    const usage = sessionUsage(active.session, active.contextClearings);
     active.responseMetrics = reconstructed.responseMetrics ?? active.responseMetrics;
     active.responseMetricsHistory = reconstructed.responseMetricsHistory;
     const projectedTools = new Map(reconstructed.tools);

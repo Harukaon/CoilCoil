@@ -219,6 +219,7 @@ export function transcriptNote(path: string, sections: readonly TranscriptSectio
 export default function contextTranscriptExtension(pi: ExtensionAPI): void {
   let transcriptPath: string | undefined;
   let sections: TranscriptSection[] = [];
+  let pendingArchive: { path: string; body: string; at: number; messageCount: number } | undefined;
 
   const locate = (ctx: ExtensionContext): string | undefined => {
     if (transcriptPath) return transcriptPath;
@@ -232,6 +233,7 @@ export default function contextTranscriptExtension(pi: ExtensionAPI): void {
   const reset = (_event: unknown, ctx: ExtensionContext): void => {
     transcriptPath = undefined;
     sections = [];
+    pendingArchive = undefined;
     locate(ctx);
   };
 
@@ -242,34 +244,49 @@ export default function contextTranscriptExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", () => {
     transcriptPath = undefined;
     sections = [];
+    pendingArchive = undefined;
   });
 
   /**
-   * Write the stretch out before Pi summarizes it away.
+   * Capture the original stretch before the clearing extension rewrites the
+   * summary input. Only write it if Pi actually commits the compaction: an
+   * automatic threshold check can be cancelled when the request copy fits.
    *
    * Nothing is returned, so Pi's own summarization runs untouched — this only
    * adds the way back. Failing to write must not stop a compaction that the
    * session may need to survive the next request, so errors are swallowed.
    */
   pi.on("session_before_compact", (event, ctx) => {
+    pendingArchive = undefined;
     const path = locate(ctx);
     const messages = event.preparation?.messagesToSummarize ?? [];
     if (!path || !messages.length) return undefined;
     try {
-      const at = Date.now();
-      const body = renderTranscript(messages);
-      const existing = existsSync(path) ? countLines(readFileSync(path, "utf8")) : 0;
-      const fromLine = existing + 1;
-      const toLine = fromLine + countLines(body) + 1;
-      const marker = `${SECTION_MARKER}${JSON.stringify({ at, messageCount: messages.length, toLine })} -->`;
-      mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(path, `${marker}\n${body}\n`, "utf8");
-      sections.push({ fromLine, toLine, at, messageCount: messages.length });
+      pendingArchive = { path, body: renderTranscript(messages), at: Date.now(), messageCount: messages.length };
     } catch {
       // The transcript is a convenience; compaction is not.
     }
     return undefined;
   });
+
+  pi.on("session_compact", () => {
+    const archive = pendingArchive;
+    pendingArchive = undefined;
+    if (!archive) return;
+    try {
+      const existing = existsSync(archive.path) ? countLines(readFileSync(archive.path, "utf8")) : 0;
+      const fromLine = existing + 1;
+      const toLine = fromLine + countLines(archive.body) + 1;
+      const marker = `${SECTION_MARKER}${JSON.stringify({ at: archive.at, messageCount: archive.messageCount, toLine })} -->`;
+      mkdirSync(dirname(archive.path), { recursive: true });
+      appendFileSync(archive.path, `${marker}\n${archive.body}\n`, "utf8");
+      sections.push({ fromLine, toLine, at: archive.at, messageCount: archive.messageCount });
+    } catch {
+      // The transcript is a convenience; compaction is not.
+    }
+  });
+
+  pi.on("session_compact_failed", () => { pendingArchive = undefined; });
 
   /**
    * Re-state the pointer on every request once there is something to point at.

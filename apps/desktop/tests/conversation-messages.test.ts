@@ -48,6 +48,13 @@ test("正式消息使用同一 client id 确认本地消息而不是追加第二
   assert.equal(state.pending.length, 0);
 });
 
+test("回溯占位是直接运行中的消息，不显示成 FIFO 排队", () => {
+  const rewind = { ...user("client-rewind", "修改后的提示词", 10), status: "running" as const };
+  const state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, { type: "queue", message: rewind });
+  assert.deepEqual(selectConversationMessages(state).map((message) => [message.id, message.status]), [["client-rewind", "running"]]);
+  assert.deepEqual(selectQueuedPrompts(state), []);
+});
+
 test("权威回显缺少 promptDocument 时保留本地富节点", () => {
   const local = { ...user("client-1", "元素一", 10), promptDocument: elementDocument };
   let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, { type: "queue", message: local });
@@ -91,6 +98,65 @@ test("晚到的旧空快照不能覆盖已经开始的用户消息", () => {
   state = conversationMessagesReducer(state, { type: "runtime_message", message: { ...local, order: 1 }, revision: 1 });
   state = conversationMessagesReducer(state, { type: "snapshot", sessionPath: "/sessions/new.jsonl", messages: [], revision: 0 });
   assert.deepEqual(selectConversationMessages(state), [{ ...local, order: 1 }]);
+});
+
+test("重新打开同一会话后，新 runtime 从低版本开始仍能显示回复", () => {
+  const sessionPath = "/sessions/reopened.jsonl";
+  const oldUser = user("old-user", "旧问题", 1);
+  const oldAssistant = { ...user("old-assistant", "旧回复", 2), role: "assistant" as const };
+  let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, {
+    type: "snapshot",
+    sessionPath,
+    messages: [oldUser, oldAssistant],
+    revision: 1615,
+    runtimeId: "runtime-old",
+  });
+
+  // open_session creates a new runtime whose messageRevision starts at zero.
+  state = conversationMessagesReducer(state, {
+    type: "snapshot",
+    sessionPath,
+    messages: [oldUser, oldAssistant],
+    revision: 0,
+    runtimeId: "runtime-new",
+  });
+  state = conversationMessagesReducer(state, {
+    type: "runtime_message",
+    sessionPath,
+    runtimeId: "runtime-new",
+    message: user("new-user", "新问题", 3),
+    revision: 1,
+  });
+  state = conversationMessagesReducer(state, {
+    type: "runtime_message",
+    sessionPath,
+    runtimeId: "runtime-new",
+    message: { ...user("new-assistant", "新回复", 4), role: "assistant" as const },
+    revision: 111,
+  });
+
+  assert.deepEqual(selectConversationMessages(state).map((message) => message.text), ["旧问题", "旧回复", "新问题", "新回复"]);
+});
+
+test("旧 runtime 的迟到消息不会污染重新打开的会话", () => {
+  const sessionPath = "/sessions/reopened.jsonl";
+  const current = user("current", "当前", 1);
+  let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, {
+    type: "snapshot",
+    sessionPath,
+    messages: [current],
+    revision: 0,
+    runtimeId: "runtime-new",
+  });
+  state = conversationMessagesReducer(state, {
+    type: "runtime_message",
+    sessionPath,
+    runtimeId: "runtime-old",
+    message: { ...user("stale", "旧 runtime 的迟到消息", 2), role: "assistant" as const },
+    revision: 2000,
+  });
+
+  assert.deepEqual(selectConversationMessages(state).map((message) => message.text), ["当前"]);
 });
 
 test("切换会话后仍从运行时快照恢复 FIFO 排队消息", () => {
@@ -161,7 +227,15 @@ test("介入的消息留在对话里直到本轮结束才落地", () => {
 
   state = conversationMessagesReducer(state, {
     type: "runtime_message",
-    message: user("client-steer", "顺便改一下标题", 2),
+    // Runtime user messages deliberately have no status; the temporary
+    // `steering` marker must not survive this authoritative replacement.
+    message: {
+      id: "client-steer",
+      role: "user",
+      text: "顺便改一下标题",
+      order: 2,
+      timestamp: 2,
+    },
     revision: 2,
     sessionPath: "/sessions/a.jsonl",
   });
@@ -169,7 +243,7 @@ test("介入的消息留在对话里直到本轮结束才落地", () => {
   // Once Pi appends it, the committed message replaces the marked one.
   assert.deepEqual(
     selectConversationMessages(state).map((message) => [message.id, message.status]),
-    [["m1", "succeeded"], ["client-steer", "succeeded"]],
+    [["m1", "succeeded"], ["client-steer", undefined]],
   );
 });
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import contextClearingExtension, {
   applyToolResultClearing,
   CONTEXT_CLEARING_EVENT,
@@ -176,6 +177,27 @@ test("一条都没清就把上下文原样交回去", () => {
   assert.equal(applyToolResultClearing(history(2), new Set()), undefined);
 });
 
+test("清理请求副本后旧 usage 不会把回复预算压成 1 token，磁盘会话不变", () => {
+  const model = { contextWindow: 500_000 } as never;
+  const usage = { input: 87_343, cacheRead: 473_472, cacheWrite: 0, output: 913, totalTokens: 561_728 };
+  const earlier = history(12);
+  const assistant = { role: "assistant", content: [{ type: "text", text: "继续" }], usage, timestamp: ++clock } as unknown as AgentMessage;
+  const messages = [...earlier, assistant, ...recentTail()].map((message) =>
+    message.role === "assistant" && !("usage" in message)
+      ? { ...message, usage: { ...usage, input: 0, cacheRead: 0, output: 0, totalTokens: 0 } } as AgentMessage
+      : message,
+  );
+  const oldBudget = clampMaxTokensToContext(model, { messages: messages as never }, 384_000);
+  assert.equal(oldBudget, 1, "复现原故障：旧 usage 已经超出 500k 窗口");
+
+  const plan = planToolResultClearing(messages, new Set());
+  const rewritten = applyToolResultClearing(messages, new Set([...plan.toolCallIds, ...plan.callIds]))!;
+  const budget = clampMaxTokensToContext(model, { messages: rewritten as never }, 384_000);
+  assert.ok(budget > 100_000, `清理后应该有正常的回复预算，实际 ${budget}`);
+  assert.equal((assistant as never as { usage: typeof usage }).usage.totalTokens, 561_728, "原始历史 usage 不可修改");
+  assert.equal((rewritten[12 * 2] as never as { usage: typeof usage }).usage.totalTokens, 0);
+});
+
 function harness(contextTokens: number) {
   const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
   const emitted: Array<{ channel: string; value: Record<string, unknown> }> = [];
@@ -335,6 +357,55 @@ test("压缩之前先把那一段瘦下来，pi 自己的逻辑一行不动", ()
   assert.equal(trim.value.turnPrefixMessages, 4);
   assert.ok((trim.value.tokensAfter as number) < (trim.value.tokensBefore as number) / 2, "记下来的是真瘦了");
   assert.equal(trim.value.contextWindow, CONTEXT_WINDOW);
+});
+
+test("自动阈值检查先看清理后的真实请求副本，能装下则不发起摘要", () => {
+  const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
+  const emitted: unknown[] = [];
+  const pi = {
+    on(event: string, handler: (...args: unknown[]) => unknown) {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    events: { emit: (channel: string, value: unknown) => { if (channel === CONTEXT_CLEARING_EVENT) emitted.push(value); } },
+  };
+  contextClearingExtension(pi as never);
+  const messages = [...history(45), ...recentTail()];
+  const original = JSON.stringify(messages);
+  const context = {
+    model: { contextWindow: 500_000 },
+    sessionManager: { buildSessionProjection: () => ({ messages }) },
+    getContextUsage: () => ({ tokens: 561_728, contextWindow: 500_000, percent: 112 }),
+  };
+  const compact = handlers.get("session_before_compact")![0];
+  const event = { reason: "threshold", preparation: { messagesToSummarize: [], turnPrefixMessages: [] } };
+  assert.deepEqual(compact(event, context), { cancel: true });
+  assert.equal(emitted.length, 1);
+  const sent = (handlers.get("context")![0]({ messages }, context) as { messages: AgentMessage[] }).messages;
+  assert.match((sent[1] as never as { content: Array<{ text: string }> }).content[0].text, /上下文已清理/);
+  assert.equal(JSON.stringify(messages), original, "只改请求副本，不能改会话历史");
+  assert.deepEqual(compact(event, context), { cancel: true }, "下轮判断仍须承认已经清理的副本");
+  assert.equal(emitted.length, 1, "不能重复消费清理配额");
+  assert.equal(compact({ ...event, reason: "manual" }, context), undefined, "手动压缩不能取消");
+  assert.equal(compact({ ...event, reason: "overflow" }, context), undefined, "真实溢出恢复不能取消");
+});
+
+test("清完仍超窗口时自动压缩照常执行", () => {
+  const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
+  const pi = {
+    on(event: string, handler: (...args: unknown[]) => unknown) {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    events: { emit: () => undefined },
+  };
+  contextClearingExtension(pi as never);
+  const messages = [...history(5), said("z".repeat(1_980_000))];
+  const event = { reason: "threshold", preparation: { messagesToSummarize: [], turnPrefixMessages: [] } };
+  const context = {
+    model: { contextWindow: 500_000 },
+    sessionManager: { buildSessionProjection: () => ({ messages }) },
+    getContextUsage: () => ({ tokens: 490_000, contextWindow: 500_000, percent: 98 }),
+  };
+  assert.equal(handlers.get("session_before_compact")![0](event, context), undefined);
 });
 
 test("日志里那个数，量的是 pi 真要发出去的那串文本", () => {

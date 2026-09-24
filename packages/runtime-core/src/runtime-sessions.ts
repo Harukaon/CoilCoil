@@ -55,6 +55,7 @@ import {
 } from "./runtime-constants.js";
 import { installSetupRpc } from "./runtime-setup-rpc.js";
 import { contextClearingRecord } from "./runtime-state.js";
+import { sessionUsage } from "./session-values.js";
 import { isRecord } from "./runtime-utils.js";
 import { installCompactionSettings } from "./compaction-settings.js";
 import { RuntimeMcpConfig } from "./runtime-mcp-config.js";
@@ -415,6 +416,14 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       pendingContextClearings = [...pendingContextClearings, next].slice(-MAX_CONTEXT_CLEARINGS);
       if (!installedActive) return;
       installedActive.contextClearings = pendingContextClearings;
+      const usage = sessionUsage(installedActive.session, installedActive.contextClearings);
+      this.emitEvent({
+        type: "metrics_updated",
+        responseMetrics: installedActive.responseMetrics,
+        responseMetricsHistory: installedActive.responseMetricsHistory,
+        contextUsage: usage.contextUsage,
+        tokenUsage: usage.tokenUsage,
+      });
       this.publishRuntimeInspection(installedActive);
     });
     // 只进日志的两条：一条记「交给 pi 去摘要的那一段瘦了多少」，一条记「到线了却

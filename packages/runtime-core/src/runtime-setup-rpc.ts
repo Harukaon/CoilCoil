@@ -1,10 +1,22 @@
 import type {
+  FetchProviderModelsInput,
+  FetchProviderModelsResult,
   ImportMcpServersInput,
   McpConfigurationSnapshot,
   McpDiscoveryResult,
   McpImportConfiguration,
   McpJsonDocument,
   McpServerConfiguration,
+  ModelProviderAuthSnapshot,
+  ModelProviderAuthState,
+  ModelProviderConfigurationSnapshot,
+  ModelProviderPatchInput,
+  ModelProviderSaveResult,
+  OpenAIResponsesWsConfiguration,
+  OpenAIResponsesWsConfigurationInput,
+  RuntimeConfiguration,
+  TestProviderConnectionInput,
+  TestProviderConnectionResult,
 } from "@coilcoil/runtime-protocol";
 import {
   SETUP_RPC_REPLY_PREFIX,
@@ -31,6 +43,7 @@ import {
 import type {
   EventBusController,
 } from "@earendil-works/pi-coding-agent";
+import type { ModelCatalogLookupResult } from "@coilcoil/runtime-protocol/model-catalog";
 
 /**
  * The runtime half of the `coilcoil` setup tool.
@@ -68,6 +81,21 @@ export interface SetupRpcRequest {
     | "mcp_auth_complete"
     | "mcp_logout"
     | "mcp_set_session_enabled"
+    | "model_list"
+    | "model_save"
+    | "model_remove"
+    | "model_set_enabled"
+    | "model_fetch_models"
+    | "model_catalog"
+    | "model_test"
+    | "model_auth_start"
+    | "model_auth_status"
+    | "model_auth_await"
+    | "model_auth_respond"
+    | "model_auth_cancel"
+    | "model_logout"
+    | "model_ws_get"
+    | "model_ws_save"
     | "skill_list"
     | "skill_set_enabled"
     | "skill_remove"
@@ -98,6 +126,21 @@ export interface SetupRpcHost {
   completeMcpAuth(name: string, input: string): Promise<{ text: string; details?: Record<string, unknown>; status?: unknown }>;
   logoutMcpServer(name: string): Promise<{ text: string; details?: Record<string, unknown>; status?: unknown }>;
   setSessionMcpServerEnabled(name: string, enabled: boolean): Promise<unknown>;
+  getModelProviderConfiguration(): Promise<ModelProviderConfigurationSnapshot>;
+  saveModelProviderPatch(input: ModelProviderPatchInput): Promise<ModelProviderSaveResult>;
+  removeModelProviderConfiguration(providerId: string): Promise<RuntimeConfiguration>;
+  setModelProviderEnabled(providerId: string, enabled: boolean): Promise<ModelProviderSaveResult>;
+  fetchProviderModels(input: FetchProviderModelsInput): Promise<FetchProviderModelsResult>;
+  getModelCatalogMetadata(modelIds: readonly string[], refresh?: boolean): Promise<ModelCatalogLookupResult>;
+  testProviderConnection(input: TestProviderConnectionInput): Promise<TestProviderConnectionResult>;
+  startModelProviderOAuth(providerId: string): Promise<ModelProviderAuthState>;
+  getModelProviderOAuth(flowId: string): Promise<ModelProviderAuthSnapshot>;
+  awaitModelProviderOAuth(flowId: string, afterRevision?: number, timeoutMs?: number): Promise<ModelProviderAuthSnapshot>;
+  respondModelProviderOAuth(flowId: string, promptId: string, value: string): Promise<void>;
+  cancelModelProviderOAuth(flowId: string): Promise<void>;
+  removeProviderAuth(provider: string): Promise<RuntimeConfiguration>;
+  getOpenAIResponsesWsConfiguration(): Promise<OpenAIResponsesWsConfiguration>;
+  saveOpenAIResponsesWsConfiguration(input: OpenAIResponsesWsConfigurationInput): Promise<RuntimeConfiguration>;
   getSkillConfiguration(cwd?: string): Promise<unknown>;
   setSkillEnabled(filePath: string, enabled: boolean, cwd?: string): Promise<unknown>;
   removeSkill(filePath: string, cwd?: string): Promise<unknown>;
@@ -208,7 +251,24 @@ function serverFromParams(params: Record<string, unknown> | undefined): McpServe
   };
 }
 
-async function hostSensitiveValues(host: SetupRpcHost, cwd?: string): Promise<string[]> {
+function setupParamSensitiveValues(value: unknown, key = "", output: string[] = []): string[] {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const secretKey = sensitiveConfigurationKey(key) || /^(headers|credential|ws)$/i.test(key);
+    if (secretKey && trimmed && trimmed !== MASKED_SECRET_VALUE && !trimmed.startsWith("$") && !trimmed.startsWith("!")) output.push(trimmed);
+    return output;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) setupParamSensitiveValues(item, key, output);
+    return output;
+  }
+  if (isRecord(value)) {
+    for (const [childKey, childValue] of Object.entries(value)) setupParamSensitiveValues(childValue, childKey, output);
+  }
+  return output;
+}
+
+async function hostSensitiveValues(host: SetupRpcHost, cwd?: string, params?: Record<string, unknown>): Promise<string[]> {
   try {
     const configuration = await host.getMcpConfiguration(cwd);
     const secrets: string[] = [];
@@ -229,9 +289,9 @@ async function hostSensitiveValues(host: SetupRpcHost, cwd?: string): Promise<st
         }
       }
     }
-    return secrets;
+    return [...new Set([...secrets, ...setupParamSensitiveValues(params)])];
   } catch {
-    return [];
+    return setupParamSensitiveValues(params);
   }
 }
 
@@ -242,6 +302,50 @@ async function hostSensitiveValues(host: SetupRpcHost, cwd?: string): Promise<st
  * call can ask. Session switches swap the whole bus, so a request that
  * arrives late answers for nobody — `requireActive` guards that.
  */
+function providerIdParam(params: Record<string, unknown> | undefined): string | undefined {
+  const provider = stringParam(params, "providerId") ?? stringParam(params, "provider");
+  return provider?.trim() || stringParam(params, "name")?.trim() || undefined;
+}
+
+function requestRecord(params: Record<string, unknown> | undefined): Record<string, unknown> {
+  const request = params?.request;
+  if (isRecord(request)) return request;
+  const input = params?.input;
+  if (isRecord(input)) return input;
+  return params ?? {};
+}
+
+function stringMapParam(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  return entries.length ? Object.fromEntries(entries) : {};
+}
+
+function providerFetchInput(params: Record<string, unknown> | undefined): FetchProviderModelsInput {
+  const raw = requestRecord(params);
+  const baseUrl = stringValue(raw.baseUrl).trim();
+  if (!baseUrl) throw new Error("缺少 baseUrl（服务商 Base URL）。");
+  return {
+    baseUrl,
+    api: stringValue(raw.api).trim() || undefined,
+    apiKey: typeof raw.apiKey === "string" ? raw.apiKey : undefined,
+    headers: stringMapParam(raw.headers),
+    provider: typeof raw.provider === "string" ? raw.provider.trim() || undefined : providerIdParam(params),
+  };
+}
+
+function providerTestInput(params: Record<string, unknown> | undefined): TestProviderConnectionInput {
+  const raw = requestRecord(params);
+  const input = providerFetchInput(params);
+  const api = input.api?.trim();
+  if (!api) throw new Error("缺少 api（请求协议）。");
+  return {
+    ...input,
+    api,
+    modelId: typeof raw.modelId === "string" ? raw.modelId : undefined,
+  };
+}
+
 export function installSetupRpc(host: SetupRpcHost, eventBus: EventBusController, ensureActive: () => void): void {
   eventBus.on(SETUP_RPC_REQUEST_CHANNEL, async (raw: unknown) => {
     const request = setupRequestFrom(raw);
@@ -399,6 +503,124 @@ export function installSetupRpc(host: SetupRpcHost, eventBus: EventBusController
           replyOk({ inspection: await host.setSessionMcpServerEnabled(name, params.enabled) });
           return;
         }
+        case "model_list": {
+          replyOk({ configuration: await host.getModelProviderConfiguration() });
+          return;
+        }
+        case "model_save": {
+          if (!isRecord(params?.provider)) throw new Error("缺少 provider（要保存的服务商配置）。");
+          replyOk({ result: await host.saveModelProviderPatch(params.provider as unknown as ModelProviderPatchInput) });
+          return;
+        }
+        case "model_remove": {
+          const provider = providerIdParam(params);
+          if (!provider) throw new Error("缺少 providerId（服务商 ID）。");
+          replyOk({ configuration: await host.removeModelProviderConfiguration(provider) });
+          return;
+        }
+        case "model_set_enabled": {
+          const provider = providerIdParam(params);
+          if (!provider) throw new Error("缺少 providerId（服务商 ID）。");
+          if (typeof params?.enabled !== "boolean") throw new Error("缺少 enabled（true/false）。");
+          replyOk({ result: await host.setModelProviderEnabled(provider, params.enabled) });
+          return;
+        }
+        case "model_fetch_models": {
+          const result = await host.fetchProviderModels(providerFetchInput(params));
+          const metadata = await host.getModelCatalogMetadata(result.models.map((model) => model.id), params?.refresh === true);
+          const metadataById = new Map(metadata.entries.map((entry) => [entry.modelId, entry]));
+          const enrichedModels = result.models.map((model) => {
+            const meta = metadataById.get(model.id);
+            if (!meta) return model;
+            return {
+              ...model,
+              name: model.name ?? meta.name,
+              contextWindow: meta.contextWindow,
+              maxTokens: meta.maxTokens,
+              reasoning: meta.reasoning,
+              input: meta.input,
+              thinkingLevels: meta.thinkingLevels,
+              catalogSources: meta.sources,
+            };
+          });
+          replyOk({ result: { ...result, models: enrichedModels }, metadata });
+          return;
+        }
+        case "model_catalog": {
+          const modelIds = params?.modelIds;
+          if (!Array.isArray(modelIds) || !modelIds.every((id) => typeof id === "string")) {
+            throw new Error("缺少 modelIds（模型 ID 数组）。");
+          }
+          replyOk({ metadata: await host.getModelCatalogMetadata(modelIds, params?.refresh === true) });
+          return;
+        }
+        case "model_test": {
+          replyOk({ result: await host.testProviderConnection(providerTestInput(params)) });
+          return;
+        }
+        case "model_auth_start": {
+          const provider = providerIdParam(params);
+          if (!provider) throw new Error("缺少 providerId（服务商 ID）。");
+          const state = await host.startModelProviderOAuth(provider);
+          replyOk({ result: await host.getModelProviderOAuth(state.flowId) });
+          return;
+        }
+        case "model_auth_status": {
+          const flowId = stringParam(params, "flowId")?.trim();
+          if (!flowId) throw new Error("缺少 flowId（订阅登录流程 ID）。");
+          replyOk({ result: await host.getModelProviderOAuth(flowId) });
+          return;
+        }
+        case "model_auth_await": {
+          const flowId = stringParam(params, "flowId")?.trim();
+          if (!flowId) throw new Error("缺少 flowId（订阅登录流程 ID）。");
+          const revision = typeof params?.revision === "number" ? params.revision : undefined;
+          const timeoutMs = typeof params?.timeoutMs === "number" ? params.timeoutMs : undefined;
+          replyOk({ result: await host.awaitModelProviderOAuth(flowId, revision, timeoutMs) });
+          return;
+        }
+        case "model_auth_respond": {
+          const flowId = stringParam(params, "flowId")?.trim();
+          const promptId = stringParam(params, "promptId")?.trim();
+          const value = stringParam(params, "value");
+          if (!flowId || !promptId || value === undefined) throw new Error("缺少 flowId、promptId 或 value（订阅登录输入）。");
+          await host.respondModelProviderOAuth(flowId, promptId, value);
+          replyOk({ result: await host.getModelProviderOAuth(flowId) });
+          return;
+        }
+        case "model_auth_cancel": {
+          const flowId = stringParam(params, "flowId")?.trim();
+          if (!flowId) throw new Error("缺少 flowId（订阅登录流程 ID）。");
+          await host.cancelModelProviderOAuth(flowId);
+          replyOk({ result: { cancelled: true } });
+          return;
+        }
+        case "model_logout": {
+          const provider = providerIdParam(params);
+          if (!provider) throw new Error("缺少 providerId（服务商 ID）。");
+          replyOk({ configuration: await host.removeProviderAuth(provider) });
+          return;
+        }
+        case "model_ws_get": {
+          replyOk({ configuration: await host.getOpenAIResponsesWsConfiguration() });
+          return;
+        }
+        case "model_ws_save": {
+          const raw = isRecord(params?.ws) ? params.ws : params;
+          const baseUrl = stringValue(raw?.baseUrl).trim();
+          if (!baseUrl) throw new Error("缺少 baseUrl（OpenAI Responses WS 地址）。");
+          const input: OpenAIResponsesWsConfigurationInput = {
+            baseUrl,
+            apiKey: typeof raw?.apiKey === "string" ? raw.apiKey : undefined,
+            preserveApiKey: raw?.preserveApiKey !== false,
+            fast: raw?.fast === true,
+          };
+          replyOk({
+            configuration: await host.saveOpenAIResponsesWsConfiguration(input),
+            ws: await host.getOpenAIResponsesWsConfiguration(),
+          });
+          return;
+        }
         case "skill_list": {
           replyOk({ configuration: await host.getSkillConfiguration(cwd) });
           return;
@@ -450,7 +672,7 @@ export function installSetupRpc(host: SetupRpcHost, eventBus: EventBusController
       }
     } catch (error) {
       // 红线画在这里：敏感值在 runtime 侧就脱敏，错误文本里带出来的 token 也一样。
-      const secrets = await hostSensitiveValues(host, cwd).catch(() => [] as string[]);
+      const secrets = await hostSensitiveValues(host, cwd, params).catch(() => setupParamSensitiveValues(params));
       replyError(redactSensitiveText(errorMessage(error), secrets));
     }
   });

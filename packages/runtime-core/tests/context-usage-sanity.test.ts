@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ContextUsage } from "@coilcoil/runtime-protocol";
-import { believableContextUsage } from "../src/session-values.js";
+import { believableContextUsage, contextUsageAfterClearing } from "../src/session-values.js";
 
 const usage = (tokens: number | null, contextWindow = 200_000): ContextUsage => ({
   tokens,
@@ -31,4 +31,13 @@ test("读数不知道、窗口不知道的时候，原样传过去", () => {
   assert.equal(believableContextUsage(undefined), undefined);
   assert.equal(believableContextUsage(usage(null))?.tokens, null);
   assert.equal(believableContextUsage(usage(999_999, 0))?.tokens, 999_999, "窗口都不知道，就没有判断的依据");
+});
+
+test("清理后的请求显示新估算值，新回复抵达后恢复提供商用量", () => {
+  const stale = usage(562_000, 500_000);
+  const clearing = { at: 100, clearedResults: 772, freedTokens: 364_860, projectedTokens: 172_000, contextWindow: 500_000 };
+  assert.deepEqual(contextUsageAfterClearing(stale, clearing, 99), { ...usage(172_000, 500_000), estimated: true });
+  assert.deepEqual(contextUsageAfterClearing(stale, clearing, 100), stale);
+  assert.deepEqual(contextUsageAfterClearing(stale, clearing, 101), stale);
+  assert.deepEqual(contextUsageAfterClearing(stale, { ...clearing, contextWindow: 200_000 }, 99), stale);
 });

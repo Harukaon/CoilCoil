@@ -126,6 +126,41 @@ test("没会话就直说，不干活", async () => {
   assert.match(answered.error.message, /请先打开项目/);
 });
 
+test("model_list/model_save：服务商配置走同一条 setup RPC", async () => {
+  const bus = createEventBus();
+  const configuration = {
+    configPath: "/tmp/models.json",
+    supportedApis: [{ id: "openai-completions", label: "Chat", description: "" }],
+    providers: [{
+      id: "demo",
+      name: "Demo",
+      disabled: false,
+      apiKeyConfigured: false,
+      hasPrivateApiKeyReference: false,
+      replaceModels: true,
+      models: [{ id: "demo-model", contextWindow: 128000, maxTokens: 8192, input: ["text"] }],
+      source: "custom",
+      credential: { methods: [] },
+    }],
+  };
+  let saved: Record<string, unknown> | undefined;
+  installSetupRpc(unusedHost({
+    getModelProviderConfiguration: async () => configuration,
+    saveModelProviderPatch: async (input: Record<string, unknown>) => {
+      saved = input;
+      return { provider: configuration.providers[0], configuration: {} };
+    },
+  }) as never, bus, () => undefined);
+  const listed = await ask(bus, "model-list", "model_list") as { success: boolean; data: { configuration: typeof configuration } };
+  assert.equal(listed.success, true);
+  assert.equal(listed.data.configuration.providers[0]?.models[0]?.maxTokens, 8192);
+  const savedReply = await ask(bus, "model-save", "model_save", {
+    provider: { id: "demo", models: [{ id: "demo-model", contextWindow: 256000 }] },
+  }) as { success: boolean };
+  assert.equal(savedReply.success, true);
+  assert.equal(saved?.id, "demo");
+});
+
 test("报错文本里的敏感值同样脱敏", async () => {
   const bus = createEventBus();
   installSetupRpc(unusedHost({

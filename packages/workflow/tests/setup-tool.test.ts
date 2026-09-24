@@ -8,6 +8,7 @@ import {
   isSensitiveConfigKey,
   missingEnvPlaceholders,
   readBundledDoc,
+  modelSetupGuide,
   setupGuide,
   SETUP_MASKED_VALUE,
   summarizeBundledDoc,
@@ -17,6 +18,7 @@ import {
   CoilcoilParams,
   isDisableOp,
   resolveMcpMethod,
+  resolveModelMethod,
   resolveSkillMethod,
   sessionMcpText,
   SETUP_RPC_REPLY_PREFIX,
@@ -40,9 +42,9 @@ test("工具名就叫 coilcoil，一个顶三个", () => {
   assert.equal(COILCOIL_TOOL_NAME, "coilcoil");
 });
 
-test("guide 三个 topic 都有教程，且点了名目录", () => {
+test("guide 四个 topic 都有教程，且点了名目录", () => {
   const agentDir = join(tmpdir(), "agent");
-  for (const topic of ["skill", "mcp", "auth"] as const) {
+  for (const topic of ["skill", "mcp", "auth", "model"] as const) {
     const text = setupGuide(topic, agentDir);
     assert.ok(text.length > 100, topic);
   }
@@ -51,6 +53,9 @@ test("guide 三个 topic 都有教程，且点了名目录", () => {
   assert.match(setupGuide("mcp", agentDir), /mcp\.json/);
   assert.match(setupGuide("mcp", agentDir), /parse_snippet/);
   assert.match(setupGuide("auth", agentDir), /auth_start/);
+  assert.match(setupGuide("model", agentDir), /contextWindow/);
+  assert.match(modelSetupGuide(), /OpenRouter/);
+  assert.match(modelSetupGuide(), /auth_respond/);
 });
 
 test("agent 目录跟着 PI_CODING_AGENT_DIR 走", () => {
@@ -99,6 +104,25 @@ test("文档按名读，超长截断标出来", () => {
   }
 });
 
+
+test("model area 的 schema 覆盖面板模型能力和凭据字段", () => {
+  const schema = CoilcoilParams as unknown as { properties: Record<string, Record<string, any>> };
+  assert.equal(schema.properties.area.enum?.includes("model"), true);
+  const provider = schema.properties.provider;
+  for (const field of ["id", "baseUrl", "api", "models", "modelsMode", "apiKey", "credential"]) {
+    assert.ok(provider.properties?.[field], `provider.${field} 必须在 schema 里`);
+  }
+  const model = provider.properties?.models?.items as { properties?: Record<string, unknown> };
+  for (const field of ["contextWindow", "maxTokens", "reasoning", "thinkingLevelMap", "input", "cost", "samplingParams", "headers", "compat"]) {
+    assert.ok(model.properties?.[field], `provider.models[].${field} 必须在 schema 里`);
+  }
+  for (const op of ["list", "save", "fetch_models", "catalog", "test", "auth_start", "auth_status", "auth_await", "auth_respond", "auth_cancel", "logout", "ws_get", "ws_save"]) {
+    assert.ok(resolveModelMethod(op), `model op「${op}」必须存在`);
+  }
+  assert.equal(resolveModelMethod("set_default"), undefined);
+  assert.equal(resolveModelMethod("use"), undefined);
+  assert.equal(resolveModelMethod("summarizer"), undefined);
+});
 
 test("save 的 server 参数有完整字段，不是一个空 schema", () => {
   // 空 schema（Type.Any）序列化成 {}：模型看不出要填什么，provider 也可能直接把

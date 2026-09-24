@@ -322,7 +322,7 @@ export function ConversationPane({
                 <MessageView
                   key={`user-${item.message.id}`}
                   message={item.message}
-                  disabled={running}
+                  disabled={running || snapshot?.aborting === true}
                   editing={editingMessageId === item.message.id}
                   project={project}
                   configuration={configuration}

@@ -134,6 +134,12 @@ export interface ModelProviderAuthState {
   error?: string;
 }
 
+/** A provider OAuth state plus a cursor for Agent-side await calls. */
+export interface ModelProviderAuthSnapshot {
+  state: ModelProviderAuthState;
+  revision: number;
+}
+
 export interface ModelCostConfiguration {
   input: number;
   output: number;
@@ -209,6 +215,44 @@ export interface ModelProviderConfigurationInput {
   apiKey?: string;
   /** Keep an existing redacted literal or expression from models.json. */
   preserveApiKeyReference?: boolean;
+}
+
+/**
+ * A partial provider edit, the way the `coilcoil` tool sends one.
+ *
+ * The settings panel always posts the whole draft back, because a form holds
+ * every field anyway. An Agent does not: it is told "把上下文改成 200k", and
+ * making it restate the entire model catalogue to do that is how models get
+ * silently deleted. So every field here is optional and means "leave it"; the
+ * runtime reads the current configuration and applies only what was sent.
+ */
+export interface ModelProviderPatchInput {
+  id: string;
+  name?: string;
+  baseUrl?: string;
+  api?: string;
+  oauth?: "radius";
+  headers?: Record<string, string>;
+  compat?: Record<string, unknown>;
+  authHeader?: boolean;
+  apiKeyReference?: string;
+  disabled?: boolean;
+  /** `models` in models.json replaces Pi's own catalog for this provider. */
+  replaceModels?: boolean;
+  /** Upserted by model id under `merge` (the default); the whole list under `replace`. */
+  models?: ModelProviderModelConfiguration[];
+  modelsMode?: "merge" | "replace";
+  removeModels?: string[];
+  modelOverrides?: ModelProviderConfiguration["modelOverrides"];
+  /** Explicitly preserve the existing models.json key/reference when no new one is supplied. */
+  preserveApiKeyReference?: boolean;
+  /** Literal key; stored in Pi's private auth store, never in models.json. */
+  apiKey?: string;
+  credential?: {
+    method: string;
+    values: Record<string, string>;
+    preserveFields?: string[];
+  };
 }
 
 export interface ModelProviderConfigurationSnapshot {
@@ -925,6 +969,8 @@ export interface ContextUsage {
   tokens: number | null;
   contextWindow: number;
   percent: number | null;
+  /** True when based on the rewritten request, not provider-reported usage. */
+  estimated?: boolean;
 }
 
 export interface TokenUsage {
@@ -1044,6 +1090,9 @@ export interface ContextClearingRecord {
   at: number;
   clearedResults: number;
   freedTokens: number;
+  /** Estimated size of the request after old tool results were removed. */
+  projectedTokens?: number;
+  contextWindow?: number;
 }
 
 export interface RuntimeInspectionSnapshot {
