@@ -8,7 +8,7 @@
  *
  * - browser_open：开页即返回句柄，后续操作拿句柄而不是 pageId 数字
  * - browser_navigate：导航含等待可加载，超时报错带当前状态
- * - browser_click：点击后自动重读快照，UID 失效自动重取一次再报错
+ * - browser_click：点击后自动重读快照；点不中时把新快照交回去，让模型用新 uid 再点
  * - browser_type：输入后回读确认
  *
  * 调试继续用 coilcoil-browser，两层分家。
@@ -19,20 +19,16 @@ import { requestMcpManager } from "./mcp-tools.ts";
 
 const BROWSER_SERVER = "coilcoil-browser";
 
-/** 句柄 → pageId。打开即绑定，模型只认句柄，不认数字。 */
-const handleToPage = new Map<string, number>();
-let nextHandleId = 1;
-
-function newHandle(pageId?: number): string {
-  const handle = `btab-${nextHandleId++}`;
-  if (pageId !== undefined) handleToPage.set(handle, pageId);
-  return handle;
-}
-
-function resolvePageId(handle?: string, pageId?: number): number | undefined {
-  if (pageId !== undefined) return pageId;
-  if (handle && handleToPage.has(handle)) return handleToPage.get(handle);
-  return undefined;
+/**
+ * 从 chrome-devtools-mcp 的页面列表里认出当前选中的那一页。
+ *
+ * new_page 开完就选中新页，它的回执里那一行带 `[selected]`。以前这里取的是列表里
+ * 第一个匹配的行，也就是第一个标签页：句柄绑错页，之后拿「新页」的句柄导航、点击，
+ * 动的全是第一个标签页，用户正看着的页面被换掉。
+ */
+export function selectedPageId(listing: string): number | undefined {
+  const match = /^(\d+):[^\n]*\[selected\]/m.exec(listing);
+  return match ? Number(match[1]) : undefined;
 }
 
 function textResult(text: string, details: Record<string, unknown>, isError = false): {
@@ -56,6 +52,9 @@ async function callBrowser(
   const text = Array.isArray(content)
     ? content.filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n")
     : JSON.stringify(result);
+  // MCP 工具出错是「返回 isError」，不是抛异常。不在这里转成异常，下面各个工具的
+  // 失败分支就永远走不到：点不中报成「点击完成」，导航失败报成「导航完成」。
+  if ((result as { isError?: unknown }).isError === true) throw new Error(text || `${tool} 失败`);
   return { text: text || "（服务器没有返回内容）", json: result };
 }
 
@@ -85,6 +84,20 @@ const handleFields = {
 } as const;
 
 export default function browserActExtension(pi: ExtensionAPI): void {
+  // 句柄 → pageId，每个会话一份：页面编号是这个会话自己那条浏览器连接里的编号。
+  const handleToPage = new Map<string, number>();
+  let nextHandleId = 1;
+  const newHandle = (pageId?: number): string => {
+    const handle = `btab-${nextHandleId++}`;
+    if (pageId !== undefined) handleToPage.set(handle, pageId);
+    return handle;
+  };
+  const resolvePageId = (handle?: string, pageId?: number): number | undefined => {
+    if (pageId !== undefined) return pageId;
+    if (handle && handleToPage.has(handle)) return handleToPage.get(handle);
+    return undefined;
+  };
+
   pi.registerTool({
     name: "browser_open",
     label: "Browser Open",
@@ -100,14 +113,14 @@ export default function browserActExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal) {
       try {
         const { text } = await callBrowser(pi.events, "new_page", { url: params.url }, signal);
-        // new_page 不直接给 id：读一遍页面列表，取最后一个即新开的页。
-        let pageId: number | undefined;
-        try {
-          const listed = await callBrowser(pi.events, "list_pages", {}, signal);
-          const match = (listed.text.match(/(\d+):\s*\S*[^\n]*$/m) ?? listed.text.match(/id[=:\s]+(\d+)/i));
-          if (match?.[1]) pageId = Number(match[1]);
-        } catch {
-          // 拿不到 id 也不致命：句柄先返回，后续操作回落到选中页。
+        // new_page 不直接给 id，但它会选中新页，回执里的页面列表把它标成 [selected]。
+        let pageId = selectedPageId(text);
+        if (pageId === undefined) {
+          try {
+            pageId = selectedPageId((await callBrowser(pi.events, "list_pages", {}, signal)).text);
+          } catch {
+            // 拿不到 id 也不致命：句柄先返回，后续操作回落到选中页。
+          }
         }
         const handle = newHandle(pageId);
         return textResult(`已打开 ${params.url}，句柄 ${handle}。${pageId !== undefined ? `（pageId ${pageId}）` : "后续操作拿句柄即可。"}\n${text.slice(0, 1500)}`, { handle, pageId, server: BROWSER_SERVER });
@@ -150,8 +163,8 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "browser_click",
     label: "Browser Click",
-    description: "点击页面元素。UID 失效时自动重取一次快照再点，还不行才报错；每次点击后自动带回当前页面状态。",
-    promptSnippet: "browser_click: 点完自动带回页面状态，UID 过期自动重取一次",
+    description: "点击页面元素。每次点击后自动带回当前页面状态；点不中（比如 uid 过期）时会带回一份新快照，用新快照里的 uid 再点。",
+    promptSnippet: "browser_click: 点完自动带回页面状态，点不中时带回新快照",
     parameters: Type.Object({
       ...handleFields,
       uid: Type.String({ description: "take_snapshot 里看到的元素 uid" }),
@@ -166,8 +179,8 @@ export default function browserActExtension(pi: ExtensionAPI): void {
         return textResult(`点击完成。\n${text.slice(0, 800)}\n--- 当前页面 ---\n${state}`, { handle: params.handle, pageId });
       } catch (error) {
         const first = error instanceof Error ? error.message : String(error);
-        // UID 过期是最常见的失败：重取一次快照，用新快照里的同位置元素再点一次。
-        // 这里只做一次自动重试，还不行就把新快照交出去，让模型自己选。
+        // uid 过期是最常见的失败：重取一次快照交出去，让模型用新快照里的 uid 再点。
+        // 不替它挑元素：新快照里「同一个」元素是谁，只有看得懂页面的模型说得清。
         try {
           const fresh = await currentState(pi.events, pageId, signal);
           return textResult(
