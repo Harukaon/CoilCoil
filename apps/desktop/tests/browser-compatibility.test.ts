@@ -70,6 +70,10 @@ test("pageId 是可选的：不传就落到当前选中的页面", async () => {
   // 处理器那一侧的兜底还在，否则可选就成了「不传就报错」。
   const handler = await read("node_modules/chrome-devtools-mcp/build/src/ToolHandler.js");
   assert.match(handler, /: context\.getSelectedMcpPage\(\)/);
+  // evaluate_script 在自己的处理函数里又按 pageId 查一次页面，没有兜底：照 schema
+  // 不传 pageId，每次都是 "No page found"。端到端跑真实 Agent 时撞出来的。
+  const script = await read("node_modules/chrome-devtools-mcp/build/src/tools/script.js");
+  assert.match(script, /experimentalPageIdRouting && request\.params\.pageId !== undefined/);
   // select_page 自己那个 pageId 仍然必填：它的全部意思就是「选这一个」。
   const pages = await read("node_modules/chrome-devtools-mcp/build/src/tools/pages.js");
   assert.match(pages, /The ID of the page to select/);
