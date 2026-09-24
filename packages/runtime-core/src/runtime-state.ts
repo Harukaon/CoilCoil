@@ -54,7 +54,6 @@ export interface CoilCoilRuntimeOptions {
   legacyAgentDir?: string;
   modelRuntime?: ModelRuntime;
   modelRuntimePromise?: Promise<ModelRuntime>;
-  /** Browser capability scope owned by this runtime/session. */
   /**
    * Extra Pi extensions for this runtime only, on top of the bundled workflow.
    *

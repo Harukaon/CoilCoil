@@ -229,6 +229,46 @@ export class BrowserRuntimeManager {
     return state;
   }
 
+  /**
+   * 新会话接手草稿阶段开的标签页。
+   *
+   * 浏览器按会话分，可新对话要等发出第一条消息才有会话；在那之前界面落在工作区这一份
+   * 作用域上。用户先开个页面、再问 Agent「看看这个页面」是很自然的顺序，所以会话一
+   * 建好，那几张标签页就整批交给它：不然页面从面板上消失，Agent 也看不到它。
+   *
+   * 只在新会话还一张标签页都没有时接手，已经有自己页面的会话不掺进别的。cookie 跟着
+   * 标签页走，同一个工作区，不用换。CDP 那边先按旧作用域宣布消失、再按新作用域宣布
+   * 出现，两边连着的客户端看到的都是完整的变化。
+   */
+  adoptScope(fromScopeId: string, toScopeId: string, workspacePath?: string): BrowserStateSnapshot {
+    const from = fromScopeId.trim();
+    const to = toScopeId.trim() || DEFAULT_SCOPE_ID;
+    this.noteScopeWorkspace(to, workspacePath);
+    const moving = from && from !== to && this.tabsForScope(to).length === 0 ? this.tabsForScope(from) : [];
+    if (moving.length === 0) return this.state(to);
+    for (const tab of moving) {
+      this.cdp.announceDestroyed(tab);
+      tab.scopeId = to;
+      this.cdp.announceCreated(tab);
+    }
+    const active = this.activeTabIds.get(from);
+    this.activeTabIds.delete(from);
+    if (active) this.activeTabIds.set(to, active);
+    const zoom = this.zoomFactors.get(from);
+    this.zoomFactors.delete(from);
+    if (zoom !== undefined) this.zoomFactors.set(to, zoom);
+    for (const tab of moving) this.applyZoom(tab);
+    if (this.uiScopeId === from) {
+      // 界面马上也会切到这个会话；先跟过去，免得这中间被当成后台页停放。
+      this.elementPicker.cancel();
+      this.uiScopeId = to;
+      this.refreshViewportOverrides();
+    }
+    const state = this.state(to);
+    if (to === this.uiScopeId) this.publishState(state);
+    return state;
+  }
+
   private zoomFor(scopeId: string): number {
     return this.zoomFactors.get(scopeId) ?? 1;
   }

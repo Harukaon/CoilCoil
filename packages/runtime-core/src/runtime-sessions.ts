@@ -514,7 +514,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
         projectTrusted: settingsManager.isProjectTrusted(),
       }),
     });
-    await this.refreshAgentMcpConfiguration(eventBus, cwd);
+    await this.refreshAgentMcpConfiguration(eventBus, cwd, sessionManager.getSessionId());
     const resourceLoaderStartedAt = Date.now();
     const resourceLoaderPromise = loader.reload().then(() => {
       if (timingEnabled) timings.resourceLoader = Date.now() - resourceLoaderStartedAt;

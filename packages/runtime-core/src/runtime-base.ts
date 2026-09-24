@@ -169,7 +169,7 @@ export abstract class RuntimeBase {
   /** CoilCoil's per-model runtime metadata, which Pi's registry does not hold. */
   protected abstract readModelRuntimeOptions(): Record<string, Record<string, { contextWindow?: number; }>>;
 
-  protected abstract refreshAgentMcpConfiguration(eventBus: EventBusController, cwd: string): Promise<void>;
+  protected abstract refreshAgentMcpConfiguration(eventBus: EventBusController, cwd: string, browserScopeId: string): Promise<void>;
 
   protected abstract canReloadActiveSession(active: ActiveSession): boolean;
 

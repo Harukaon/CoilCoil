@@ -36,18 +36,18 @@ test("Agent MCP configuration contains enabled servers only", () => {
   ]);
 });
 
-test("bundled Chrome DevTools MCP is scoped per workspace with zero direct tools", () => {
+test("bundled Chrome DevTools MCP is scoped per session with zero direct tools", () => {
   const source: { mcpServers: Record<string, Record<string, unknown>> } = { mcpServers: { ordinary: { command: "ordinary" } } };
   const result = withBundledBrowserMcp(source, {
     COILCOIL_BROWSER_MCP_COMMAND: "/private/node",
     COILCOIL_BROWSER_MCP_ARGS: JSON.stringify(["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools"]),
     COILCOIL_BROWSER_MCP_ENV: JSON.stringify({ CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", ELECTRON_RUN_AS_NODE: "1" }),
-  }, "/Users/hao/项目 A");
+  }, "session-a");
   assert.equal(source.mcpServers["coilcoil-browser"], undefined);
   assert.deepEqual(Object.keys(result.mcpServers), ["ordinary", "coilcoil-browser"]);
   assert.deepEqual(result.mcpServers["coilcoil-browser"], {
     command: "/private/node",
-    args: ["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools?scope=%2FUsers%2Fhao%2F%E9%A1%B9%E7%9B%AE+A"],
+    args: ["/private/devtools.js", "--wsEndpoint", "ws://127.0.0.1/devtools?scope=session-a"],
     env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1", ELECTRON_RUN_AS_NODE: "1" },
     lifecycle: "lazy",
     idleTimeout: BROWSER_IDLE_TIMEOUT_MINUTES,

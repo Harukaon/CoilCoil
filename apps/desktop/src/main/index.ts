@@ -194,6 +194,29 @@ function backgroundNodeExecutable(): string {
   return process.platform === "darwin" && existsSync(macHelperExecutable) ? macHelperExecutable : process.execPath;
 }
 
+/**
+ * 新对话的会话刚建好：把它草稿阶段开的标签页交给它。
+ *
+ * 浏览器按会话分，可新对话要等发出第一条消息才有会话；在那之前界面的作用域是工作区
+ * 路径（渲染层 browserScopeId 的兜底），也就是这条 create_session 的 cwd。用户先开
+ * 页面、再让 Agent 看它是很自然的顺序，所以会话一建好，那几张标签页就归它。在快照
+ * 回到界面之前做，界面切到会话作用域时标签页已经在那儿了，不会先补建一张空白页。
+ *
+ * `browser` 是发起请求那个窗口的浏览器。气泡窗口没有浏览器，它建的会话不会把主窗口
+ * 草稿里的页面拿走。
+ */
+function handDraftTabsToNewSession(browser: BrowserRuntimeManager | undefined, command: RuntimeCommand, value: unknown): void {
+  if (!browser || command.type !== "create_session") return;
+  const session = (value as { session?: { id?: unknown; cwd?: unknown } } | undefined)?.session;
+  if (typeof session?.id !== "string" || !session.id) return;
+  try {
+    browser.adoptScope(command.cwd, session.id, typeof session.cwd === "string" ? session.cwd : command.cwd);
+  } catch (error) {
+    // 接手失败只是草稿里的页面留在原处，不能挡住这条消息。
+    diagnosticLog().warn("browser", "draft_tabs_adoption_failed", { message: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 async function safeProjectPath(input: Pick<OpenFilePreviewInput, "root" | "path">): Promise<{ root: string; path: string }> {
   const root = await realpath(input.root);
   const candidate = isAbsolute(input.path) ? resolve(input.path) : resolve(root, input.path);
@@ -466,14 +489,13 @@ class RuntimeBridge {
   private host?: RuntimeHost;
 
   private broadcast = (runtimeId: string | undefined, event: RuntimeEventEnvelope["event"]): void => {
-    // 会话结束时不再关浏览器：浏览器是整个工作区的，同一个工作区里别的会话、还有
-    // 用户自己都在用它。以前这里按会话作用域把那一批标签页关掉，换成按工作区之后，
-    // 这一条会连用户正看着的页面一起关。
-    // 每个会话在哪个工作区，只有快照说得清。记下来，那个工作区那份 cookie jar 才会
-    // 提前配好——界面切到别处也不影响。
+    // 浏览器按会话分，一个会话一批标签页；cookie 仍按工作区分。每个会话在哪个工作区，
+    // 只有快照说得清：用会话 id 记下它的工作区，它的 Agent 在后台开的标签页才会落在
+    // 那个工作区的 cookie jar 里——界面切到别处也不影响。
+    // 会话结束、运行时被回收时都不关它的标签页：切回来页面还要在，一直留到退出 App。
     if (runtimeId && event.type === "session_snapshot") {
-      const cwd = event.snapshot.session.cwd;
-      for (const runtime of browserRuntimes.values()) runtime.noteScopeWorkspace(cwd, cwd);
+      const { id, cwd } = event.snapshot.session;
+      for (const runtime of browserRuntimes.values()) runtime.noteScopeWorkspace(id, cwd);
     }
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
@@ -561,7 +583,9 @@ function remoteController(): RemoteAccessController {
       if (channel === RUNTIME_REQUEST_CHANNEL) {
         const payload = args[0] as RuntimeRequestPayload;
         try {
-          return { ok: true, value: await runtime.request(payload) } satisfies RuntimeRequestResult;
+          const value = await runtime.request(payload);
+          handDraftTabsToNewSession(primaryBrowserRuntime, payload.command, value);
+          return { ok: true, value } satisfies RuntimeRequestResult;
         } catch (error) {
           return { ok: false, error: error instanceof Error ? error.message : String(error) } satisfies RuntimeRequestResult;
         }
@@ -1321,9 +1345,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(REMOTE_ACCOUNT_CHANNEL, (_event, username: string, password: string) => remoteController().setAccount(username ?? "", password ?? ""));
   ipcMain.handle(REMOTE_REVOKE_CHANNEL, () => remoteController().revokeDevices());
 
-  ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (_event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
+  ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
     try {
-      return { ok: true, value: await runtime.request(payload) };
+      const value = await runtime.request(payload);
+      handDraftTabsToNewSession(browserRuntimes.get(event.sender.id), payload.command, value);
+      return { ok: true, value };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }

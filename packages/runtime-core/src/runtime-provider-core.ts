@@ -234,7 +234,7 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
 
     if (this.active) {
       if (this.canReloadActiveSession(this.active)) {
-        await this.refreshAgentMcpConfiguration(this.active.eventBus, this.active.cwd);
+        await this.refreshAgentMcpConfiguration(this.active.eventBus, this.active.cwd, this.active.session.sessionId);
         await this.active.session.reload();
       }
       else this.reloadActiveSessionResources("OpenAI Response (WS) 配置重新加载失败");

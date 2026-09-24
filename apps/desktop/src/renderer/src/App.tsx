@@ -142,7 +142,7 @@ export default function App(): React.JSX.Element {
   const optimisticSessionsRef = useRef(new Map<string, SessionSummary>());
   const selectionRequestRef = useRef(0);
   useEffect(() => window.coilcoil.onBrowserAgentActivated((scopeId) => {
-    if (scopeId !== snapshotRef.current?.runtimeId) return;
+    if (scopeId !== snapshotRef.current?.session.id) return; // 浏览器作用域就是会话 id
     inspector.openBrowserTab();
   }), [inspector.openBrowserTab]);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
