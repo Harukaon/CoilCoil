@@ -7,6 +7,7 @@ import test from "node:test";
 import { MCP_MANAGER_CHANNEL } from "../extensions/mcp-tools.ts";
 import { COILCOIL_WINDOWS_SHELL_STANDARDS } from "../extensions/system/engineering-standards.ts";
 import {
+  BROWSER_MCP_SERVER,
   type ChildSessionHandle,
   childPromptAdditions,
   childToolExtensions,
@@ -170,4 +171,51 @@ test("a child session on this platform gets PowerShell exactly when Windows woul
   const active = handle.session.getActiveToolNames();
   if (process.platform === "win32") assert.ok(active.includes("powershell"));
   else assert.ok(!active.includes("powershell"), `powershell must not be active on ${process.platform}: ${active.join(",")}`);
+});
+
+test("a child's MCP tool neither lists nor calls the built-in browser", async (context) => {
+  const calls: string[] = [];
+  const manager = {
+    listServers: async () => [
+      { server: "github", status: "connected", tools: [{ name: "search" }] },
+      { server: BROWSER_MCP_SERVER, status: "connected", tools: [{ name: "click" }] },
+    ],
+    directTools: async () => [],
+    serverTools: async (server: string) => {
+      calls.push(`tools:${server}`);
+      return { status: "connected", tools: [{ name: "search" }] };
+    },
+    callTool: async (server: string, tool: string) => {
+      calls.push(`call:${server}/${tool}`);
+      return { content: [{ type: "text", text: "ok" }] };
+    },
+  };
+  const parentEvents: ParentEvents = {
+    emit(channel, data) {
+      if (channel === MCP_MANAGER_CHANNEL) (data as { manager?: unknown }).manager = manager;
+    },
+  };
+  const { handle, cwd } = await openChild(context, { parentEvents });
+
+  const listed = await execute(handle, "mcp", { action: "list" }, cwd);
+  assert.match(listed.content[0]?.text ?? "", /github/);
+  assert.doesNotMatch(listed.content[0]?.text ?? "", /coilcoil-browser/);
+
+  const tools = await execute(handle, "mcp", { action: "tools", server: BROWSER_MCP_SERVER }, cwd);
+  assert.equal(tools.isError, true);
+  assert.match(tools.content[0]?.text ?? "", /不能使用内置浏览器/);
+
+  const called = await execute(handle, "mcp", { action: "call", server: BROWSER_MCP_SERVER, tool: "click", args: { uid: "1_1" } }, cwd);
+  assert.equal(called.isError, true);
+  assert.match(called.content[0]?.text ?? "", /不能使用内置浏览器/);
+
+  const allowed = await execute(handle, "mcp", { action: "call", server: "github", tool: "search" }, cwd);
+  assert.notEqual(allowed.isError, true);
+  assert.deepEqual(calls, ["call:github/search"], "the browser must never be reached");
+});
+
+test("a child session never gets the browser interaction tools", async (context) => {
+  const { handle } = await openChild(context, { tools: [...DEFAULT_CHILD_TOOLS, "browser_open", "browser_click"] });
+  const active = handle.session.getActiveToolNames();
+  assert.ok(!active.some((tool) => tool.startsWith("browser_")), `got ${active.join(",")}`);
 });

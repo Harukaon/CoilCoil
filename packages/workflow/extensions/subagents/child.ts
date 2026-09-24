@@ -126,9 +126,56 @@ function createChildEventBus(parentEvents?: ParentEvents) {
   if (parentEvents) {
     bus.on(MCP_MANAGER_CHANNEL, (data) => {
       parentEvents.emit(MCP_MANAGER_CHANNEL, data);
+      const request = data as { manager?: unknown };
+      if (request.manager && typeof request.manager === "object") {
+        request.manager = withoutBrowserServer(request.manager as ChildMcpManager);
+      }
     });
   }
   return bus;
+}
+
+/** 内置浏览器在 MCP 里的名字，由 runtime-core 的 withBundledBrowserMcp 注册。 */
+export const BROWSER_MCP_SERVER = "coilcoil-browser";
+
+type ChildMcpManager = {
+  listServers(): Promise<Array<{ server: string }>>;
+  directTools(): Promise<Array<{ server: string }>>;
+  serverTools(server: string, ...rest: unknown[]): Promise<unknown>;
+  callTool(server: string, ...rest: unknown[]): Promise<unknown>;
+};
+
+function browserRefused(): Error {
+  return new Error("子 Agent 不能使用内置浏览器。需要看网页、点页面的工作请交回主 Agent 来做。");
+}
+
+/**
+ * 子 Agent 看到的 MCP 客户端：同一个客户端，只是没有内置浏览器。
+ *
+ * 浏览器是用户和主 Agent 共用、正显示在右侧面板里的那一个。子 Agent 可以好几个同时
+ * 跑，各自开页、切页、点击，标签页会被抢来抢去，用户看着的页面也会被它们翻走。所以
+ * 不给：列表里不出现，按名字直接调也拒绝。
+ */
+export function withoutBrowserServer<T extends ChildMcpManager>(manager: T): T {
+  return new Proxy(manager, {
+    get(target, property, receiver) {
+      if (property === "listServers") {
+        return async () => (await target.listServers()).filter((entry) => entry.server !== BROWSER_MCP_SERVER);
+      }
+      if (property === "directTools") {
+        return async () => (await target.directTools()).filter((entry) => entry.server !== BROWSER_MCP_SERVER);
+      }
+      if (property === "serverTools" || property === "callTool") {
+        const original = target[property].bind(target) as (server: string, ...rest: unknown[]) => Promise<unknown>;
+        return async (server: string, ...rest: unknown[]) => {
+          if (server === BROWSER_MCP_SERVER) throw browserRefused();
+          return original(server, ...rest);
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 async function buildChildSession(options: {
