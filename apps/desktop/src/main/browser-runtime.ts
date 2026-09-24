@@ -12,6 +12,7 @@ import {
   DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
   DEFAULT_BROWSER_URL as DEFAULT_URL,
   DEFAULT_BROWSER_VIEWPORT as DEFAULT_VIEWPORT,
+  isReusableBlankTab,
   orderTabsForUi,
   type BrowserTab,
 } from "./browser-runtime-types";
@@ -249,6 +250,9 @@ export class BrowserRuntimeManager {
     for (const tab of moving) {
       this.cdp.announceDestroyed(tab);
       tab.scopeId = to;
+      // 浏览器面板开着时，草稿会先垫一张空白页。它还停在空白页就当桥自己垫的那张：
+      // Agent 第一次 new_page 直接拿它用，不然新会话一开头就是「空白页 + 真页面」两张。
+      if (tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab({ implicit: true, phase: tab.phase }, tab.guest.getURL())) tab.implicit = true;
       this.cdp.announceCreated(tab);
     }
     const active = this.activeTabIds.get(from);
