@@ -1,9 +1,9 @@
-import { BrainCircuit, Files, FileText, Globe2, Terminal } from "lucide-react";
+import { BrainCircuit, Files, FileText, GitBranch, Globe2, Terminal } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import type { FileNode } from "@coilcoil/runtime-protocol";
 import type { LucideIcon } from "lucide-react";
 
-export type InspectorTabKind = "files" | "browser" | "runtime" | "terminal" | "file";
+export type InspectorTabKind = "files" | "browser" | "runtime" | "git" | "terminal" | "file";
 export type InspectorTabId = string;
 
 export interface InspectorTabDefinition {
@@ -159,6 +159,7 @@ export function useWorkspaceInspector(workspacePath?: string): {
   openFilesTab(): void;
   openBrowserTab(): void;
   openRuntimeTab(): void;
+  openGitTab(): void;
   openTerminalTab(sessionId: string): void;
   rebindTerminalTab(tabId: InspectorTabId, sessionId: string): void;
   openFileTab(node: FileNode): void;
@@ -180,6 +181,7 @@ export function useWorkspaceInspector(workspacePath?: string): {
   const openFilesTab = useCallback(() => openTab({ id: "files", kind: "files", label: "文件", icon: Files }), [openTab]);
   const openBrowserTab = useCallback(() => openTab({ id: "browser", kind: "browser", label: "浏览器", icon: Globe2 }), [openTab]);
   const openRuntimeTab = useCallback(() => openTab({ id: "runtime", kind: "runtime", label: "运行时", icon: BrainCircuit }), [openTab]);
+  const openGitTab = useCallback(() => openTab({ id: "git", kind: "git", label: "Git", icon: GitBranch }), [openTab]);
   const openTerminalTab = useCallback((sessionId: string) => openTab({
     id: terminalInspectorTabId(sessionId),
     kind: "terminal",
@@ -205,7 +207,8 @@ export function useWorkspaceInspector(workspacePath?: string): {
     if (id === "files") openFilesTab();
     else if (id === "browser") openBrowserTab();
     else if (id === "runtime") openRuntimeTab();
-  }, [openBrowserTab, openFilesTab, openRuntimeTab]);
+    else if (id === "git") openGitTab();
+  }, [openBrowserTab, openFilesTab, openGitTab, openRuntimeTab]);
   const activeTab = useMemo(
     () => state.tabs.find((item) => item.id === state.activeTabId),
     [state.activeTabId, state.tabs],
@@ -232,6 +235,7 @@ export function useWorkspaceInspector(workspacePath?: string): {
     openFilesTab,
     openBrowserTab,
     openRuntimeTab,
+    openGitTab,
     openTerminalTab,
     rebindTerminalTab,
     openFileTab,
