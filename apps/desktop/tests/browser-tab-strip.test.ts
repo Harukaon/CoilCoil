@@ -31,8 +31,8 @@ test("每个网页标签都是顶部标签条上的一个标签", () => {
   };
 
   assert.deepEqual(browserPaneTabs(state), [
-    { id: "browser:a", label: "第一页", loading: false, foreign: false },
-    { id: "browser:b", label: "第二页", loading: true, foreign: false },
+    { id: "browser:a", label: "第一页", loading: false, foreign: false, agent: false },
+    { id: "browser:b", label: "第二页", loading: true, foreign: false, agent: false },
   ]);
   assert.equal(activeBrowserPaneTabId(state), "browser:b");
 });
@@ -40,7 +40,7 @@ test("每个网页标签都是顶部标签条上的一个标签", () => {
 test("还没有网页标签时留一个占位，标签条不会空掉", () => {
   // 空掉的话右侧栏会退回「打开一个面板」的空状态，第一个网页建好又跳回来。
   const empty: BrowserStateSnapshot = { scopeId: "runtime-1", tabs: [] };
-  assert.deepEqual(browserPaneTabs(empty), [{ id: BROWSER_PLACEHOLDER_TAB_ID, label: "浏览器", loading: true, foreign: false }]);
+  assert.deepEqual(browserPaneTabs(empty), [{ id: BROWSER_PLACEHOLDER_TAB_ID, label: "浏览器", loading: true, foreign: false, agent: false }]);
   assert.equal(activeBrowserPaneTabId(empty), BROWSER_PLACEHOLDER_TAB_ID);
 });
 
@@ -67,7 +67,7 @@ test("其他文件夹的标签页不会出现在当前标签条", () => {
   };
 
   assert.deepEqual(browserPaneTabs(state), [
-    { id: "browser:mine", label: "我的页", loading: false, foreign: false },
+    { id: "browser:mine", label: "我的页", loading: false, foreign: false, agent: false },
   ]);
   assert.equal(ownBrowserTabCount(state), 1);
   assert.equal(ownBrowserTabCount({ scopeId: "文件夹 A", tabs: [page("theirs", "只有其他文件夹", false, true)] }), 0);
@@ -113,4 +113,12 @@ test("只剩其他文件夹的标签页时，当前浏览器入口会收起", ()
   assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [theirs], activeTabId: "theirs" }), true);
   assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [], activeTabId: undefined }), true);
   assert.equal(shouldCloseBrowserEntry({ scopeId: "s", tabs: [mine, theirs], activeTabId: "mine" }), false);
+});
+
+test("Agent 开的网页标签在标签条上标成 agent，和用户自己开的分开", () => {
+  const state: BrowserStateSnapshot = {
+    scopeId: "session-1",
+    tabs: [page("mine", "我的页"), { ...page("bot", "Agent 的页"), agent: true }],
+  };
+  assert.deepEqual(browserPaneTabs(state).map((tab) => [tab.label, tab.agent]), [["我的页", false], ["Agent 的页", true]]);
 });

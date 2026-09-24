@@ -119,6 +119,8 @@ export interface BrowserTabSnapshot {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /** Agent 开的标签页：标签条上带 Agent 标识，超过上限时会被收掉最久没用的。 */
+  agent?: boolean;
   /**
    * 旧版本快照可能带有这个标记；当前界面会过滤其他工作区的标签页，不再展示它们。
    */

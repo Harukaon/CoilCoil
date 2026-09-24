@@ -157,9 +157,10 @@ export function WorkspaceInspector({
     ? browserPaneTabs(browser.state).map((page) => ({
       id: page.id,
       label: page.label,
-      // 别的会话开的那几张换个图标：它们本来对用户是隐形的，现在既然列出来了，
-      // 就得一眼看出哪几张不是自己这边开的。
-      icon: page.loading ? LoaderCircle : page.foreign ? Bot : Globe2,
+      // Agent 开的换成 Agent 图标：同一排标签里一眼分得出哪几张是 Agent 开的、会被
+      // 上限收掉，哪几张是自己开的、永远不动。
+      icon: page.loading ? LoaderCircle : page.agent || page.foreign ? Bot : Globe2,
+      hint: page.agent ? `${page.label}（Agent 打开）` : undefined,
       spinning: page.loading,
       closable: true,
     }))

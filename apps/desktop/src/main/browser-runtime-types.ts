@@ -1,4 +1,5 @@
 import type { WebContents } from "electron";
+import type { BrowserTabOwner } from "./browser-agent-tabs";
 
 export const DEFAULT_BROWSER_URL = "about:blank";
 export const DEFAULT_BROWSER_SCOPE_ID = "default";
@@ -18,6 +19,10 @@ export interface BrowserTab {
    * 区时不能拿窗口当前那份去套老标签页——各自带着自己那份活着，切回去还在。
    */
   partition: string;
+  /** 谁开的这张：Agent 开的会被上限收掉、在标签条上带 Agent 标识；用户开的永远不动。 */
+  owner: BrowserTabOwner;
+  /** 最近一次被 Agent 操作或被选中的时间，上限收页时先关最久没用的。 */
+  lastUsedAt: number;
   tabTargetId: string;
   pageTargetId: string;
   guest?: WebContents;

@@ -17,6 +17,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { McpManager } from "@coilcoil/mcp";
+import { BROWSER_MCP_SERVER, drainBrowserNotice, noteBrowserCall } from "./browser-recycle-notice.ts";
 
 const TOOL_NAME = "mcp";
 export const MCP_MANAGER_CHANNEL = "coilcoil:mcp:manager:v1";
@@ -175,7 +176,7 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
     ],
     parameters: McpParams,
 
-    async execute(_toolCallId, params, signal) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const manager = requestMcpManager(pi.events);
       if (!manager) {
         return textResult("MCP 客户端当前不可用。", { error: "manager_unavailable" }, true);
@@ -212,10 +213,17 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
       try {
         const result = await manager.callTool(server, tool, (params.args ?? {}) as Record<string, unknown>, signal);
         const content = (result as { content?: Array<{ type: string; text?: string }> }).content;
-        const text = Array.isArray(content)
+        let text = Array.isArray(content)
           ? content.filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n")
           : JSON.stringify(result);
-        return textResult(text || "（服务器没有返回内容）", { server, tool });
+        if (server === BROWSER_MCP_SERVER) {
+          // 内置浏览器替 Agent 收掉了超出上限的标签页的话，就在这次返回里告诉它。
+          const session = ctx?.sessionManager?.getSessionId();
+          await noteBrowserCall(session, text);
+          text += drainBrowserNotice(session);
+        }
+        // 工具报错是返回 isError，不是抛异常；照实标成失败，界面和模型才不会当它成功了。
+        return textResult(text || "（服务器没有返回内容）", { server, tool }, (result as { isError?: unknown }).isError === true);
       } catch (error) {
         // The server's own words, verbatim. "Invalid API key" tells the model
         // what to do next; "MCP call failed" does not.

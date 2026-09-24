@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server as HttpServer } from "node:http";
 import type { Event, WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
+import { AGENT_TAB_LIMIT, isAgentTabUse } from "./browser-agent-tabs";
 import { isDirectPageTargetInfoRequest, isTabActivationCommand, routePageCommand } from "./browser-cdp-commands";
 import { detachDebuggerListener } from "./browser-cdp-teardown";
 import { normalizeBrowserUrl } from "./browser-navigation";
@@ -44,6 +45,10 @@ export interface BrowserCdpHost {
   onAgentActivated(scopeId: string): void;
   ensureActiveTab(scopeId: string): Promise<BrowserTab>;
   createTab(rawUrl: string | undefined, activate: boolean, scopeId: string): Promise<BrowserTab>;
+  /** Agent 刚操作过这张标签页：上限收页时它就不是「最久没用的」。 */
+  noteAgentUse(tab: BrowserTab): void;
+  /** 这个作用域里因为超过上限被关掉的 Agent 标签页，取一次就清空。 */
+  takeRecycledTabs(scopeId: string): Array<{ url: string; title: string }>;
   selectTab(id: string, scopeId: string): void;
   closeTab(id: string, scopeId: string): void;
   cdpTabs(scopeId: string): BrowserTab[];
@@ -91,19 +96,23 @@ export class BrowserCdpBridge {
   private port?: number;
 
   constructor(private readonly host: BrowserCdpHost) {
-    this.server = createServer((_request, response) => {
+    this.server = createServer((request, response) => {
+      // 运行时在每次调内置浏览器之后来取一次：上限收掉了哪些 Agent 标签页，好在那次
+      // 工具返回里告诉 Agent。鉴权和 CDP 连接同一套：路径里的令牌加 Bearer。
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (request.method === "GET" && requestUrl.pathname === `/coilcoil/recycled-tabs/${this.pathToken}` && this.authorized(request)) {
+        const scopeId = requestUrl.searchParams.get("scope")?.trim() || DEFAULT_BROWSER_SCOPE_ID;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ limit: AGENT_TAB_LIMIT, recycled: this.host.takeRecycledTabs(scopeId) }));
+        return;
+      }
       response.writeHead(404);
       response.end();
     });
     this.socketServer = new WebSocketServer({ noServer: true });
     this.server.on("upgrade", (request, socket, head) => {
-      const expected = Buffer.from(`Bearer ${this.token}`);
-      const actual = Buffer.from(request.headers.authorization ?? "");
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
-      const authorizedPath = requestUrl.pathname === `/devtools/browser/${this.pathToken}`;
-      const authorized = authorizedPath
-        && actual.length === expected.length
-        && timingSafeEqual(actual, expected);
+      const authorized = requestUrl.pathname === `/devtools/browser/${this.pathToken}` && this.authorized(request);
       if (!authorized) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
@@ -112,6 +121,12 @@ export class BrowserCdpBridge {
       const scopeId = requestUrl.searchParams.get("scope")?.trim() || DEFAULT_BROWSER_SCOPE_ID;
       this.socketServer.handleUpgrade(request, socket, head, (webSocket) => this.acceptClient(webSocket, scopeId));
     });
+  }
+
+  private authorized(request: { headers: { authorization?: string } }): boolean {
+    const expected = Buffer.from(`Bearer ${this.token}`);
+    const actual = Buffer.from(request.headers.authorization ?? "");
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
   }
 
   async start(): Promise<void> {
@@ -322,6 +337,7 @@ export class BrowserCdpBridge {
     params: Record<string, unknown>,
     sessionId: string,
   ): Promise<unknown> {
+    if (isAgentTabUse(method)) this.host.noteAgentUse(tab);
     const guest = this.host.guestOf(tab);
     const childSession = kind === "child" ? sessionId : undefined;
     const normalizedParams = method === "Page.navigate" && typeof params.url === "string"
@@ -369,6 +385,9 @@ export class BrowserCdpBridge {
       tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab(tab, tab.guest.getURL()));
     if (!blank) return undefined;
     blank.implicit = false;
+    // 垫出来的空白页被 Agent 拿去用了，就是 Agent 的页。
+    blank.owner = "agent";
+    blank.lastUsedAt = Date.now();
     if (activate) this.host.selectTab(blank.id, scopeId);
     await this.host.guestOf(blank).loadURL(normalizeBrowserUrl(url));
     this.announceChanged(blank);

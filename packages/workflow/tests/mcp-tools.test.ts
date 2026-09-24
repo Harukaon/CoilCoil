@@ -83,3 +83,19 @@ test("直接注册的工具名字带着服务器，横杠换成下划线", () =>
   assert.equal(directToolName("github", "search"), "mcp__github__search");
   assert.equal(directToolName("my-server", "read"), "mcp__my_server__read");
 });
+
+test("MCP 工具报错（返回 isError）时，mcp 工具如实标成失败", async () => {
+  const { default: coilcoilMcpTools } = await import("../extensions/mcp-tools.ts");
+  const tools = new Map<string, { execute: (...args: unknown[]) => Promise<{ isError: boolean; content: Array<{ text: string }> }> }>();
+  const manager = {
+    callTool: async () => ({ content: [{ type: "text", text: "Error: No page found" }], isError: true }),
+    directTools: async () => [],
+  };
+  coilcoilMcpTools({
+    events: { emit: (channel: string, data: { manager?: unknown }) => { if (channel === MCP_MANAGER_CHANNEL) data.manager = manager; } },
+    registerTool: (tool: never) => { const entry = tool as { name: string; execute: never }; tools.set(entry.name, entry); },
+  } as never);
+  const result = await tools.get("mcp")!.execute("t", { action: "call", server: "some-server", tool: "x" }, undefined, undefined, undefined);
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /No page found/);
+});

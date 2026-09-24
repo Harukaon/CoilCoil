@@ -15,6 +15,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { drainBrowserNotice, noteBrowserCall } from "./browser-recycle-notice.ts";
 import { requestMcpManager } from "./mcp-tools.ts";
 
 const BROWSER_SERVER = "coilcoil-browser";
@@ -44,6 +45,7 @@ async function callBrowser(
   tool: string,
   args: Record<string, unknown>,
   signal?: AbortSignal,
+  session?: string,
 ): Promise<{ text: string; json: unknown }> {
   const manager = requestMcpManager(events);
   if (!manager) throw new Error("MCP 客户端当前不可用。");
@@ -52,6 +54,8 @@ async function callBrowser(
   const text = Array.isArray(content)
     ? content.filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n")
     : JSON.stringify(result);
+  // 记下页面编号、取回「超过上限被收掉的 Agent 标签页」，工具返回时一起告诉 Agent。
+  await noteBrowserCall(session, text);
   // MCP 工具出错是「返回 isError」，不是抛异常。不在这里转成异常，下面各个工具的
   // 失败分支就永远走不到：点不中报成「点击完成」，导航失败报成「导航完成」。
   if ((result as { isError?: unknown }).isError === true) throw new Error(text || `${tool} 失败`);
@@ -63,11 +67,12 @@ async function currentState(
   events: { emit(channel: string, data: unknown): void },
   pageId?: number,
   signal?: AbortSignal,
+  session?: string,
 ): Promise<string> {
   try {
     const args: Record<string, unknown> = {};
     if (pageId !== undefined) args.pageId = pageId;
-    const { text } = await callBrowser(events, "take_snapshot", args, signal);
+    const { text } = await callBrowser(events, "take_snapshot", args, signal, session);
     return text.slice(0, 2000);
   } catch {
     return "（当前页面状态读取失败）";
@@ -84,6 +89,22 @@ const handleFields = {
 } as const;
 
 export default function browserActExtension(pi: ExtensionAPI): void {
+  // 这个扩展属于一个会话；会话 id 用来找它那一份浏览器的回收记录。
+  let sessionId: string | undefined;
+  const registerTool: ExtensionAPI["registerTool"] = (tool) => {
+    const execute = tool.execute;
+    pi.registerTool({
+      ...tool,
+      async execute(toolCallId, params, signal, onUpdate, ctx) {
+        sessionId = ctx?.sessionManager?.getSessionId() ?? sessionId;
+        const result = await execute(toolCallId, params, signal, onUpdate, ctx);
+        const notice = drainBrowserNotice(sessionId);
+        const first = result.content[0];
+        if (notice && first?.type === "text") first.text += notice;
+        return result;
+      },
+    });
+  };
   // 句柄 → pageId，每个会话一份：页面编号是这个会话自己那条浏览器连接里的编号。
   const handleToPage = new Map<string, number>();
   let nextHandleId = 1;
@@ -98,7 +119,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
     return undefined;
   };
 
-  pi.registerTool({
+  registerTool({
     name: "browser_open",
     label: "Browser Open",
     description: "打开一个网页并返回句柄。交互（点击/输入/导航）用 browser_navigate、browser_click、browser_type 拿句柄操作；调试（脚本/控制台/网络/性能）继续用 coilcoil-browser。",
@@ -112,12 +133,12 @@ export default function browserActExtension(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params, signal) {
       try {
-        const { text } = await callBrowser(pi.events, "new_page", { url: params.url }, signal);
+        const { text } = await callBrowser(pi.events, "new_page", { url: params.url }, signal, sessionId);
         // new_page 不直接给 id，但它会选中新页，回执里的页面列表把它标成 [selected]。
         let pageId = selectedPageId(text);
         if (pageId === undefined) {
           try {
-            pageId = selectedPageId((await callBrowser(pi.events, "list_pages", {}, signal)).text);
+            pageId = selectedPageId((await callBrowser(pi.events, "list_pages", {}, signal, sessionId)).text);
           } catch {
             // 拿不到 id 也不致命：句柄先返回，后续操作回落到选中页。
           }
@@ -131,7 +152,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: "browser_navigate",
     label: "Browser Navigate",
     description: "让句柄对应的页面导航到新地址，含等待可加载。超时时报错自带当前页面状态，不要盲重试。",
@@ -145,12 +166,12 @@ export default function browserActExtension(pi: ExtensionAPI): void {
       const args: Record<string, unknown> = { url: params.url };
       if (pageId !== undefined) args.pageId = pageId;
       try {
-        const { text } = await callBrowser(pi.events, "navigate_page", args, signal);
-        const state = await currentState(pi.events, pageId, signal);
+        const { text } = await callBrowser(pi.events, "navigate_page", args, signal, sessionId);
+        const state = await currentState(pi.events, pageId, signal, sessionId);
         return textResult(`导航完成。\n${text.slice(0, 1000)}\n--- 当前页面 ---\n${state}`, { handle: params.handle, pageId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const state = await currentState(pi.events, pageId, signal);
+        const state = await currentState(pi.events, pageId, signal, sessionId);
         return textResult(
           `导航失败：${message}\n不要直接重试——先看下面的页面状态确认这一步到底做没做成。\n--- 当前页面 ---\n${state}`,
           { error: "navigate_failed", message, handle: params.handle, pageId },
@@ -160,7 +181,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: "browser_click",
     label: "Browser Click",
     description: "点击页面元素。每次点击后自动带回当前页面状态；点不中（比如 uid 过期）时会带回一份新快照，用新快照里的 uid 再点。",
@@ -174,15 +195,15 @@ export default function browserActExtension(pi: ExtensionAPI): void {
       const args: Record<string, unknown> = { uid: params.uid };
       if (pageId !== undefined) args.pageId = pageId;
       try {
-        const { text } = await callBrowser(pi.events, "click", args, signal);
-        const state = await currentState(pi.events, pageId, signal);
+        const { text } = await callBrowser(pi.events, "click", args, signal, sessionId);
+        const state = await currentState(pi.events, pageId, signal, sessionId);
         return textResult(`点击完成。\n${text.slice(0, 800)}\n--- 当前页面 ---\n${state}`, { handle: params.handle, pageId });
       } catch (error) {
         const first = error instanceof Error ? error.message : String(error);
         // uid 过期是最常见的失败：重取一次快照交出去，让模型用新快照里的 uid 再点。
         // 不替它挑元素：新快照里「同一个」元素是谁，只有看得懂页面的模型说得清。
         try {
-          const fresh = await currentState(pi.events, pageId, signal);
+          const fresh = await currentState(pi.events, pageId, signal, sessionId);
           return textResult(
             `点击失败（${first}）。已重取快照，请用下面新快照里的 uid 再点一次。\n--- 当前页面 ---\n${fresh}`,
             { error: "click_stale", message: first, handle: params.handle, pageId, retried: true },
@@ -195,7 +216,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: "browser_type",
     label: "Browser Type",
     description: "往输入框填内容，填完回读确认。需要先 take_snapshot 拿到输入框的 uid。",
@@ -211,17 +232,17 @@ export default function browserActExtension(pi: ExtensionAPI): void {
       const args: Record<string, unknown> = { uid: params.uid, value: params.value };
       if (pageId !== undefined) args.pageId = pageId;
       try {
-        const { text } = await callBrowser(pi.events, "fill", args, signal);
+        const { text } = await callBrowser(pi.events, "fill", args, signal, sessionId);
         if (params.submit) {
           const pressArgs: Record<string, unknown> = { key: "Enter" };
           if (pageId !== undefined) pressArgs.pageId = pageId;
-          await callBrowser(pi.events, "press_key", pressArgs, signal);
+          await callBrowser(pi.events, "press_key", pressArgs, signal, sessionId);
         }
-        const state = await currentState(pi.events, pageId, signal);
+        const state = await currentState(pi.events, pageId, signal, sessionId);
         return textResult(`输入完成。\n${text.slice(0, 500)}\n--- 当前页面 ---\n${state}`, { handle: params.handle, pageId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const state = await currentState(pi.events, pageId, signal);
+        const state = await currentState(pi.events, pageId, signal, sessionId);
         return textResult(
           `输入失败：${message}\n--- 当前页面 ---\n${state}`,
           { error: "type_failed", message, handle: params.handle, pageId },

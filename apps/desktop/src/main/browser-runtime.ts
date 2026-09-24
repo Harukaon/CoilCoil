@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { app, BrowserWindow, screen, session, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
 import type { BrowserElementSelection, BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
+import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabOwner } from "./browser-agent-tabs";
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserElementPicker } from "./browser-element-picker";
@@ -76,6 +77,8 @@ export class BrowserRuntimeManager {
   private readonly identityReady = new Set<string>();
   /** One in-flight creation per scope; see ensureActiveTab. */
   private readonly pendingEnsure = new Map<string, Promise<BrowserTab>>();
+  /** 每个会话还没告诉 Agent 的回收记录。 */
+  private readonly recycledTabs = new RecycledAgentTabs();
   private disposed = false;
   /** Correlates renderer-created <webview> guests with tab records. Unused until the switch. */
   private readonly guests = new BrowserGuestRegistry({
@@ -111,7 +114,9 @@ export class BrowserRuntimeManager {
     this.cdp = new BrowserCdpBridge({
       onAgentActivated: (scopeId) => this.onAgentActivated(scopeId),
       ensureActiveTab: (scopeId) => this.ensureActiveTab(scopeId),
-      createTab: (rawUrl, activate, scopeId) => this.createCdpTab(rawUrl, activate, scopeId),
+      createTab: (rawUrl, activate, scopeId) => this.createCdpTab(rawUrl, activate, scopeId, false, "agent"),
+      noteAgentUse: (tab) => { tab.lastUsedAt = Date.now(); },
+      takeRecycledTabs: (scopeId) => this.recycledTabs.take(scopeId),
       selectTab: (id, scopeId) => { this.selectTab(id, scopeId); },
       closeTab: (id, scopeId) => { this.closeTab(id, scopeId); },
       cdpTabs: (scopeId) => this.cdpTabs(scopeId),
@@ -323,12 +328,14 @@ export class BrowserRuntimeManager {
    * announced stays false and pageTargetId is a placeholder — so no CDP client
    * can see a target that has no WebContents behind it yet.
    */
-  private createTabRecord(activate: boolean, scopeId: string, implicit = false): BrowserTab {
+  private createTabRecord(activate: boolean, scopeId: string, implicit: boolean, owner: BrowserTabOwner): BrowserTab {
     const id = randomUUID();
     const tab: BrowserTab = {
       id,
       scopeId,
       partition: this.partitionForScope(scopeId),
+      owner,
+      lastUsedAt: Date.now(),
       tabTargetId: `tab-${id}`,
       pageTargetId: `pending-page-${id}`,
       guestNonce: randomBytes(16).toString("hex"),
@@ -456,9 +463,15 @@ export class BrowserRuntimeManager {
     tab.pageTargetId = targetId;
   }
 
-  private async createCdpTab(rawUrl: string | undefined, activate: boolean, scopeId: string, implicit = false): Promise<BrowserTab> {
+  private async createCdpTab(
+    rawUrl: string | undefined,
+    activate: boolean,
+    scopeId: string,
+    implicit = false,
+    owner: BrowserTabOwner = "user",
+  ): Promise<BrowserTab> {
     const url = normalizeBrowserUrl(rawUrl);
-    const tab = this.createTabRecord(activate, scopeId, implicit);
+    const tab = this.createTabRecord(activate, scopeId, implicit, owner);
     try {
       await this.attachGuest(tab);
       await loadGuestUrl(tab.guest!, url);
@@ -468,7 +481,18 @@ export class BrowserRuntimeManager {
       this.publish();
       throw error;
     }
+    if (owner === "agent") this.keepAgentTabsWithinLimit(tab);
     return tab;
+  }
+
+  /** 见 browser-agent-tabs.ts：Agent 再开新页、超过上限时，关掉它最久没用过的那几张。 */
+  private keepAgentTabsWithinLimit(opened: BrowserTab): void {
+    const keep = new Set([opened.id, this.activeTabIds.get(opened.scopeId) ?? ""]);
+    for (const tab of agentTabsToRecycle(this.tabsForScope(opened.scopeId), keep, AGENT_TAB_LIMIT)) {
+      const guest = tab.guest && !tab.guest.isDestroyed() ? tab.guest : undefined;
+      this.recycledTabs.record(tab.scopeId, { url: guest?.getURL() || DEFAULT_URL, title: guest?.getTitle() || "" });
+      this.closeTab(tab.id, tab.scopeId);
+    }
   }
 
   /**
@@ -481,7 +505,8 @@ export class BrowserRuntimeManager {
     if (active) return active;
     const inFlight = this.pendingEnsure.get(scopeId);
     if (inFlight) return inFlight;
-    const attempt = this.createCdpTab(undefined, true, scopeId, true)
+    // 桥为 CDP 客户端垫的空白页：没人要过它，算 Agent 的，Agent 第一次 new_page 就拿它用。
+    const attempt = this.createCdpTab(undefined, true, scopeId, true, "agent")
       .finally(() => {
         if (this.pendingEnsure.get(scopeId) === attempt) this.pendingEnsure.delete(scopeId);
       });
@@ -515,6 +540,7 @@ export class BrowserRuntimeManager {
     if (tab.scopeId !== scopeId) return this.state(scopeId);
     this.elementPicker.cancel();
     this.activeTabIds.set(scopeId, id);
+    tab.lastUsedAt = Date.now();
     this.refreshViewportOverrides();
     this.publish();
     return this.state(scopeId);
@@ -710,7 +736,7 @@ export class BrowserRuntimeManager {
     const contents = tab.guest;
     // A tab exists in the strip while its guest is still being created.
     if (!contents || contents.isDestroyed()) {
-      return { id: tab.id, title: "新标签页", url: DEFAULT_URL, loading: true, canGoBack: false, canGoForward: false };
+      return { id: tab.id, title: "新标签页", url: DEFAULT_URL, loading: true, canGoBack: false, canGoForward: false, agent: tab.owner === "agent" };
     }
     return {
       id: tab.id,
@@ -719,6 +745,7 @@ export class BrowserRuntimeManager {
       loading: contents.isLoading(),
       canGoBack: contents.navigationHistory.canGoBack(),
       canGoForward: contents.navigationHistory.canGoForward(),
+      agent: tab.owner === "agent",
     };
   }
 
@@ -736,7 +763,8 @@ export class BrowserRuntimeManager {
     contents.setWindowOpenHandler(({ url }) => {
       try {
         normalizeBrowserUrl(url);
-        void this.createTab(url, true, tab.scopeId).catch((error) => console.error("[browser] 打开新标签页失败", error));
+        // 页面自己弹出的新窗口跟着打开它的那张算：Agent 页里弹出来的还是 Agent 的。
+        void this.createCdpTab(url, true, tab.scopeId, false, tab.owner).catch((error) => console.error("[browser] 打开新标签页失败", error));
       } catch {
         // Keep unsupported protocols inside the browser sandbox.
       }

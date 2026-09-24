@@ -35,6 +35,8 @@ export interface BrowserPaneTab {
   loading: boolean;
   /** 兼容旧快照；当前界面不会把其他工作区的标签页展示出来。 */
   foreign: boolean;
+  /** Agent 开的：标签条上换成 Agent 图标，和用户自己开的分开。 */
+  agent: boolean;
 }
 
 /** 当前scope可以展示的标签；旧版本的foreign快照也在这里被拦住。 */
@@ -50,12 +52,13 @@ export function visibleBrowserTabs(state: BrowserStateSnapshot): BrowserStateSna
  */
 export function browserPaneTabs(state: BrowserStateSnapshot): BrowserPaneTab[] {
   const tabs = visibleBrowserTabs(state);
-  if (tabs.length === 0) return [{ id: BROWSER_PLACEHOLDER_TAB_ID, label: "浏览器", loading: true, foreign: false }];
+  if (tabs.length === 0) return [{ id: BROWSER_PLACEHOLDER_TAB_ID, label: "浏览器", loading: true, foreign: false, agent: false }];
   return tabs.map((tab) => ({
     id: browserPaneTabId(tab.id),
     label: tab.title,
     loading: tab.loading,
     foreign: false,
+    agent: tab.agent === true,
   }));
 }
 
