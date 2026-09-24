@@ -31,6 +31,8 @@ import { copyPath, copyText, revealLabel, revealPath } from "../files/pathAction
 import { markdownUrlTransform, parseMarkdownFileHref, type MarkdownFileTarget } from "./markdownFileLinks";
 import { useFileLinkKind } from "./fileLinkKinds";
 import { TerminalNoticeCard } from "./TerminalNoticeCard";
+import { SubagentNoticeCard } from "./SubagentNoticeCard";
+import { parseSubagentCompletion } from "./subagentNotice";
 import { compactionMarkDetail, compactionMarkLabel, compactionSummaryPreview, type CompactionMark } from "./compactionMarks";
 import { TERMINAL_NOTIFICATION_TYPE } from "./terminalNotice";
 
@@ -679,6 +681,18 @@ export function AgentTurnView({
     if (item.message.custom?.type === TERMINAL_NOTIFICATION_TYPE) {
       flushActivity();
       rendered.push(<TerminalNoticeCard key={`terminal-notice-${item.message.id}`} message={item.message} />);
+      continue;
+    }
+    const subagentNotice = parseSubagentCompletion(item.message);
+    if (subagentNotice) {
+      flushActivity();
+      rendered.push(
+        <SubagentNoticeCard
+          key={`subagent-notice-${item.message.id}`}
+          notice={subagentNotice}
+          report={subagentNotice.report ? <Markdown>{subagentNotice.report}</Markdown> : undefined}
+        />,
+      );
       continue;
     }
     if (item.message.thinking?.trim()) activity.push({ kind: "thinking", id: `${item.message.id}-thinking`, text: item.message.thinking });
