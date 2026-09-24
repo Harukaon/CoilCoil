@@ -36,7 +36,7 @@ export async function run({ page, ui, check, shot, paths }) {
   const dialog = page.getByRole("dialog");
   check("弹窗问代码要不要回退", await ui.waitFor(async () => (await dialog.getByText("代码也回退吗？").count()) === 1));
   const text = await dialog.innerText();
-  check("弹窗列出会变的文件，并说明新建的会被删掉", text.includes("a.txt") && text.includes("b.txt") && text.includes("新建的文件会被删除"), text.replace(/\n/g, " "));
+  check("弹窗只说改动了几个文件", text.includes("改动了 2 个文件") && !text.includes("a.txt"), text.replace(/\n/g, " "));
   await shot("dialog");
   await dialog.getByRole("button", { name: "回退代码并重新发送" }).click();
   check("代码退回了第二条消息发出时的样子", await ui.waitFor(async () => read("a.txt") === "第一版\n" && read("b.txt") === undefined), JSON.stringify([read("a.txt"), read("b.txt")]));

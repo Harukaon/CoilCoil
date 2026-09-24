@@ -86,3 +86,25 @@ test("不对家目录和磁盘根目录做快照", () => {
   assert.equal(checkpointsSupported("/"), false);
   assert.equal(checkpointsSupported(join(homedir(), "project")), true);
 });
+
+test("回退也恢复 .gitignore；快照时被忽略的文件（从没存过）不会因为后来改了 .gitignore 被当成新文件删掉", async (context) => {
+  const { workspace, data } = setup(context);
+  writeFileSync(join(workspace, ".gitignore"), "secret.env\n");
+  writeFileSync(join(workspace, "secret.env"), "TOKEN=1\n");
+  writeFileSync(join(workspace, "a.txt"), "a\n");
+  const store = new CheckpointStore(workspace, data);
+  const checkpoint = await store.snapshot();
+
+  // Agent 把 secret.env 从忽略列表里拿掉、改了它，还新建了一个 .gitignore 管着的目录。
+  writeFileSync(join(workspace, ".gitignore"), "\n");
+  writeFileSync(join(workspace, "secret.env"), "TOKEN=2\n");
+  mkdirSync(join(workspace, "sub"));
+  writeFileSync(join(workspace, "sub", ".gitignore"), "*.log\n");
+  writeFileSync(join(workspace, "sub", "new.txt"), "new\n");
+
+  const { files } = await store.restore(checkpoint);
+  assert.equal(readFileSync(join(workspace, ".gitignore"), "utf8"), "secret.env\n", ".gitignore 本身回退了");
+  assert.equal(existsSync(join(workspace, "secret.env")), true, "快照时被忽略的文件没被删");
+  assert.equal(existsSync(join(workspace, "sub")), false, "之后新建的文件和空目录都清掉了");
+  assert.deepEqual(files.map((file) => file.path).sort(), [".gitignore", "sub/.gitignore", "sub/new.txt"]);
+});

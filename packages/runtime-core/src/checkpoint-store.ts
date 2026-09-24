@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, parse, resolve } from "node:path";
+import { basename, dirname, join, parse, resolve, sep } from "node:path";
 import type { GitCommitFile } from "@coilcoil/runtime-protocol";
 import { parseNameStatus, runGit } from "./git-workspace.js";
 
@@ -118,15 +118,53 @@ export class CheckpointStore {
   /**
    * 把工作区退回到快照。退之前先把现在的样子也存一份（返回的 `backup`），万一退错了
    * 还找得回来。只动快照管得到的文件：被忽略的（node_modules 之类）原样不动。
+   *
+   * 不直接 `read-tree -u`：它会删掉所有「快照里没有」的文件，其中包括快照时被
+   * .gitignore 忽略、之后 .gitignore 改了才露出来的文件（比如 .env）——它们从没存
+   * 过，删了就找不回来。所以分三步：索引换成快照；快照里有的文件写回去（.gitignore
+   * 也在里面）；之后新出现的文件，再按快照当时的忽略规则判断，被忽略的留着，其余删掉。
    */
   restore(commit: string): Promise<{ backup: string; files: GitCommitFile[] }> {
     return serialized(this.gitDir, async () => {
       const backup = await this.commitTree(await this.indexWorkspace());
-      const files = parseNameStatus(await this.git(["diff", "--cached", "--name-status", "-z", "--no-renames", commit, "--"]));
-      // 索引现在就是工作区的样子；--reset -u 让索引和工作区都变成快照里的样子，
-      // 之后新加的文件会被删掉，改过、删掉的文件会恢复。
-      await this.git(["read-tree", "--reset", "-u", commit]);
-      return { backup, files };
+      const changes = parseNameStatus(await this.git(["diff", "--cached", "--name-status", "-z", "--no-renames", commit, "--"]));
+      const created = changes.filter((file) => file.state === "added").map((file) => file.path);
+      const rewritten = changes.filter((file) => file.state !== "added").map((file) => file.path);
+      await this.git(["read-tree", commit]);
+      for (const paths of chunks(rewritten)) await this.git(["checkout-index", "-f", "--", ...paths]);
+      // 之后新建的 .gitignore 先删掉，剩下的新文件才是按快照当时的规则判断。
+      const createdIgnoreFiles = created.filter((path) => basename(path) === ".gitignore");
+      createdIgnoreFiles.forEach((path) => this.remove(path));
+      const candidates = created.filter((path) => basename(path) !== ".gitignore");
+      const kept = new Set<string>();
+      for (const paths of chunks(candidates)) {
+        // 退出码 1 表示这一批都没被忽略。
+        const output = await this.git(["check-ignore", "--", ...paths], { allowExitCodes: [1] });
+        output.split("\n").filter(Boolean).forEach((path) => kept.add(path));
+      }
+      candidates.filter((path) => !kept.has(path)).forEach((path) => this.remove(path));
+      return { backup, files: changes.filter((file) => !kept.has(file.path)) };
     });
   }
+
+  /** 删掉一个文件，顺手删掉因此变空的上级目录（不出工作区）。 */
+  private remove(path: string): void {
+    const root = resolve(this.cwd);
+    rmSync(join(root, path), { force: true });
+    for (let dir = dirname(join(root, path)); dir.startsWith(root + sep) && dir !== root; dir = dirname(dir)) {
+      try {
+        if (readdirSync(dir).length) break;
+        rmdirSync(dir);
+      } catch {
+        break;
+      }
+    }
+  }
+}
+
+/** 路径分批传给 git，免得命令行太长（Windows 上限三万多字符）。 */
+function chunks(paths: string[], size = 200): string[][] {
+  const batches: string[][] = [];
+  for (let index = 0; index < paths.length; index += size) batches.push(paths.slice(index, index + size));
+  return batches;
 }

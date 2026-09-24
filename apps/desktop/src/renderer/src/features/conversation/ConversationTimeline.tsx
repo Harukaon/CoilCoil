@@ -461,7 +461,7 @@ export function MessageView({
         <ConfirmDialog
           open={Boolean(codeChanges)}
           title="代码也回退吗？"
-          description={checkpointRewindDescription(codeChanges ?? [])}
+          description={checkpointRewindDescription(codeChanges?.length ?? 0)}
           onClose={() => setCodeChanges(undefined)}
           actions={[
             { label: "取消", onClick: () => setCodeChanges(undefined) },
