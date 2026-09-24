@@ -499,8 +499,8 @@ export default function App(): React.JSX.Element {
       return;
     }
     if (!modelConfigured) {
-      toastError("发送第一条消息前，请先选择并配置模型。");
-      setSettingsOpen(true);
+      toastError(configuration ? "发送第一条消息前，请先选择并配置模型。" : "正在读取模型配置，请稍等一下再发送。");
+      if (configuration) setSettingsOpen(true);
       return;
     }
     if (images.length && !selectedModel?.supportsImages) {
