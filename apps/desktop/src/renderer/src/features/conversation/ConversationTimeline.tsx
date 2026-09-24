@@ -19,9 +19,11 @@ import type {
   ToolRun,
 } from "@coilcoil/runtime-protocol";
 import { ConversationComposer } from "../composer/ConversationComposer";
+import { PromptImagePreview } from "../composer/PromptImagePreview";
 import type { PromptEditorHandle } from "../composer/PromptEditor";
 import { appendPromptImages, clipboardImage, imageDataUrl } from "../composer/promptImages";
 import { promptDocumentFromText, promptDocumentText, replaceTextRange } from "../composer/promptDocument";
+import { isPromptSendKey } from "../composer/promptKeyboard";
 import { inAppBrowserModifierLabel, markdownBrowserUrl } from "../browser/useInAppBrowserLinks";
 import { ConfirmDialog } from "../../ui/dialog";
 import { CollapsibleCodeBlock } from "./CollapsibleCodeBlock";
@@ -207,9 +209,12 @@ function ImageStrip({ images }: { images: PromptImage[] }): React.JSX.Element | 
   return (
     <span className="message-images">
       {images.map((image) => (
-        <span className="message-image" key={image.id ?? image.data.slice(0, 24)}>
-          <img src={imageDataUrl(image)} alt={image.name ?? "附加图片"} />
-        </span>
+        <PromptImagePreview
+          className="message-image"
+          image={image}
+          alt={image.name ?? "附加图片"}
+          key={image.id ?? image.data.slice(0, 24)}
+        />
       ))}
     </span>
   );
@@ -380,11 +385,10 @@ export function MessageView({
               onCompositionStart={() => { composingRef.current = true; }}
               onCompositionEnd={() => { composingRef.current = false; }}
               onKeyDown={(event) => {
-                if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.closest("form")?.requestSubmit();
-                }
+                if (composingRef.current || !isPromptSendKey(event)) return;
+                event.preventDefault();
+                const currentTarget = event.currentTarget as unknown as HTMLElement | null;
+                currentTarget?.closest("form")?.requestSubmit();
               }}
               onModelMenuOpenChange={setModelMenuOpen}
               onSelectModel={(model) => {

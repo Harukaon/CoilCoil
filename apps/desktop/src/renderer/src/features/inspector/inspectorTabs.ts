@@ -33,55 +33,46 @@ export interface BrowserPaneTab {
   id: string;
   label: string;
   loading: boolean;
-  /** 别的会话的 agent 开的那一张：照样列出来，只是图标不同。 */
+  /** 兼容旧快照；当前界面不会把其他工作区的标签页展示出来。 */
   foreign: boolean;
 }
 
+/** 当前scope可以展示的标签；旧版本的foreign快照也在这里被拦住。 */
+export function visibleBrowserTabs(state: BrowserStateSnapshot): BrowserStateSnapshot["tabs"] {
+  return state.tabs.filter((tab) => tab.foreign !== true);
+}
+
 /**
- * 把主进程的浏览器快照摊成标签条上的若干个标签。
+ * 把当前工作区的浏览器快照摊成标签条上的若干个标签。
  *
  * 空列表要还一个占位标签：一个工作区如果只开了浏览器，标签条空掉会让右侧栏退回
  * 「打开一个面板」的空状态，等第一个网页建好又跳回来，闪一下。
  */
 export function browserPaneTabs(state: BrowserStateSnapshot): BrowserPaneTab[] {
-  if (state.tabs.length === 0) return [{ id: BROWSER_PLACEHOLDER_TAB_ID, label: "浏览器", loading: true, foreign: false }];
-  return state.tabs.map((tab) => ({
+  const tabs = visibleBrowserTabs(state);
+  if (tabs.length === 0) return [{ id: BROWSER_PLACEHOLDER_TAB_ID, label: "浏览器", loading: true, foreign: false }];
+  return tabs.map((tab) => ({
     id: browserPaneTabId(tab.id),
     label: tab.title,
     loading: tab.loading,
-    foreign: tab.foreign === true,
+    foreign: false,
   }));
 }
 
 /** 当前选中的是哪个网页标签。主进程是 activeTabId 的唯一权威，这里只做展示。 */
 export function activeBrowserPaneTabId(state: BrowserStateSnapshot): string {
-  const active = state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0];
+  const tabs = visibleBrowserTabs(state);
+  const active = tabs.find((tab) => tab.id === state.activeTabId) ?? tabs[0];
   return active ? browserPaneTabId(active.id) : BROWSER_PLACEHOLDER_TAB_ID;
 }
 
-/**
- * 这个会话自己开着几张网页标签。
- *
- * 「浏览器开着但一张网页都没有，补建一张」和「最后一张关掉了，浏览器这一项也收
- * 起来」这两条判断都只能看自己的那几张：别的会话的标签页现在也列在这一排里，拿
- * 总数去判断的话，用户这边一张页面都没有却以为有。
- */
 export function ownBrowserTabCount(state: BrowserStateSnapshot): number {
-  return state.tabs.filter((tab) => tab.foreign !== true).length;
+  return visibleBrowserTabs(state).length;
 }
 
-/**
- * 关掉一张网页之后，浏览器这一项还要不要从右侧栏撤掉。
- *
- * 看的是标签条上还剩不剩东西，也就是总数，而不是「自己还剩几张」。别的会话开的
- * 标签页同样列在这一排里：只剩它们的时候撤掉浏览器项，用户看到的是标签条上明明
- * 还有好几个标签，右侧栏却整个折叠了——东西都还在，只是看不见了。
- *
- * 这和 ownBrowserTabCount 的用途不冲突：那个回答的是「要不要给用户补建一张自己的
- * 页面」，只能数自己的；这个回答的是「还有没有东西可显示」，得数全部。
- */
+/** 只剩当前工作区没有可见标签时，收起浏览器入口。 */
 export function shouldCloseBrowserEntry(state: BrowserStateSnapshot): boolean {
-  return state.tabs.length === 0;
+  return visibleBrowserTabs(state).length === 0;
 }
 
 /** 中键 = 关闭标签页。 */

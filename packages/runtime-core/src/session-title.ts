@@ -9,6 +9,40 @@
  * 因为模型不配合而要重发，也不会把一次命名变成两个来回。
  */
 
+/** Persisted markers that make title ownership explicit across runtime restarts. */
+export const SESSION_TITLE_ATTEMPT_ENTRY_TYPE = "coilcoil.session_title_attempt";
+export const SESSION_TITLE_MANUAL_ENTRY_TYPE = "coilcoil.session_title_manual";
+
+export interface SessionTitleMarkerEntry {
+  type: string;
+  customType?: string;
+}
+
+export interface SessionTitleState {
+  titlePending?: boolean;
+  titleAttempted?: boolean;
+  titleManuallySet?: boolean;
+}
+
+export function sessionTitleMarkers(entries: Iterable<SessionTitleMarkerEntry>): Pick<SessionTitleState, "titleAttempted" | "titleManuallySet"> {
+  let titleAttempted = false;
+  let titleManuallySet = false;
+  for (const entry of entries) {
+    if (entry.type !== "custom") continue;
+    if (entry.customType === SESSION_TITLE_ATTEMPT_ENTRY_TYPE) titleAttempted = true;
+    if (entry.customType === SESSION_TITLE_MANUAL_ENTRY_TYPE) titleManuallySet = true;
+  }
+  return { titleAttempted, titleManuallySet };
+}
+
+/** Claim the one and only automatic naming attempt for this session. */
+export function claimSessionTitleAttempt(state: SessionTitleState): boolean {
+  if (state.titleManuallySet || state.titleAttempted || !state.titlePending) return false;
+  state.titleAttempted = true;
+  state.titlePending = false;
+  return true;
+}
+
 /** 命名请求的系统提示词。 */
 export const SESSION_TITLE_SYSTEM_PROMPT = [
   "你在给一段刚开始的对话起标题，标题会显示在侧栏的会话列表里。",

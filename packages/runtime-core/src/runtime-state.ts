@@ -85,8 +85,12 @@ export interface ActiveSession {
   /** Prompts handed to Pi whose user message it has not echoed back yet. */
   pendingUserPrompts: PendingUserPrompt[];
   promptQueue: QueuedPrompt[];
-  /** 第一轮结束后要去单独问一次模型要标题；命名跑完（或放弃）就清掉。 */
+  /** 第一轮结束后要去单独问一次模型要标题。 */
   titlePending?: boolean;
+  /** This session has already claimed its one automatic naming attempt. */
+  titleAttempted?: boolean;
+  /** A human title owns this session; automatic naming must never overwrite it. */
+  titleManuallySet?: boolean;
   /** 已交给 Pi、还没落进对话的介入消息；快照带着它，切换会话后界面才恢复得回来。 */
   steeringMessages: SteeringMessage[];
   promptDrainInProgress: boolean;
@@ -115,8 +119,21 @@ export interface ActiveSession {
   planApproval?: PlanApprovalState;
   /** Live `/goal` loop state, mirrored from the workflow extension. */
   goal?: GoalState;
+  /** 配置的总结模型当前解析不出来，这个会话的总结已回退到会话模型。 */
+  summarizationModelUnavailable?: boolean;
+  /**
+   * A manual `/compact` is summarizing this session right now.
+   *
+   * Pi's own `isStreaming` says nothing about compaction, so without this the
+   * interface looks idle while a minute-long summarization is in flight: no
+   * spinner, no stop button, and the next message races the compaction into
+   * the same session.
+   */
+  compacting?: boolean;
   /** A stop was delivered and the run has not settled yet. */
   aborting?: boolean;
+  /** The underlying Pi abort is still settling, even if it already emitted agent_settled. */
+  abortInFlight?: Promise<void>;
   /** A stop that arrived before the run existed; it lands when the run starts. */
   abortOnStart?: boolean;
   /** Model selected while a turn was already running; applied before the next prompt. */
@@ -399,6 +416,8 @@ export function contextClearingRecord(value: unknown): ContextClearingRecord | u
     at,
     clearedResults: Math.round(clearedResults),
     freedTokens: Math.max(0, Math.round(number(value.freedTokens) ?? 0)),
+    projectedTokens: number(value.projectedTokens),
+    contextWindow: number(value.contextWindow),
   };
 }
 

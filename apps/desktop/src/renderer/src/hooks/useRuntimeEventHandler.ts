@@ -133,6 +133,7 @@ export function useRuntimeEventHandler({
           queue: event.queue,
           revision: event.revision,
           sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
+          runtimeId,
         });
         setSnapshot((current) => {
           if (!current) return current;
@@ -149,6 +150,7 @@ export function useRuntimeEventHandler({
           message: event.message,
           revision: event.revision,
           sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
+          runtimeId,
         });
         break;
       case "message_delta":
@@ -157,6 +159,7 @@ export function useRuntimeEventHandler({
           ...event,
           timestamp: Date.now(),
           sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
+          runtimeId,
         });
         break;
       case "message_steering":

@@ -2,8 +2,8 @@ import type { ProjectSelection, SessionSummary } from "@coilcoil/runtime-protoco
 
 export const RECENT_SECTION_COLLAPSED_KEY = "coilcoil.recent-section-collapsed";
 
-/** How many rows the section shows before "more" is used. Kept short so the project tree stays in view. */
-export const DEFAULT_RECENT_ROWS = 4;
+/** How many rows the section shows before "more" is used. Keep a useful 10+ recent history visible by default. */
+export const DEFAULT_RECENT_ROWS = 12;
 
 export interface RecentSessionEntry {
   project: ProjectSelection;

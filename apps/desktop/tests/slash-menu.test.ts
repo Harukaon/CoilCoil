@@ -33,6 +33,16 @@ test("/mcp 和 /skills 这两条本来就是设置入口，保持原样", () => 
   assert.equal(items.find((item) => item.id === "action:skills")?.openSettings, "skills");
 });
 
+test("/compact 在菜单里，选中是写进输入框而不是跳设置", () => {
+  const items = buildSlashMenuItems([], []);
+  const row = items.find((item) => item.id === "command:compact");
+  assert.ok(row, "手动压缩得能在菜单里找得到，否则等于不存在");
+  assert.equal(row.title, "/compact");
+  // 写进输入框而不自带空格：直接回车就是压缩，想补要求再自己接着敲。
+  assert.equal(row.insert, "/compact");
+  assert.equal(row.openSettings, undefined);
+});
+
 test("技能仍然是写进输入框", () => {
   const items = buildSlashMenuItems([skill("pdf")], []);
   assert.equal(items.find((item) => item.id === "skill:/skills/pdf.md")?.insert, "/skill:pdf ");

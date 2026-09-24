@@ -18,9 +18,13 @@ import {
   type ModelProviderConfiguration,
   type ModelProviderConfigurationInput,
   type ModelProviderConfigurationSnapshot,
+  type ModelProviderModelConfiguration,
+  type ModelProviderPatchInput,
   type ModelProviderSaveResult,
   type PendingSessionModel,
   type RuntimeConfiguration,
+  type SummarizationModelConfiguration,
+  type SummarizationModelConfigurationInput,
   type ThinkingLevel,
 } from "@coilcoil/runtime-protocol";
 import {
@@ -36,6 +40,11 @@ import {
 } from "./provider-helpers.js";
 import { RuntimeProviderCore } from "./runtime-provider-core.js";
 import {
+  parseModelReference,
+  readSummarizationModelConfiguration,
+  writeSummarizationModelConfiguration,
+} from "./summarization-model.js";
+import {
   cloneJson,
   errorMessage,
   isRecord,
@@ -45,6 +54,69 @@ import {
 import type { ActiveSession } from "./runtime-state.js";
 
 export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
+  /** 压缩和分支摘要跑在哪个模型上；空表示跟随会话模型。 */
+  async getSummarizationModelConfiguration(): Promise<SummarizationModelConfiguration> {
+    return this.summarizationModelState();
+  }
+
+  async saveSummarizationModelConfiguration(
+    input: SummarizationModelConfigurationInput,
+  ): Promise<SummarizationModelConfiguration> {
+    writeSummarizationModelConfiguration(this.agentDir, input);
+    await this.applySummarizationModel();
+    return this.summarizationModelState();
+  }
+
+  /** What the panel should show: what was configured, and whether it is usable. */
+  protected summarizationModelState(): SummarizationModelConfiguration {
+    const configured = readSummarizationModelConfiguration(this.agentDir);
+    if (!configured.model || !this.active) return configured;
+    return { ...configured, unavailable: this.active.summarizationModelUnavailable === true };
+  }
+
+  /**
+   * Point this session's summaries at the configured model.
+   *
+   * A model that cannot be resolved — deleted from the provider, credentials
+   * gone — must not take compaction down with it: the session falls back to its
+   * own model and says so in the panel. A compaction that does not happen is
+   * how a session walks into a context overflow.
+   */
+  protected async applySummarizationModel(active = this.active): Promise<void> {
+    if (!active) return;
+    const configured = readSummarizationModelConfiguration(this.agentDir).model;
+    const resolved = await this.resolveSummarizationModel(configured);
+    if (this.active !== active) return;
+    active.session.summarizationModel = resolved;
+    active.summarizationModelUnavailable = Boolean(configured) && !resolved;
+    if (active.summarizationModelUnavailable) {
+      this.log.warn("compaction", "summarization_model_unavailable", { configured });
+    } else if (resolved) {
+      this.log.info("compaction", "summarization_model_applied", { model: `${resolved.provider}/${resolved.id}` });
+    }
+    this.publishRuntimeInspection(active);
+  }
+
+  private async resolveSummarizationModel(configured: string) {
+    const reference = configured ? parseModelReference(configured) : undefined;
+    if (!reference) return undefined;
+    try {
+      const modelRuntime = await this.ready();
+      const model = modelRuntime.getModel(reference.provider, reference.id);
+      // Context-window overrides are CoilCoil metadata, not registry data; the
+      // summary model needs them for the same reason the session model does.
+      return model ? this.modelWithRuntimeOptions(model) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 模型表或凭证变了，配置的总结模型也要重新解析一次。 */
+  override refreshSessionModelFromRegistry(): void {
+    super.refreshSessionModelFromRegistry();
+    void this.applySummarizationModel().catch(() => undefined);
+  }
+
   async getModelProviderConfiguration(): Promise<ModelProviderConfigurationSnapshot> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
@@ -231,6 +303,79 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     await modelRuntime.refresh({ providers: [providerId], allowNetwork: false });
   }
 
+  /**
+   * Apply the small edit an Agent normally has: "add this model" or "make
+   * contextWindow 200k". The panel posts a complete form draft; the Agent
+   * must not have to repeat every existing model just to change one field.
+   */
+  async saveModelProviderPatch(input: ModelProviderPatchInput): Promise<ModelProviderSaveResult> {
+    const id = assertProviderId(input.id);
+    const snapshot = await this.getModelProviderConfiguration();
+    const current = snapshot.providers.find((provider) => provider.id === id);
+    const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(input, key);
+    const currentModels = current?.models.map((model) => ({ ...model })) ?? [];
+    let models: ModelProviderModelConfiguration[] = currentModels;
+    if (input.modelsMode === "replace") {
+      models = (input.models ?? []).map((model) => ({ ...model }));
+    } else if (input.models) {
+      const byId = new Map(currentModels.map((model) => [model.id, model]));
+      for (const model of input.models) {
+        const previous = byId.get(model.id);
+        byId.set(model.id, previous ? { ...previous, ...model } : { ...model });
+      }
+      models = [...byId.values()];
+    }
+    if (input.removeModels?.length) {
+      const removed = new Set(input.removeModels);
+      models = models.filter((model) => !removed.has(model.id));
+    }
+
+    const provider: ModelProviderConfigurationInput["provider"] = {
+      id,
+      name: has("name") ? input.name : current?.name,
+      baseUrl: has("baseUrl") ? input.baseUrl : current?.baseUrl,
+      api: has("api") ? input.api : current?.api,
+      oauth: has("oauth") ? input.oauth : current?.oauth,
+      headers: has("headers") ? input.headers : current?.headers,
+      compat: has("compat") ? input.compat : current?.compat,
+      authHeader: has("authHeader") ? input.authHeader : current?.authHeader,
+      apiKeyReference: has("apiKeyReference") ? input.apiKeyReference?.trim() || undefined : current?.apiKeyReference,
+      disabled: has("disabled") ? input.disabled === true : current?.disabled === true,
+      replaceModels: has("replaceModels")
+        ? input.replaceModels === true
+        : current ? current.replaceModels === true : input.models !== undefined,
+      models,
+      modelOverrides: has("modelOverrides") ? input.modelOverrides : current?.modelOverrides,
+    };
+
+    let credential: ModelProviderConfigurationInput["credential"];
+    if (input.credential) {
+      const supplied = new Set(Object.keys(input.credential.values));
+      const automaticPreserveFields = current?.credential.methods
+        .flatMap((method) => method.fields)
+        .filter((field) => field.configured && !supplied.has(field.id))
+        .map((field) => field.id) ?? [];
+      credential = {
+        method: input.credential.method,
+        values: input.credential.values,
+        preserveFields: [...new Set([...automaticPreserveFields, ...(input.credential.preserveFields ?? [])])],
+      };
+    }
+
+    return this.saveModelProviderConfiguration({
+      provider,
+      credential,
+      apiKey: input.apiKey,
+      preserveApiKeyReference: has("preserveApiKeyReference")
+        ? input.preserveApiKeyReference === true
+        : !has("apiKeyReference"),
+    });
+  }
+
+  async setModelProviderEnabled(providerId: string, enabled: boolean): Promise<ModelProviderSaveResult> {
+    return this.saveModelProviderPatch({ id: providerId, disabled: !enabled });
+  }
+
   async saveModelProviderConfiguration(input: ModelProviderConfigurationInput): Promise<ModelProviderSaveResult> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
@@ -376,7 +521,9 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
       && currentModel.contextWindow === effectiveModel.contextWindow
       && active.session.thinkingLevel === effectiveThinkingLevel,
     );
-    const busy = active.session.isStreaming || this.promptStarting || (active.promptQueue?.length ?? 0) > 0 || active.promptDrainInProgress === true;
+    // A manual compaction is a model request of its own; swapping the model
+    // out from under it would move only the half that has not been sent yet.
+    const busy = active.session.isStreaming || this.promptStarting || (active.promptQueue?.length ?? 0) > 0 || active.promptDrainInProgress === true || active.compacting === true;
 
     if (busy) {
       // Never mutate the model object used by an in-flight AgentSession turn.

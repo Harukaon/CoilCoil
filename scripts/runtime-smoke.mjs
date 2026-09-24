@@ -424,6 +424,43 @@ try {
   ) {
     throw new Error(`An empty /memory request did not leave structured runtime feedback: ${JSON.stringify(emptyMemoryInspection.memory)}`);
   }
+  await assert.rejects(
+    request({ type: "run_compaction_now" }),
+    /还没有可压缩的上下文/,
+    "手动压缩在空会话上要说人话，而不是把 Pi 的英文错误透出去",
+  );
+  // 输入框里敲的 /compact 走的是同一条路：它永远不应该变成发给模型的一句话。
+  await assert.rejects(
+    request({ type: "prompt", text: "/compact 保留接口改动细节" }),
+    /还没有可压缩的上下文/,
+  );
+  // 总结模型：配得上的就用，配不上的要说出口，且两种情况都不能拖垮对话。
+  const summarizationDefault = await request({ type: "get_summarization_model_configuration" });
+  if (summarizationDefault.model !== "") {
+    throw new Error(`总结模型默认应该跟随会话模型：${JSON.stringify(summarizationDefault)}`);
+  }
+  const summarizationSaved = await request({
+    type: "save_summarization_model_configuration",
+    input: { model: "openai-responses-ws/gpt-5.6-ws-smoke" },
+  });
+  if (summarizationSaved.model !== "openai-responses-ws/gpt-5.6-ws-smoke" || summarizationSaved.unavailable) {
+    throw new Error(`配置的总结模型没有生效：${JSON.stringify(summarizationSaved)}`);
+  }
+  const summarizationInspection = await request({ type: "get_runtime_inspection" });
+  if (summarizationInspection.summarizationModel?.model !== "openai-responses-ws/gpt-5.6-ws-smoke") {
+    throw new Error(`面板看不到已配置的总结模型：${JSON.stringify(summarizationInspection.summarizationModel)}`);
+  }
+  const summarizationMissing = await request({
+    type: "save_summarization_model_configuration",
+    input: { model: "deleted-provider/deleted-model" },
+  });
+  if (summarizationMissing.unavailable !== true) {
+    throw new Error(`模型不可用时必须说出来，而不是默默接受：${JSON.stringify(summarizationMissing)}`);
+  }
+  const summarizationCleared = await request({ type: "save_summarization_model_configuration", input: { model: "" } });
+  if (summarizationCleared.model !== "" || summarizationCleared.unavailable) {
+    throw new Error(`清空后应该回到跟随会话模型：${JSON.stringify(summarizationCleared)}`);
+  }
   const smokePromptOverride = "CoilCoil runtime inspection smoke prompt";
   const overriddenInspection = await request({ type: "set_session_system_prompt", prompt: smokePromptOverride });
   if (!overriddenInspection.systemPromptOverride || overriddenInspection.effectiveSystemPrompt !== smokePromptOverride) {
@@ -474,6 +511,9 @@ try {
   // of them in the model's schema costs tokens on every turn. So what a session
   // toggle changes is which servers that tool can reach, not which tools exist.
   await waitForRuntimeInspection((inspection) => inspection.tools.some((tool) => tool.name === "mcp" && tool.active));
+  // The `coilcoil` setup tool is registered the same way: one tool with three
+  // areas (guide/mcp/skill), answering through the panel's own methods.
+  await waitForRuntimeInspection((inspection) => inspection.tools.some((tool) => tool.name === "coilcoil" && tool.active));
   const mcpConfigBeforeSessionToggle = readFileSync(savedMcp.configPath, "utf8");
   const sessionDisabledInspection = await request({ type: "set_session_mcp_server_enabled", name: "smoke-server", enabled: false });
   if (sessionDisabledInspection.mcp?.servers.find((server) => server.name === "smoke-server")?.sessionDisabled !== true) {

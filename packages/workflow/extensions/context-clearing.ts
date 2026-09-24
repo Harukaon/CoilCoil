@@ -1,4 +1,4 @@
-import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, estimateTokens, serializeConversation } from "@earendil-works/pi-coding-agent";
 import type { ContextEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 type AgentMessage = ContextEvent["messages"][number];
@@ -30,14 +30,11 @@ type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
  * and that is this stage stepping aside, not failing. In every case the next
  * pass is handed back by `session_compact`, never by the context climbing again.
  *
- * Owning a line ahead of Pi's is what makes that work without a cancel. The
- * previous version hooked Pi's own decision and cancelled the summary when it
- * had cleared "enough"; a cancel that turned out not to be enough left the
- * request over the ceiling with nothing between it and the provider, and one
- * real session ended in overflow recovery that way. Arriving first needs no
- * cancel: Pi measures what the provider charged for the last request, which is
- * the copy this stage already trimmed, so clearing genuinely keeps Pi's line out
- * of reach — and when it cannot, Pi acts on its own schedule.
+ * Pi's automatic threshold check reads the persisted branch, not this request
+ * copy. If it asks to compact anyway, the pre-compaction hook checks the
+ * rewritten copy with an explicit safety margin. Only that automatic threshold
+ * attempt can be cancelled, and only when the measured copy fits; an overflow
+ * or manual /compact still proceeds.
  *
  * What stays is the *fact* of the call — this tool ran, then that one. The
  * arguments go with the output: a grep pattern is small, five hundred of them
@@ -151,9 +148,11 @@ export interface ContextClearingRecord {
   clearedResults: number;
   /** Roughly how many tokens that freed. */
   freedTokens: number;
-  /** What the context measured when this ran, and against which window. */
+  /** What the prior response reported when this ran, and against which window. */
   contextTokens: number;
   contextWindow: number;
+  /** Size of the rewritten request copy, not the previous response's usage. */
+  projectedTokens?: number;
   /** Whether the batch brought the request back under this stage's line. */
   fitsAgain: boolean;
 }
@@ -362,7 +361,22 @@ export function applyToolResultClearing(
     });
     return { ...message, content } as AgentMessage;
   });
-  return changed ? next : undefined;
+  if (!changed) return undefined;
+  // Usage describes the *old* provider request, before these earlier messages
+  // were rewritten. Keeping it makes Pi's output-budget clamp see the old
+  // (possibly over-window) size and can reduce maxTokens to exactly one.
+  // This is only the request copy; session history and billing stay untouched.
+  return next.map((message) => {
+    if (message.role !== "assistant" || !("usage" in message) || !message.usage) return message;
+    return {
+      ...message,
+      usage: { ...message.usage, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+    };
+  });
+}
+
+function projectedTokens(messages: readonly AgentMessage[]): number {
+  return messages.reduce((total, message) => total + estimateTokens(message), 0);
 }
 
 /**
@@ -454,6 +468,38 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
    * 话记账全是它的。我们只是让它看到的那份，和模型平时看到的那份一样瘦。
    */
   pi.on("session_before_compact", (event, ctx) => {
+    // Automatic threshold checks see the persisted, untrimmed branch. Before
+    // paying for a lossy summary, ask whether this extension's request copy
+    // already fits. Never cancel overflow recovery or a manual /compact.
+    if (event.reason === "threshold" && ctx.model?.contextWindow && ctx.sessionManager?.buildSessionProjection) {
+      const original = ctx.sessionManager.buildSessionProjection().messages;
+      const plan = passesLeft > 0 ? planToolResultClearing(original, cleared) : undefined;
+      const addBatch = !!plan && plan.freedTokens >= MIN_BATCH_TOKENS;
+      const nextCleared = addBatch
+        ? new Set([...cleared, ...plan.toolCallIds, ...plan.callIds])
+        : cleared;
+      const rewritten = applyToolResultClearing(original, nextCleared);
+      // Leave extra room for the provider's tokenization and its output budget.
+      const projected = rewritten ? projectedTokens(rewritten) : Number.POSITIVE_INFINITY;
+      const window = ctx.model.contextWindow;
+      if (rewritten && projected + 8_192 < window - PI_RESERVE_TOKENS) {
+        if (addBatch) {
+          cleared = nextCleared;
+          passesLeft -= 1;
+          lastDeclined = undefined;
+          pi.events.emit(CONTEXT_CLEARING_EVENT, {
+            at: Date.now(),
+            clearedResults: plan.toolCallIds.length + plan.callIds.length,
+            freedTokens: plan.freedTokens,
+            contextTokens: ctx.getContextUsage()?.tokens ?? 0,
+            contextWindow: window,
+            projectedTokens: projected,
+            fitsAgain: projected <= clearingLine(window),
+          } satisfies ContextClearingRecord);
+        }
+        return { cancel: true };
+      }
+    }
     const preparation = (event as { preparation?: { messagesToSummarize?: AgentMessage[]; turnPrefixMessages?: AgentMessage[] } }).preparation;
     if (!preparation) return undefined;
     const history = Array.isArray(preparation.messagesToSummarize) ? preparation.messagesToSummarize : [];
@@ -488,10 +534,9 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
    * Before every request: at this stage's line, clear what can be cleared, then
    * hand over the rewritten copy.
    *
-   * Measuring by what Pi reports rather than counting the messages here is
-   * deliberate. Pi's number is anchored on what the provider charged for the
-   * last request — the copy this stage already trimmed — so clearing genuinely
-   * lowers it, and both stages read the same dial.
+   * Pi's prior usage is a trigger for considering a clear, not an authoritative
+   * size of the rewritten copy. The provider budget and the pre-compaction
+   * guard measure that copy separately after the old usage has been invalidated.
    */
   pi.on("context", (event, ctx) => {
     const usage = ctx.getContextUsage();
@@ -536,8 +581,8 @@ export default function contextClearingExtension(pi: ExtensionAPI): void {
           freedTokens: plan.freedTokens,
           contextTokens,
           contextWindow,
-          // Said plainly, because it is the only question that matters as a
-          // session grows: did this stage keep up, or is Pi about to summarize?
+          projectedTokens: projectedTokens(applyToolResultClearing(event.messages, cleared) ?? event.messages),
+          // Keep the older usage-relative line signal for existing diagnostics.
           fitsAgain: contextTokens - plan.freedTokens <= line,
         } satisfies ContextClearingRecord);
       }

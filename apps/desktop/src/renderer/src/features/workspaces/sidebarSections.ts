@@ -12,8 +12,8 @@ export type SidebarSection = "recent" | "projects";
 
 export const SIDEBAR_SECTION_ORDER_KEY = "coilcoil.sidebar-section-order";
 
-/** Recent on top, the way the sidebar has always opened. */
-export const DEFAULT_SIDEBAR_SECTION_ORDER: readonly SidebarSection[] = ["recent", "projects"];
+/** Projects on top: the tree is the stable entry, recent is the auxiliary list below. */
+export const DEFAULT_SIDEBAR_SECTION_ORDER: readonly SidebarSection[] = ["projects", "recent"];
 
 export const SIDEBAR_SECTION_LABELS: Record<SidebarSection, string> = { recent: "最近", projects: "项目" };
 

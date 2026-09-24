@@ -95,7 +95,7 @@ export function buildRuntimeInspectionSnapshot(active: ActiveSession): RuntimeIn
     tools,
     mcpServerNames,
   );
-  const usage = sessionUsage(active.session);
+  const usage = sessionUsage(active.session, active.contextClearings);
   const { cacheHitRate, cache } = sessionCacheInspection(active.session, active.responseMetrics);
   const sharedMemoryStatus = projectMemoryStatusByCwd.get(safeRealPath(active.cwd));
   const memoryStatus = memoryStatusForInspection(active.memoryStatus, sharedMemoryStatus);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ContextEvent } from "@earendil-works/pi-coding-agent";
@@ -133,7 +133,7 @@ test("这段话进系统提示，不是每轮塞到消息末尾", () => {
 
 test("两个扩展一起跑，存档里留下的必须是原文", () => {
   // 光断言清单顺序不够——真正会出事的是「跑完之后存档里写了什么」。这一条按
-  // package.json 的顺序把两个扩展都装上，发一次真的 session_before_compact，然后去
+  // package.json 的顺序把两个扩展都装上，先准备，再确认压缩成功，最后去
   // 磁盘上读那份存档。2026-09-11 那条会话就是这里塌的：存档 12 万行里 9,815 行是
   // 占位符，模型回头去读，读回来满屏「[上下文已清理]」。
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -147,11 +147,13 @@ test("两个扩展一起跑，存档里留下的必须是原文", () => {
 
   // pi 的 runner 就是这么派发的：按扩展清单的顺序，一个一个 await 过去。
   const handlers: Array<(event: unknown, ctx: unknown) => unknown> = [];
+  const committed: Array<(event: unknown, ctx: unknown) => unknown> = [];
   const sessionFile = join(mkdtempSync(join(tmpdir(), "coilcoil-order-")), "s.jsonl");
   for (const path of order) {
     const pi = {
       on(event: string, handler: (event: unknown, ctx: unknown) => unknown) {
         if (event === "session_before_compact") handlers.push(handler);
+        if (event === "session_compact") committed.push(handler);
       },
       events: { emit: () => {} },
     };
@@ -176,6 +178,8 @@ test("两个扩展一起跑，存档里留下的必须是原文", () => {
   for (const handler of handlers) {
     handler({ preparation: { messagesToSummarize, turnPrefixMessages: [] } }, ctx);
   }
+  assert.equal(existsSync(transcriptPathFor(sessionFile)), false, "压缩成功前不可落盘");
+  for (const handler of committed) handler({}, ctx);
 
   // 交给 pi 去摘要的那一份，工具内容该清掉——这是另一个 bug 的修复，不能倒回去。
   const summarized = messagesToSummarize[1] as unknown as { content: Array<{ text: string }> };
@@ -189,10 +193,25 @@ test("两个扩展一起跑，存档里留下的必须是原文", () => {
   assert.doesNotMatch(archive, /上下文已清理/, "存档里一个占位符都不该有");
 });
 
+test("自动压缩取消或失败时不留下假存档", () => {
+  const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
+  contextTranscriptExtension({ on(event: string, handler: (event: unknown, ctx: unknown) => unknown) {
+    handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+  } } as never);
+  const sessionFile = join(mkdtempSync(join(tmpdir(), "coilcoil-cancel-")), "s.jsonl");
+  const ctx = { sessionManager: { getSessionFile: () => sessionFile } };
+  const before = handlers.get("session_before_compact")![0];
+  before({ preparation: { messagesToSummarize: messages() } }, ctx);
+  assert.equal(existsSync(transcriptPathFor(sessionFile)), false);
+  handlers.get("session_compact_failed")![0]({ aborted: true }, ctx);
+  handlers.get("session_compact")![0]({}, ctx);
+  assert.equal(existsSync(transcriptPathFor(sessionFile)), false, "取消后不能把暂存内容写进去");
+});
+
 test("存档扩展必须排在清理扩展前面", () => {
   // 两个扩展挂的是同一个 session_before_compact，拿到的是同一个
   // preparation.messagesToSummarize 数组，而清理那一层是就地改写它的。排在后面，
-  // 这里写进存档的就是清理后的那一份——而存档的全部意义正是「压缩丢掉的东西还能翻
+  // 这里暂存的就是清理后的那一份——而存档的全部意义正是「压缩丢掉的东西还能翻
   // 回来」。2026-09-11 那条会话的存档 12 万行里有 9,815 行是占位符，模型回头去读存
   // 档，读回来满屏「[上下文已清理]」。package.json 里的顺序就是执行顺序。
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -202,7 +221,7 @@ test("存档扩展必须排在清理扩展前面", () => {
   const transcript = order.indexOf("./extensions/context-transcript.ts");
   const clearing = order.indexOf("./extensions/context-clearing.ts");
   assert.ok(transcript >= 0 && clearing >= 0, "两个扩展都得在清单里");
-  assert.ok(transcript < clearing, "存档要先写，写的必须是没被清理过的原文");
+  assert.ok(transcript < clearing, "存档要先暂存没被清理过的原文");
 });
 
 test("还没压缩过就什么也不说", () => {

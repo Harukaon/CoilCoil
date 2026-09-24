@@ -134,6 +134,12 @@ export interface ModelProviderAuthState {
   error?: string;
 }
 
+/** A provider OAuth state plus a cursor for Agent-side await calls. */
+export interface ModelProviderAuthSnapshot {
+  state: ModelProviderAuthState;
+  revision: number;
+}
+
 export interface ModelCostConfiguration {
   input: number;
   output: number;
@@ -209,6 +215,44 @@ export interface ModelProviderConfigurationInput {
   apiKey?: string;
   /** Keep an existing redacted literal or expression from models.json. */
   preserveApiKeyReference?: boolean;
+}
+
+/**
+ * A partial provider edit, the way the `coilcoil` tool sends one.
+ *
+ * The settings panel always posts the whole draft back, because a form holds
+ * every field anyway. An Agent does not: it is told "把上下文改成 200k", and
+ * making it restate the entire model catalogue to do that is how models get
+ * silently deleted. So every field here is optional and means "leave it"; the
+ * runtime reads the current configuration and applies only what was sent.
+ */
+export interface ModelProviderPatchInput {
+  id: string;
+  name?: string;
+  baseUrl?: string;
+  api?: string;
+  oauth?: "radius";
+  headers?: Record<string, string>;
+  compat?: Record<string, unknown>;
+  authHeader?: boolean;
+  apiKeyReference?: string;
+  disabled?: boolean;
+  /** `models` in models.json replaces Pi's own catalog for this provider. */
+  replaceModels?: boolean;
+  /** Upserted by model id under `merge` (the default); the whole list under `replace`. */
+  models?: ModelProviderModelConfiguration[];
+  modelsMode?: "merge" | "replace";
+  removeModels?: string[];
+  modelOverrides?: ModelProviderConfiguration["modelOverrides"];
+  /** Explicitly preserve the existing models.json key/reference when no new one is supplied. */
+  preserveApiKeyReference?: boolean;
+  /** Literal key; stored in Pi's private auth store, never in models.json. */
+  apiKey?: string;
+  credential?: {
+    method: string;
+    values: Record<string, string>;
+    preserveFields?: string[];
+  };
 }
 
 export interface ModelProviderConfigurationSnapshot {
@@ -595,6 +639,17 @@ export interface SkillConfigurationSnapshot {
   customSkillPaths: string[];
   enableSkillCommands: boolean;
   skills: SkillEntry[];
+  /**
+   * Skills CoilCoil was told to hide (`!` in settings), files still on disk.
+   *
+   * They are deliberately kept out of `skills` — that list is "what this
+   * workspace offers" and the settings panel renders it directly. But hiding
+   * used to mean *forgetting*: a removed skill could no longer be found by
+   * path, so deleting it, re-enabling it, or reinstalling it all failed with
+   * 「未找到技能」 and the folder stayed on disk forever. Listing them here is
+   * what makes removal reversible.
+   */
+  removedSkills?: SkillEntry[];
   diagnostics: SkillDiagnostic[];
 }
 
@@ -676,6 +731,33 @@ export function promptDocumentText(document: PromptDocument | undefined): string
 
 export function promptDocumentHasContent(document: PromptDocument | undefined): boolean {
   return Boolean(document?.parts.some((part) => part.type === "browser-element" || part.text.trim()));
+}
+
+/** `/compact` 带的额外要求，没写就是空对象。 */
+export interface ManualCompactionCommand {
+  instructions?: string;
+}
+
+const MANUAL_COMPACTION_COMMAND = "compact";
+
+/**
+ * 认出一句话是不是 `/compact`。
+ *
+ * 放在协议包里，是因为两边都要用：输入框靠它决定这句话不该变成一条对话消息，
+ * 运行时靠它拦下所有客户端（桌面、远程浏览器）发来的同一句话。两边各写一份
+ * 正则，迟早会分家。全角斜杠也认：中文输入法不问自己就会打出它。
+ */
+export function manualCompactionCommand(prompt: string): ManualCompactionCommand | undefined {
+  const trimmed = prompt.trim();
+  const slash = trimmed[0];
+  if (slash !== "/" && slash !== "／") return undefined;
+  const rest = trimmed.slice(1);
+  if (rest.slice(0, MANUAL_COMPACTION_COMMAND.length).toLowerCase() !== MANUAL_COMPACTION_COMMAND) return undefined;
+  const tail = rest.slice(MANUAL_COMPACTION_COMMAND.length);
+  // `/compactify 一下` 是一句话，不是这条命令。
+  if (tail && !/^\s/.test(tail)) return undefined;
+  const instructions = tail.trim();
+  return instructions ? { instructions } : {};
 }
 
 /** A user prompt accepted by the runtime but not started by Pi yet. */
@@ -887,6 +969,8 @@ export interface ContextUsage {
   tokens: number | null;
   contextWindow: number;
   percent: number | null;
+  /** True when based on the rewritten request, not provider-reported usage. */
+  estimated?: boolean;
 }
 
 export interface TokenUsage {
@@ -1006,6 +1090,9 @@ export interface ContextClearingRecord {
   at: number;
   clearedResults: number;
   freedTokens: number;
+  /** Estimated size of the request after old tool results were removed. */
+  projectedTokens?: number;
+  contextWindow?: number;
 }
 
 export interface RuntimeInspectionSnapshot {
@@ -1036,6 +1123,8 @@ export interface RuntimeInspectionSnapshot {
   subagent?: SubagentConfiguration;
   /** 会话自动命名用哪个模型；空表示跟随会话当前模型。 */
   sessionNaming?: SessionNamingConfiguration;
+  /** 压缩和分支摘要用哪个模型；空就是会话当前的那个。 */
+  summarizationModel?: SummarizationModelConfiguration;
   capabilities: {
     editSystemPrompt: boolean;
     removeOriginalSessionItems: false;
@@ -1161,6 +1250,22 @@ export interface SessionNamingConfiguration {
 }
 
 export interface SessionNamingConfigurationInput {
+  model: string;
+}
+
+/**
+ * 上下文总结（压缩、回溯时的分支摘要）跑在哪个模型上。
+ *
+ * 空字符串表示跟随会话当前的模型。总结是一发独立的、反复发生的大请求，主对话跑在
+ * 贵模型上的时候，很多人愿意让它跑在便宜模型上。
+ */
+export interface SummarizationModelConfiguration {
+  model: string;
+  /** 配了但现在找不到（模型被删、凭证没了）：总结已经回退到会话模型在跑。 */
+  unavailable?: boolean;
+}
+
+export interface SummarizationModelConfigurationInput {
   model: string;
 }
 
@@ -1319,6 +1424,8 @@ export type RuntimeCommand =
   | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
   | { type: "get_subagent_configuration" }
   | { type: "get_session_naming_configuration" }
+  | { type: "get_summarization_model_configuration" }
+  | { type: "save_summarization_model_configuration"; input: SummarizationModelConfigurationInput }
   /**
    * 跑任务面板上的一条任务。
    *
@@ -1353,6 +1460,8 @@ export type RuntimeCommand =
   | { type: "approve_plan"; planId: string; target: PlanExecutionTarget; agent?: string }
   | { type: "reject_plan"; planId: string }
   | { type: "run_memory_now" }
+  /** 手动压缩上下文（`/compact`）；`instructions` 是用户对这份摘要的额外要求。 */
+  | { type: "run_compaction_now"; instructions?: string }
   | { type: "remove_original_session_item"; entryId: string }
   | { type: "stop_subagent"; id: string; background: boolean }
   | { type: "resume_subagent"; id: string }

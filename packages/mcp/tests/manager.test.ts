@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { McpServerConfiguration } from "@coilcoil/runtime-protocol";
 import { McpAuthCallbackServer } from "../src/auth-callback.ts";
 import { McpCredentialStore, credentialKey, defaultCredentialFile } from "../src/credential-store.ts";
-import { McpManager, authorizationCode, authorizationState } from "../src/manager.ts";
+import { McpManager, authorizationCode, authorizationState, coercePageId } from "../src/manager.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SMOKE_SERVER = resolve(here, "../../../scripts/fixtures/mcp-smoke-server.mjs");
@@ -324,4 +324,35 @@ test("停止按钮按得停一次 MCP 调用", async (t) => {
   const settled = assert.rejects(() => pending);
   setTimeout(() => controller.abort(), 50);
   await settled;
+});
+
+test("浏览器旧工具名命中别名直接转调", async (t) => {
+  // 历史会话里模型猜过 navigate/screenshot/type 等旧名，命中别名不该再撞 schema 墙。
+  const { manager: mcp } = manager([server({ name: "coilcoil-browser" })]);
+  t.after(() => mcp.close());
+  await mcp.connect("coilcoil-browser");
+  const seen: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  const connection = (mcp as unknown as { connectionFor(name: string): { callTool: (tool: string, args: Record<string, unknown>) => Promise<unknown> } }).connectionFor("coilcoil-browser");
+  const original = connection.callTool.bind(connection);
+  connection.callTool = async (tool: string, args: Record<string, unknown>) => {
+    seen.push({ tool, args });
+    return { ok: true };
+  };
+  try {
+    await mcp.callTool("coilcoil-browser", "navigate", { url: "https://example.com" });
+    await mcp.callTool("coilcoil-browser", "screenshot", {});
+    await mcp.callTool("coilcoil-browser", "snapshot", {});
+  } finally {
+    connection.callTool = original;
+  }
+  assert.deepEqual(seen.map((entry) => entry.tool), ["navigate_page", "take_screenshot", "take_snapshot"]);
+});
+
+test("pageId 字符串数字自愈成数字", () => {
+  // "1" → 1；转不掉的原样透出让 schema 报错，不吞错。
+  assert.deepEqual(coercePageId({ pageId: "1" }), { pageId: 1 });
+  assert.deepEqual(coercePageId({ pageId: " 2 " }), { pageId: 2 });
+  assert.deepEqual(coercePageId({ pageId: "abc" }), { pageId: "abc" });
+  assert.deepEqual(coercePageId({ pageId: 3 }), { pageId: 3 });
+  assert.deepEqual(coercePageId({}), {});
 });

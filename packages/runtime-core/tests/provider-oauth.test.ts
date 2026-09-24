@@ -59,8 +59,13 @@ test("provider OAuth is driven through serializable runtime events and responses
   const prompt = started.prompt;
   assert.equal(prompt?.type, "select");
   assert.equal(prompt?.type === "select" ? prompt.options[0]?.id : undefined, "device");
+  const beforeDevice = await runtime.getModelProviderOAuth(started.flowId);
+  const waitingForDevice = runtime.awaitModelProviderOAuth(started.flowId, beforeDevice.revision, 2_000);
 
   await runtime.respondModelProviderOAuth(started.flowId, prompt!.id, "device");
+  const deviceSnapshot = await waitingForDevice;
+  assert.equal(deviceSnapshot.state.status, "authorizing");
+  assert.ok(deviceSnapshot.revision > beforeDevice.revision);
   await tick();
   const deviceState = events.flatMap((event) => event.type === "model_provider_auth_updated" ? [event.state] : []).at(-1);
   assert.equal(deviceState?.status, "authorizing");
@@ -72,5 +77,7 @@ test("provider OAuth is driven through serializable runtime events and responses
   const authStates = events.flatMap((event) => event.type === "model_provider_auth_updated" ? [event.state] : []);
   assert.equal(authStates.at(-1)?.status, "cancelled");
   assert.equal(authStates.some((state) => state.status === "failed"), false);
+  const completed = await runtime.getModelProviderOAuth(started.flowId);
+  assert.equal(completed.state.status, "cancelled");
   await runtime.dispose();
 });

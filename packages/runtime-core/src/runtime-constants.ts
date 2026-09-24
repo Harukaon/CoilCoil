@@ -123,6 +123,23 @@ export const MCP_AGENT_CONFIG_CHANNEL = "coilcoil:mcp:agent-config:v1";
  */
 export const MCP_MANAGER_CHANNEL = "coilcoil:mcp:manager:v1";
 
+/**
+ * How the `coilcoil` setup tool reaches the runtime's configuration methods.
+ *
+ * Same direction as the subagent/plan RPC channels, and for the same reason:
+ * the extension only gets a `{emit, on}` wrapper, never the runtime object.
+ * The extension emits a request, the runtime answers on a per-request reply
+ * channel. The runtime installs its listener when the session is created, so
+ * it is in place before any tool call can ask.
+ *
+ * Answers run through the same methods the settings panel uses. Writing the
+ * file alone is not enough — the live session must be reloaded and the server
+ * actually connected — which is why the tool does not bash the config files
+ * itself.
+ */
+export const SETUP_RPC_REQUEST_CHANNEL = "coilcoil:setup:rpc:v1:request";
+export const SETUP_RPC_REPLY_PREFIX = "coilcoil:setup:rpc:v1:reply:";
+
 export const WORKFLOW_PURPOSE_FIELDS = ["purpose", "_auditPurpose", "__auditPurpose"] as const;
 
 export const IGNORED_DIRECTORIES = new Set([

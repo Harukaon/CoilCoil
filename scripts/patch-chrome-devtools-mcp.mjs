@@ -81,10 +81,18 @@ if (patchFile("build/src/tools/pages.js", [
   },
 ])) changedFiles.push("tools/pages.js");
 
-if (patchFile("build/src/tools/snapshot.js", [{
-  before: `        text: zod\n            .array(zod.string())\n            .min(1)\n            .describe('Non-empty list of texts. Resolves when any value appears on the page.'),`,
-  after: `        text: zod\n            .union([zod.string(), zod.array(zod.string()).min(1)])\n            .transform(value => typeof value === 'string' ? [value] : value)\n            .describe('Text or non-empty list of texts. Resolves when any value appears on the page.'),`,
-}])) changedFiles.push("tools/snapshot.js");
+if (patchFile("build/src/tools/snapshot.js", [
+  {
+    before: `        text: zod\n            .array(zod.string())\n            .min(1)\n            .describe('Non-empty list of texts. Resolves when any value appears on the page.'),`,
+    after: `        text: zod\n            .union([zod.string(), zod.array(zod.string()).min(1)])\n            .transform(value => typeof value === 'string' ? [value] : value)\n            .describe('Text or non-empty list of texts. Resolves when any value appears on the page.'),`,
+  },
+  {
+    // COILCOIL: wait_for 超时不再吞错：报错带上等了什么、等了多久，模型不用盲猜下一步。
+    before: `        await page.waitForTextOnPage(request.params.text, request.params.timeout);`,
+    after: `        try {\n            await page.waitForTextOnPage(request.params.text, request.params.timeout);\n        }\n        catch (error) {\n            throw new Error(\`WAIT_FOR_TIMEOUT: waited for \${JSON.stringify(request.params.text)} but it did not appear\${request.params.timeout ? \` within \${request.params.timeout}ms\` : ''}. Take a fresh snapshot to see what the page shows now.\`, { cause: error });\n        } // COILCOIL: wait_for`,
+    marker: "COILCOIL: wait_for",
+  },
+])) changedFiles.push("tools/snapshot.js");
 
 if (patchFile("build/src/tools/network.js", [
   {

@@ -187,6 +187,29 @@ test("stopping a session that is no longer streaming republishes the truth", asy
   assert.deepEqual(runState, { type: "run_state", running: false, aborting: false });
 });
 
+test("回溯会等待停止的底层 promise，避免和旧 run 的清理竞态", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-rewind-after-abort-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const { runtime, calls, session, active } = createSteerHarness(root);
+  session.messages = [{ role: "user", content: "已有消息" }];
+  session.navigateTree = async () => ({ cancelled: false });
+  (runtime as any).snapshot = async () => ({ });
+  (runtime as any).refreshRuntimeInspectionSources = async () => undefined;
+  let release!: () => void;
+  active.abortInFlight = new Promise<void>((resolve) => { release = resolve; });
+
+  let settled = false;
+  const rewind = runtime.rewindPrompt("entry-1", "修改后的提示词", undefined, "client-rewind").then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(settled, false);
+  assert.equal(calls.length, 0);
+
+  release();
+  await rewind;
+  assert.equal(settled, true);
+  assert.equal(calls[calls.length - 1]?.text, "修改后的提示词");
+});
+
 test("in goal mode a message joins the running turn instead of queueing", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-goal-steer-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));

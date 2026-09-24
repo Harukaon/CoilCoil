@@ -32,6 +32,7 @@ import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { ConfirmDialog } from "../../ui/dialog";
 import { copyText } from "../files/pathActions";
 import { collectRecentSessions, DEFAULT_RECENT_ROWS, loadRecentSectionCollapsed, saveRecentSectionCollapsed, visibleRecentSessions } from "./recentSessions";
+import { rendererPlatform } from "../../platform";
 import { dropSidebarSection, loadSidebarSectionOrder, saveSidebarSectionOrder, SIDEBAR_SECTION_LABELS, type SidebarSection } from "./sidebarSections";
 import { collectPinnedSessions, collapsedSessionLimit, conversationStatusKind, nextExpandedSessionLimit, SESSION_EXPANSION_BATCH, summarizeWorkspaceActivity, visibleProjectSessions, workspaceActivityLabel, type ConversationStatusKind, type PinnedSessionEntry } from "./sessionList";
 
@@ -644,7 +645,7 @@ export function WorkspaceSidebar({
           做法已经去掉：省下的那点高度换来的是「同一个按钮换了位置、也没了名字」，
           左上角看着像换了个界面。 */}
       <nav className="primary-nav">
-        <button className="nav-button nav-new" type="button" title="新建对话" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>{primaryModifierLabel(window.coilcoil.platform)}N</kbd></button>
+        <button className="nav-button nav-new" type="button" title="新建对话" disabled={!activeProject} onClick={() => onNewConversation()}><MessageSquarePlus size={16} strokeWidth={1.7} /><span>新建对话</span><kbd>{primaryModifierLabel(rendererPlatform())}N</kbd></button>
         <button className={`nav-button nav-skills ${skillsOpen ? "active" : ""}`} type="button" title="技能" onClick={onOpenSkills}><Sparkles size={16} strokeWidth={1.7} /><span>技能</span></button>
         <button className={`nav-button nav-memory ${memoryOpen ? "active" : ""}`} type="button" title="记忆" onClick={onOpenMemory}><BookOpen size={16} strokeWidth={1.7} /><span>记忆</span></button>
       </nav>

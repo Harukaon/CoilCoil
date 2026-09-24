@@ -112,7 +112,7 @@ export function WorkspaceStatus({
             <Popover.Content className="context-popover" side="top" align="end" sideOffset={7}>
               <strong>Token 使用情况</strong>
               <dl>
-                <div><dt>已占用</dt><dd>{formatTokens(contextUsage?.tokens)} / {formatTokens(contextUsage?.contextWindow)}</dd></div>
+                <div><dt>{contextUsage?.estimated ? "已占用（估算）" : "已占用"}</dt><dd>{formatTokens(contextUsage?.tokens)} / {formatTokens(contextUsage?.contextWindow)}</dd></div>
                 <div><dt>占用比例</dt><dd>{contextUsage?.percent === null || contextUsage?.percent === undefined ? "—" : `${contextUsage.percent.toFixed(1)}%`}</dd></div>
                 {tokenBreakdown ? <>
                   <div><dt>系统提示词</dt><dd>{formatTokens(tokenBreakdown.systemPrompt)}</dd></div>

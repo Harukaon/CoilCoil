@@ -29,6 +29,7 @@ import { WorkspaceStatus } from "../composer/WorkspaceStatus";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { BlobsLoader, OrbitLoader } from "../../ui/loaders";
 import { AgentTurnView, CompactionMarkView, MessageView, type ConversationTimelineItem } from "./ConversationTimeline";
+import { hasRunningCompaction } from "./buildConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
 import { nextScrollDownVisible } from "./scrollDownVisibility";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
@@ -200,6 +201,8 @@ export function ConversationPane({
   );
   const visibleTimeline = timeline.slice(timelineStart);
   const hasEarlierTimeline = timelineStart > 0;
+  // 压缩在跑时，底下那个常规转圈让给横线；普通对话照旧。
+  const compactionRunning = hasRunningCompaction(visibleTimeline);
 
   const updateScrollDownVisibility = useCallback((): void => {
     const viewport = timelineRef.current;
@@ -319,7 +322,7 @@ export function ConversationPane({
                 <MessageView
                   key={`user-${item.message.id}`}
                   message={item.message}
-                  disabled={running}
+                  disabled={running || snapshot?.aborting === true}
                   editing={editingMessageId === item.message.id}
                   project={project}
                   configuration={configuration}
@@ -347,7 +350,7 @@ export function ConversationPane({
                   renderPlan={(plan) => <PlanApprovalCard plan={plan} onApprove={onApprovePlan} onReject={onRejectPlan} />}
                 />
               ))}
-              {running ? <div className="agent-activity"><OrbitLoader size={13} /><span className="agent-activity-line">{activityLine}</span></div> : null}
+              {running && !compactionRunning ? <div className="agent-activity"><OrbitLoader size={13} /><span className="agent-activity-line">{activityLine}</span></div> : null}
             </div>
           ) : (
             <div className="empty-chat"><div className="empty-chat-mark"><span className="brand-icon" aria-hidden="true" /></div><h1>你想构建什么？</h1><p>{project ? `CoilCoil 已在 ${project.name} 中准备就绪。` : "打开项目以开始新的 Agent 会话。"}</p></div>

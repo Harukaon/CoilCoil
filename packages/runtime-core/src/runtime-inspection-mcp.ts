@@ -650,6 +650,13 @@ export abstract class RuntimeInspectionMcp extends RuntimeResourcesController {
     const normalizedName = name.trim();
     if (!normalizedName) throw new Error("缺少 MCP Server 名称。");
     const active = this.requireActive();
+    // A name nobody configured used to be accepted in silence: the set grew an
+    // entry that matched no server, the caller was told nothing, and the list
+    // afterwards looked exactly as before. Refusing is the only honest answer.
+    const known = await this.getMcpStatus();
+    if (!known.servers.some((server) => server.name === normalizedName)) {
+      throw new Error(`MCP Server 不存在：${normalizedName}`);
+    }
     this.mcpManager().setSessionEnabled(normalizedName, enabled);
     active.mcpStatus = await this.getMcpStatus();
     const inspection = this.runtimeInspection(active);

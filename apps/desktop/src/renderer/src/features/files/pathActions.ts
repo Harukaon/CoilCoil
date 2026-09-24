@@ -1,9 +1,10 @@
 import { fileManagerLabel } from "../../../../shared/platform-labels";
 import { toastError, toastSuccess } from "../../ui/toast";
+import { rendererPlatform } from "../../platform";
 
 /** "在访达中显示" on macOS, and the matching wording elsewhere. */
 export function revealLabel(): string {
-  return `在${fileManagerLabel(window.coilcoil.platform)}中显示`;
+  return `在${fileManagerLabel(rendererPlatform())}中显示`;
 }
 
 /**

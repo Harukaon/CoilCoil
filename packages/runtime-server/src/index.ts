@@ -533,6 +533,10 @@ export class RuntimeServer {
         return runtime.getSubagentConfiguration();
       case "get_session_naming_configuration":
         return runtime.getSessionNamingConfiguration();
+      case "get_summarization_model_configuration":
+        return runtime.getSummarizationModelConfiguration();
+      case "save_summarization_model_configuration":
+        return runtime.saveSummarizationModelConfiguration(command.input);
       case "save_session_naming_configuration":
         return runtime.saveSessionNamingConfiguration(command.input);
       case "save_subagent_configuration":
@@ -565,6 +569,8 @@ export class RuntimeServer {
         return runtime.rejectPlan(command.planId);
       case "run_memory_now":
         return runtime.runMemoryNow();
+      case "run_compaction_now":
+        return runtime.compactNow(command.instructions);
       case "remove_original_session_item":
         return runtime.removeOriginalSessionItem(command.entryId);
       case "stop_subagent":

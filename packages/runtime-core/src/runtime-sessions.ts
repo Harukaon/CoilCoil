@@ -53,7 +53,9 @@ import {
   SUBAGENT_ACTIVITY_CHANNEL,
   projectMemoryStatusByCwd,
 } from "./runtime-constants.js";
+import { installSetupRpc } from "./runtime-setup-rpc.js";
 import { contextClearingRecord } from "./runtime-state.js";
+import { sessionUsage } from "./session-values.js";
 import { isRecord } from "./runtime-utils.js";
 import { installCompactionSettings } from "./compaction-settings.js";
 import { RuntimeMcpConfig } from "./runtime-mcp-config.js";
@@ -79,6 +81,10 @@ import {
 } from "./runtime-utils.js";
 import { rewriteSessionHeaderCwd } from "./session-relocation.js";
 import { systemPromptLayerFiles } from "./system-prompt-layers.js";
+import {
+  SESSION_TITLE_MANUAL_ENTRY_TYPE,
+  sessionTitleMarkers,
+} from "./session-title.js";
 
 export abstract class RuntimeSessions extends RuntimeMcpConfig {
   private readonly sessionListings = new SessionListingCache<SessionListEntry>();
@@ -226,10 +232,16 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     const { resolvedCwd, resolvedSession } = await this.requireProjectSession(cwd, sessionPath);
     const activeFile = this.active?.session.sessionFile ? safeRealPath(this.active.session.sessionFile) : undefined;
     if (activeFile && activeFile === safeRealPath(resolvedSession)) {
-      this.active!.session.setSessionName(nextName);
+      const active = this.active!;
+      active.titleManuallySet = true;
+      active.titlePending = false;
+      active.session.setSessionName(nextName);
+      active.session.sessionManager.appendCustomEntry(SESSION_TITLE_MANUAL_ENTRY_TYPE, { version: 1 });
       this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
     } else {
-      SessionManager.open(resolvedSession, this.sessionDir).appendSessionInfo(nextName);
+      const session = SessionManager.open(resolvedSession, this.sessionDir);
+      session.appendSessionInfo(nextName);
+      session.appendCustomEntry(SESSION_TITLE_MANUAL_ENTRY_TYPE, { version: 1 });
     }
     return this.listSessions(resolvedCwd);
   }
@@ -404,6 +416,14 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       pendingContextClearings = [...pendingContextClearings, next].slice(-MAX_CONTEXT_CLEARINGS);
       if (!installedActive) return;
       installedActive.contextClearings = pendingContextClearings;
+      const usage = sessionUsage(installedActive.session, installedActive.contextClearings);
+      this.emitEvent({
+        type: "metrics_updated",
+        responseMetrics: installedActive.responseMetrics,
+        responseMetricsHistory: installedActive.responseMetricsHistory,
+        contextUsage: usage.contextUsage,
+        tokenUsage: usage.tokenUsage,
+      });
       this.publishRuntimeInspection(installedActive);
     });
     // 只进日志的两条：一条记「交给 pi 去摘要的那一段瘦了多少」，一条记「到线了却
@@ -608,6 +628,10 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       planApproval: reconstructed.planApproval ?? pendingPlanApproval,
       refreshedAt: Date.now(),
     };
+    const titleMarkers = sessionTitleMarkers(created.session.sessionManager.getEntries());
+    // Older sessions have no marker. An existing persisted name is still user-owned
+    // for safety; only a truly unnamed session may enter automatic naming.
+    const titleManuallySet = titleMarkers.titleManuallySet || Boolean(created.session.sessionManager.getSessionName()?.trim());
     const active: ActiveSession = {
       cwd,
       session: created.session,
@@ -627,6 +651,8 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       steeringMessages: [],
       promptDrainInProgress: false,
       nextTimelineOrder: reconstructed.nextTimelineOrder,
+      titleAttempted: titleMarkers.titleAttempted,
+      titleManuallySet,
       toolRunIds: reconstructed.toolRunIds,
       responseMetrics: reconstructed.responseMetrics,
       responseMetricsHistory: reconstructed.responseMetricsHistory,
@@ -641,6 +667,12 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     };
     installedActive = active;
     this.active = active;
+    // 总结跑在哪个模型上和对话是两件事；在第一次压缩之前就得就位。
+    await this.applySummarizationModel(active);
+    // The `coilcoil` setup tool asks over this bus; installed here so it is
+    // in place before any tool call, and per-session so a late request after
+    // a switch answers for nobody. Every answer runs the panel's own method.
+    installSetupRpc(this, eventBus, () => { this.requireActive(); });
     active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
     eventBus.on(SUBAGENT_ACTIVITY_CHANNEL, (raw) => {
       if (this.active !== active) return;

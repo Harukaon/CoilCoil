@@ -9,9 +9,10 @@ import type {
   SessionSnapshot,
 } from "@coilcoil/runtime-protocol";
 import { carriesPaths, droppedPaths, quotePath } from "./pathInsert";
-import { imageDataUrl } from "./promptImages";
 import { ModelPicker } from "./ModelPicker";
-import { PromptEditor, type PromptEditorHandle } from "./PromptEditor";
+import type { PromptEditorHandle } from "./PromptEditor";
+import { PromptImagePreview } from "./PromptImagePreview";
+import { TiptapPromptEditor } from "./TiptapPromptEditor";
 
 export type ComposerVariant = "footer" | "inline";
 
@@ -148,7 +149,7 @@ export function ConversationComposer({
         <div className="composer-images">
           {images.map((image) => (
             <figure key={image.id ?? image.data.slice(0, 24)} title={image.name}>
-              <img src={imageDataUrl(image)} alt={image.name ?? "粘贴的图片"} />
+              <PromptImagePreview image={image} alt={image.name ?? "粘贴的图片"} className="composer-image-preview" />
               <button type="button" aria-label="移除图片" onClick={() => onImagesChange((current) => current.filter((item) => item !== image))}>
                 <X size={11} />
               </button>
@@ -156,18 +157,13 @@ export function ConversationComposer({
           ))}
         </div>
       ) : null}
-      <PromptEditor
-        ref={inputRef}
+      {/* 主输入框和历史消息编辑态共用同一套 Tiptap 文档与键盘行为。 */}
+      <TiptapPromptEditor
+        ref={inputRef as never}
         document={document}
         onChange={onDocumentChange}
         ariaLabel={inline ? "编辑历史消息" : "发送消息给 CoilCoil"}
-        placeholder={
-          inline
-            ? "编辑历史消息…"
-            : project
-              ? (running ? (goalActive ? "消息会介入当前轮次…" : "消息将排队发送…") : "让 CoilCoil 处理这个项目…")
-              : "请先打开项目"
-        }
+        placeholder={inline ? "编辑历史消息…" : "让 CoilCoil 处理这个项目…"}
         disabled={!project || loading || startingSession || modelChanging}
         onPasteImages={onPaste}
         onCompositionStart={onCompositionStart}

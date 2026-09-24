@@ -7,6 +7,7 @@ import {
   INITIAL_ONBOARDING,
   isLastStep,
   ONBOARDING_STEPS,
+  onboardingStepsFor,
   PERMISSION_TOPICS,
   type OnboardingProgress,
   stepIndex,
@@ -32,6 +33,13 @@ test("任何一步都走得下去，引导不会把人卡住", () => {
   }
   // 最后一步之后没有下一步：真正的「完成」由界面调 onDone，不是再 advance 一次。
   assert.deepEqual(advance(progress), progress);
+});
+
+test("Windows 和 Linux 不展示无效的 macOS 权限页", () => {
+  assert.deepEqual([...onboardingStepsFor("win32")], ["intro", "model", "agents", "memory", "integrations", "workspace"]);
+  assert.deepEqual([...onboardingStepsFor("linux")], ["intro", "model", "agents", "memory", "integrations", "workspace"]);
+  assert.equal(isLastStep("integrations", onboardingStepsFor("win32")), false);
+  assert.equal(isLastStep("workspace", onboardingStepsFor("win32")), true);
 });
 
 test("权限页只是介绍：四项彼此独立，每项都要说清用途", () => {

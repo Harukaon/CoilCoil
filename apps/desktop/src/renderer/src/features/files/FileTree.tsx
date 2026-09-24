@@ -5,6 +5,7 @@ import type { DragEvent as ReactDragEvent } from "react";
 import type { FileNode } from "@coilcoil/runtime-protocol";
 import { fileManagerLabel, trashLabel } from "../../../../shared/platform-labels";
 import { toastError } from "../../ui/toast";
+import { rendererPlatform } from "../../platform";
 import { quotePath, COILCOIL_PATH_TYPE } from "../composer/pathInsert";
 import { absoluteProjectPath, relativeProjectPath } from "./filePaths";
 
@@ -37,9 +38,9 @@ function FileContextMenu({ node, root, onOpenAsText, onTrashed }: {
         <ContextMenu.Separator className="file-context-separator" />
         {node.kind === "file" ? <ContextMenu.Item className="conversation-context-item" onSelect={() => onOpenAsText(node)}>作为文本尝试预览</ContextMenu.Item> : null}
         {node.kind === "file" ? <ContextMenu.Separator className="file-context-separator" /> : null}
-        <ContextMenu.Item className="conversation-context-item" onSelect={() => void run("reveal")}>在{fileManagerLabel(window.coilcoil.platform)}中显示</ContextMenu.Item>
+        <ContextMenu.Item className="conversation-context-item" onSelect={() => void run("reveal")}>在{fileManagerLabel(rendererPlatform())}中显示</ContextMenu.Item>
         <ContextMenu.Separator className="file-context-separator" />
-        <ContextMenu.Item className="conversation-context-item file-context-danger" onSelect={() => void run("trash")}>移到{trashLabel(window.coilcoil.platform)}</ContextMenu.Item>
+        <ContextMenu.Item className="conversation-context-item file-context-danger" onSelect={() => void run("trash")}>移到{trashLabel(rendererPlatform())}</ContextMenu.Item>
       </ContextMenu.Content>
     </ContextMenu.Portal>
   );

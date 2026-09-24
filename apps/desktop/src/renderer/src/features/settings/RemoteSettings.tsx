@@ -2,18 +2,19 @@ import { Copy, LoaderCircle, RefreshCw, Smartphone, Trash2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react";
 import type { RemoteAccessInput, RemoteAccessState, RemoteTunnelMode } from "../../../../shared/desktop-api";
 import { toastError, toastSuccess } from "../../ui/toast";
+import { platformComputerLabel, rendererPlatform } from "../../platform";
 
 const TUNNEL_MODES: { id: RemoteTunnelMode; name: string; summary: string; available: boolean }[] = [
   {
     id: "reverse-proxy",
     name: "自有服务器反代",
-    summary: "Mac 主动连到你自己的服务器，服务器用一个域名对外提供 HTTPS。手机上什么都不用装。",
+    summary: "主机主动连到你自己的服务器，服务器用一个域名对外提供 HTTPS。手机上什么都不用装。",
     available: true,
   },
   {
     id: "tailscale",
     name: "Tailscale 私有网络",
-    summary: "Mac 和手机加入同一个私有网络直连，不需要服务器、域名和证书。手机上要装 Tailscale 并登录同一个账号。",
+    summary: "主机和手机加入同一个私有网络直连，不需要服务器、域名和证书。手机上要装 Tailscale 并登录同一个账号。",
     available: true,
   },
 ];
@@ -77,6 +78,7 @@ export function RemoteSettings(): React.JSX.Element {
     return <div className="remote-settings"><p className="remote-lead">正在读取远程控制状态…</p></div>;
   }
 
+  const hostLabel = platformComputerLabel(rendererPlatform());
   const mode = TUNNEL_MODES.find((candidate) => candidate.id === state.mode) ?? TUNNEL_MODES[0];
   // Tailscale needs no address from the user: the tailnet address plus the port
   // is the whole answer, so asking for one would only be a field to get wrong.
@@ -89,9 +91,9 @@ export function RemoteSettings(): React.JSX.Element {
       <section className="remote-section">
         <div className="remote-switch-row">
           <div>
-            <h3>用手机遥控这台 Mac</h3>
+            <h3>用手机遥控这台 {hostLabel}</h3>
             <p className="remote-lead">
-              手机上打开的是同一套界面、同一个会话，所有活儿仍然在这台 Mac 上执行。同一时间只允许一台设备接管。
+              手机上打开的是同一套界面、同一个会话，所有活儿仍然在这台 {hostLabel} 上执行。同一时间只允许一台设备接管。
             </p>
           </div>
           <button
@@ -145,7 +147,7 @@ export function RemoteSettings(): React.JSX.Element {
               </button>
             </div>
           ) : mode.id === "tailscale" ? (
-            <p className="remote-hint">还没检测到这台 Mac 的 Tailscale 地址。装好 Tailscale 并登录后，地址会自动出现在这里。</p>
+            <p className="remote-hint">还没检测到这台 {hostLabel} 的 Tailscale 地址。装好 Tailscale 并登录后，地址会自动出现在这里。</p>
           ) : (
             <p className="remote-hint">还没填访问地址，在下面「连接方式」里填上之后这里会显示，方便复制到手机。</p>
           )}
@@ -155,7 +157,7 @@ export function RemoteSettings(): React.JSX.Element {
       <section className="remote-section">
         <h3>连接方式</h3>
         <p className="remote-lead">
-          两种都是内网穿透，区别在于谁来转发。走服务器时入口只监听本机回环，由隧道送出去；走 Tailscale 时直接监听这台 Mac 的私有网络地址，手机在同一个私有网络里直连。
+          两种都是内网穿透，区别在于谁来转发。走服务器时入口只监听本机回环，由隧道送出去；走 Tailscale 时直接监听这台 {hostLabel} 的私有网络地址，手机在同一个私有网络里直连。
         </p>
         <div className="remote-modes">
           {TUNNEL_MODES.map((candidate) => (
@@ -182,10 +184,10 @@ export function RemoteSettings(): React.JSX.Element {
           <div className="remote-steps">
             <h4>Tailscale 怎么用</h4>
             <ol>
-              <li>Mac 和手机各装一个 Tailscale，登录同一个账号。</li>
-              <li>切到这个模式并开启远程控制，CoilCoil 会自动监听这台 Mac 的私有网络地址。</li>
+              <li>{hostLabel} 和手机各装一个 Tailscale，登录同一个账号。</li>
+              <li>切到这个模式并开启远程控制，CoilCoil 会自动监听这台 {hostLabel} 的私有网络地址。</li>
               <li>
-                手机浏览器打开 <code>http://{state.tailscaleAddress ?? "<Mac 的 Tailscale 地址>"}:{state.port}</code>
+                手机浏览器打开 <code>http://{state.tailscaleAddress ?? `<${hostLabel} 的 Tailscale 地址>`}:{state.port}</code>
                 {state.tailscaleAddress ? null : "（当前没检测到 Tailscale 地址，装好并登录后回到这里）"}
               </li>
             </ol>
@@ -197,7 +199,7 @@ export function RemoteSettings(): React.JSX.Element {
             <ol>
               <li>准备一个解析到那台服务器的域名。</li>
               <li>在服务器上装好 nginx 或 Caddy，加一个把该域名反代到 <code>127.0.0.1:{state.port}</code> 的站点，并申请证书。转发配置必须带 WebSocket 升级，否则手机上的会话不会实时更新。</li>
-              <li>在这台 Mac 上开一条常驻的反向隧道，把本机的 {state.port} 端口送到服务器的同一端口。仓库里的 <code>scripts/remote/mac-tunnel.sh install</code> 会把它装成开机自启、断线自动重连。</li>
+              <li>在这台 {hostLabel} 上开一条常驻的反向隧道，把本机的 {state.port} 端口送到服务器的同一端口。仓库里的 <code>scripts/remote/mac-tunnel.sh install</code> 会把它装成开机自启、断线自动重连。</li>
             </ol>
             <p className="remote-hint">仓库 <code>scripts/remote/</code> 下有可直接套用的 nginx 配置模板和隧道脚本。</p>
           </div>
@@ -236,7 +238,7 @@ export function RemoteSettings(): React.JSX.Element {
       <section className="remote-section">
         <h3>备忘</h3>
         <p className="remote-lead">
-          自己记东西的地方：隧道命令、域名、服务器上改过什么。内容只存在这台 Mac 上，跟着远程设置一起保存，谁都不会读它。
+          自己记东西的地方：隧道命令、域名、服务器上改过什么。内容只存在这台 {hostLabel} 上，跟着远程设置一起保存，谁都不会读它。
         </p>
         <textarea
           className="remote-notes"
@@ -258,7 +260,7 @@ export function RemoteSettings(): React.JSX.Element {
       <section className="remote-section">
         <h3>账号密码</h3>
         <p className="remote-lead">
-          配对码用过一次就失效，适合站在 Mac 前面配对。账号密码则可以随时随地登录，换手机、清了浏览器数据都不用再回到 Mac 上看码。两种方式都能用。
+          配对码用过一次就失效，适合站在 {hostLabel} 前面配对。账号密码则可以随时随地登录，换手机、清了浏览器数据都不用再回到 {hostLabel} 上看码。两种方式都能用。
         </p>
         <form
           className="remote-form"
@@ -309,7 +311,7 @@ export function RemoteSettings(): React.JSX.Element {
       <section className="remote-section">
         <h3>休眠策略</h3>
         <p className="remote-lead">
-          Mac 睡着了就没人回应手机。开启后 CoilCoil 会声明系统不得进入闲置休眠——macOS 不需要额外授权，屏幕仍然可以照常息屏。
+          {hostLabel} 睡着了就没人回应手机。开启后 CoilCoil 会声明系统不得进入闲置休眠——系统不需要额外授权，屏幕仍然可以照常息屏。
         </p>
         <label className="remote-check">
           <input

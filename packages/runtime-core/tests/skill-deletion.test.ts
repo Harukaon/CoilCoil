@@ -11,7 +11,7 @@ interface DeleteSkillRuntime {
   agentDir: string;
   mcpCwd(cwd?: string): string;
   getSkillConfiguration(cwd?: string): Promise<SkillConfigurationSnapshot>;
-  skillSettingsManager(cwd?: string): { getSkillPaths(): string[]; setSkillPaths(paths: string[]): void };
+  skillSettingsManager(cwd?: string): { getSkillPaths(): string[]; setSkillPaths(paths: string[]): void; flush(): Promise<void> };
   reloadActiveSessionResources(label?: string): void;
   updateActiveSkillConfiguration(cwd: string, snapshot: SkillConfigurationSnapshot): void;
   removeSkill(filePath: string, cwd?: string): Promise<SkillConfigurationSnapshot>;
@@ -73,6 +73,8 @@ test("deleteSkill removes a managed user skill and its stale override", async (c
   runtime.skillSettingsManager = () => ({
     getSkillPaths: () => paths,
     setSkillPaths: (next) => { paths = next; },
+    // Settings writes are queued; every write waits for this before re-reading.
+    flush: async () => undefined,
   });
   runtime.reloadActiveSessionResources = () => undefined;
   runtime.updateActiveSkillConfiguration = (_resolvedCwd, next) => { current = next; };
@@ -108,6 +110,7 @@ test("removeSkill removes an Agents skill import without deleting its source", a
       paths = next;
       current = snapshot(agentDir, []);
     },
+    flush: async () => undefined,
   });
   runtime.reloadActiveSessionResources = () => undefined;
   runtime.updateActiveSkillConfiguration = (_resolvedCwd, next) => { current = next; };

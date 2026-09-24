@@ -21,8 +21,11 @@ import {
 import { agentRetryRuntimeEvent } from "./runtime-agent-retry.js";
 import {
   buildSessionTitlePrompt,
+  claimSessionTitleAttempt,
   sanitizeSessionTitle,
+  SESSION_TITLE_ATTEMPT_ENTRY_TYPE,
   SESSION_TITLE_SYSTEM_PROMPT,
+  sessionTitleMarkers,
 } from "./session-title.js";
 import { beginStreamingToolRun } from "./streaming-tool-call.js";
 import {
@@ -226,7 +229,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           this.publishRuntimeInspection(active);
           break;
         case "entry_appended":
-          if (event.entry.type === "message" && isRecord(event.entry.message) && event.entry.message.role === "user") {
+          if (event.entry.type === "message" && event.entry.message.role === "user") {
             const correlatedId = active.activeUserId ?? active.lastUserId;
             if (correlatedId) active.messageIds.set(event.entry.message, correlatedId);
             if (correlatedId && this.persistPromptDocument(active, event.entry.id, correlatedId)) {
@@ -234,13 +237,14 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             }
             active.lastUserId = undefined;
           }
-          if (event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE) {
-            const metrics = responseMetricsFromData(event.entry.data);
+          if ((event.entry.type === "custom" && event.entry.customType === RESPONSE_METRICS_ENTRY_TYPE)
+            || (event.entry.type === "message" && event.entry.message.role === "assistant")) {
+            const metrics = event.entry.type === "custom" ? responseMetricsFromData(event.entry.data) : undefined;
             if (metrics) {
               active.responseMetrics = metrics;
               active.responseMetricsHistory = [...active.responseMetricsHistory, metrics].slice(-60);
             }
-            const usage = sessionUsage(active.session);
+            const usage = sessionUsage(active.session, active.contextClearings);
             // Pi emits this custom entry from message_end immediately before it
             // persists the assistant message. Include that just-finished response
             // so the UI is live without double-counting later session snapshots.
@@ -517,37 +521,22 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     }
   }
 
-  /**
-   * Deliver a stop that was pressed before this run existed.
-   *
-   * The window Pi spends preparing a prompt has no run to abort: summarization
-   * owns it, `isStreaming` still reads false, and the prompt is sent the moment
-   * the summary ends. A stop taken there is remembered instead of dropped, and
-   * lands here on `agent_start`, which Pi awaits before it sends anything to
-   * the model — so the turn the user stopped never reaches the provider.
-   */
-  /**
-   * 第一轮跑完后单独问一次模型：这段对话该叫什么。
-   *
-   * 标题原来就是第一句话截断，一屏侧栏全是「继续」「帮我看一下」，等于没有标题。
-   * 这里发一次独立请求——不是主对话里的工具调用，所以不占记录、不会因为模型
-   * 不配合而要重发，也不会把命名变成两个来回。
-   *
-   * 整个过程是尽力而为：拿不到、模型没配好、请求失败，都保留兜底的那个截断标题，
-   * 绝不把错误抛给用户——命名失败不该影响这次对话。
-   */
+  /** Name the first completed turn once, without blocking the conversation. */
   private async nameSessionFromFirstTurn(active: ActiveSession): Promise<void> {
-    // 只试一次。失败了也不留着标记，否则每一轮结束都会再试一遍。
-    active.titlePending = false;
+    // Claim synchronously before the first await: duplicate settle events must not
+    // create a second request, even while the first naming request is in flight.
+    if (!claimSessionTitleAttempt(active)) return;
     try {
+      // Persist the claim before doing any model work so a reopened session cannot retry it.
+      active.session.sessionManager.appendCustomEntry(SESSION_TITLE_ATTEMPT_ENTRY_TYPE, { version: 1 });
       const messages = active.session.messages;
-      const firstUser = messages.find((message) => isRecord(message) && message.role === "user");
+      const firstUser = messages.find((message) => message.role === "user");
       if (!firstUser) return;
-      const firstAssistant = messages.find((message) => isRecord(message) && message.role === "assistant");
-      const userText = contentParts(isRecord(firstUser) ? firstUser.content : undefined).text;
+      const firstAssistant = messages.find((message) => message.role === "assistant");
+      const userText = contentParts(firstUser.content).text;
       if (!userText.trim()) return;
       const assistantText = firstAssistant
-        ? contentParts(isRecord(firstAssistant) ? firstAssistant.content : undefined).text
+        ? contentParts(firstAssistant.content).text
         : "";
 
       const modelRuntime = await this.ready();
@@ -577,7 +566,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
         this.log.info("session-title", "unusable_reply", { preview: contentParts(reply.content).text.slice(0, 120) });
         return;
       }
-      if (this.active !== active) return;
+      // Manual naming wins even if it happened while this request was in flight.
+      const manualTitlePersisted = sessionTitleMarkers(active.session.sessionManager.getEntries()).titleManuallySet;
+      if (this.active !== active || active.titleManuallySet || manualTitlePersisted) return;
       active.session.setSessionName(title);
       this.log.info("session-title", "named", { title, model: `${model.provider}/${model.id}` });
       void this.listSessions(active.cwd);
@@ -588,6 +579,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
     }
   }
 
+  /** Apply a stop requested while prompt preparation was still in flight. */
   private applyPendingAbort(active: ActiveSession): void {
     if (!active.abortOnStart) return;
     active.abortOnStart = false;
@@ -617,8 +609,8 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
       await this.applyPendingSessionModel(active);
       const prepared = await preparePromptImages(images);
       const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-      const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
-      if (!hasUserMessage) {
+      const hasUserMessage = active.session.messages.some((message) => message.role === "user");
+      if (!hasUserMessage && !active.titleManuallySet && !active.titleAttempted) {
         // 先用第一句话兜底，第一轮结束后再让模型起个像样的名字。
         active.session.setSessionName(titleFromText(prompt));
         active.titlePending = true;
@@ -677,9 +669,10 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
 
   protected async drainPromptQueue(active: ActiveSession): Promise<void> {
     if (this.active !== active || active.promptQueue.length === 0) return;
-    // Something already owns starting the next item; a second start would
-    // duplicate it.
-    if (active.promptDrainInProgress || this.promptStarting) return;
+    // Something already owns starting the next item, or a manual compaction is
+    // rewriting the history it would be added to (that one wakes the queue
+    // itself once it settles). Either way, not from here.
+    if (active.promptDrainInProgress || this.promptStarting || active.compacting) return;
     if (active.session.isStreaming) {
       this.scheduleDrainRetry(active);
       return;

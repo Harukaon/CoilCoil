@@ -9,6 +9,7 @@ import type {
   RuntimeSummaryEvent,
   SessionNamingConfiguration,
   SubagentConfiguration,
+  SummarizationModelConfiguration,
   SubagentProfileModels,
   TokenUsage,
 } from "@coilcoil/runtime-protocol";
@@ -136,6 +137,9 @@ export function RuntimePanel({
   const [subagentModels, setSubagentModels] = useState<SubagentProfileModels>(inspection?.subagent?.models ?? emptySubagentModels());
   const [namingModel, setNamingModel] = useState(inspection?.sessionNaming?.model ?? "");
   const [namingSaving, setNamingSaving] = useState(false);
+  const [summaryModel, setSummaryModel] = useState(inspection?.summarizationModel?.model ?? "");
+  const [summarySaving, setSummarySaving] = useState(false);
+  const summaryModelUnavailable = inspection?.summarizationModel?.unavailable === true;
   const [subagentSaving, setSubagentSaving] = useState(false);
   const canEditSystemPrompt = inspection?.capabilities.editSystemPrompt !== false;
   const summaries = inspection?.summaryEvents ?? [];
@@ -161,6 +165,11 @@ export function RuntimePanel({
   useEffect(() => {
     if (!canEditSystemPrompt) setEditingPrompt(false);
   }, [canEditSystemPrompt]);
+
+  // 总结模型是全局配置：另一个窗口改了，这边该跟着变，而不是拿着挂载时的那份不放。
+  useEffect(() => {
+    setSummaryModel(inspection?.summarizationModel?.model ?? "");
+  }, [inspection?.summarizationModel?.model]);
 
   useEffect(() => {
     setSubagentModels(inspection?.subagent?.models ?? emptySubagentModels());
@@ -248,6 +257,25 @@ export function RuntimePanel({
       toastSuccess(result.model ? `会话命名将使用 ${result.model}` : "会话命名已改回跟随会话当前模型");
     } finally {
       setNamingSaving(false);
+    }
+  };
+
+  const saveSummaryModel = async (): Promise<void> => {
+    setSummarySaving(true);
+    try {
+      const result = await request<SummarizationModelConfiguration>("summarization-model", {
+        type: "save_summarization_model_configuration",
+        input: { model: summaryModel.trim() },
+      });
+      if (!result) return;
+      setSummaryModel(result.model);
+      toastSuccess(result.model
+        ? (result.unavailable
+          ? `已保存 ${result.model}，但它当前不可用，总结暂时还用会话模型`
+          : `上下文总结将使用 ${result.model}`)
+        : "上下文总结已改回跟随会话当前模型");
+    } finally {
+      setSummarySaving(false);
     }
   };
 
@@ -442,6 +470,59 @@ export function RuntimePanel({
             onClick={() => { void saveNamingModel(); }}
           >
             {namingSaving ? <LoaderCircle className="spin" size={12} /> : <Save size={12} />}保存
+          </button>
+        </div>
+      </RuntimeSection>
+
+      <RuntimeSection
+        title="上下文总结"
+        icon={<History size={14} />}
+        badge={summaryModel ? (summaryModelUnavailable ? `${summaryModel}（不可用）` : summaryModel) : "跟随会话模型"}
+      >
+        <p className="runtime-section-footnote">
+          上下文压缩和回溯时的分支总结，都是单独的一发请求，而且把大半个会话都发了出去。
+          不配就跟会话当前的模型，主对话跑在贵模型上时，这几发也一样贵；指定一个便宜模型只换总结，
+          不影响对话本身。模型窗口太小的话这一发可能发不出去，选的时候留意。
+        </p>
+        {summaryModelUnavailable ? (
+          <p className="runtime-section-footnote">
+            配的 <strong>{summaryModel}</strong> 现在找不到（模型被删、或者凭证没了），总结已经回退到会话模型在跑。
+            回退而不是报错，是因为压缩一旦停下来，上下文就会一路涨到溢出。
+          </p>
+        ) : null}
+        <label className="runtime-subagent-model-row">
+          <span><strong>总结用的模型</strong><small>压缩与分支总结共用</small></span>
+          <Select
+            value={summaryModel}
+            options={[
+              { value: "", label: "跟随会话当前模型", detail: "不额外指定" },
+              ...(summaryModel && !availableModels.some((model) => `${model.provider}/${model.id}` === summaryModel)
+                ? [{ value: summaryModel, label: summaryModel, detail: "当前不可用", disabled: true }]
+                : []),
+              ...availableModels.map((model) => ({
+                value: `${model.provider}/${model.id}`,
+                label: model.name,
+                // 窗口大小得看得见：总结要把大半个会话塞进去，选了个小窗口模型就是白配。
+                detail: model.contextWindow
+                  ? `${model.providerName} · ${tokenNumber(model.contextWindow)} 窗口`
+                  : `${model.providerName} · ${model.provider}/${model.id}`,
+                keywords: `${model.providerName} ${model.provider} ${model.id}`,
+              })),
+            ]}
+            onChange={setSummaryModel}
+            ariaLabel="上下文总结使用的模型"
+            className="runtime-subagent-select"
+            searchable
+          />
+        </label>
+        <div className="runtime-actions">
+          <button
+            className="primary"
+            type="button"
+            disabled={summarySaving || !runtimeId}
+            onClick={() => { void saveSummaryModel(); }}
+          >
+            {summarySaving ? <LoaderCircle className="spin" size={12} /> : <Save size={12} />}保存
           </button>
         </div>
       </RuntimeSection>

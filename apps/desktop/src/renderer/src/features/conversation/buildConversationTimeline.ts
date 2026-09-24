@@ -2,6 +2,16 @@ import type { ChatMessage, PlanApprovalState, RuntimeInspectionSnapshot, Subagen
 import { buildCompactionMarks } from "./compactionMarks";
 import type { ConversationTimelineItem, TimelineItem } from "./ConversationTimeline";
 
+/**
+ * 此刻有没有一次压缩正在跑。
+ *
+ * 压缩那条横线自带转圈，并且写清了在干什么；底下那个「正在思考」的常规转圈同时在转的
+ * 话，是同一件事说两遍——而且后一遍还不准，因为模型此刻没在答题，它在被摘要。
+ */
+export function hasRunningCompaction(items: readonly ConversationTimelineItem[]): boolean {
+  return items.some((item) => item.kind === "compaction" && item.marks.some((mark) => mark.status === "running"));
+}
+
 export function buildConversationTimeline(
   messages: ChatMessage[],
   tools: ToolRun[],

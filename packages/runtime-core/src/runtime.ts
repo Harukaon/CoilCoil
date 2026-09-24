@@ -1,4 +1,5 @@
 import {
+  manualCompactionCommand,
   type FileNode,
   type ProjectSnapshot,
   type PromptDocument,
@@ -19,6 +20,10 @@ import {
 import {
   relative,
 } from "node:path";
+import {
+  manualCompactionErrorMessage,
+  manualCompactionRefusal,
+} from "./manual-compaction.js";
 import {
   preparePromptImages,
   promptDocumentPrompt,
@@ -59,6 +64,11 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     const prompt = documentPrompt.text.trim() || text.trim() || (promptImages?.length ? "请查看附加的图片。" : "");
     if (!prompt) throw new Error("消息不能为空。");
     if (prompt === "/memory" && !images?.length) return this.runMemoryNow();
+    // Both manual commands are intercepted here rather than in the composer so
+    // that every client — desktop, the remote browser, anything speaking the
+    // runtime protocol — gets them from one place.
+    const compaction = images?.length ? undefined : manualCompactionCommand(prompt);
+    if (compaction) return this.compactNow(compaction.instructions);
     // A goal loop starts the next round as soon as this one settles, so a
     // queued message would sit behind rounds that keep coming. Everything the
     // user sends during goal mode joins the turn that is running instead.
@@ -71,6 +81,9 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       || this.promptStarting
       || active.promptDrainInProgress
       || active.promptQueue.length > 0
+      // A manual compaction is rewriting the very history this prompt would be
+      // appended to. Queue behind it instead of racing it.
+      || active.compacting
     ) {
       this.enqueuePrompt(active, prompt, promptImages, clientMessageId, promptDocument);
       // Nothing else is guaranteed to come along: the run this prompt is
@@ -110,6 +123,11 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string, promptDocument?: PromptDocument): Promise<{ accepted: true; }> {
     const active = this.requireActive();
     if (this.modelTransition) await this.modelTransition;
+    // Stop returns before Pi settles; rewinding must wait before changing the branch.
+    if (active.abortInFlight) {
+      await active.abortInFlight;
+      if (this.active !== active) throw new Error("会话已切换，未能回溯消息。");
+    }
     const documentPrompt = promptDocumentPrompt(promptDocument, images);
     const promptImages = documentPrompt.images;
     const prompt = documentPrompt.text.trim() || text.trim() || (promptImages?.length ? "请查看附加的图片。" : "");
@@ -119,6 +137,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     // A stop belongs to the prompt it was pressed against, never to this one.
     active.abortOnStart = false;
     this.promptStarting = true;
+    this.publishRunning(true, "prompt_starting", { queued: false });
     try {
       await this.applyPendingSessionModel(active);
       const result = await active.session.navigateTree(entryId, { summarize: false });
@@ -127,8 +146,8 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       active.summaryActivity = undefined;
       const prepared = await preparePromptImages(promptImages);
       const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-      const hasUserMessage = active.session.messages.some((message) => isRecord(message) && message.role === "user");
-      if (!hasUserMessage) {
+      const hasUserMessage = active.session.messages.some((message) => message.role === "user");
+      if (!hasUserMessage && !active.titleManuallySet && !active.titleAttempted) {
         active.session.setSessionName(titleFromText(prompt));
         active.titlePending = true;
       }
@@ -150,6 +169,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       return { accepted: true };
     } catch (error) {
       this.promptStarting = false;
+      if (this.active === active) this.publishRunState(active);
       throw error;
     }
   }
@@ -279,6 +299,53 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   }
 
   /**
+   * Summarize the context now, because the user said so.
+   *
+   * The automatic passes only fire once the context is nearly full, which is
+   * the worst moment to discover they were needed. `/compact` is the same
+   * machinery, started by hand at a moment the user chose. Why it may refuse,
+   * and in what words, lives in `manualCompactionRefusal`.
+   */
+  async compactNow(instructions?: string): Promise<{ accepted: true; }> {
+    const active = this.requireActive();
+    if (this.modelTransition) await this.modelTransition;
+    const refusal = manualCompactionRefusal({
+      compacting: active.compacting === true,
+      summarizing: active.summaryActivity?.status === "running",
+      busy: active.session.isStreaming || this.promptStarting || active.promptDrainInProgress === true,
+      hasModel: Boolean(active.session.model),
+      messages: active.session.messages.length,
+      alreadyCompacted: active.session.sessionManager.getBranch().at(-1)?.type === "compaction",
+    });
+    if (refusal) throw new Error(refusal);
+    active.compacting = true;
+    this.log.info("compaction", "manual_compaction_started", { withInstructions: Boolean(instructions) });
+    // Compaction is not streaming, so nothing else would make the session look
+    // busy: no spinner, no stop button, for a request that can run for minutes.
+    this.publishRunState(active);
+    // Deliberately not awaited. The reply to this request is not where the wait
+    // belongs — the transcript already draws a live rule from Pi's own
+    // compaction events, and the stop button cancels it through the same path
+    // an automatic compaction uses.
+    void active.session.compact(instructions)
+      .catch((error: unknown) => {
+        const raw = errorMessage(error);
+        const cancelled = raw.includes("Compaction cancelled") || (error instanceof Error && error.name === "AbortError");
+        this.log.log(cancelled ? "info" : "error", "compaction", "manual_compaction_failed", { error: raw, cancelled });
+        this.emitEvent({ type: "runtime_notice", level: cancelled ? "info" : "error", message: manualCompactionErrorMessage(raw) });
+      })
+      .finally(() => {
+        active.compacting = false;
+        if (this.active !== active) return;
+        this.publishRunState(active);
+        // Anything typed during the compaction queued behind it; nothing else
+        // is coming to wake that queue up.
+        if (active.promptQueue.length > 0) void this.drainPromptQueue(active);
+      });
+    return { accepted: true };
+  }
+
+  /**
    * Stop everything this session is doing.
    *
    * The request returns as soon as the abort is delivered. Pi's own `abort()`
@@ -290,8 +357,6 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
    */
   async abort(): Promise<{ aborted: boolean; aborting: boolean; cancelledQueue: number; }> {
     const active = this.requireActive();
-    // Stopping is how a user ends a `/goal` loop: without this the loop would
-    // simply start the next round after the aborted turn settles.
     const requestedAt = Date.now();
     this.log.info("abort", "abort_requested", {
       streaming: active.session.isStreaming,
@@ -300,26 +365,17 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       runningTools: [...active.tools.values()].filter((tool) => tool.status === "running").map((tool) => tool.name),
     });
     const stoppedGoal = await this.stopGoalIfRunning(active);
-    // Stopping means the conversation stops. Anything still waiting — in this
-    // runtime's FIFO or in Pi's own steering queue — would otherwise be sent the
-    // moment the aborted turn settles, which looks exactly like the stop having
-    // been ignored.
     const cancelledQueue = this.dropQueuedPrompts(active) + this.clearSteeredQueue(active);
     const cancelledSummary = this.cancelSummarization(active);
+    if (active.abortInFlight) {
+      return { aborted: true, aborting: true, cancelledQueue };
+    }
     if (!active.session.isStreaming) {
-      // A summarization that runs before the prompt owns the window in which no
-      // run exists yet, and Pi sends that prompt as soon as it ends. Cancelling
-      // it here is only half a stop: the run it was preparing still has to be
-      // stopped, and it can only be stopped once it exists.
       const pending = this.promptStarting;
-      // Remembered, and shown as "正在停止" until it lands, so the composer does
-      // not look like it simply swallowed the press.
       if (pending) {
         active.abortOnStart = true;
         active.aborting = true;
       }
-      // A stop pressed against a run this session no longer has still has a job
-      // to do: publish what is actually true, so a stale spinner clears.
       this.log.info("abort", "abort_without_live_run", { cancelledQueue, stoppedGoal, cancelledSummary, pending });
       this.publishRunState(active);
       return {
@@ -332,12 +388,13 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     this.publishRunState(active);
     const stallNotice = setTimeout(() => this.reportSlowAbort(active), ABORT_STALL_NOTICE_MS);
     stallNotice.unref?.();
-    void active.session.abort()
+    const abortInFlight = active.session.abort()
       .catch((error) => {
         this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
       })
       .finally(() => {
         clearTimeout(stallNotice);
+        if (active.abortInFlight === abortInFlight) active.abortInFlight = undefined;
         active.aborting = false;
         // The gap between this and `abort_requested` is the whole of "I pressed
         // stop and nothing happened": it is time spent inside a tool call that
@@ -345,6 +402,8 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
         this.log.info("abort", "abort_settled", { elapsedMs: Date.now() - requestedAt });
         if (this.active === active) this.publishRunState(active);
       });
+    active.abortInFlight = abortInFlight;
+    void abortInFlight;
     return { aborted: true, aborting: true, cancelledQueue };
   }
 
@@ -413,11 +472,15 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
 
   /** Emit the run state this session actually has, whatever the UI believes. */
   private publishRunState(active: ActiveSession): void {
-    const running = active.session.isStreaming || this.promptStarting || active.promptQueue.length > 0;
+    const running = active.session.isStreaming
+      || this.promptStarting
+      || active.promptQueue.length > 0
+      || active.compacting === true;
     this.publishRunning(running, "publish_run_state", {
       aborting: active.aborting === true,
       streaming: active.session.isStreaming,
       promptStarting: this.promptStarting,
+      compacting: active.compacting === true,
       queued: active.promptQueue.length,
     });
     void this.snapshot().then((snapshot) => this.emitEvent({ type: "session_snapshot", snapshot })).catch(() => undefined);
@@ -546,7 +609,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       messages.push({ ...active.activeAssistantMessage, order: maxOrder + 1 });
     }
     const model = active.session.model;
-    const usage = sessionUsage(active.session);
+    const usage = sessionUsage(active.session, active.contextClearings);
     active.responseMetrics = reconstructed.responseMetrics ?? active.responseMetrics;
     active.responseMetricsHistory = reconstructed.responseMetricsHistory;
     const projectedTools = new Map(reconstructed.tools);
@@ -586,7 +649,10 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       contextUsage: usage.contextUsage,
       tokenUsage: usage.tokenUsage,
       runtimeInspection: this.runtimeInspection(active),
-      running: active.session.isStreaming || this.promptStarting || active.promptQueue.length > 0,
+      running: active.session.isStreaming
+        || this.promptStarting
+        || active.promptQueue.length > 0
+        || active.compacting === true,
     };
   }
 
@@ -596,6 +662,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       ...snapshot,
       subagent: this.readSubagentConfiguration(),
       sessionNaming: this.readSessionNamingConfiguration(),
+      summarizationModel: this.summarizationModelState(),
     };
   }
 

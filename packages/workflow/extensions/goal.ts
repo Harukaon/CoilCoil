@@ -397,9 +397,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
   pi.on("agent_end", (event, ctx) => {
     currentContext = ctx;
     if (!state || state.status !== "running") return;
-    const failure = event.messages.find((message) => (
-      isRecord(message) && message.role === "assistant" && message.stopReason === "error"
-    ));
+    const failure: unknown = event.messages.find((message) => {
+      const record: unknown = message;
+      return isRecord(record) && record.role === "assistant" && record.stopReason === "error";
+    });
     const errorMessage = isRecord(failure) && typeof failure.errorMessage === "string"
       ? failure.errorMessage
       : undefined;

@@ -2,6 +2,7 @@ import { Keyboard, LoaderCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { BubbleShortcutState } from "../../../../shared/desktop-api";
 import { toastError, toastSuccess } from "../../ui/toast";
+import { rendererPlatform } from "../../platform";
 import { acceleratorFromKeyPress, formatAccelerator } from "./shortcutAccelerator";
 
 /**
@@ -43,7 +44,7 @@ export function ShortcutSettings(): React.JSX.Element {
     }
   };
 
-  const platform = window.coilcoil.platform;
+  const platform = rendererPlatform();
   const current = state?.accelerator;
 
   return (

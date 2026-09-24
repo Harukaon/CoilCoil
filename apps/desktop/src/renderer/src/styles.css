@@ -246,6 +246,10 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .nav-button:hover:not(:disabled), .conversation-row:hover { background: hsl(var(--th) var(--ts) var(--l-888)); }
 .nav-button.active { color: hsl(var(--th) var(--ts) var(--l-171)); background: hsl(var(--th) var(--ts) var(--l-888)); }
 .project-section { min-height: 0; padding: 0 11px; overflow-x: hidden; overflow-y: auto; }
+/* 滚到底多留一段：最后一个项目贴着底边时手指没地方落，滚一下就到头，
+   留白让末尾内容能再往上顶一段，方便点开/滚动。 */
+.project-section { padding-bottom: 48px; }
+.project-section::after { content: ""; display: block; height: 0; }
 .pinned-sessions-section { min-width: 0; padding: 4px 0 5px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-861) / 55%); }
 .pinned-conversation-list { padding-left: 5px; }
 .pinned-conversation-row-wrap { min-width: 0; }
@@ -543,6 +547,17 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .message-image { position: relative; display: block; min-width: 0; }
 /* contain 而不是 cover：超出的部分按比例缩小，不裁掉画面。 */
 .message-image img { display: block; width: 100%; height: auto; max-height: 180px; object-fit: contain; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: var(--radius-2xl); }
+/* 输入框和历史气泡共用的图片入口：缩略图不变，点击后在遮罩里按原比例看大图。 */
+.prompt-image-trigger { display: block; cursor: zoom-in; outline: 0; }
+.prompt-image-trigger:focus-visible { outline: 2px solid hsl(var(--th) var(--ts) var(--l-547)); outline-offset: 2px; }
+.composer-image-preview { width: 100%; height: 100%; }
+.prompt-image-lightbox-backdrop { position: fixed; inset: 0; z-index: 2500; display: grid; place-items: center; padding: 20px; background: rgb(18 18 16 / 82%); animation: prompt-image-lightbox-in 140ms ease; }
+.prompt-image-lightbox { position: relative; display: flex; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); align-items: center; justify-content: center; flex-direction: column; }
+.prompt-image-lightbox > img { display: block; max-width: min(92vw, 1440px); max-height: 88vh; width: auto; height: auto; border-radius: var(--radius-2xl); object-fit: contain; box-shadow: 0 20px 70px rgb(0 0 0 / 40%); }
+.prompt-image-lightbox-close { position: absolute; top: -12px; right: -12px; z-index: 1; display: grid; width: 32px; height: 32px; padding: 0; place-items: center; border: 1px solid rgb(255 255 255 / 35%); border-radius: 50%; color: rgb(255 255 255 / 92%); background: rgb(30 30 28 / 82%); cursor: pointer; }
+.prompt-image-lightbox-close:hover { background: rgb(60 60 56 / 92%); }
+.prompt-image-lightbox-name { max-width: min(80vw, 720px); margin-top: 9px; overflow: hidden; color: rgb(255 255 255 / 78%); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes prompt-image-lightbox-in { from { opacity: 0; } to { opacity: 1; } }
 .user-message-editor-shell { display: flex; width: 100%; max-width: 100%; align-items: stretch; flex-direction: column; }
 .user-message-editor-shell .composer { width: 100%; }
 .assistant-message { display: block; }
@@ -917,7 +932,13 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .composer textarea { height: 42px; }
 .composer textarea::placeholder { color: hsl(var(--th) var(--ts) var(--l-622)); }
 .prompt-editor { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+/* Tiptap 接管后：ProseMirror 自己管段落与换行，断词不断字中间；
+   pill 改 inline 渲染保基线，外观仍是同一枚胶囊。 */
+.prompt-editor.tiptap p { margin: 0; }
+.prompt-editor.tiptap .prompt-editor-element { display: inline; white-space: nowrap; }
 .prompt-editor:empty::before { content: attr(data-placeholder); color: hsl(var(--th) var(--ts) var(--l-622)); pointer-events: none; }
+/* Tiptap 空段落：官方 Placeholder 扩展往空 p 打标记，样式与旧 :empty 版同色。 */
+.prompt-editor.tiptap p.is-empty::before { content: attr(data-placeholder); float: left; height: 0; color: hsl(var(--th) var(--ts) var(--l-622)); pointer-events: none; }
 .prompt-editor:disabled, .prompt-editor[contenteditable="false"] { cursor: default; }
 .prompt-editor-element { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 7px; border: 1px solid hsl(214 78% 62% / 55%); border-radius: var(--radius-lg); color: hsl(214 72% 42%); background: hsl(214 86% 93%); font-size: .92em; line-height: 1.35; white-space: nowrap; user-select: none; vertical-align: baseline; }
 .prompt-history-element { margin: 0 3px; }

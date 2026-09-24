@@ -53,25 +53,22 @@ export function isReusableBlankTab(
 }
 
 /**
- * 界面要看到的那一排标签页：自己的在前，别的会话的跟在后面并标出来。
+ * 界面只显示当前挂载文件夹的标签页。
  *
- * scope 是给 CDP 客户端划的发现边界——一个后台会话的 agent 不该看见另一个会话的
- * 页面。但同一条边界被原样套在界面上之后，agent 在别的 scope 里开的标签页对用户就
- * 是隐形的：页面在加载、脚本在跑、cookie 在写，用户屏幕上什么都没有，点不到也关
- * 不掉。发现归发现，用户归用户，所以这里把全部标签页交出去。
+ * scope 是给 CDP 客户端划的发现边界，界面也必须遵守同一条工作区边界。把其他文件夹
+ * 的页面拼进来会让切到一个还没有标签页的工作区时回退显示别的文件夹的页面，看起来
+ * 就像两个项目共用了同一个浏览器。
  *
- * 顺序有意这么排：自己的那几张保持原来的次序和位置，别人的追加在后面，标签条不会
- * 因为别的会话开了一张页面就整排错位。
+ * 后台 Agent 仍然可以在自己的 scope 里继续加载页面；它们不会因为用户切换项目而被
+ * 关闭，只是不再混进当前工作区的可见标签条。
  */
 export function orderTabsForUi<T extends { scopeId: string }>(
   tabs: Iterable<T>,
   scopeId: string,
 ): Array<{ tab: T; foreign: boolean }> {
-  const all = [...tabs];
-  return [
-    ...all.filter((tab) => tab.scopeId === scopeId).map((tab) => ({ tab, foreign: false })),
-    ...all.filter((tab) => tab.scopeId !== scopeId).map((tab) => ({ tab, foreign: true })),
-  ];
+  return [...tabs]
+    .filter((tab) => tab.scopeId === scopeId)
+    .map((tab) => ({ tab, foreign: false }));
 }
 
 export function browserContextId(scopeId: string): string {

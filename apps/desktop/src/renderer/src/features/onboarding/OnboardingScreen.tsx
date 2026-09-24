@@ -1,7 +1,8 @@
 import { FolderOpen, FolderTree } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { RuntimeConfiguration } from "@coilcoil/runtime-protocol";
-import type { MacPermissionId, MacPermissions, ProjectSelection } from "../../../../shared/desktop-api";
+import type { MacPermissions, ProjectSelection } from "../../../../shared/desktop-api";
+import { rendererPlatform } from "../../platform";
 import { ModelSettings } from "../settings/ModelSettings";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { OnboardingAgentSetup } from "./OnboardingAgentSetup";
@@ -14,7 +15,7 @@ import {
   INITIAL_ONBOARDING,
   isLastStep,
   ONBOARDING_STEP_LABELS,
-  ONBOARDING_STEPS,
+  onboardingStepsFor,
   PERMISSION_TOPICS,
   type OnboardingProgress,
   type OnboardingStepId,
@@ -81,6 +82,7 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
 }): React.JSX.Element {
   const [progress, setProgress] = useState<OnboardingProgress>(INITIAL_ONBOARDING);
   const [permissions, setPermissions] = useState<MacPermissions>();
+  const steps = onboardingStepsFor(rendererPlatform());
 
   const refresh = useCallback(() => {
     if (typeof window.coilcoil?.getMacPermissions !== "function") return;
@@ -96,10 +98,10 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
     return () => window.removeEventListener("focus", refresh);
   }, [progress.step, refresh]);
 
-  const index = stepIndex(progress.step);
+  const index = stepIndex(progress.step, steps);
   const next = (): void => {
-    if (isLastStep(progress.step)) onDone();
-    else setProgress(advance(progress));
+    if (isLastStep(progress.step, steps)) onDone();
+    else setProgress(advance(progress, steps));
   };
 
   return (
@@ -110,7 +112,7 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
       <div className="onboarding-stage">
         <div className="onboarding-inner">
           <nav className="onboarding-rail" aria-label="引导进度">
-            {ONBOARDING_STEPS.map((step, position) => (
+            {steps.map((step, position) => (
               <span className={position < index ? "done" : position === index ? "current" : ""} key={step}>
                 {ONBOARDING_STEP_LABELS[step]}
               </span>
@@ -203,7 +205,7 @@ export function OnboardingScreen({ configuration, onConfigurationSaved, runtimeI
       </div>
 
       <footer className="onboarding-footer">
-        {index > 0 ? <button className="onboarding-back" type="button" onClick={() => setProgress(goBack(progress))}>上一步</button> : null}
+        {index > 0 ? <button className="onboarding-back" type="button" onClick={() => setProgress(goBack(progress, steps))}>上一步</button> : null}
         <span className="spacer" />
         {canSkip(progress.step) ? <button className="onboarding-skip" type="button" onClick={next}>跳过这一步</button> : null}
         <button className="onboarding-next" type="button" onClick={next}>

@@ -9,35 +9,35 @@ import {
   serializeSidebarSectionOrder,
 } from "../src/renderer/src/features/workspaces/sidebarSections";
 
-test("nothing stored means the order the sidebar has always opened with", () => {
-  assert.deepEqual(resolveSidebarSectionOrder(null), ["recent", "projects"]);
+test("nothing stored means projects on top, recent below", () => {
+  assert.deepEqual(resolveSidebarSectionOrder(null), ["projects", "recent"]);
   assert.deepEqual(resolveSidebarSectionOrder(""), [...DEFAULT_SIDEBAR_SECTION_ORDER]);
 });
 
 test("a stored order round-trips", () => {
-  const swapped = dropSidebarSection(["recent", "projects"], "projects", "recent");
-  assert.deepEqual(swapped, ["projects", "recent"]);
-  assert.deepEqual(resolveSidebarSectionOrder(serializeSidebarSectionOrder(swapped)), ["projects", "recent"]);
+  const swapped = dropSidebarSection(["projects", "recent"], "recent", "projects");
+  assert.deepEqual(swapped, ["recent", "projects"]);
+  assert.deepEqual(resolveSidebarSectionOrder(serializeSidebarSectionOrder(swapped)), ["recent", "projects"]);
 });
 
 test("dragging either heading onto the other swaps them", () => {
-  assert.deepEqual(dropSidebarSection(["recent", "projects"], "recent", "projects"), ["projects", "recent"]);
-  assert.deepEqual(dropSidebarSection(["projects", "recent"], "recent", "projects"), ["recent", "projects"]);
+  assert.deepEqual(dropSidebarSection(["projects", "recent"], "projects", "recent"), ["recent", "projects"]);
+  assert.deepEqual(dropSidebarSection(["recent", "projects"], "projects", "recent"), ["projects", "recent"]);
 });
 
 test("dropping a heading on itself changes nothing", () => {
   // 拖起来又原地放下是最常见的一次「误操作」，不能因此写一次存储、也不能重排。
+  assert.deepEqual(dropSidebarSection(["projects", "recent"], "projects", "projects"), ["projects", "recent"]);
   assert.deepEqual(dropSidebarSection(["recent", "projects"], "recent", "recent"), ["recent", "projects"]);
-  assert.deepEqual(dropSidebarSection(["projects", "recent"], "recent", "recent"), ["projects", "recent"]);
 });
 
 test("a damaged preference can never hide a section", () => {
   // Written by an older build, hand-edited, or truncated - whatever is missing
   // comes back in its default position instead of the section disappearing.
-  assert.deepEqual(resolveSidebarSectionOrder("projects"), ["projects", "recent"]);
-  assert.deepEqual(resolveSidebarSectionOrder("projects,projects"), ["projects", "recent"]);
-  assert.deepEqual(resolveSidebarSectionOrder("nonsense"), ["recent", "projects"]);
-  assert.deepEqual(resolveSidebarSectionOrder(" projects , recent "), ["projects", "recent"]);
+  assert.deepEqual(resolveSidebarSectionOrder("recent"), ["recent", "projects"]);
+  assert.deepEqual(resolveSidebarSectionOrder("recent,recent"), ["recent", "projects"]);
+  assert.deepEqual(resolveSidebarSectionOrder("nonsense"), ["projects", "recent"]);
+  assert.deepEqual(resolveSidebarSectionOrder(" recent , projects "), ["recent", "projects"]);
 });
 
 test("两栏是靠拖标题换顺序的，不是靠按钮", () => {

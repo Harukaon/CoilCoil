@@ -28,6 +28,7 @@ import {
 import { McpDiscoveryDialog } from "./McpDiscoveryDialog";
 import { McpJsonEditor } from "./McpJsonEditor";
 import { useMobileRemote } from "../../hooks/useMobileRemote";
+import { platformComputerLabel, rendererPlatform } from "../../platform";
 import { RemoteSettings } from "./RemoteSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
 import { SkillSettings } from "./SkillSettings";
@@ -665,6 +666,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
 }): React.JSX.Element | null {
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const mobile = useMobileRemote();
+  const hostLabel = platformComputerLabel(rendererPlatform());
   /**
    * Two pages stay on the Mac.
    *
@@ -774,7 +776,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
               <h1 id="settings-title">{shown === "models" ? "模型与服务商" : shown === "mcp" ? "MCP" : shown === "appearance" ? "外观" : shown === "shortcuts" ? "快捷键" : shown === "remote" ? "远程控制" : "技能"}</h1>
               <p>
                 {shown === "remote"
-                  ? "从手机遥控这台 Mac，配对码只在这里显示。"
+                  ? `从手机遥控这台 ${hostLabel}，配对码只在这里显示。`
                   : shown === "skills"
                   ? "按需加载的专业技能包。"
                   : shown === "appearance"
