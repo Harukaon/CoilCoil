@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { installBrowserFocusReturn } from "./focusReturn";
 import { mountGuestLayer } from "./guestLayer";
 
 /**
@@ -18,9 +17,6 @@ export function BrowserGuestLayer(): React.JSX.Element {
     if (!host) return;
     return mountGuestLayer(host);
   }, []);
-
-  // Agent 在网页里点击、打字时抢走的焦点，还给用户原来所在的地方。
-  useEffect(() => installBrowserFocusReturn(), []);
 
   return <div className="browser-guest-layer" ref={hostRef} aria-hidden="true" />;
 }

@@ -2,7 +2,6 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server as HttpServer } from "node:http";
 import type { Event, WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
-import { prepareAgentInput } from "./browser-agent-focus";
 import { AGENT_TAB_LIMIT, isAgentTabUse } from "./browser-agent-tabs";
 import { isDirectPageTargetInfoRequest, isTabActivationCommand, routePageCommand } from "./browser-cdp-commands";
 import { detachDebuggerListener } from "./browser-cdp-teardown";
@@ -355,7 +354,6 @@ export class BrowserCdpBridge {
     this.host.attachDebugger(tab);
     try {
       if (resetCache) await guest.debugger.sendCommand("Network.setCacheDisabled", { cacheDisabled: true }, childSession);
-      prepareAgentInput(guest, command, commandParams);
       const result = await guest.debugger.sendCommand(command, commandParams, childSession);
       this.log("✓", `${method}${command === method ? "" : ` → ${command}`}`, sessionId);
       return result;
