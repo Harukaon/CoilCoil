@@ -593,6 +593,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         agentDir: getAgentDir(),
         tools,
         systemPrompt: profile?.systemPrompt,
+        parentEvents: pi.events,
         onEvent: (event) => handleChildEvent(run, event),
       });
       return { handle };
@@ -728,6 +729,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         tools,
         systemPrompt: profile?.systemPrompt,
         meta,
+        parentEvents: pi.events,
         onEvent: (event) => handleChildEvent(run, event),
       });
     } catch (error) {
