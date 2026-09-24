@@ -98,7 +98,7 @@ export interface AppViewController {
   forkConversation(owner: ProjectSelection, session: SessionSummary): Promise<void>;
   moveConversation(owner: ProjectSelection, session: SessionSummary, target: ProjectSelection): Promise<void>;
   reorderProjects(fromPath: string, toPath: string): void;
-  rewindPrompt(message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument): Promise<void>;
+  rewindPrompt(message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument, restoreCode: boolean): Promise<void>;
   cancelQueuedPrompt(id: string): Promise<void>;
   promoteQueuedPrompt(id: string): Promise<void>;
   abortRun(): Promise<void>;

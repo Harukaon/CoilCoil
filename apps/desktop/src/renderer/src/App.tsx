@@ -142,7 +142,7 @@ export default function App(): React.JSX.Element {
   const optimisticSessionsRef = useRef(new Map<string, SessionSummary>());
   const selectionRequestRef = useRef(0);
   useEffect(() => window.coilcoil.onBrowserAgentActivated((scopeId) => {
-    if (scopeId !== snapshotRef.current?.runtimeId) return;
+    if (scopeId !== snapshotRef.current?.session.id) return; // 浏览器作用域就是会话 id
     inspector.openBrowserTab();
   }), [inspector.openBrowserTab]);
   const { fileDragActive, handleFileDragEnter, handleFileDragOver, handleFileDragLeave, handleFileDrop } = useFilePathDrop({
@@ -428,7 +428,7 @@ export default function App(): React.JSX.Element {
   } = useSessionControls(snapshot?.runtimeId);
   promoteQueuedPromptRef.current = promoteQueuedPrompt;
 
-  const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[], promptDocument: PromptDocument): Promise<void> => {
+  const rewindPrompt = async (message: ChatMessage, text: string, images: PromptImage[], promptDocument: PromptDocument, restoreCode: boolean): Promise<void> => {
     if (!message.entryId || !snapshot?.runtimeId) return;
     const previousConversationMessages = conversationMessages;
     const previousTools = tools;
@@ -448,7 +448,7 @@ export default function App(): React.JSX.Element {
     setTools((current) => current.filter((item) => item.order < message.order));
     shouldAutoScrollRef.current = true;
     try {
-      await window.coilcoil.request({ type: "rewind_prompt", entryId: message.entryId, text, promptDocument, images, clientMessageId }, snapshot.runtimeId);
+      await window.coilcoil.request({ type: "rewind_prompt", entryId: message.entryId, text, promptDocument, images, clientMessageId, restoreCode }, snapshot.runtimeId);
     } catch (caught) {
       dispatchConversationMessages({ type: "restore", state: previousConversationMessages });
       setTools(previousTools);
@@ -499,8 +499,8 @@ export default function App(): React.JSX.Element {
       return;
     }
     if (!modelConfigured) {
-      toastError("发送第一条消息前，请先选择并配置模型。");
-      setSettingsOpen(true);
+      toastError(configuration ? "发送第一条消息前，请先选择并配置模型。" : "正在读取模型配置，请稍等一下再发送。");
+      if (configuration) setSettingsOpen(true);
       return;
     }
     if (images.length && !selectedModel?.supportsImages) {

@@ -1,4 +1,5 @@
-import type { WebContents } from "electron";
+import type { BrowserWindow, WebContents } from "electron";
+import type { BrowserTabControl, BrowserTabOwner } from "./browser-agent-tabs";
 
 export const DEFAULT_BROWSER_URL = "about:blank";
 export const DEFAULT_BROWSER_SCOPE_ID = "default";
@@ -18,6 +19,23 @@ export interface BrowserTab {
    * 区时不能拿窗口当前那份去套老标签页——各自带着自己那份活着，切回去还在。
    */
   partition: string;
+  /** 谁开的这张：只有 Agent 开的、而且现在还归 Agent 的，才会被上限收掉。 */
+  owner: BrowserTabOwner;
+  /**
+   * 这张现在归谁操作。
+   *
+   * - agent：离屏渲染的页面（offscreen 窗口），Agent 通过 CDP 操作，用户只看画面；
+   *   Agent 点击、打字不会碰用户的焦点（见 browser-offscreen.ts）。
+   * - user：正常嵌在面板里的 <webview>，用户自己操作；Agent 看不到、也碰不了它。
+   *
+   * 两边都能「接管」：用户按接管按钮，Agent 调接管工具。接管时页面状态（网址、历史、
+   * 表单内容）原样搬过去。
+   */
+  control: BrowserTabControl;
+  /** control 是 agent 时，承载这个离屏页面的隐藏窗口。 */
+  offscreen?: BrowserWindow;
+  /** 最近一次被 Agent 操作或被选中的时间，上限收页时先关最久没用的。 */
+  lastUsedAt: number;
   tabTargetId: string;
   pageTargetId: string;
   guest?: WebContents;
@@ -53,14 +71,14 @@ export function isReusableBlankTab(
 }
 
 /**
- * 界面只显示当前挂载文件夹的标签页。
+ * 界面只显示当前会话的标签页。
  *
- * scope 是给 CDP 客户端划的发现边界，界面也必须遵守同一条工作区边界。把其他文件夹
- * 的页面拼进来会让切到一个还没有标签页的工作区时回退显示别的文件夹的页面，看起来
- * 就像两个项目共用了同一个浏览器。
+ * scope 是给 CDP 客户端划的发现边界（一个会话一个），界面也必须遵守同一条边界。把
+ * 别的会话的页面拼进来，标签页就会在会话之间窜来窜去，看起来像几个会话共用了同一个
+ * 浏览器。
  *
- * 后台 Agent 仍然可以在自己的 scope 里继续加载页面；它们不会因为用户切换项目而被
- * 关闭，只是不再混进当前工作区的可见标签条。
+ * 后台会话的 Agent 仍然可以在自己的 scope 里继续加载页面；它们不会因为用户切换会话
+ * 而被关闭，只是不混进当前会话的可见标签条。
  */
 export function orderTabsForUi<T extends { scopeId: string }>(
   tabs: Iterable<T>,

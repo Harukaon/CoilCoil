@@ -120,6 +120,11 @@ export interface BrowserTabSnapshot {
   canGoBack: boolean;
   canGoForward: boolean;
   /**
+   * 这张标签页现在归 Agent：离屏渲染，面板里只显示画面，用户按「接管」才能操作。
+   * 标签条上带 Agent 标识。Agent 只能操作这种标签页。
+   */
+  agent?: boolean;
+  /**
    * 旧版本快照可能带有这个标记；当前界面会过滤其他工作区的标签页，不再展示它们。
    */
   foreign?: boolean;
@@ -143,6 +148,22 @@ export interface BrowserGuestSlot {
   nonce: string;
   /** 这张标签页要建在哪份 cookie jar 里——一个工作区一份。 */
   partition: string;
+  /**
+   * 用户刚从 Agent 手里接管这张标签页：元素建好后先别加载任何东西，主进程要把 Agent
+   * 那边的页面（网址、历史、表单里填的内容）原样恢复进来。
+   */
+  restore?: boolean;
+}
+
+/** 接管用的 <webview> 带这个 src 报到，后面接 tab id（见主进程 browser-webview-policy.ts）。 */
+export const BROWSER_RESTORE_SRC_PREFIX = "about:blank#coilcoil-restore=";
+
+/** Agent 标签页的一帧画面（JPEG），面板里显示给用户看。 */
+export interface BrowserFrame {
+  tabId: string;
+  width: number;
+  height: number;
+  data: Uint8Array;
 }
 
 export interface BrowserGuestRoster {
@@ -431,9 +452,15 @@ export interface CoilCoilDesktopApi {
   /** Enter Chromium's native element picker and resolve after a click or cancel. */
   pickBrowserElement(scopeId: string): Promise<BrowserElementSelection | undefined>;
   cancelBrowserElementPick(): Promise<void>;
-  createBrowserTab(scopeId: string, url?: string): Promise<BrowserStateSnapshot>;
+  /**
+   * `placeholder`：面板打开时给空会话垫的那一张。主进程只在这个会话一张都没有时才建
+   * （判断和建在同一步，不和 Agent 开页抢），Agent 开了真正的页面后它会被收掉。
+   */
+  createBrowserTab(scopeId: string, url?: string, placeholder?: boolean): Promise<BrowserStateSnapshot>;
   selectBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
   closeBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
+  /** 用户从 Agent 手里接管这张标签页：换成正常网页，页面状态原样带过来。 */
+  takeOverBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
   navigateBrowser(scopeId: string, url: string): Promise<BrowserStateSnapshot>;
   browserBack(scopeId: string): Promise<BrowserStateSnapshot>;
   browserForward(scopeId: string): Promise<BrowserStateSnapshot>;
@@ -463,6 +490,7 @@ export interface CoilCoilDesktopApi {
   onBrowserGuestRoster(listener: (roster: BrowserGuestRoster) => void): () => void;
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
   onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
+  onBrowserFrame(listener: (frame: BrowserFrame) => void): () => void;
   getTerminalSessions(): Promise<TerminalSessionSnapshot[]>;
   /** Always opens another shell: each one gets its own inspector tab. */
   createTerminal(cwd: string): Promise<TerminalSessionSnapshot[]>;

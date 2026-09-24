@@ -15,6 +15,8 @@ export interface InspectorTab<T extends string> {
   disabled?: boolean;
   /** 图标转起来表示还在加载（网页标签用）。 */
   spinning?: boolean;
+  /** 悬停提示；不给就用 label。 */
+  hint?: string;
 }
 
 export function InspectorPane<T extends string>({
@@ -139,8 +141,8 @@ export function InspectorPane<T extends string>({
                 <button
                   className="inspector-tab-select"
                   type="button"
-                  title={item.label}
-                  aria-label={item.label}
+                  title={item.hint ?? item.label}
+                  aria-label={item.hint ?? item.label}
                   aria-pressed={item.id === activeTab}
                   onClick={() => onSelectTab(item.id)}
                 >

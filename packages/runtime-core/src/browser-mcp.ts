@@ -169,14 +169,14 @@ export function withoutRivalBrowserServers(
 export function withBundledBrowserMcp(
   configuration: McpAdapterEffectiveConfig,
   environment: NodeJS.ProcessEnv = process.env,
-  /** 作用域是**工作区**，不是会话：一个工作区一个浏览器，用户和 Agent 共用。 */
-  workspaceScopeId?: string,
+  /** 作用域是**会话**：一个会话一批标签页。cookie 分区另按工作区定，不在这里。 */
+  browserScopeId?: string,
 ): McpAdapterEffectiveConfig {
   const scopedEndpoint = (value: string): string => {
-    if (!workspaceScopeId) return value;
+    if (!browserScopeId) return value;
     try {
       const url = new URL(value);
-      url.searchParams.set("scope", workspaceScopeId);
+      url.searchParams.set("scope", browserScopeId);
       return url.toString();
     } catch {
       return value;
@@ -243,9 +243,9 @@ export function withBundledBrowserMcp(
  */
 export function bundledBrowserServerConfiguration(
   environment: NodeJS.ProcessEnv = process.env,
-  workspaceScopeId?: string,
+  browserScopeId?: string,
 ): McpServerConfiguration | undefined {
-  const built = withBundledBrowserMcp({ mcpServers: {} }, environment, workspaceScopeId);
+  const built = withBundledBrowserMcp({ mcpServers: {} }, environment, browserScopeId);
   const entry = built.mcpServers["coilcoil-browser"];
   if (!entry) return undefined;
   return {

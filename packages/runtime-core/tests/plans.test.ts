@@ -84,6 +84,7 @@ test("runtime restores the latest durable plan state from the active branch", (c
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
   });
   const restored = (runtime as unknown as RuntimeInternals).reconstructState({ sessionManager: manager } as AgentSession);
   assert.equal(restored.planApproval?.status, "delegated");
@@ -98,6 +99,7 @@ test("runtime approval bridge forwards the selected execution target and updates
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     onEvent: (event) => events.push(event),
   });
   const eventBus = createEventBus();

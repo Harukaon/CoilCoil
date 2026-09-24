@@ -1,10 +1,11 @@
-import { Bot, BrainCircuit, Files, Globe2, LoaderCircle, Terminal } from "lucide-react";
+import { Bot, BrainCircuit, Files, GitBranch, Globe2, LoaderCircle, Terminal } from "lucide-react";
 import { useCallback } from "react";
 import type { ProjectSnapshot, RuntimeConfiguration, SessionSnapshot } from "@coilcoil/runtime-protocol";
 import type { BrowserElementSelection } from "../../../../shared/desktop-api";
 import { BrowserPanel } from "../browser/BrowserPanel";
-import { useBrowserTabs } from "../browser/useBrowserTabs";
+import { browserScopeId, useBrowserTabs } from "../browser/useBrowserTabs";
 import { FilesPanel } from "../files/FilesPanel";
+import { GitPanel } from "../git/GitPanel";
 import { RuntimePanel } from "../runtime/RuntimePanel";
 import { TerminalPanel } from "../terminal/TerminalPanel";
 import { openTerminalSession } from "../terminal/terminalSessions";
@@ -87,13 +88,14 @@ export function WorkspaceInspector({
   const hasFiles = tabs.some((item) => item.kind === "files" || item.kind === "file");
   const hasRuntime = tabs.some((item) => item.kind === "runtime");
   const hasBrowser = tabs.some((item) => item.kind === "browser");
+  const hasGit = tabs.some((item) => item.kind === "git");
   const terminalTabs = tabs.filter((item) => item.kind === "terminal");
   // 浏览器的网页标签由主进程按 scope 拥有，agent 也会开关它们，所以这份列表订阅
   // 主进程而不是存在右侧栏状态里；tabs 里那条 browser 记录只表示「开着浏览器」。
-  // 浏览器按工作区分，不按会话分：同一个工作区里换一个会话，标签页必须还是那一批。
-  // 以前这里是 `snapshot?.runtimeId ?? projectPath`，会话 id 在前，于是每换一个会话
-  // 就换一份浏览器，Agent 的页面对用户也成了「别人的」。见 browser-runtime.ts。
-  const scopeId = projectPath ?? "default";
+  // 浏览器按会话分：一个会话一批标签页，换会话就换一批，页面不会在会话之间窜。
+  // cookie 仍按工作区分（workspacePath）。取会话 id 而不是 runtimeId：同一个会话
+  // 重新打开会换运行时，标签页不能因此丢。还没有会话时先落在工作区这一份上。
+  const scopeId = browserScopeId(snapshot, projectPath);
   const browser = useBrowserTabs({ scopeId, workspacePath: projectPath, open: hasBrowser });
   const openTerminal = useCallback(async (): Promise<void> => {
     try {
@@ -157,9 +159,10 @@ export function WorkspaceInspector({
     ? browserPaneTabs(browser.state).map((page) => ({
       id: page.id,
       label: page.label,
-      // 别的会话开的那几张换个图标：它们本来对用户是隐形的，现在既然列出来了，
-      // 就得一眼看出哪几张不是自己这边开的。
-      icon: page.loading ? LoaderCircle : page.foreign ? Bot : Globe2,
+      // 归 Agent 的换成 Agent 图标：同一排标签里一眼分得出哪几张是 Agent 在操作（只能
+      // 看、要接管才能动），哪几张是自己的。
+      icon: page.loading ? LoaderCircle : page.agent || page.foreign ? Bot : Globe2,
+      hint: page.agent ? `${page.label}（Agent 在用）` : undefined,
       spinning: page.loading,
       closable: true,
     }))
@@ -174,6 +177,7 @@ export function WorkspaceInspector({
     // 浏览器和终端一样不置灰：再点一次就是多开一个网页标签。
     { id: "browser", label: "浏览器", icon: Globe2 },
     { id: "runtime", label: "运行时", icon: BrainCircuit, disabled: hasRuntime },
+    { id: "git", label: "Git", icon: GitBranch, disabled: hasGit },
     // Never disabled: picking it again is how a second shell is opened.
     { id: "terminal", label: "终端", icon: Terminal },
   ];
@@ -195,11 +199,12 @@ export function WorkspaceInspector({
         <>
           <div className="inspector-empty-icon"><Files size={18} strokeWidth={1.7} /></div>
           <strong>打开一个面板</strong>
-          <p>选择文件、浏览器、运行时或终端，内容会按工作区独立保留。</p>
+          <p>选择文件、浏览器、运行时、Git 或终端，内容会按工作区独立保留。</p>
           <div className="inspector-empty-actions">
             <button type="button" onClick={onOpenFiles}><Files size={14} />文件</button>
             <button type="button" onClick={openBrowserPage}><Globe2 size={14} />浏览器</button>
             <button type="button" onClick={onOpenRuntime}><BrainCircuit size={14} />运行时</button>
+            <button type="button" onClick={() => onOpenOption("git")}><GitBranch size={14} />Git</button>
             <button type="button" onClick={() => void openTerminal()}><Terminal size={14} />终端</button>
           </div>
         </>
@@ -228,6 +233,11 @@ export function WorkspaceInspector({
             cwd={projectPath}
             configuration={configuration}
           />
+        </div>
+      ) : null}
+      {hasGit ? (
+        <div className={`inspector-tab-panel git-tab-panel ${activeTab?.kind === "git" ? "active" : ""}`}>
+          <GitPanel cwd={projectState.cwd || projectPath} active={rightOpen && activeTab?.kind === "git"} />
         </div>
       ) : null}
       {hasBrowser ? (

@@ -120,7 +120,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     return { cancelled: true };
   }
 
-  async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string, promptDocument?: PromptDocument): Promise<{ accepted: true; }> {
+  async rewindPrompt(entryId: string, text: string, images?: PromptImage[], clientMessageId?: string, promptDocument?: PromptDocument, restoreCode = false): Promise<{ accepted: true; }> {
     const active = this.requireActive();
     if (this.modelTransition) await this.modelTransition;
     // Stop returns before Pi settles; rewinding must wait before changing the branch.
@@ -140,7 +140,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     this.publishRunning(true, "prompt_starting", { queued: false });
     try {
       await this.applyPendingSessionModel(active);
-      const result = await active.session.navigateTree(entryId, { summarize: false });
+      const result = await this.navigateWithCheckpoint(active, entryId, restoreCode);
       if (result.cancelled) throw new Error("未能回溯到所选消息。");
       active.sessionRevision += 1;
       active.summaryActivity = undefined;
@@ -156,7 +156,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       // Pi branch. Rewinding changes that branch, so refresh the right-hand
       // runtime inspector without blocking the new prompt on MCP discovery.
       void this.refreshRuntimeInspectionSources(active);
-      this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
+      await this.preparePromptTurn(active, clientMessageId, expandedPrompt, promptDocument);
       void active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
         preflightResult: () => { this.promptStarting = false; },
@@ -216,7 +216,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   ): Promise<void> {
     const prepared = await preparePromptImages(images);
     const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-    this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
+    await this.preparePromptTurn(active, clientMessageId, expandedPrompt, promptDocument);
     try {
       await active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,

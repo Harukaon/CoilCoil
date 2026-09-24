@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWSER_PARTITION, browserPartitionFor, hardenGuestPreferences, isAllowedGuestSrc } from "../src/main/browser-webview-policy.ts";
+import { BROWSER_PARTITION, browserPartitionFor, hardenGuestPreferences, isAllowedGuestSrc, restoreGuestSrc, restoreTabIdFromSrc } from "../src/main/browser-webview-policy.ts";
 
 const params = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   partition: BROWSER_PARTITION,
@@ -136,4 +136,14 @@ test("一个窗口同时认几份 jar——切工作区时老标签页还活着"
   assert.equal(hardenGuestPreferences({}, params({ partition: BROWSER_PARTITION }), expects), false);
   assert.equal(hardenGuestPreferences({}, params({ partition: undefined }), expects), false);
   assert.equal(hardenGuestPreferences({}, params({ partition: "persist:somewhere-else" }), expects), false);
+});
+
+test("接管标记：只认 about:blank 加一个 tab id，别的地址、别的片段一律不认", () => {
+  const id = "0e0d54c6-dd68-4752-8631-7c49e1a670cc";
+  assert.equal(restoreTabIdFromSrc(restoreGuestSrc(id)), id);
+  assert.equal(isAllowedGuestSrc(restoreGuestSrc(id)), true);
+  for (const src of [`https://evil.example/#coilcoil-restore=${id}`, "about:blank#coilcoil-restore=nope", `about:blank#coilcoil-restore=${id}x`, "about:blank#other"]) {
+    assert.equal(restoreTabIdFromSrc(src), undefined, src);
+    assert.equal(isAllowedGuestSrc(src), false, src);
+  }
 });

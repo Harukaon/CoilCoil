@@ -263,7 +263,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
    */
   private mcpConfigServed?: WeakSet<object>;
 
-  protected async refreshAgentMcpConfiguration(eventBus: EventBusController, cwd: string): Promise<void> {
+  protected async refreshAgentMcpConfiguration(eventBus: EventBusController, cwd: string, browserScopeId: string): Promise<void> {
     const adapter = await loadMcpAdapterConfigModule();
     const resolvedCwd = this.mcpCwd(cwd);
     this.cleanRemovedMcpServerState(adapter, resolvedCwd);
@@ -279,11 +279,10 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     registry.set(eventBus, withBundledBrowserMcp(
       mcpConfigurationForAgent(configuration, hiddenNames),
       process.env,
-      // 浏览器按**工作区**分，不按会话分。同一个工作区里换一个会话，看到的必须还是
-      // 同一个浏览器，用户和 Agent 共用同一批标签页。以前这里传的是会话 id，于是每
-      // 个会话各有一份浏览器：Agent 在后台会话里开的页面对用户就成了「别人的」，而
-      // 每个会话第一次连上 CDP 又会各垫一张空白页，用户看到的就是一堆 about:blank。
-      cwd,
+      // 浏览器按**会话**分：一个会话一批标签页，不同会话的页面不会互相窜。cookie 仍按
+      // 工作区隔离，那是桌面端按会话所在工作区选分区做的（noteScopeWorkspace）。
+      // 用会话 id 而不是运行时 id：同一个会话重新打开会换运行时，标签页不能因此丢。
+      browserScopeId,
     ));
     // Pi no longer hands extensions the bus object itself, so identity lookups
     // miss. Answering over the bus is what actually reaches the adapter.
@@ -295,7 +294,7 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
   }
 
   protected async reloadActiveSessionNow(active: ActiveSession): Promise<void> {
-    await this.refreshAgentMcpConfiguration(active.eventBus, active.cwd);
+    await this.refreshAgentMcpConfiguration(active.eventBus, active.cwd, active.session.sessionId);
     await active.session.reload();
     if (this.active !== active) return;
     this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });

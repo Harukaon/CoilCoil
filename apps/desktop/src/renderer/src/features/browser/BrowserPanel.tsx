@@ -6,6 +6,7 @@ import { useMobileRemote } from "../../hooks/useMobileRemote";
 import { platformComputerLabel, rendererPlatform } from "../../platform";
 import { visibleBrowserTabs } from "../inspector/inspectorTabs";
 import { toastError } from "../../ui/toast";
+import { AgentPageView } from "./AgentPageView";
 import { BrowserDataMenu } from "./BrowserDataMenu";
 import { setGuestPlacement } from "./guestLayer";
 
@@ -45,6 +46,8 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   useEffect(() => setAddress(activeTab?.url === "about:blank" ? "" : activeTab?.url ?? ""), [activeTab?.id, activeTab?.url]);
 
   const activeTabId = activeTab?.id;
+  // 归 Agent 的标签页只能看：地址栏、前进后退这些都要先接管。
+  const agentTab = activeTab?.agent === true;
 
   useEffect(() => {
     pickRequestRef.current += 1;
@@ -127,18 +130,17 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
    * Without this the rejection had nowhere to go and became an unhandled promise
    * error in the log that the user never saw.
    */
-  const apply = (action: Promise<BrowserStateSnapshot>): void => {
-    void action.then(onState).catch((error: unknown) => {
-      toastError(error instanceof Error ? error.message : String(error));
-    });
-  };
+  const apply = (action: Promise<BrowserStateSnapshot>): Promise<void> => action.then(onState).catch((error: unknown) => {
+    toastError(error instanceof Error ? error.message : String(error));
+  });
 
   const zoomPercent = Math.round((state.zoom ?? 1) * 100);
   const zoomed = zoomPercent !== 100;
 
   const submitAddress = (event: React.FormEvent): void => {
     event.preventDefault();
-    apply(window.coilcoil.navigateBrowser(scopeId, address));
+    if (agentTab) return;
+    void apply(window.coilcoil.navigateBrowser(scopeId, address));
   };
 
   const toggleElementPicker = (): void => {
@@ -163,10 +165,10 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   return (
     <section className="browser-panel">
       <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
-        <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => apply(window.coilcoil.browserBack(scopeId))}><ArrowLeft size={13} /></button>
-        <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => apply(window.coilcoil.browserForward(scopeId))}><ArrowRight size={13} /></button>
-        <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => apply(window.coilcoil.reloadBrowser(scopeId))}><RotateCw size={12} /></button>
-        <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} onChange={(event) => setAddress(event.target.value)} />
+        <button type="button" aria-label="后退" disabled={agentTab || !activeTab?.canGoBack} onClick={() => apply(window.coilcoil.browserBack(scopeId))}><ArrowLeft size={13} /></button>
+        <button type="button" aria-label="前进" disabled={agentTab || !activeTab?.canGoForward} onClick={() => apply(window.coilcoil.browserForward(scopeId))}><ArrowRight size={13} /></button>
+        <button type="button" aria-label="刷新网页" disabled={agentTab || !activeTab} onClick={() => apply(window.coilcoil.reloadBrowser(scopeId))}><RotateCw size={12} /></button>
+        <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} readOnly={agentTab} onChange={(event) => setAddress(event.target.value)} />
         {mobile ? null : (
           <button
             className={`browser-element-picker ${picking ? "active" : ""}`}
@@ -174,7 +176,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
             aria-label={picking ? "取消选择网页元素" : "选择网页元素"}
             aria-pressed={picking}
             title={picking ? "取消选择" : "选择页面元素并附加到对话"}
-            disabled={!activeTab || activeTab.loading}
+            disabled={agentTab || !activeTab || activeTab.loading}
             onClick={toggleElementPicker}
           >
             <MousePointer2 size={13} />
@@ -203,7 +205,15 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
       </form>
       <div className={`browser-native-host ${mobile ? "browser-remote-host" : ""}`} ref={hostRef}>
         {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => apply(window.coilcoil.createBrowserTab(scopeId))}>新建标签页</button></div> : null}
-        {mobile && activeTab ? (
+        {activeTab && agentTab ? (
+          <AgentPageView
+            key={activeTab.id}
+            tab={activeTab}
+            remoteFrame={mobile ? frame ?? "" : undefined}
+            onTakeOver={() => apply(window.coilcoil.takeOverBrowserTab(scopeId, activeTab.id))}
+          />
+        ) : null}
+        {mobile && activeTab && !agentTab ? (
           frame
             ? <img className="browser-remote-frame" src={frame} alt={activeTab.title} />
             : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取 {platformLabel} 上的页面…</strong></div>

@@ -14,6 +14,7 @@ import {
   DEFAULT_CHILD_TOOLS,
   type ChildSessionHandle,
   childSessionDirectory,
+  childToolsForPlatform,
   createChildSession,
   reopenChildSession,
   scanResumableChildren,
@@ -593,6 +594,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         agentDir: getAgentDir(),
         tools,
         systemPrompt: profile?.systemPrompt,
+        parentEvents: pi.events,
         onEvent: (event) => handleChildEvent(run, event),
       });
       return { handle };
@@ -648,7 +650,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
     const background = params.background === true;
     const useWorktree = params.worktree ?? profile?.worktree ?? false;
-    const tools = [...(profile?.tools ?? DEFAULT_CHILD_TOOLS)];
+    // 记下的是这个平台上实际给出的工具，界面和恢复看到的都和子 Agent 手里的一致。
+    const tools = childToolsForPlatform(profile?.tools ?? DEFAULT_CHILD_TOOLS);
     const run: ChildRun = {
       runId: createRunId(),
       parentToolId: toolCallId,
@@ -728,6 +731,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         tools,
         systemPrompt: profile?.systemPrompt,
         meta,
+        parentEvents: pi.events,
         onEvent: (event) => handleChildEvent(run, event),
       });
     } catch (error) {

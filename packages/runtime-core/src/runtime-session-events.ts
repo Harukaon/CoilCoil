@@ -387,7 +387,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           if (role === "user") {
             active.lastUserId = id;
             active.activeUserId = undefined;
-            active.activeUserOrder = undefined; if (active.promptDocumentsByMessageId?.has(id)) this.schedulePromptDocumentPersistence(active, id, raw);
+            active.activeUserOrder = undefined; this.persistUserMessageMetadata(active, id, raw);
           } else if (role === "assistant") {
             active.activeAssistantMessage = undefined;
           }
@@ -615,7 +615,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
         active.session.setSessionName(titleFromText(prompt));
         active.titlePending = true;
       }
-      this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
+      await this.preparePromptTurn(active, clientMessageId, expandedPrompt, promptDocument);
       const run = active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
         preflightResult: () => { this.promptStarting = false; },

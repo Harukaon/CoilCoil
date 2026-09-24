@@ -38,7 +38,7 @@ import {
   runContextMenuAction,
   type GuestContextMenuParams,
 } from "./browser-context-menu";
-import { BROWSER_PARTITION, hardenGuestPreferences } from "./browser-webview-policy";
+import { BROWSER_PARTITION, hardenGuestPreferences, restoreTabIdFromSrc } from "./browser-webview-policy";
 import { configureBrowserIdentity } from "./browser-user-agent";
 import { readMountedProjects, writeMountedProjects } from "./mounted-projects";
 import { checkWorkspaceName, memoryBucketName, rememberedMemoryNames, workspaceNamePrompt } from "./workspace-name-guard";
@@ -147,6 +147,7 @@ const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
+const BROWSER_TAKE_OVER_CHANNEL = "browser:take-over";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
@@ -192,6 +193,29 @@ function backgroundNodeExecutable(): string {
   const executableName = basename(process.execPath);
   const macHelperExecutable = join(dirname(dirname(process.execPath)), "Frameworks", `${executableName} Helper.app`, "Contents", "MacOS", `${executableName} Helper`);
   return process.platform === "darwin" && existsSync(macHelperExecutable) ? macHelperExecutable : process.execPath;
+}
+
+/**
+ * 新对话的会话刚建好：把它草稿阶段开的标签页交给它。
+ *
+ * 浏览器按会话分，可新对话要等发出第一条消息才有会话；在那之前界面的作用域是工作区
+ * 路径（渲染层 browserScopeId 的兜底），也就是这条 create_session 的 cwd。用户先开
+ * 页面、再让 Agent 看它是很自然的顺序，所以会话一建好，那几张标签页就归它。在快照
+ * 回到界面之前做，界面切到会话作用域时标签页已经在那儿了，不会先补建一张空白页。
+ *
+ * `browser` 是发起请求那个窗口的浏览器。气泡窗口没有浏览器，它建的会话不会把主窗口
+ * 草稿里的页面拿走。
+ */
+function handDraftTabsToNewSession(browser: BrowserRuntimeManager | undefined, command: RuntimeCommand, value: unknown): void {
+  if (!browser || command.type !== "create_session") return;
+  const session = (value as { session?: { id?: unknown; cwd?: unknown } } | undefined)?.session;
+  if (typeof session?.id !== "string" || !session.id) return;
+  try {
+    browser.adoptScope(command.cwd, session.id, typeof session.cwd === "string" ? session.cwd : command.cwd);
+  } catch (error) {
+    // 接手失败只是草稿里的页面留在原处，不能挡住这条消息。
+    diagnosticLog().warn("browser", "draft_tabs_adoption_failed", { message: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 async function safeProjectPath(input: Pick<OpenFilePreviewInput, "root" | "path">): Promise<{ root: string; path: string }> {
@@ -466,16 +490,15 @@ class RuntimeBridge {
   private host?: RuntimeHost;
 
   private broadcast = (runtimeId: string | undefined, event: RuntimeEventEnvelope["event"]): void => {
-    // 会话结束时不再关浏览器：浏览器是整个工作区的，同一个工作区里别的会话、还有
-    // 用户自己都在用它。以前这里按会话作用域把那一批标签页关掉，换成按工作区之后，
-    // 这一条会连用户正看着的页面一起关。
-    // 每个会话在哪个工作区，只有快照说得清。记下来，那个工作区那份 cookie jar 才会
-    // 提前配好——界面切到别处也不影响。
+    // 浏览器按会话分，一个会话一批标签页；cookie 仍按工作区分。每个会话在哪个工作区，
+    // 只有快照说得清：用会话 id 记下它的工作区，它的 Agent 在后台开的标签页才会落在
+    // 那个工作区的 cookie jar 里——界面切到别处也不影响。
+    // 会话结束、运行时被回收时都不关它的标签页：切回来页面还要在，一直留到退出 App。
     if (runtimeId && event.type === "session_snapshot") {
-      const cwd = event.snapshot.session.cwd;
-      for (const runtime of browserRuntimes.values()) runtime.noteScopeWorkspace(cwd, cwd);
+      const { id, cwd } = event.snapshot.session;
+      for (const runtime of browserRuntimes.values()) runtime.noteScopeWorkspace(id, cwd);
     }
-    for (const window of BrowserWindow.getAllWindows()) {
+    for (const window of appWindows()) {
       window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
     }
     // Remote clients are additional viewers of the same session, so they see
@@ -561,7 +584,9 @@ function remoteController(): RemoteAccessController {
       if (channel === RUNTIME_REQUEST_CHANNEL) {
         const payload = args[0] as RuntimeRequestPayload;
         try {
-          return { ok: true, value: await runtime.request(payload) } satisfies RuntimeRequestResult;
+          const value = await runtime.request(payload);
+          handDraftTabsToNewSession(primaryBrowserRuntime, payload.command, value);
+          return { ok: true, value } satisfies RuntimeRequestResult;
         } catch (error) {
           return { ok: false, error: error instanceof Error ? error.message : String(error) } satisfies RuntimeRequestResult;
         }
@@ -645,9 +670,10 @@ function remoteController(): RemoteAccessController {
           case BROWSER_SET_SCOPE_CHANNEL: return browser.setUiScope(args[0] as string, args[1] as string | undefined);
           case BROWSER_GET_STATE_CHANNEL: return browser.state(args[0] as string);
           case BROWSER_CAPTURE_CHANNEL: return browser.captureTab(args[0] as string);
-          case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, args[0] as string);
+          case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, args[0] as string, args[2] === true);
           case BROWSER_SELECT_TAB_CHANNEL: return browser.selectTab(args[1] as string, args[0] as string);
           case BROWSER_CLOSE_TAB_CHANNEL: return browser.closeTab(args[1] as string, args[0] as string);
+          case BROWSER_TAKE_OVER_CHANNEL: return browser.takeOverForUser(args[1] as string, args[0] as string);
           case BROWSER_NAVIGATE_CHANNEL: return browser.navigate(args[1] as string, args[0] as string);
           case BROWSER_ZOOM_CHANNEL: return browser.setZoom(args[1] as "in" | "out" | "reset", args[0] as string);
           case BROWSER_BACK_CHANNEL: return browser.back(args[0] as string);
@@ -677,7 +703,7 @@ function remoteController(): RemoteAccessController {
         return undefined;
       }
       if (channel === TERMINAL_CLOSE_CHANNEL) return primaryTerminalRuntime?.close(args[0] as string) ?? [];
-      if (channel === WINDOW_IS_MAXIMIZED_CHANNEL) return BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false;
+      if (channel === WINDOW_IS_MAXIMIZED_CHANNEL) return appWindows()[0]?.isMaximized() ?? false;
       if (channel === DIAGNOSTIC_LOG_CHANNEL) {
         const batch = args[0] as DiagnosticLogBatch;
         if (Array.isArray(batch?.entries)) diagnosticLog().writeEntries(batch.entries);
@@ -699,7 +725,7 @@ function remoteController(): RemoteAccessController {
     // The pairing code is shown in settings and nowhere else, so any change to
     // it has to reach an open settings screen on its own.
     onStateChanged: (state) => {
-      for (const window of BrowserWindow.getAllWindows()) {
+      for (const window of appWindows()) {
         window.webContents.send(REMOTE_STATE_CHANNEL, state);
       }
       remoteAccess?.broadcast(REMOTE_STATE_CHANNEL, state);
@@ -868,19 +894,38 @@ async function createWindow(): Promise<void> {
   // Capture the id up front: by the time "closed" fires the window is destroyed
   // and reading webContents throws.
   mainWindow.once("closed", () => webviewHostIds.delete(webviewHostId));
+  // 接管用的元素在 will-attach 里认出来，到 did-attach 才拿得到它的 guest。两个事件
+  // 对同一个元素是紧挨着同步发的，中间不会插进别的元素的事件，所以记一个就够。
+  let pendingRestoreAttach: string | undefined;
   mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
     const allowed = hardenGuestPreferences(
       webPreferences as unknown as Record<string, unknown>,
       params as unknown as Record<string, unknown>,
       (partition) => browserRuntime.expectsPartition(partition),
     );
-    if (!allowed) event.preventDefault();
+    if (!allowed) {
+      event.preventDefault();
+      return;
+    }
+    // 用户接管 Agent 标签页：确认真有这张在等，再清空 src，guest 什么都不加载，页面
+    // 状态由主进程恢复进去（见 browser-webview-policy.ts 的 restoreGuestSrc）。
+    const restoreTabId = restoreTabIdFromSrc(params.src);
+    if (!restoreTabId) return;
+    if (!browserRuntime.acceptsRestoreAttach(restoreTabId, params.partition)) {
+      event.preventDefault();
+      return;
+    }
+    params.src = "";
+    pendingRestoreAttach = restoreTabId;
   });
   // Baseline until the tab record claims the guest and installs its own handler;
   // a guest must never be able to open an OS window.
   mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
     guest.setWindowOpenHandler(() => ({ action: "deny" }));
     installGuestContextMenu(guest, mainWindow);
+    const restoreTabId = pendingRestoreAttach;
+    pendingRestoreAttach = undefined;
+    if (restoreTabId) browserRuntime.claimRestoreGuest(restoreTabId, guest);
   });
 
   const browserRuntime = new BrowserRuntimeManager(mainWindow, (state) => {
@@ -1011,6 +1056,17 @@ async function createWindow(): Promise<void> {
   });
 }
 
+/**
+ * CoilCoil 自己的窗口。
+ *
+ * 内置浏览器里 Agent 用的标签页是隐藏的离屏窗口（见 browser-offscreen.ts），装的是
+ * 任意网页。广播对话事件、设置状态这类消息只能发给 App 自己的窗口，不能落进网页的
+ * 渲染进程；「还有没有窗口」这类判断也只算 App 窗口。
+ */
+function appWindows(): BrowserWindow[] {
+  return BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed() && !window.webContents.isOffscreen());
+}
+
 function loadRendererInto(window: BrowserWindow, hash?: string): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(hash ? `${process.env.ELECTRON_RENDERER_URL}#${hash}` : process.env.ELECTRON_RENDERER_URL);
@@ -1032,7 +1088,7 @@ let offeredUpdate: string | undefined;
 function offerUpdate(update: UpdateAvailable): void {
   if (offeredUpdate === update.latest) return;
   offeredUpdate = update.latest;
-  for (const window of BrowserWindow.getAllWindows()) {
+  for (const window of appWindows()) {
     if (!window.isDestroyed()) window.webContents.send(UPDATE_AVAILABLE_CHANNEL, update);
   }
   remoteAccess?.broadcast(UPDATE_AVAILABLE_CHANNEL, update);
@@ -1240,9 +1296,10 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_CAPTURE_CHANNEL, (event, scopeId: string) => browserFor(event).captureTab(scopeId));
   ipcMain.handle(BROWSER_PICK_ELEMENT_CHANNEL, (event, scopeId: string) => browserFor(event).pickElement(scopeId));
   ipcMain.handle(BROWSER_CANCEL_PICK_CHANNEL, (event): void => browserFor(event).cancelElementPick());
-  ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string) => browserFor(event).createTab(url, true, scopeId));
+  ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string, placeholder?: boolean) => browserFor(event).createTab(url, true, scopeId, placeholder === true));
   ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).selectTab(id, scopeId));
   ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).closeTab(id, scopeId));
+  ipcMain.handle(BROWSER_TAKE_OVER_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).takeOverForUser(id, scopeId));
   ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, (event, scopeId: string, url: string) => browserFor(event).navigate(url, scopeId));
   ipcMain.handle(BROWSER_ZOOM_CHANNEL, (event, scopeId: string, step: "in" | "out" | "reset") => browserFor(event).setZoom(step, scopeId));
   ipcMain.handle(BROWSER_BACK_CHANNEL, (event, scopeId: string) => browserFor(event).back(scopeId));
@@ -1321,9 +1378,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(REMOTE_ACCOUNT_CHANNEL, (_event, username: string, password: string) => remoteController().setAccount(username ?? "", password ?? ""));
   ipcMain.handle(REMOTE_REVOKE_CHANNEL, () => remoteController().revokeDevices());
 
-  ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (_event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
+  ipcMain.handle(RUNTIME_REQUEST_CHANNEL, async (event, payload: RuntimeRequestPayload): Promise<RuntimeRequestResult> => {
     try {
-      return { ok: true, value: await runtime.request(payload) };
+      const value = await runtime.request(payload);
+      handDraftTabsToNewSession(browserRuntimes.get(event.sender.id), payload.command, value);
+      return { ok: true, value };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -1340,7 +1399,7 @@ app.whenReady().then(async () => {
   runtime.start();
   void remoteController().start();
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (appWindows().length === 0) {
       void createWindow()
         .then(() => runtime.start())
         .catch((error) => diagnosticLog().error("window", "reactivate_failed", error));

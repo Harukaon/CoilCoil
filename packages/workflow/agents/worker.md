@@ -1,7 +1,7 @@
 ---
 name: worker
 description: 编码执行代理，负责具体的代码编写和修改任务
-tools: [read, bash, terminal, edit, write, grep, ls]
+tools: [read, bash, terminal, edit, write, grep, ls, mcp]
 worktree: true
 ---
 

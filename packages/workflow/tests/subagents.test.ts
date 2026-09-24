@@ -477,7 +477,7 @@ test("resume preserves the tool allowlist captured by the original profile", () 
   assert.deepEqual(resumeToolsForRun(run, changedProfile), ["read", "grep", "ls"]);
   assert.deepEqual(resumeToolsForRun(makeRun({ tools: undefined }), changedProfile), ["read", "edit", "write"]);
   assert.equal(resumeToolsForRun(makeRun({ tools: undefined }), undefined), undefined, "a missing named profile must fail closed");
-  assert.deepEqual(resumeToolsForRun(makeRun({ agent: "default", tools: undefined }), undefined), ["read", "bash", "terminal", "edit", "write", "grep", "ls"]);
+  assert.deepEqual(resumeToolsForRun(makeRun({ agent: "default", tools: undefined }), undefined), ["read", "bash", "terminal", "edit", "write", "grep", "ls", "mcp"]);
 });
 
 test("resume fails closed when an isolated worktree disappeared", () => {

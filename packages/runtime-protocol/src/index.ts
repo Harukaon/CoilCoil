@@ -810,6 +810,16 @@ export interface ChatMessage {
   isError?: boolean;
   /** `steering` is a message Pi has accepted for the running turn but has not delivered yet. */
   status?: "queued" | "steering" | "running" | "succeeded" | "failed" | "aborted";
+  /** 用户消息：发出前存过工作区快照，编辑它重新发送时可以把代码退回那时的样子。 */
+  checkpoint?: boolean;
+}
+
+/** 编辑一条历史消息之前问一下：代码要不要回退、回退会动到哪些文件。 */
+export interface RewindPreview {
+  /** 这条消息有检查点。 */
+  checkpoint: boolean;
+  /** 从这条消息发出到现在，工作区里变过的文件；回退就是把它们恢复原样。 */
+  files: GitCommitFile[];
 }
 
 export interface TodoItem {
@@ -1299,6 +1309,110 @@ export interface ChangedFile {
   patch?: string;
 }
 
+/** 一个文件在暂存区或工作区里的状态；`undefined` 表示那一侧没有改动。 */
+export type GitFileState = "modified" | "added" | "deleted" | "renamed" | "copied" | "type-changed" | "untracked" | "conflicted";
+
+export interface GitFileChange {
+  /** 相对仓库根目录的路径。 */
+  path: string;
+  /** 改名 / 复制前的路径。 */
+  originalPath?: string;
+  staged?: GitFileState;
+  unstaged?: GitFileState;
+}
+
+export interface GitStatus {
+  /** 这个工作区不在 git 仓库里时为 false，其余字段都没有意义。 */
+  repository: boolean;
+  root?: string;
+  /** 当前分支；分离 HEAD 时是 undefined。 */
+  branch?: string;
+  detached: boolean;
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  /** 仓库里一个提交都还没有。 */
+  unborn: boolean;
+  /** HEAD 指向的提交；还没有提交时是 undefined。 */
+  head?: string;
+  files: GitFileChange[];
+}
+
+export interface GitBranch {
+  name: string;
+  upstream?: string;
+  current: boolean;
+}
+
+export interface GitDiff {
+  path: string;
+  staged: boolean;
+  /** 看的是某个历史提交里的改动时，那个提交的哈希。 */
+  commit?: string;
+  patch: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
+/** 指向一个提交的引用。`fullName` 是 `refs/heads/main` 这种完整名字。 */
+export interface GitCommitRef {
+  name: string;
+  fullName: string;
+  kind: "branch" | "remote" | "tag" | "head";
+}
+
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  /** 第一个是主线父提交；合并提交有多个，根提交没有。 */
+  parents: string[];
+  author: string;
+  email: string;
+  /** 作者时间，毫秒。 */
+  date: number;
+  subject: string;
+  /** 提交说明除了标题以外的部分。 */
+  body: string;
+  refs: GitCommitRef[];
+}
+
+export interface GitLog {
+  /** 按拓扑顺序排，子提交一定在父提交前面。 */
+  commits: GitCommit[];
+  /** 后面还有更早的提交。 */
+  hasMore: boolean;
+  head?: string;
+  /** 当前分支和它的上游的完整引用名，给图上的线配色用。 */
+  currentRef?: string;
+  upstreamRef?: string;
+}
+
+/** 一个历史提交里改了的文件（和第一个父提交比）。 */
+export interface GitCommitFile {
+  path: string;
+  originalPath?: string;
+  state: GitFileState;
+}
+
+export type GitAction =
+  | { op: "status" }
+  | { op: "diff"; path: string; staged: boolean }
+  | { op: "stage"; paths: string[] }
+  | { op: "unstage"; paths: string[] }
+  /** 丢弃工作区里的改动；未跟踪的文件会被删除。暂存区不动。 */
+  | { op: "discard"; paths: string[] }
+  /** `stageAll`：暂存区是空的就先把所有改动暂存再提交。 */
+  | { op: "commit"; message: string; stageAll?: boolean }
+  | { op: "push" }
+  | { op: "pull" }
+  | { op: "branches" }
+  | { op: "checkout"; branch: string }
+  | { op: "create_branch"; name: string }
+  /** 提交历史：默认是当前分支和它的上游，`all` 时是所有分支和标签。 */
+  | { op: "log"; limit?: number; all?: boolean }
+  | { op: "commit_files"; hash: string }
+  | { op: "commit_diff"; hash: string; path: string; originalPath?: string };
+
 export interface FileNode {
   name: string;
   path: string;
@@ -1479,13 +1593,17 @@ export type RuntimeCommand =
   | { type: "open_session"; cwd: string; sessionPath: string }
   | { type: "open_workspace"; cwd: string }
   | { type: "prompt"; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
-  | { type: "rewind_prompt"; entryId: string; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
+  /** `restoreCode`：先把工作区退回这条消息发出时的检查点，再重新发送。 */
+  | { type: "rewind_prompt"; entryId: string; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string; restoreCode?: boolean }
+  | { type: "rewind_preview"; entryId: string }
   | { type: "steer"; text: string; promptDocument?: PromptDocument; images?: PromptImage[]; clientMessageId?: string }
   | { type: "abort" }
   | { type: "stop_goal" }
   | { type: "cancel_queued_prompt"; id: string }
   | { type: "promote_queued_prompt"; id: string }
   | { type: "refresh_project" }
+  /** 工作区的 git 操作。不属于任何会话，结果类型见 GitAction 各分支的说明。 */
+  | { type: "git"; cwd: string; action: GitAction }
   | { type: "list_directory"; path: string }
   | { type: "read_file"; path: string; maxBytes?: number };
 

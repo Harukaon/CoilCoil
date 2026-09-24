@@ -151,6 +151,15 @@ if (patchFile("build/src/tools/lighthouse.js", [{
   after: `                url: lhr.mainDocumentUrl ?? lhr.finalDisplayedUrl ?? page.pptrPage.url(),`,
 }])) changedFiles.push("tools/lighthouse.js");
 
+// ToolDefinition.js makes pageId optional, but evaluate_script looks the page up
+// again on its own and never falls back: with page-id routing on, omitting pageId
+// (as the schema invites) ends in "No page found" on every call.
+if (patchFile("build/src/tools/script.js", [{
+  before: `                const mcpPage = cliArgs?.experimentalPageIdRouting\n                    ? context.getPageById(request.params.pageId)`,
+  after: `                // COILCOIL: an omitted pageId means the selected page, like every other tool.\n                const mcpPage = cliArgs?.experimentalPageIdRouting && request.params.pageId !== undefined\n                    ? context.getPageById(request.params.pageId)`,
+  marker: "COILCOIL: an omitted pageId means the selected page",
+}])) changedFiles.push("tools/script.js");
+
 process.stdout.write(changedFiles.length
   ? `Patched chrome-devtools-mcp 1.7.0: ${changedFiles.join(", ")}\n`
   : "chrome-devtools-mcp 1.7.0 compatibility patches already applied.\n");

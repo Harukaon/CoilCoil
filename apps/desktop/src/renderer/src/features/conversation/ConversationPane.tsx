@@ -133,7 +133,7 @@ export function ConversationPane({
   onDragLeave: (event: ReactDragEvent<HTMLElement>) => void;
   onDrop: (event: ReactDragEvent<HTMLElement>) => void;
   onTimelineScroll: () => void;
-  onRewind: (message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument) => Promise<void>;
+  onRewind: (message: ChatMessage, text: string, images: PromptImage[], document: PromptDocument, restoreCode: boolean) => Promise<void>;
   onError: (message?: string) => void;
   onSubmit: (event: FormEvent) => void;
   onDocumentChange: (document: PromptDocument) => void;

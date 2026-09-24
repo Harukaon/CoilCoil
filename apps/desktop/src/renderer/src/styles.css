@@ -631,6 +631,13 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .tool-execution-details section + section { margin-top: 8px; }
 .tool-execution-details section > span { display: block; margin: 0 0 4px 11px; color: hsl(var(--th) var(--ts) var(--l-618)); font-size: 9px; font-weight: 600; }
 .tool-activity-row pre, .tool-execution-details pre { max-height: 260px; margin: 0; overflow: auto; padding: 9px 11px; border-left: 2px solid hsl(var(--th) var(--ts) var(--l-861)); color: hsl(var(--th) var(--ts) var(--l-390)); background: transparent; font: 10px/1.55 var(--font-mono, "SFMono-Regular", Consolas, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-execution-details pre.tool-diff { white-space: pre; overflow-wrap: normal; }
+.tool-diff-header, .tool-diff-line { display: block; min-width: max-content; }
+.tool-diff-header { margin-bottom: 4px; color: hsl(var(--th) var(--ts) var(--l-250)); font-weight: 600; }
+.tool-diff-line.add { color: var(--c-green-text); background: color-mix(in srgb, var(--c-green-text) 9%, transparent); }
+.tool-diff-line.del { color: var(--c-red-muted); background: color-mix(in srgb, var(--c-red-muted) 9%, transparent); }
+.tool-diff-line.hunk { color: hsl(var(--th) var(--ts) var(--l-541)); }
+.tool-diff-line.note { color: hsl(var(--th) var(--ts) var(--l-541)); font-style: italic; }
 .loading-state-stacked { flex-direction: column; gap: 16px; }
 .agent-activity { display: flex; min-width: 0; align-items: center; gap: 8px; margin: -8px 0 25px; color: hsl(var(--th) var(--ts) var(--l-512)); font-size: 12px; }
 .agent-activity-line { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -808,6 +815,8 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .terminal-notice-toggle { display: inline-flex; height: 24px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-450)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 10px; cursor: pointer; }
 .terminal-notice-toggle:hover { color: hsl(var(--th) var(--ts) var(--l-200)); }
 .terminal-notice-preview { min-width: 0; overflow: hidden; padding-left: 35px; color: hsl(var(--th) var(--ts) var(--l-520)); font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-notice-report { min-width: 0; padding-left: 35px; color: hsl(var(--th) var(--ts) var(--l-250)); font-size: 12px; }
+.subagent-notice-error { min-width: 0; padding-left: 35px; color: var(--c-red-text); font-size: 11px; }
 .terminal-notice-output { max-height: 260px; margin: 0; overflow: auto; padding: 9px 10px; border-radius: var(--radius-2xl); color: hsl(var(--th) var(--ts) var(--l-320)); background: hsl(var(--th) var(--ts) var(--l-939)); font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .terminal-notice-batch { display: grid; min-width: 0; }
 .terminal-notice-batch .terminal-notice { margin-bottom: 6px; }
@@ -1141,6 +1150,12 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .browser-toolbar input { min-width: 0; height: 25px; flex: 1; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-865)); border-radius: var(--radius-lg); outline: 0; color: hsl(var(--th) var(--ts) var(--l-324)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 8px; }
 .browser-toolbar input:focus { border-color: hsl(var(--th) var(--ts) var(--l-735)); box-shadow: 0 0 0 2px rgb(110 130 106 / 10%); }
 .browser-native-host { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: hsl(var(--th) var(--ts) var(--l-1000)); }
+/* 归 Agent 的标签页：离屏页面的画面，只能看；底下一条说明和「接管」按钮。 */
+.browser-agent-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.browser-agent-frame { display: block; flex: 1; min-height: 0; width: 100%; object-fit: contain; object-position: top left; user-select: none; pointer-events: none; }
+.browser-agent-bar { position: absolute; left: 50%; bottom: 12px; display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; transform: translateX(-50%); border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-302)); background: hsl(var(--th) var(--ts) var(--l-1000) / 94%); box-shadow: 0 4px 16px hsl(0 0% 0% / 12%); font-size: 11px; white-space: nowrap; }
+.browser-agent-bar button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: 0; border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-247)); font: inherit; font-weight: 600; cursor: pointer; }
+.browser-agent-bar button:disabled { opacity: .6; cursor: default; }
 /* Guests composite above the app shell but below every overlay: resizer 20, app-sidebar-control 80,
    context-menu 100, dialog 240, subagent backdrop 300, popovers 1000, tooltip 1500. */
 .browser-guest-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }

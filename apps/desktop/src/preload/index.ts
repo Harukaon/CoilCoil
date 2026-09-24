@@ -6,6 +6,7 @@ import type {
   BrowserElementSelection,
   BrowserGuestRoster,
   BrowserImportSummary,
+  BrowserFrame,
   BrowserStateSnapshot,
   BrowserUiViewport,
   BubbleSessionTarget,
@@ -84,6 +85,8 @@ const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
+const BROWSER_TAKE_OVER_CHANNEL = "browser:take-over";
+const BROWSER_FRAME_CHANNEL = "browser:frame";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
@@ -198,9 +201,10 @@ const api: CoilCoilDesktopApi = {
   pickBrowserElement: (scopeId: string) =>
     ipcRenderer.invoke(BROWSER_PICK_ELEMENT_CHANNEL, scopeId) as Promise<BrowserElementSelection | undefined>,
   cancelBrowserElementPick: () => ipcRenderer.invoke(BROWSER_CANCEL_PICK_CHANNEL) as Promise<void>,
-  createBrowserTab: (scopeId: string, url?: string) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, scopeId, url) as Promise<BrowserStateSnapshot>,
+  createBrowserTab: (scopeId: string, url?: string, placeholder?: boolean) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, scopeId, url, placeholder === true) as Promise<BrowserStateSnapshot>,
   selectBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_SELECT_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
   closeBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
+  takeOverBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_TAKE_OVER_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
   navigateBrowser: (scopeId: string, url: string) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, scopeId, url) as Promise<BrowserStateSnapshot>,
   setBrowserZoom: (scopeId: string, step: "in" | "out" | "reset") => ipcRenderer.invoke(BROWSER_ZOOM_CHANNEL, scopeId, step) as Promise<BrowserStateSnapshot>,
   browserBack: (scopeId: string) => ipcRenderer.invoke(BROWSER_BACK_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
@@ -229,6 +233,11 @@ const api: CoilCoilDesktopApi = {
     const handler = (_event: Electron.IpcRendererEvent, state: BrowserStateSnapshot): void => listener(state);
     ipcRenderer.on(BROWSER_STATE_CHANNEL, handler);
     return () => ipcRenderer.removeListener(BROWSER_STATE_CHANNEL, handler);
+  },
+  onBrowserFrame: (listener: (frame: BrowserFrame) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, frame: BrowserFrame): void => listener(frame);
+    ipcRenderer.on(BROWSER_FRAME_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(BROWSER_FRAME_CHANNEL, handler);
   },
   onBrowserAgentActivated: (listener: (scopeId: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, scopeId: string): void => listener(scopeId);

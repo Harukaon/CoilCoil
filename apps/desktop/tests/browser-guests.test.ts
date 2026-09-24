@@ -214,3 +214,41 @@ test("两个工作区的标签页可以同时等着，各认各的 jar", () => {
   registry.release("tab-a");
   registry.release("tab-b");
 });
+
+test("接管：主进程在 did-attach 里认领 guest，之后渲染层的 nonce 登记必须报同一个", async () => {
+  const { registry } = harness({ 7: {}, 8: {} });
+  const claimed = registry.expectRestoreGuest("tab-1", PARTITION);
+  const registered = registry.expectGuest("tab-1", "nonce-1", PARTITION);
+  assert.equal(registry.restorePending("tab-1"), true);
+  assert.equal(registry.acceptsRestore("tab-1", PARTITION), true);
+  assert.equal(registry.acceptsRestore("tab-1", "persist:other"), false, "分区不对不认");
+  assert.equal(registry.acceptsRestore("tab-2", PARTITION), false, "没在等接管的标签页不认");
+  registry.claimRestore("tab-1", 7);
+  assert.equal(await claimed, 7);
+  assert.equal(registry.restorePending("tab-1"), false);
+  assert.throws(() => registry.register("tab-1", "nonce-1", 8), /和认领的不一致/);
+  registry.register("tab-1", "nonce-1", 7);
+  assert.equal(await registered, 7);
+  assert.equal(registry.boundGuestId("tab-1"), 7);
+});
+
+test("接管认领和常规登记一样核对：类型、窗口、分区不对都拒绝", async () => {
+  for (const [override, message] of [
+    [{ type: "window" }, /类型不符/],
+    [{ hostWebContentsId: 99 }, /不属于当前窗口/],
+    [{ partition: "persist:other" }, /会话分区不符/],
+  ] as const) {
+    const { registry } = harness({ 7: override });
+    const claimed = settled(registry.expectRestoreGuest("tab-1", PARTITION));
+    assert.throws(() => registry.claimRestore("tab-1", 7), message);
+    assert.equal((await claimed).ok, false);
+  }
+});
+
+test("关掉等接管的标签页：等待落空，也不再认领", async () => {
+  const { registry } = harness({ 7: {} });
+  const claimed = settled(registry.expectRestoreGuest("tab-1", PARTITION));
+  registry.release("tab-1");
+  assert.equal((await claimed).error, "标签页已关闭。");
+  assert.throws(() => registry.claimRestore("tab-1", 7), /未在等待接管/);
+});

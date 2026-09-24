@@ -9,11 +9,16 @@ const read = (path: string) => readFile(resolve(repositoryRoot, path), "utf8");
 /**
  * 这条线是防「一个文件什么都装」，不是防长文件本身。
  *
- * 内置浏览器先后加了缩放、每个工作区一份 cookie，browser-runtime.ts 两次越线。为
- * 了这几十行把它拆开，只会让同一件事分散在两处——用户明确说过，宁可一个长文件，也
- * 不要为了压行数把复杂逻辑切开。所以抬上限，不动代码。
+ * 内置浏览器先后加了缩放、每个工作区一份 cookie、新会话接手草稿标签页，
+ * browser-runtime.ts 三次越线。为了这几十行把它拆开，只会让同一件事分散在两处——
+ * 用户明确说过，宁可一个长文件，也不要为了压行数把复杂逻辑切开。所以抬上限，不动代码。
+ *
+ * 1150：Agent 的标签页改成离屏页面、用户和 Agent 互相接管之后又涨了两百多行。能独立
+ * 成块的已经各自成文件（离屏页面和画面推送 browser-offscreen.ts、接管用 guest 的认领
+ * 在 browser-guests.ts），剩下的是标签页在两种形态之间切换本身，和标签页生命周期是
+ * 同一件事，拆开反而要在两处对着看。
  */
-const MAX_LINES = 800;
+const MAX_LINES = 1150;
 
 test(`browser runtime source files stay within the ${MAX_LINES}-line architecture limit`, async () => {
   for (const path of [
@@ -70,6 +75,10 @@ test("pageId 是可选的：不传就落到当前选中的页面", async () => {
   // 处理器那一侧的兜底还在，否则可选就成了「不传就报错」。
   const handler = await read("node_modules/chrome-devtools-mcp/build/src/ToolHandler.js");
   assert.match(handler, /: context\.getSelectedMcpPage\(\)/);
+  // evaluate_script 在自己的处理函数里又按 pageId 查一次页面，没有兜底：照 schema
+  // 不传 pageId，每次都是 "No page found"。端到端跑真实 Agent 时撞出来的。
+  const script = await read("node_modules/chrome-devtools-mcp/build/src/tools/script.js");
+  assert.match(script, /experimentalPageIdRouting && request\.params\.pageId !== undefined/);
   // select_page 自己那个 pageId 仍然必填：它的全部意思就是「选这一个」。
   const pages = await read("node_modules/chrome-devtools-mcp/build/src/tools/pages.js");
   assert.match(pages, /The ID of the page to select/);

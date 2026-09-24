@@ -116,6 +116,7 @@ test("an idle session commits its model before publishing the new snapshot", asy
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     modelRuntime,
     onEvent: (event) => events.push(event),
   });
@@ -168,6 +169,7 @@ test("a running session records a model switch for the next request", async (con
   const runtime = new CoilCoilRuntime({
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
+    checkpoints: false,
     modelRuntime,
   });
   const internals = runtime as unknown as RuntimeInternals;

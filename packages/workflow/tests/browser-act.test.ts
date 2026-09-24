@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import browserActExtension from "../extensions/browser-act.ts";
+import browserActExtension, { pageIdForUrl, selectedPageId } from "../extensions/browser-act.ts";
 import { MCP_MANAGER_CHANNEL } from "../extensions/mcp-tools.ts";
 
 function fakePi(calls: Array<{ server: string; tool: string; args: Record<string, unknown> }>, behavior?: (server: string, tool: string) => unknown): {
@@ -42,7 +42,7 @@ function collectTools(): { tools: Map<string, { description: string; execute: (i
 
 test("browser-act 注册四个交互工具，描述里分清交互与调试", () => {
   const { tools } = collectTools();
-  for (const name of ["browser_open", "browser_navigate", "browser_click", "browser_type"]) {
+  for (const name of ["browser_open", "browser_navigate", "browser_click", "browser_type", "browser_user_tabs", "browser_take_over"]) {
     assert.ok(tools.has(name), `缺少 ${name}`);
   }
   const open = tools.get("browser_open")!;
@@ -110,4 +110,85 @@ test("browser-act 工具名与描述锁死：描述里提到的工具必须真�
   }
   const unknown = [...mentioned].filter((name) => !known.has(name));
   assert.deepEqual(unknown, [], `描述里提到了不存在的工具：${unknown.join(", ")}`);
+});
+
+// 下面几条按 chrome-devtools-mcp 的真实行为造假：出错是返回 isError，不是抛异常；
+// new_page 的回执里带着页面列表，新页标着 [selected]。
+type Call = { server: string; tool: string; args: Record<string, unknown> };
+type Result = { content: Array<{ type: string; text?: string }>; details: Record<string, unknown>; isError: boolean };
+
+function realisticTools(behavior: (tool: string, args: Record<string, unknown>) => unknown): { calls: Call[]; run: (name: string, params: Record<string, unknown>) => Promise<Result> } {
+  const calls: Call[] = [];
+  const tools = new Map<string, { execute: (id: string, params: never) => Promise<Result> }>();
+  browserActExtension({
+    events: {
+      emit(channel: string, data: { manager?: unknown }) {
+        if (channel !== MCP_MANAGER_CHANNEL) return;
+        data.manager = {
+          callTool: async (server: string, tool: string, args: Record<string, unknown>) => {
+            calls.push({ server, tool, args });
+            return behavior(tool, args);
+          },
+        };
+      },
+    },
+    registerTool: (tool: never) => {
+      const entry = tool as unknown as { name: string; execute: (id: string, params: never) => Promise<Result> };
+      tools.set(entry.name, entry);
+    },
+  } as never);
+  return { calls, run: (name, params) => tools.get(name)!.execute("t", params as never) };
+}
+
+const text = (value: string) => ({ content: [{ type: "text", text: value }] });
+
+test("selectedPageId 认的是标着 [selected] 的那一页，不是第一行", () => {
+  assert.equal(selectedPageId("## Pages\n1: page-a (http://a) \n2: page-b (http://b) [selected]"), 2);
+  assert.equal(selectedPageId("## Pages\n1: page-a (http://a) [selected]\n2: page-b (http://b)"), 1);
+  assert.equal(selectedPageId("没有页面"), undefined);
+});
+
+test("第二次 browser_open 的句柄绑在新开的那一页上，导航动的也是它", async () => {
+  const { calls, run } = realisticTools((tool) => {
+    if (tool === "new_page") return text("## Pages\n1: page-a (http://a)\n2: page-b (http://b) [selected]");
+    return text(`${tool}-ok`);
+  });
+  const opened = await run("browser_open", { url: "http://b" });
+  assert.equal(opened.details.pageId, 2, "句柄要绑新页，不能绑第一个标签页");
+  await run("browser_navigate", { handle: opened.details.handle, url: "http://c" });
+  const navigate = calls.find((call) => call.tool === "navigate_page");
+  assert.equal(navigate?.args.pageId, 2);
+});
+
+test("MCP 返回 isError 时报失败，不报成功", async () => {
+  const { run } = realisticTools((tool) => {
+    if (tool === "click") return { ...text("Error: No snapshot found for page 1."), isError: true };
+    if (tool === "navigate_page") return { ...text("Error: NAVIGATION_FAILED"), isError: true };
+    return text("uid=2_0 RootWebArea");
+  });
+  const clicked = await run("browser_click", { uid: "9_9" });
+  assert.equal(clicked.isError, true);
+  assert.match(clicked.content[0]?.text ?? "", /点击失败/);
+  assert.match(clicked.content[0]?.text ?? "", /uid=2_0/, "失败时要带回新快照");
+  const navigated = await run("browser_navigate", { url: "http://nope" });
+  assert.equal(navigated.isError, true);
+  assert.match(navigated.content[0]?.text ?? "", /导航失败/);
+});
+
+test("句柄每个会话一份，两个会话的 btab-1 不会串", async () => {
+  const first = realisticTools((tool) => (tool === "new_page" ? text("1: a [selected]") : text("ok")));
+  const second = realisticTools((tool) => (tool === "new_page" ? text("1: x\n2: y [selected]") : text("ok")));
+  const a = await first.run("browser_open", { url: "http://a" });
+  const b = await second.run("browser_open", { url: "http://y" });
+  assert.equal(a.details.handle, "btab-1");
+  assert.equal(b.details.handle, "btab-1");
+  await first.run("browser_navigate", { handle: "btab-1", url: "http://c" });
+  assert.equal(first.calls.find((call) => call.tool === "navigate_page")?.args.pageId, 1);
+});
+
+test("接管后按网址认出新页面的编号；同一个网址有好几张时要最新的", () => {
+  const listing = "## Pages\n1: a (http://x/a.html)\n2: form (http://x/form.html)\n3: form again (http://x/form.html) [selected]";
+  assert.equal(pageIdForUrl(listing, "http://x/form.html"), 3);
+  assert.equal(pageIdForUrl(listing, "http://x/a.html"), 1);
+  assert.equal(pageIdForUrl(listing, "http://x/none.html"), undefined);
 });
