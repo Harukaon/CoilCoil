@@ -146,35 +146,14 @@ export function usePanelLayout(options: {
 
   const beginResize = useCallback((side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>): void => {
     event.preventDefault();
-    // One global drag state owns the frozen transcript. Ignore a second pointer
-    // rather than letting one drag thaw or clean up the other one.
-    if (document.body.classList.contains("resizing-panels")) return;
-    const resizeHandle = event.currentTarget;
-    const pointerId = event.pointerId;
     const startX = event.clientX;
     const startWidth = side === "left" ? leftWidth : rightWidth;
     let finalWidth = startWidth;
-    let pendingClientX = startX;
-    let resizeFrame: number | undefined;
-    let stopped = false;
-    const shell = resizeHandle.closest(".app-shell") as HTMLElement | null;
+    const shell = event.currentTarget.closest(".app-shell") as HTMLElement | null;
     const cssVar = side === "left" ? "--sidebar-width" : "--inspector-width";
-    const conversationBody = shell?.querySelector<HTMLElement>(".conversation-body");
-    if (shell && conversationBody) {
-      // Keep the expensive transcript at its starting width while the panel follows
-      // the pointer. Markdown, tables and code blocks then reflow once on release
-      // instead of once for every pixel the pointer crosses.
-      shell.style.setProperty("--conversation-resize-width", `${conversationBody.getBoundingClientRect().width}px`);
-      shell.classList.add("conversation-layout-frozen");
-    }
     document.body.classList.add("resizing-panels");
-    // Capture keeps pointerup flowing to this window when the cursor leaves its
-    // bounds. Synthetic events do not establish an active pointer, so keep the
-    // blur fallback below and tolerate capture being unavailable.
-    try { resizeHandle.setPointerCapture(pointerId); } catch { /* no active pointer */ }
-    const applyWidth = (): void => {
-      resizeFrame = undefined;
-      const raw = side === "left" ? startWidth + pendingClientX - startX : startWidth + startX - pendingClientX;
+    const move = (pointer: PointerEvent): void => {
+      const raw = side === "left" ? startWidth + pointer.clientX - startX : startWidth + startX - pointer.clientX;
       // A hidden panel must not consume the visible panel's resize budget. Use
       // the open state as well as the fitted width to avoid the one render
       // between toggling a panel and the fitting effect collapsing its track.
@@ -186,32 +165,9 @@ export function usePanelLayout(options: {
       // Update layout via CSS only — avoid React re-rendering the chat tree every frame.
       shell?.style.setProperty(cssVar, `${width}px`);
     };
-    const move = (pointer: PointerEvent): void => {
-      if (pointer.pointerId !== pointerId) return;
-      pendingClientX = pointer.clientX;
-      // Pointer events can arrive faster than the display refreshes. Only the
-      // latest coordinate matters, so collapse them into one layout per frame.
-      if (resizeFrame === undefined) resizeFrame = window.requestAnimationFrame(applyWidth);
-    };
-    const stopOnBlur = (): void => stop();
-    const stop = (pointer?: PointerEvent): void => {
-      if (stopped || (pointer && pointer.pointerId !== pointerId)) return;
-      stopped = true;
-      // Cancellation/blur commits the last coordinate already shown on screen;
-      // pointerup can supply one final coordinate that had no move event yet.
-      if (pointer?.type === "pointerup") pendingClientX = pointer.clientX;
-      if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame);
-      applyWidth();
+    const stop = (): void => {
       document.body.classList.remove("resizing-panels");
-      shell?.classList.remove("conversation-layout-frozen");
-      shell?.style.removeProperty("--conversation-resize-width");
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      window.removeEventListener("blur", stopOnBlur);
-      try {
-        if (resizeHandle.hasPointerCapture(pointerId)) resizeHandle.releasePointerCapture(pointerId);
-      } catch { /* handle detached during the drag */ }
       if (side === "left") {
         preferredLeftWidthRef.current = finalWidth;
         setLeftWidth(finalWidth);
@@ -222,9 +178,7 @@ export function usePanelLayout(options: {
       window.localStorage.setItem(side === "left" ? LEFT_WIDTH_KEY : RIGHT_WIDTH_KEY, String(finalWidth));
     };
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
-    window.addEventListener("blur", stopOnBlur, { once: true });
+    window.addEventListener("pointerup", stop, { once: true });
   }, [leftOpen, leftWidth, rightOpen, rightWidth]);
 
   return { leftOpen, rightOpen, leftWidth, rightWidth, setLeftOpen, setRightOpen, beginResize };

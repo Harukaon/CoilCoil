@@ -458,10 +458,6 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .conversation-title span { color: hsl(var(--th) var(--ts) var(--l-531)); font-size: 10px; }
 .conversation-scroll { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .conversation-body { min-width: 0; min-height: 0; height: 100%; overflow-x: hidden; overflow-y: auto; padding: 30px clamp(12px, 2vw, 28px) 76px; overscroll-behavior: contain; scrollbar-gutter: stable; }
-/* Panel edges still follow the pointer live, but the transcript keeps its starting
-   width until release. Otherwise every Markdown paragraph, table and code block
-   re-wraps for every pointer event, making long conversations visibly lag. */
-.app-shell.conversation-layout-frozen .conversation-body { width: var(--conversation-resize-width); }
 .conversation-pane.has-composer-activity .conversation-body { padding-bottom: 190px; }
 .scroll-to-bottom {
   position: absolute;
