@@ -184,10 +184,17 @@ test("右侧栏标签条按内容取宽，并给右侧按钮留位", () => {
   const actions = controlWidth - 16;
 
   const reserved = Number.parseFloat(
-    /max-width:\s*calc\(100% - ([\d.]+)px\)/.exec(declarations(".inspector-nav"))?.[1] ?? "NaN",
+    /max-width:\s*calc\(100% - ([\d.]+)px([^)]*)\)/.exec(declarations(".inspector-nav"))?.[1] ?? "NaN",
   );
   assert.ok(Number.isFinite(reserved), ".inspector-nav 必须用 calc(100% - Npx) 限宽");
   assert.equal(reserved, actions + gap);
+  // 还要再扣除右上角那三枚自绘的窗口按钮（Windows / Linux 138px，mac 为 0）。实测
+  // 漏掉这一项的后果：标签铺满时末尾标签右半边落在窗口按钮下，点它实际按到最大化。
+  assert.match(
+    declarations(".inspector-nav"),
+    /max-width:\s*calc\(100% - 69px - var\(--window-controls-width\)\)/,
+    ".inspector-nav 要让开窗口按钮",
+  );
   assert.match(declarations(".inspector-nav"), /width:\s*max-content/);
   assert.match(declarations(".inspector-nav"), /flex:\s*0 1 auto/);
   assert.equal(horizontalPadding, 16);

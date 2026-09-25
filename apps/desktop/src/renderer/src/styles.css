@@ -1070,8 +1070,10 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .inspector-add-popover button:hover:not(:disabled) { color: hsl(var(--th) var(--ts) var(--l-196)); background: hsl(var(--th) var(--ts) var(--l-922)); }
 .inspector-add-popover button:disabled { color: hsl(var(--th) var(--ts) var(--l-678)); cursor: default; }
 /* 标签条按内容取宽；只有标签真的多到超过标题栏时，才把自己撑到最大区域并横向滚动。
-   右侧按钮固定在标题栏右边，所以这里仅需给两个按钮和 7px 间距留位。 */
-.inspector-nav { display: flex; width: max-content; min-width: 0; max-width: calc(100% - 69px); flex: 0 1 auto; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
+   右侧按钮固定在标题栏右边，所以这里仅需给两个按钮和 7px 间距留位；Windows /
+   Linux 上还要让开右上角那三枚自绘的窗口按钮，否则标签会伸到它们下面，点标签
+   右半边实际按到的是最小化 / 最大化。 */
+.inspector-nav { display: flex; width: max-content; min-width: 0; max-width: calc(100% - 69px - var(--window-controls-width)); flex: 0 1 auto; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
 .inspector-nav::-webkit-scrollbar { display: none; }
 .inspector-scrollbar {
   position: absolute;
