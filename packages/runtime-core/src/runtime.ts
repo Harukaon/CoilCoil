@@ -31,7 +31,7 @@ import {
 } from "./message-helpers.js";
 import {
   directoryNodes,
-  gitChanges,
+  readGitChanges,
 } from "./project-helpers.js";
 import {
   ABORT_STALL_NOTICE_MS,
@@ -526,11 +526,11 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
 
   async refreshProject(): Promise<ProjectSnapshot> {
     const active = this.requireActive();
-    const [files, changes] = await Promise.all([directoryNodes(active.cwd), gitChanges(active.cwd)]);
+    const [files, changes] = await Promise.all([directoryNodes(active.cwd), readGitChanges(active.cwd)]);
     active.project = {
       cwd: active.cwd,
       files,
-      changes,
+      ...changes,
       terminals: [...active.terminals.values()].sort((a, b) => b.startedAt - a.startedAt),
       plan: [...active.plan],
       planApproval: active.planApproval,

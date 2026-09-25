@@ -1335,7 +1335,21 @@ export interface GitStatus {
   unborn: boolean;
   /** HEAD 指向的提交；还没有提交时是 undefined。 */
   head?: string;
+  /**
+   * 改动（最多 GIT_STATUS_LIMIT 条）。未跟踪的文件按文件夹聚合：一整个没被跟踪的
+   * 文件夹只算一条，路径以 `/` 结尾——和 git 自己默认的显示方式一样。
+   */
   files: GitFileChange[];
+  /** 一共有多少条改动；比 files 多时就是 truncated。 */
+  total: number;
+  truncated: boolean;
+}
+
+/** 工作区里找到的一个 git 仓库：工作区本身所在的，或者子文件夹里的。 */
+export interface GitRepository {
+  root: string;
+  /** 相对工作区的路径；工作区本身所在的仓库是 `.`。 */
+  name: string;
 }
 
 export interface GitBranch {
@@ -1403,9 +1417,15 @@ export type GitAction =
   | { op: "discard"; paths: string[] }
   /** `stageAll`：暂存区是空的就先把所有改动暂存再提交。 */
   | { op: "commit"; message: string; stageAll?: boolean }
+  /** 整个仓库一起暂存 / 取消暂存 / 丢弃（不按列表里的条目，列表可能被截断）。 */
+  | { op: "stage_all" }
+  | { op: "unstage_all" }
+  | { op: "discard_all" }
   | { op: "push" }
   | { op: "pull" }
   | { op: "branches" }
+  /** 工作区本身所在的仓库，加上子文件夹里找到的仓库。cwd 是工作区。 */
+  | { op: "repositories" }
   | { op: "checkout"; branch: string }
   | { op: "create_branch"; name: string }
   /** 提交历史：默认是当前分支和它的上游，`all` 时是所有分支和标签。 */
@@ -1424,6 +1444,8 @@ export interface ProjectSnapshot {
   cwd: string;
   files: FileNode[];
   changes: ChangedFile[];
+  /** 读 git 改动失败了（和「确实没有改动」区分开）；有值时 changes 不可信。 */
+  changesError?: string;
   terminals: TerminalRun[];
   plan: TodoItem[];
   planApproval?: PlanApprovalState;

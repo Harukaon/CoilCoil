@@ -79,15 +79,34 @@ export async function directoryNodes(cwd: string, requestedPath = ""): Promise<F
   });
 }
 
+/** 项目摘要用：读不到时带上原因，界面不会把它显示成「没有改动」。 */
+export async function readGitChanges(cwd: string): Promise<{ changes: ChangedFile[]; changesError?: string }> {
+  try {
+    return { changes: await gitChanges(cwd) };
+  } catch (error) {
+    return { changes: [], changesError: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * 项目摘要里的改动列表（最多 MAX_CHANGE_FILES 条）。
+ *
+ * 未跟踪的文件按文件夹聚合（git 默认的 normal）：一个上层文件夹里放着很多小项目时，
+ * 逐个列出未跟踪文件会有几万条、几 MB，既读不完也用不上。读失败要抛出去，让调用方
+ * 区分「读不到」和「没有改动」，不能返回空列表假装工作区是干净的。不是 git 仓库照旧
+ * 当作没有改动。
+ */
 export async function gitChanges(cwd: string): Promise<ChangedFile[]> {
   let statusOutput = "";
   try {
-    const result = await execFileAsync("git", ["-C", cwd, "status", "--porcelain=v1", "--untracked-files=all"], {
-      maxBuffer: 4 * 1024 * 1024,
+    const result = await execFileAsync("git", ["-C", cwd, "status", "--porcelain=v1", "--untracked-files=normal"], {
+      maxBuffer: 32 * 1024 * 1024,
     });
     statusOutput = result.stdout;
-  } catch {
-    return [];
+  } catch (error) {
+    const stderr = String((error as { stderr?: unknown }).stderr ?? "");
+    if (/not a git repository/i.test(stderr)) return [];
+    throw new Error(`读取 git 改动失败：${(stderr || (error as Error).message).trim().split("\n").slice(-3).join(" ")}`);
   }
 
   const records = statusOutput
@@ -104,7 +123,7 @@ export async function gitChanges(cwd: string): Promise<ChangedFile[]> {
   const numstat = new Map<string, { additions: number; deletions: number; }>();
   try {
     const result = await execFileAsync("git", ["-C", cwd, "diff", "--numstat", "HEAD", "--", "."], {
-      maxBuffer: 4 * 1024 * 1024,
+      maxBuffer: 32 * 1024 * 1024,
     });
     for (const line of result.stdout.split("\n")) {
       const [added, deleted, ...pathParts] = line.split("\t");
