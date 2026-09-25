@@ -53,6 +53,8 @@ export function resizeOffscreenPage(page: BrowserWindow, size: { width: number; 
   const [width, height] = page.getContentSize();
   if (width === size.width && height === size.height) return;
   page.setContentSize(size.width, size.height);
+  // 静止的页面改完大小不一定马上重画，主动要一帧，界面上立刻换成新尺寸的画面。
+  page.webContents.invalidate();
 }
 
 function displayScale(): number {

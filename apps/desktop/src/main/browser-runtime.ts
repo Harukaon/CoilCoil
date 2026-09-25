@@ -717,7 +717,12 @@ export class BrowserRuntimeManager {
     // A zero size means the panel is hidden, so the active tab is parked like any
     // other and needs the override back to stay screenshot-able.
     if (this.panelVisible === !hidden) {
-      if (!hidden) this.uiViewport = { width, height };
+      if (hidden || (width === this.uiViewport.width && height === this.uiViewport.height)) return;
+      this.uiViewport = { width, height };
+      // 面板只是变了大小：正看着的那张 Agent 标签页是离屏页面，得跟着改窗口大小，
+      // 不然画面还按旧尺寸画，拉宽后多出来的地方留白。用户的 guest 跟着元素走，不用管。
+      const tab = this.activeTab(this.uiScopeId);
+      if (tab?.offscreen && tab.phase !== "closing") resizeOffscreenPage(tab.offscreen, this.offscreenSize(tab));
       return;
     }
     this.panelVisible = !hidden;
