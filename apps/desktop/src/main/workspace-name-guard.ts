@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { readdirSync } from "node:fs";
+import { basename } from "node:path";
 
 /**
  * Which project a workspace's memory belongs to, by name alone.
@@ -18,26 +18,12 @@ import { basename, dirname, join } from "node:path";
  */
 
 /**
- * The name a folder's memory is filed under.
- *
- * Memory follows the project root, so a folder inside a repository is filed
- * under the repository, not under itself. Mirrors `resolveProjectRoot` in
- * `memory-storage.ts`; the two must agree or this guard checks the wrong name.
+ * The name a folder's memory is filed under: the folder's own name. Memory
+ * follows the workspace folder, not any enclosing git repository — mirrors
+ * `resolveProjectRoot` in `memory-storage.ts`.
  */
 export function memoryBucketName(path: string): string {
-  const root = memoryRoot(path);
-  return basename(root) || root;
-}
-
-/** The folder a workspace's memory follows: the enclosing repository, or the folder itself. */
-export function memoryRoot(path: string): string {
-  let current = path;
-  while (true) {
-    if (existsSync(join(current, ".git"))) return current;
-    const parent = dirname(current);
-    if (parent === current) return path;
-    current = parent;
-  }
+  return basename(path) || path;
 }
 
 /** Case-insensitive, because the stores these names become folders in are. */
@@ -48,13 +34,6 @@ function sameName(left: string, right: string): boolean {
 export interface WorkspaceCandidate {
   name: string;
   path: string;
-  /**
-   * The folder the memory follows ({@link memoryRoot}). Two workspaces with the
-   * same root are one project — a repository and a folder inside it — and
-   * sharing a memory is exactly right for them; only the same name on
-   * different roots is a clash.
-   */
-  root?: string;
 }
 
 export type WorkspaceNameVerdict =
@@ -83,8 +62,6 @@ export function checkWorkspaceName(
   remembered: readonly string[],
 ): WorkspaceNameVerdict {
   if (open.some((project) => project.path === candidate.path)) return { kind: "already-open" };
-  const sameRoot = (project: WorkspaceCandidate): boolean => Boolean(candidate.root) && project.root === candidate.root;
-  if (open.some(sameRoot)) return { kind: "ok" };
   const clash = open.find((project) => sameName(project.name, candidate.name));
   if (clash) return { kind: "name-taken", name: candidate.name, other: clash.path };
   if (remembered.some((name) => sameName(name, candidate.name))) {

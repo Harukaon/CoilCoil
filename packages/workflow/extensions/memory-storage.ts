@@ -82,15 +82,12 @@ export async function isInsidePiDirectory(cwd: string): Promise<boolean> {
     .some((segment) => segment.toLowerCase() === ".pi");
 }
 
+/**
+ * 记忆跟着工作区文件夹走，和 git 无关：导入哪个文件夹，记忆就是哪个文件夹的。
+ * 父文件夹是 git 仓库也不往上找——子文件夹单独导入，就是一个单独的项目。
+ */
 export async function resolveProjectRoot(cwd: string): Promise<string> {
-  const start = await canonicalPath(cwd);
-  let current = start;
-  while (true) {
-    if (await pathExists(join(current, ".git"))) return current;
-    const parent = dirname(current);
-    if (parent === current) return start;
-    current = parent;
-  }
+  return canonicalPath(cwd);
 }
 
 export function resolveProjectMemoryStorageRoot(
