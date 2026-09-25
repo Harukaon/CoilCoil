@@ -35,7 +35,23 @@ export async function startSite() {
  * A fresh app: its own data directory, the mock model configured as the default
  * (and as every subagent profile's model), two mounted folders, onboarding done.
  */
-export async function launch({ projects = ["projA", "projB"] } = {}) {
+/** 找一个空闲端口：远程访问要一个固定端口才能从外面连进来。 */
+function freePort() {
+  return new Promise((done, fail) => {
+    const server = createServer();
+    server.once("error", fail);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      server.close(() => done(port));
+    });
+  });
+}
+
+/**
+ * `remote: true` 时同时打开远程访问（网页版 / 手机连的那个入口），返回的 remotePort
+ * 交给 openRemoteClient，接一个真的网页客户端进来。
+ */
+export async function launch({ projects = ["projA", "projB"], remote = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-e2e-"));
   const data = join(root, "data");
   const home = join(root, "home");
@@ -65,10 +81,11 @@ export async function launch({ projects = ["projA", "projB"] } = {}) {
   writeFileSync(join(data, "mounted-projects.json"), JSON.stringify(
     Object.entries(paths).map(([name, path]) => ({ name, path, kind: "workspace" })), null, 2));
 
+  const remotePort = remote ? await freePort() : undefined;
   const app = await electron.launch({
     executablePath: require("electron"),
     args: [join(repositoryRoot, "apps/desktop"), `--user-data-dir=${data}`, "--no-sandbox", "--disable-gpu"],
-    env: { ...process.env, HOME: home, USERPROFILE: home },
+    env: { ...process.env, HOME: home, USERPROFILE: home, ...remote ? { COILCOIL_REMOTE_PORT: String(remotePort) } : {} },
     timeout: 90_000,
   });
   const page = await app.firstWindow();
@@ -83,7 +100,7 @@ export async function launch({ projects = ["projA", "projB"] } = {}) {
     await app.close().catch(() => undefined);
     await new Promise((done) => gateway.server.close(done));
   };
-  return { app, page, root, paths, close, gatewayLog: () => readLog(log) };
+  return { app, page, root, paths, remotePort, close, gatewayLog: () => readLog(log) };
 }
 
 function readLog(path) {
@@ -92,6 +109,32 @@ function readLog(path) {
   } catch {
     return [];
   }
+}
+
+/**
+ * 接一个真的网页版客户端进来：和用户在电脑浏览器里打开远程地址一样，走配对码配对，
+ * 拿到的是远程桥（remote-client），不是桌面窗口的 preload。窗口开得够宽，是电脑上
+ * 的网页版，不是手机布局。
+ */
+export async function openRemoteClient({ app, page, remotePort, width = 1400, height = 900 }) {
+  const { pairingCode } = await page.evaluate(() => window.coilcoil.getRemoteAccess());
+  if (!pairingCode) throw new Error("远程访问没有开起来，拿不到配对码。");
+  const url = `http://127.0.0.1:${remotePort}/`;
+  const [client] = await Promise.all([
+    app.waitForEvent("window", { timeout: 30_000 }),
+    app.evaluate(({ BrowserWindow }, { url, width, height }) => {
+      const win = new BrowserWindow({ width, height, show: true, webPreferences: { partition: "e2e-remote-client" } });
+      void win.loadURL(url);
+    }, { url, width, height }),
+  ]);
+  await client.waitForLoadState();
+  const paired = await client.evaluate(async (code) => (await fetch("/__remote/pair", { method: "POST", body: JSON.stringify({ code, name: "e2e 网页版" }) })).status, pairingCode);
+  if (paired !== 200) throw new Error(`配对失败：${paired}`);
+  await client.evaluate(() => window.localStorage.setItem("coilcoil.onboarding", JSON.stringify({ completedAt: new Date().toISOString() })));
+  await client.reload();
+  await client.waitForFunction(() => Boolean(window.coilcoil) && document.documentElement.dataset.client === "remote", undefined, { timeout: 60_000 });
+  await client.locator(".agent-mode", { hasText: "Mock 1" }).first().waitFor({ timeout: 60_000 });
+  return client;
 }
 
 /** Helpers that drive the UI the way a person would. */

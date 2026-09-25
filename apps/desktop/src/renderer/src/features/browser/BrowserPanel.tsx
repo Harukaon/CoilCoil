@@ -2,7 +2,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Minus, MousePointer2, Plus, RotateCw, Search } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserElementSelection, BrowserStateSnapshot } from "../../../../shared/desktop-api";
-import { useMobileRemote } from "../../hooks/useMobileRemote";
+import { isRemoteClient } from "../../hooks/useMobileRemote";
 import { platformComputerLabel, rendererPlatform } from "../../platform";
 import { visibleBrowserTabs } from "../inspector/inspectorTabs";
 import { toastError } from "../../ui/toast";
@@ -33,7 +33,9 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   const [picking, setPicking] = useState(false);
   const pickRequestRef = useRef(0);
   const hostRef = useRef<HTMLDivElement>(null);
-  const mobile = useMobileRemote();
+  // 网页版不管窗口多宽都不是桌面窗口：放不了 <webview>，也收不到画面推送，只能按截图看
+  // Mac 上的页面。以前只按手机宽度判断，电脑上开网页版时 Agent 的页面一直「正在读取」。
+  const remote = isRemoteClient();
   const [frame, setFrame] = useState<string>();
   const activeTab = useMemo(() => {
     const tabs = visibleBrowserTabs(state);
@@ -61,14 +63,14 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   }, []);
 
   /**
-   * On the phone the page is captured on the Mac and shown as frames.
+   * On the phone or the web client the page is captured on the Mac and shown as frames.
    *
    * The desktop renders the page into a `<webview>` guest, which a browser tab
    * cannot host. The page is live on the Mac either way — the agent is driving
    * it — so the remote panel watches it instead of embedding it.
    */
   useEffect(() => {
-    if (!mobile) { setFrame(undefined); return; }
+    if (!remote) { setFrame(undefined); return; }
     if (!active || !activeTabId) { setFrame(undefined); return; }
     let cancelled = false;
     let timer: number | undefined;
@@ -86,7 +88,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [mobile, active, activeTabId]);
+  }, [remote, active, activeTabId]);
 
   // The guest is a <webview> in the layer at the app root, so this measures the
   // hole it should fill rather than pushing native bounds over IPC.
@@ -94,7 +96,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
     const host = hostRef.current;
     // A remote client has no guest layer to place anything into, and reporting
     // its panel size would resize the agent's browser to a phone screen.
-    if (!host || mobile) return;
+    if (!host || remote) return;
     const update = (): void => {
       const visible = active && document.visibilityState === "visible";
       const rect = host.getBoundingClientRect();
@@ -123,7 +125,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
       setGuestPlacement(undefined);
       void window.coilcoil.setBrowserUiViewport({ width: 0, height: 0 });
     };
-  }, [active, activeTabId, mobile]);
+  }, [active, activeTabId, remote]);
 
   /**
    * Every toolbar action ends in a state refresh, so a failed one has to say so.
@@ -169,7 +171,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
         <button type="button" aria-label="前进" disabled={agentTab || !activeTab?.canGoForward} onClick={() => apply(window.coilcoil.browserForward(scopeId))}><ArrowRight size={13} /></button>
         <button type="button" aria-label="刷新网页" disabled={agentTab || !activeTab} onClick={() => apply(window.coilcoil.reloadBrowser(scopeId))}><RotateCw size={12} /></button>
         <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} readOnly={agentTab} onChange={(event) => setAddress(event.target.value)} />
-        {mobile ? null : (
+        {remote ? null : (
           <button
             className={`browser-element-picker ${picking ? "active" : ""}`}
             type="button"
@@ -201,19 +203,19 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
           </Popover.Portal>
         </Popover.Root>
         {/* Importing reads this Mac's keychain, so it stays on the Mac's own window. */}
-        {mobile ? null : <BrowserDataMenu />}
+        {remote ? null : <BrowserDataMenu />}
       </form>
-      <div className={`browser-native-host ${mobile ? "browser-remote-host" : ""}`} ref={hostRef}>
+      <div className={`browser-native-host ${remote ? "browser-remote-host" : ""}`} ref={hostRef}>
         {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => apply(window.coilcoil.createBrowserTab(scopeId))}>新建标签页</button></div> : null}
         {activeTab && agentTab ? (
           <AgentPageView
             key={activeTab.id}
             tab={activeTab}
-            remoteFrame={mobile ? frame ?? "" : undefined}
+            remoteFrame={remote ? frame ?? "" : undefined}
             onTakeOver={() => apply(window.coilcoil.takeOverBrowserTab(scopeId, activeTab.id))}
           />
         ) : null}
-        {mobile && activeTab && !agentTab ? (
+        {remote && activeTab && !agentTab ? (
           frame
             ? <img className="browser-remote-frame" src={frame} alt={activeTab.title} />
             : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取 {platformLabel} 上的页面…</strong></div>

@@ -289,6 +289,8 @@ export function bridgeScript(platform: DesktopPlatform): string {
     reportBrowserGuestFailure: resolves(undefined),
     onBrowserGuestRoster: subscribe("browser:guest-roster"),
     onBrowserStateUpdated: subscribe("browser:state"),
+    // 画面推送只给桌面窗口；网页版按截图看 Agent 的页面（见 BrowserPanel）。
+    onBrowserFrame: ignore,
     onBrowserAgentActivated: subscribe("browser:agent-activated"),
 
     listImportableBrowsers: function () { return invoke("browser:import-list", []); },

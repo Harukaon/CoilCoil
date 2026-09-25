@@ -667,7 +667,8 @@ function remoteController(): RemoteAccessController {
         const browser = primaryBrowserRuntime;
         if (!browser) throw new Error("内置浏览器尚未就绪，请先在 Mac 上打开 CoilCoil 窗口。");
         switch (channel) {
-          case BROWSER_SET_SCOPE_CHANNEL: return browser.setUiScope(args[0] as string, args[1] as string | undefined);
+          // 网页版/手机看哪个会话是它自己的事，不能把桌面窗口也带过去。
+          case BROWSER_SET_SCOPE_CHANNEL: return browser.watchRemoteScope(args[0] as string, args[1] as string | undefined);
           case BROWSER_GET_STATE_CHANNEL: return browser.state(args[0] as string);
           case BROWSER_CAPTURE_CHANNEL: return browser.captureTab(args[0] as string);
           case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, args[0] as string, args[2] === true);

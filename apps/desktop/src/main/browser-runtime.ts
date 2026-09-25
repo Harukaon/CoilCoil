@@ -28,6 +28,9 @@ import { BROWSER_PARTITION, browserPartitionFor } from "./browser-webview-policy
  */
 const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
+/** 同时记住几个网页版/手机正看着的会话；多出来的按最早打开的先忘。 */
+const REMOTE_SCOPE_LIMIT = 8;
+
 /**
  * Owns CoilCoil browser tabs, guest WebContents and renderer-facing state.
  * Browser-level CDP protocol adaptation lives in BrowserCdpBridge.
@@ -55,6 +58,13 @@ export class BrowserRuntimeManager {
   private readonly elementPicker = new BrowserElementPicker();
   private readonly activeTabIds = new Map<string, string>();
   private uiScopeId = DEFAULT_SCOPE_ID;
+  /**
+   * 网页版、手机正看着的会话。它们和桌面窗口不是一个界面：只登记在这里，决定哪些会话
+   * 的标签页变化要推过去；不能去改 uiScopeId，那是桌面窗口的——以前改了，网页版一打开
+   * 别的会话，桌面这边就收不到自己会话的更新、画面也跟着停了。远程请求不带客户端身份，
+   * 所以只按先后留最近几个。
+   */
+  private readonly remoteScopeIds = new Set<string>();
   private uiViewport = { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height };
   /** 每个作用域自己的缩放倍数；1 不存，省得到处判断默认值。 */
   private readonly zoomFactors = new Map<string, number>();
@@ -248,6 +258,24 @@ export class BrowserRuntimeManager {
     return state;
   }
 
+  /** 网页版/手机打开了某个会话：只登记下来，好把这个会话的变化推给它，不动桌面窗口。 */
+  watchRemoteScope(scopeId: string, workspacePath?: string): BrowserStateSnapshot {
+    const id = scopeId.trim() || DEFAULT_SCOPE_ID;
+    this.noteScopeWorkspace(id, workspacePath);
+    this.remoteScopeIds.delete(id);
+    this.remoteScopeIds.add(id);
+    for (const old of this.remoteScopeIds) {
+      if (this.remoteScopeIds.size <= REMOTE_SCOPE_LIMIT) break;
+      this.remoteScopeIds.delete(old);
+    }
+    return this.state(id);
+  }
+
+  /** 有界面正看着这个会话：桌面窗口，或者网页版/手机。 */
+  private isWatched(scopeId: string): boolean {
+    return scopeId === this.uiScopeId || this.remoteScopeIds.has(scopeId);
+  }
+
   /**
    * 新会话接手草稿阶段开的标签页。
    *
@@ -290,7 +318,7 @@ export class BrowserRuntimeManager {
       this.refreshViewportOverrides();
     }
     const state = this.state(to);
-    if (to === this.uiScopeId) this.publishState(state);
+    if (this.isWatched(to)) this.publishState(state);
     return state;
   }
 
@@ -315,7 +343,7 @@ export class BrowserRuntimeManager {
     else this.zoomFactors.set(scopeId, next);
     for (const tab of this.tabsForScope(scopeId)) this.applyZoom(tab);
     const state = this.state(scopeId);
-    if (scopeId === this.uiScopeId) this.publishState(state);
+    if (this.isWatched(scopeId)) this.publishState(state);
     return state;
   }
 
@@ -1015,6 +1043,8 @@ export class BrowserRuntimeManager {
 
   private publish(): void {
     this.publishState(this.state());
+    // 网页版/手机看着的会话也推一份；各个界面只收自己会话的那份。
+    for (const scopeId of this.remoteScopeIds) if (scopeId !== this.uiScopeId) this.publishState(this.state(scopeId));
   }
 
   private installTabSecurity(tab: BrowserTab): void {

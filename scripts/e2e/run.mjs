@@ -26,7 +26,7 @@ for (const name of selected) {
   const check = (label, ok, detail) => results.push({ label, ok: Boolean(ok), detail });
   let session;
   try {
-    session = await launch();
+    session = await launch(scenario.launchOptions ?? {});
     const shot = (label) => session.page.screenshot({ path: join(artifacts, `${name}-${label}.png`) });
     await scenario.run({ ...session, ui: driver(session.page), site, check, shot });
   } catch (error) {
