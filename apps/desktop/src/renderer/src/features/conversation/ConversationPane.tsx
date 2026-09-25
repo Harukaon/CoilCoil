@@ -32,6 +32,7 @@ import { AgentTurnView, CompactionMarkView, MessageView, type ConversationTimeli
 import { hasRunningCompaction } from "./buildConversationTimeline";
 import { PromptAnchorRail, type PromptAnchor } from "./PromptAnchorRail";
 import { nextScrollDownVisible } from "./scrollDownVisibility";
+import { useActivityGroupVirtualization } from "./useActivityGroupVirtualization";
 import { PlanApprovalCard } from "../plans/PlanApprovalCard";
 import { SubagentCard, SubagentDetailDialog } from "../subagents/SubagentActivity";
 
@@ -160,6 +161,7 @@ export function ConversationPane({
   onRejectPlan: (planId: string) => Promise<PlanApprovalState>;
 }): React.JSX.Element {
   const { chatContentWidth, beginChatWidthResize } = useChatContentWidth();
+  useActivityGroupVirtualization(timelineRef);
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [visibleTimelineStart, setVisibleTimelineStart] = useState<number>();

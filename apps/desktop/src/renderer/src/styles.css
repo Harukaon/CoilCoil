@@ -613,6 +613,10 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .markdown-file-link-label { min-width: 0; overflow: hidden; font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace); font-size: .84em; text-overflow: ellipsis; white-space: nowrap; }
 .markdown-file-link-location { flex: 0 0 auto; color: hsl(var(--th) var(--ts) var(--l-535)); font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace); font-size: 10px; }
 .tool-activity { width: 100%; min-width: 0; max-width: 100%; margin: 0 0 18px; overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 12px; }
+/* A distant closed summary keeps its measured height in the scroll flow, while
+   Chromium can skip the subtree during panel-width reflow. Nearby summaries and
+   every open group remain untouched, so disclosure and panel animations stay native. */
+.tool-activity.tool-activity-offscreen:not([open]) { block-size: var(--tool-activity-placeholder-height, 17px); contain: strict; content-visibility: hidden; }
 .tool-activity > summary { display: flex; width: fit-content; min-width: 0; max-width: 100%; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
 .tool-activity summary::-webkit-details-marker { display: none; }
 .tool-activity > summary > span { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
