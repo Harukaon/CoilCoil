@@ -12,6 +12,8 @@ export type SlashToken = {
   query: string;
   start: number;
   end: number;
+  /** 斜杠是不是这一行的第一个非空白字符。 */
+  lineStart: boolean;
 };
 
 export type SlashMenuItem = {
@@ -36,16 +38,46 @@ function tokenKey(token: SlashToken | null): string {
   return token ? `${token.start}:${token.end}:${token.query}` : "";
 }
 
-/** Token under caret that starts with `/` (whitespace-delimited). */
+/**
+ * 光标处的斜杠命令。命令从这一行里最后一个「自己起词」的 `/` 开始：空格只是分词符，
+ * 所以 `/mcp chrome-devtools` 这种名字里带空格的命令仍然算一个命令，而不是到第一个
+ * 空格就断掉。
+ */
 export function findSlashToken(text: string, caret: number): SlashToken | null {
   const pos = Math.max(0, Math.min(caret, text.length));
   let start = pos;
   while (start > 0 && !/\s/.test(text[start - 1]!)) start -= 1;
   let end = pos;
   while (end < text.length && !/\s/.test(text[end]!)) end += 1;
-  const token = text.slice(start, end);
-  if (!token || !isSlashChar(token[0]!)) return null;
-  return { query: token.slice(1).toLowerCase(), start, end };
+  // 光标停在空格上：命令名已经写完，这里要留给正文。
+  if (start === end) return null;
+  let lineStart = pos;
+  while (lineStart > 0 && text[lineStart - 1] !== "\n") lineStart -= 1;
+  while (lineStart < text.length && /\s/.test(text[lineStart]!)) lineStart += 1;
+  let slash = -1;
+  for (let index = start; index >= lineStart; index -= 1) {
+    if (isSlashChar(text[index]!) && (index === lineStart || /\s/.test(text[index - 1]!))) {
+      slash = index;
+      break;
+    }
+  }
+  if (slash < 0) return null;
+  return { query: text.slice(slash + 1, end).trim().toLowerCase(), start: slash, end, lineStart: slash === lineStart };
+}
+
+export type SlashMenuState = { active: boolean; items: SlashMenuItem[] };
+
+/**
+ * 光标处算不算停在一条斜杠命令里，以及这一屏该列哪些条目。
+ * 命令名里带空格的（`/mcp chrome-devtools`）光标走到下一个词时不能把菜单收掉，
+ * 所以整段一起筛。筛空时：行首的 `/` 是明确在敲命令，留着菜单说「没有匹配的命令」；
+ * 句子中间的（“看 /a/b 不存在”）说明人已经在写正文，就别拿菜单挡着他。
+ */
+export function resolveSlashMenu(items: SlashMenuItem[], token: SlashToken | null): SlashMenuState {
+  if (!token) return { active: false, items: [] };
+  const matched = items.filter((item) => matchesQuery(item, token.query)).slice(0, 12);
+  if (!matched.length && /\s/.test(token.query) && !token.lineStart) return { active: false, items: [] };
+  return { active: true, items: matched };
 }
 
 function matchesQuery(item: SlashMenuItem, needle: string): boolean {
@@ -259,17 +291,16 @@ export function useSlashMenu({
     [mcpServers, skills],
   );
 
-  const filteredItems = useMemo(() => {
-    if (!token) return [];
-    const needle = token.query;
-    return allItems.filter((item) => matchesQuery(item, needle)).slice(0, 12);
-  }, [allItems, token]);
+  const { active: slashInCommand, items: filteredItems } = useMemo(
+    () => resolveSlashMenu(allItems, token),
+    [allItems, token],
+  );
 
   useEffect(() => {
     setItemIndex(0);
   }, [filteredItems]);
 
-  const slashActive = Boolean(token) && !slashDismissed;
+  const slashActive = slashInCommand && !slashDismissed;
   const slashMenuOpen = slashActive && filteredItems.length > 0;
 
   const selectItem = useCallback((item: SlashMenuItem): void => {
@@ -277,9 +308,11 @@ export function useSlashMenu({
       setSlashDismissed(true);
       tokenRef.current = null;
       onOpenSettings?.(item.openSettings);
-      // Clear the bare slash token so the menu closes cleanly.
+      // Clear the slash query so the menu closes cleanly and the settings page is
+      // not left with "/mcp chrome" text sitting in the composer. 只在命令起行时
+      // 才动输入框：句子中间的斜杠是正文，删掉它就等于替人改了半句话。
       const current = findSlashToken(draftRef.current, inputRef.current?.getCaretOffset() ?? draftRef.current.length);
-      if (current && draftRef.current.slice(current.start, current.end).match(/^[/／]\S*$/)) {
+      if (current?.lineStart) {
         const caret = current.start;
         pendingCaret.current = caret;
         onReplaceTextRange(current.start, current.end, "");

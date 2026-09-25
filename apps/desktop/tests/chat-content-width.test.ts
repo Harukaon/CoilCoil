@@ -31,9 +31,9 @@ test("readStoredChatContentWidth falls back to default", () => {
 });
 
 test("findSlashToken matches caret token at start and mid-draft", () => {
-  assert.deepEqual(findSlashToken("/sk", 3), { query: "sk", start: 0, end: 3 });
-  assert.deepEqual(findSlashToken("帮我 /skill", 8), { query: "skill", start: 3, end: 9 });
-  assert.deepEqual(findSlashToken("／skill", 3), { query: "skill", start: 0, end: 6 });
+  assert.deepEqual(findSlashToken("/sk", 3), { query: "sk", start: 0, end: 3, lineStart: true });
+  assert.deepEqual(findSlashToken("帮我 /skill", 8), { query: "skill", start: 3, end: 9, lineStart: false });
+  assert.deepEqual(findSlashToken("／skill", 3), { query: "skill", start: 0, end: 6, lineStart: true });
   assert.equal(findSlashToken("hello world", 5), null);
   assert.equal(findSlashToken("path/to/file", 12), null);
 });
@@ -41,5 +41,5 @@ test("findSlashToken matches caret token at start and mid-draft", () => {
 test("findSlashToken ignores completed skill when caret is past trailing space", () => {
   const draft = "/skill:demo ";
   assert.equal(findSlashToken(draft, draft.length), null);
-  assert.deepEqual(findSlashToken(draft, 7), { query: "skill:demo", start: 0, end: 11 });
+  assert.deepEqual(findSlashToken(draft, 7), { query: "skill:demo", start: 0, end: 11, lineStart: true });
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { McpConfigurationSnapshot, SkillEntry } from "@coilcoil/runtime-protocol";
-import { buildSlashMenuItems } from "../src/renderer/src/features/composer/useSlashSkills.ts";
+import { buildSlashMenuItems, findSlashToken, resolveSlashMenu } from "../src/renderer/src/features/composer/useSlashSkills.ts";
 
 function server(name: string, disabled = false): McpConfigurationSnapshot["servers"][number] {
   return { name, scope: "global", transport: "stdio", command: "npx thing", disabled } as never;
@@ -46,4 +46,31 @@ test("/compact 在菜单里，选中是写进输入框而不是跳设置", () =>
 test("技能仍然是写进输入框", () => {
   const items = buildSlashMenuItems([skill("pdf")], []);
   assert.equal(items.find((item) => item.id === "skill:/skills/pdf.md")?.insert, "/skill:pdf ");
+});
+
+test("斜杠后面带空格的查询照样能筛——/mcp chrome-devtools 这种名字本身就带空格", () => {
+  assert.deepEqual(findSlashToken("/ xxx", 5), { query: "xxx", start: 0, end: 5, lineStart: true });
+  assert.deepEqual(findSlashToken("/mcp chrome", 11), { query: "mcp chrome", start: 0, end: 11, lineStart: true });
+  // 光标停在中间一个词上时，查询只到那个词为止。
+  assert.deepEqual(findSlashToken("/mcp chrome", 4), { query: "mcp", start: 0, end: 4, lineStart: true });
+  // 句子里带斜杠的普通文字：从那个斜杠算到光标所在的词。
+  assert.deepEqual(findSlashToken("路径 /a/b 不存在", 8), { query: "a/b 不存在", start: 3, end: 11, lineStart: false });
+  assert.deepEqual(findSlashToken("路径是 /a/b", 8), { query: "a/b", start: 4, end: 8, lineStart: false });
+});
+
+test("命令中间的斜杠只是正文的一部分", () => {
+  assert.deepEqual(findSlashToken("看 / 记忆", 6), { query: "记忆", start: 2, end: 6, lineStart: false });
+  assert.deepEqual(findSlashToken("看 /a/b", 6), { query: "a/b", start: 2, end: 6, lineStart: false });
+});
+
+test("给筛选词加空格不影响结果，/mcp 这种名字本身就带空格", () => {
+  const items = buildSlashMenuItems([], []);
+  assert.equal(resolveSlashMenu(items, findSlashToken("/ mcp", 5)).items.length, 1, "带空格也要能筛到");
+  assert.equal(resolveSlashMenu(items, findSlashToken("/", 1)).items.length, items.length, "没写筛选词时列全部");
+});
+
+test("行首敲错命令说没有匹配，句子里写到斜杠就不挡着人", () => {
+  const items = buildSlashMenuItems([], []);
+  assert.equal(resolveSlashMenu(items, findSlashToken("/ xxx", 5)).active, true, "行首是在敲命令，说没匹配而不是默默消失");
+  assert.equal(resolveSlashMenu(items, findSlashToken("看 /a/b 不存在", 12)).active, false, "中文正文里的斜杠不该弹菜单");
 });
