@@ -155,9 +155,9 @@ test("所有工作区共用 AppView 的左侧栏开关", () => {
 });
 
 test("窗口按钮压在右上角，标题栏右侧要给它让位", () => {
-  // Windows / Linux 上窗口按钮由应用自己画在右上角（138px 宽），标题栏高 56px、
-  // 按钮高 32px，于是就压在标题栏右侧那一块上。页头右侧的动作按钮和开关不让位
-  // 就会被压住点不到：实测设置页的「工具目的」开关正好落在关闭按钮底下。
+  // Windows / Linux 上窗口按钮由应用自己画在右上角（138px 宽），标题栏高 56px，
+  // 于是就压在标题栏右侧那一块上。页头右侧的动作按钮和开关不让位就会被压住点
+  // 不到：实测设置页头部右侧的动作按钮正好落在关闭按钮底下。
   const clearance = /padding-right:\s*calc\(26px \+ var\(--window-controls-width\)\)/;
   for (const selector of [
     ".app-shell > .skills-workspace > .skills-workspace-header",
@@ -166,8 +166,13 @@ test("窗口按钮压在右上角，标题栏右侧要给它让位", () => {
   ]) {
     assert.match(declarationsOfList(selector), clearance, `${selector} 要给窗口按钮让位`);
   }
+  // 设置页只在右侧让位：窗口按钮在右上角，左侧什么也没盖住，多留 138px 会在
+  // 标题前面凭空多出一大块空白。
   const settingsCss = readFileSync(resolve(rendererRoot, "features/settings/settings.css"), "utf8");
-  assert.match(settingsCss, /\.settings-page-header \{[^}]*padding: 0 calc\(26px \+ var\(--window-controls-width\)\)/, ".settings-page-header 要给窗口按钮让位");
+  const settingsHeader = /\n\.settings-page-header \{([^}]*)\}/.exec(settingsCss)?.[1];
+  assert.ok(settingsHeader, "settings.css 里找不到 .settings-page-header 这条规则");
+  assert.match(settingsHeader, /padding:\s*0 26px/, ".settings-page-header 左侧不应该给窗口按钮留位");
+  assert.match(settingsHeader, clearance, ".settings-page-header 右侧要给窗口按钮让位");
   assert.match(declarations(".conversation-header"), /padding:\s*0 calc\(8px \+ var\(--window-controls-width\)\) 0 20px/, ".conversation-header 要给窗口按钮让位");
   // 手机上根本没有窗口按钮，不能凭空留出 138px。
   const mobileCss = readFileSync(resolve(rendererRoot, "mobile.css"), "utf8");

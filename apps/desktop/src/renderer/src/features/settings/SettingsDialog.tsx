@@ -70,43 +70,6 @@ function storedSettingsSidebarWidth(): number {
     : DEFAULT_SETTINGS_SIDEBAR_WIDTH;
 }
 
-function ToolPurposePolicyToggle({ configuration, runtimeId, onSaved }: {
-  configuration?: RuntimeConfiguration;
-  runtimeId?: string;
-  onSaved: (configuration: RuntimeConfiguration) => void;
-}): React.JSX.Element {
-  const [enabled, setEnabled] = useState(configuration?.toolPurposeAuditEnabled ?? true);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => setEnabled(configuration?.toolPurposeAuditEnabled ?? true), [configuration?.toolPurposeAuditEnabled]);
-  const toggle = async (next: boolean): Promise<void> => {
-    setEnabled(next);
-    setSaving(true);
-    try {
-      const configuration = await window.coilcoil.request<RuntimeConfiguration>({ type: "set_tool_purpose_audit_enabled", enabled: next }, runtimeId);
-      onSaved(configuration);
-      toastSuccess(next ? "已开启工具调用意图记录。" : "已关闭工具调用意图强制校验。");
-    } catch (caught) {
-      setEnabled(!next);
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
-  return <label
-    className="settings-policy-toggle"
-    title="每次工具调用都要求填写简短的直接目的，并记录在会话中。"
-  >
-    <input
-      type="checkbox"
-      aria-label="强制工具调用填写目的"
-      checked={enabled}
-      disabled={saving}
-      onChange={(event) => { void toggle(event.target.checked); }}
-    />
-    <span>工具目的</span>
-  </label>;
-}
-
 function blankMcpServer(): McpServerConfiguration {
   return {
     name: "",
@@ -787,9 +750,7 @@ export function SettingsDialog({ configuration, open, onClose, onSaved, runtimeI
               </p>
             </div>
           </div>
-          {shown === "models" ? (
-            <ToolPurposePolicyToggle configuration={configuration} runtimeId={runtimeId} onSaved={onSaved} />
-          ) : shown === "mcp" ? (
+          {shown === "mcp" ? (
             <button
               className="settings-header-action"
               type="button"

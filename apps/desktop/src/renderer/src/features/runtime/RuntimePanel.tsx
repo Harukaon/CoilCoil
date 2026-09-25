@@ -283,6 +283,21 @@ export function RuntimePanel({
     await request(`skill:${filePath}`, { type: "set_session_skill_enabled", filePath, enabled });
   };
 
+  // 全局设置（不是会话级）：保存后主进程会广播 configuration_updated，
+  // 上层跟着刷新，所以这里不用自己回写 configuration。
+  const setToolPurposeAuditEnabled = async (enabled: boolean): Promise<void> => {
+    const action = "tool-purpose";
+    setBusyAction(action);
+    try {
+      await window.coilcoil.request<RuntimeConfiguration>({ type: "set_tool_purpose_audit_enabled", enabled }, runtimeId);
+      toastSuccess(enabled ? "已开启工具调用意图记录。" : "已关闭工具调用意图强制校验。");
+    } catch (caught) {
+      toastError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusyAction(undefined);
+    }
+  };
+
   const toggleMcpVisibility = async (server: McpServerRuntimeStatus): Promise<void> => {
     const next = toggledVisibility(mcpVisibility(server, mcpOverrides));
     const action = `mcp:${server.name}`;
@@ -528,6 +543,22 @@ export function RuntimePanel({
       </RuntimeSection>
 
       <RuntimeSection title="工具" icon={<Wrench size={14} />} badge={inspection?.tools.length ? `${activeTools.length}/${inspection.tools.length} 启用` : undefined}>
+        <div className="runtime-toggle-list">
+          <label title="每次工具调用都要求填写简短的直接目的（1 至 100 字，单行），并记在会话里。关闭后不再要求，也不再记录。">
+            <span>
+              <strong>强制填写调用目的</strong>
+              <small>写进工具 schema 并注入系统提示词；不合规的调用会被拦下</small>
+            </span>
+            <input
+              type="checkbox"
+              aria-label="强制工具调用填写目的"
+              checked={configuration?.toolPurposeAuditEnabled ?? true}
+              disabled={busyAction === "tool-purpose" || !runtimeId}
+              onChange={(event) => { void setToolPurposeAuditEnabled(event.target.checked); }}
+            />
+          </label>
+        </div>
+        <p className="runtime-section-footnote">打开时，每次工具调用都要先说明「这次要干什么」，记在会话里供事后查证；关闭则模型可以不带目的直接调。这是个全局设置，和当前会话无关。</p>
         {inspection?.tools.length ? <div className="runtime-chip-grid">{inspection.tools.map((tool) => (
           <Tooltip content={tool.description} key={tool.name}>
             <div className={`runtime-chip ${tool.active ? "active" : "inactive"}`}>
