@@ -137,17 +137,15 @@ function contextFor(
   };
 }
 
-test("project scope uses the nearest git root and otherwise keeps the cwd", async (t) => {
+test("project scope is the workspace folder itself, even inside a git repository", async (t) => {
   const root = await temporaryDirectory(t);
-  const repository = join(root, "A");
-  const nested = join(repository, "src", "feature");
-  const plain = join(root, "plain", "nested");
+  const repository = join(root, "feedmob");
+  const nested = join(repository, "fithub");
   await mkdir(join(repository, ".git"), { recursive: true });
   await mkdir(nested, { recursive: true });
-  await mkdir(plain, { recursive: true });
 
-  assert.equal(await resolveProjectRoot(nested), await realpath(repository));
-  assert.equal(await resolveProjectRoot(plain), await realpath(plain));
+  assert.equal(await resolveProjectRoot(nested), await realpath(nested));
+  assert.equal(await resolveProjectRoot(repository), await realpath(repository));
 });
 
 test("global storage root is Pi agent memory without an extra project layer", () => {

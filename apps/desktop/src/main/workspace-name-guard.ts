@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { readdirSync } from "node:fs";
+import { basename } from "node:path";
 
 /**
  * Which project a workspace's memory belongs to, by name alone.
@@ -18,20 +18,12 @@ import { basename, dirname, join } from "node:path";
  */
 
 /**
- * The name a folder's memory is filed under.
- *
- * Memory follows the project root, so a folder inside a repository is filed
- * under the repository, not under itself. Mirrors `resolveProjectRoot` in
- * `memory-storage.ts`; the two must agree or this guard checks the wrong name.
+ * The name a folder's memory is filed under: the folder's own name. Memory
+ * follows the workspace folder, not any enclosing git repository — mirrors
+ * `resolveProjectRoot` in `memory-storage.ts`.
  */
 export function memoryBucketName(path: string): string {
-  let current = path;
-  while (true) {
-    if (existsSync(join(current, ".git"))) return basename(current) || current;
-    const parent = dirname(current);
-    if (parent === current) return basename(path) || path;
-    current = parent;
-  }
+  return basename(path) || path;
 }
 
 /** Case-insensitive, because the stores these names become folders in are. */

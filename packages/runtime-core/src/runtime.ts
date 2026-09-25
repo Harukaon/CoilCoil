@@ -31,7 +31,7 @@ import {
 } from "./message-helpers.js";
 import {
   directoryNodes,
-  gitChanges,
+  readGitChanges,
 } from "./project-helpers.js";
 import {
   ABORT_STALL_NOTICE_MS,
@@ -156,7 +156,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       // Pi branch. Rewinding changes that branch, so refresh the right-hand
       // runtime inspector without blocking the new prompt on MCP discovery.
       void this.refreshRuntimeInspectionSources(active);
-      await this.preparePromptTurn(active, clientMessageId, expandedPrompt, promptDocument);
+      this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
       void active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
         preflightResult: () => { this.promptStarting = false; },
@@ -216,7 +216,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   ): Promise<void> {
     const prepared = await preparePromptImages(images);
     const expandedPrompt = prepared.hints ? `${prompt}\n\n${prepared.hints}` : prompt;
-    await this.preparePromptTurn(active, clientMessageId, expandedPrompt, promptDocument);
+    this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
     try {
       await active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
@@ -526,11 +526,11 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
 
   async refreshProject(): Promise<ProjectSnapshot> {
     const active = this.requireActive();
-    const [files, changes] = await Promise.all([directoryNodes(active.cwd), gitChanges(active.cwd)]);
+    const [files, changes] = await Promise.all([directoryNodes(active.cwd), readGitChanges(active.cwd)]);
     active.project = {
       cwd: active.cwd,
       files,
-      changes,
+      ...changes,
       terminals: [...active.terminals.values()].sort((a, b) => b.startedAt - a.startedAt),
       plan: [...active.plan],
       planApproval: active.planApproval,

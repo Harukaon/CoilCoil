@@ -615,7 +615,7 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
         active.session.setSessionName(titleFromText(prompt));
         active.titlePending = true;
       }
-      await this.preparePromptTurn(active, clientMessageId, expandedPrompt, promptDocument);
+      this.queueClientMessage(active, clientMessageId, expandedPrompt, promptDocument);
       const run = active.session.prompt(expandedPrompt, {
         images: prepared.images.length ? prepared.images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data })) : undefined,
         preflightResult: () => { this.promptStarting = false; },

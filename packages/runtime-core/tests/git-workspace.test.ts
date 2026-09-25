@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { GitBranch, GitDiff, GitLog, GitStatus } from "@coilcoil/runtime-protocol";
-import { runGitAction } from "../src/git-workspace.js";
+import type { GitBranch, GitDiff, GitLog, GitRepository, GitStatus } from "@coilcoil/runtime-protocol";
+import { limitStatus, runGitAction } from "../src/git-workspace.js";
+import { readGitChanges } from "../src/project-helpers.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -263,4 +264,83 @@ test("历史提交的文件列表和 diff：改名带原路径，根提交是整
   const mergeHash = git(repo, "rev-parse", "HEAD").trim();
   assert.deepEqual(await runGitAction(repo, { op: "commit_files", hash: mergeHash }), [{ path: "feature.txt", state: "added" }]);
   await assert.rejects(runGitAction(repo, { op: "commit_files", hash: "--all" }), /不是提交哈希/);
+});
+
+test("上层文件夹里有大量未跟踪文件：按文件夹聚合成一条，不逐个列出", async (context) => {
+  const { repo } = repository(context);
+  writeFileSync(join(repo, "a.txt"), "a\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "init");
+  for (const project of ["proj1", "proj2"]) {
+    mkdirSync(join(repo, project, "src"), { recursive: true });
+    for (let index = 0; index < 300; index += 1) writeFileSync(join(repo, project, "src", `f${index}.ts`), `${index}\n`);
+  }
+  const current = await status(repo);
+  assert.deepEqual(current.files, [{ path: "proj1/", unstaged: "untracked" }, { path: "proj2/", unstaged: "untracked" }]);
+  assert.equal(current.total, 2);
+  assert.equal(current.truncated, false);
+  await assert.rejects(runGitAction(repo, { op: "diff", path: "proj1/", staged: false }), /暂存之后才能看到/);
+  const discarded = await runGitAction(repo, { op: "discard", paths: ["proj2/"] }) as GitStatus;
+  assert.equal(existsSync(join(repo, "proj2")), false, "未跟踪的文件夹整个删掉");
+  assert.deepEqual(discarded.files, [{ path: "proj1/", unstaged: "untracked" }]);
+});
+
+test("改动超过上限：只交出上限条数，同时报总数", () => {
+  const files = Array.from({ length: 12 }, (_, index) => ({ path: `f${index}`, unstaged: "modified" as const }));
+  const limited = limitStatus({ repository: true, detached: false, ahead: 0, behind: 0, unborn: false, files, total: 12, truncated: false }, 5);
+  assert.equal(limited.files.length, 5);
+  assert.equal(limited.total, 12);
+  assert.equal(limited.truncated, true);
+  const mixed = limitStatus({
+    repository: true, detached: false, ahead: 0, behind: 0, unborn: false, total: 8, truncated: false,
+    files: [...files.slice(0, 6), { path: "new-project/", unstaged: "untracked" }, { path: "c.txt", unstaged: "conflicted" }],
+  }, 4);
+  assert.deepEqual(mixed.files.map((file) => file.path), ["c.txt", "new-project/", "f0", "f1"], "截断时冲突和未跟踪的先留下");
+});
+
+test("整个仓库一起暂存、取消暂存、丢弃；.gitignore 管的文件不动", async (context) => {
+  const { repo } = repository(context);
+  writeFileSync(join(repo, ".gitignore"), "local.env\n");
+  writeFileSync(join(repo, "a.txt"), "a\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "init");
+  writeFileSync(join(repo, "a.txt"), "changed\n");
+  mkdirSync(join(repo, "new"));
+  writeFileSync(join(repo, "new", "b.txt"), "b\n");
+  writeFileSync(join(repo, "local.env"), "SECRET=1\n");
+  let current = await runGitAction(repo, { op: "stage_all" }) as GitStatus;
+  assert.deepEqual(current.files.map((file) => [file.path, file.staged]), [["a.txt", "modified"], ["new/b.txt", "added"]]);
+  current = await runGitAction(repo, { op: "unstage_all" }) as GitStatus;
+  assert.ok(current.files.every((file) => !file.staged));
+  current = await runGitAction(repo, { op: "discard_all" }) as GitStatus;
+  assert.deepEqual(current.files, []);
+  assert.equal(readFileSync(join(repo, "a.txt"), "utf8"), "a\n");
+  assert.equal(existsSync(join(repo, "new")), false);
+  assert.equal(readFileSync(join(repo, "local.env"), "utf8"), "SECRET=1\n", "被忽略的文件不删");
+});
+
+test("找仓库：工作区本身所在的，加上子文件夹里的；依赖目录不去翻", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-repos-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, "init", "-q", "-b", "main");
+  for (const path of ["app", "libs/core", "node_modules/pkg"]) {
+    mkdirSync(join(root, path), { recursive: true });
+    git(join(root, path), "init", "-q", "-b", "main");
+  }
+  mkdirSync(join(root, "plain"));
+  const found = await runGitAction(root, { op: "repositories" }) as GitRepository[];
+  assert.deepEqual(found.map((repository) => repository.name), [".", "app", join("libs", "core")]);
+  const plain = await runGitAction(join(root, "plain"), { op: "repositories" }) as GitRepository[];
+  assert.deepEqual(plain.map((repository) => repository.name), ["."], "在子文件夹里打开时，上层仓库仍然算");
+});
+
+test("项目摘要：读 git 失败时带上原因，不是 git 仓库才算没有改动", async (context) => {
+  const dir = mkdtempSync(join(tmpdir(), "coilcoil-changes-"));
+  context.after(() => rmSync(dir, { recursive: true, force: true }));
+  assert.deepEqual(await readGitChanges(dir), { changes: [] });
+  git(dir, "init", "-q", "-b", "main");
+  writeFileSync(join(dir, ".git", "index"), "garbage");
+  const broken = await readGitChanges(dir);
+  assert.deepEqual(broken.changes, []);
+  assert.match(broken.changesError ?? "", /读取 git 改动失败/);
 });

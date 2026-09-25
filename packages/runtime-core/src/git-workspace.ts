@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
-import type { GitAction, GitBranch, GitCommit, GitCommitFile, GitCommitRef, GitDiff, GitFileChange, GitFileState, GitLog, GitStatus } from "@coilcoil/runtime-protocol";
+import { existsSync, readdirSync } from "node:fs";
+import { basename, join, relative, resolve } from "node:path";
+import type { GitAction, GitBranch, GitCommit, GitCommitFile, GitCommitRef, GitDiff, GitFileChange, GitFileState, GitLog, GitRepository, GitStatus } from "@coilcoil/runtime-protocol";
 
 /**
  * 工作区的 git 操作，给界面上的 Git 面板用。
@@ -14,6 +16,18 @@ import type { GitAction, GitBranch, GitCommit, GitCommitFile, GitCommitRef, GitD
  */
 
 const MAX_DIFF_BYTES = 512 * 1024;
+
+/**
+ * 一次最多交给界面多少条改动。
+ *
+ * 和 VS Code 的 git.statusLimit 一个意思：一个上层文件夹里放着很多小项目时，改动能有
+ * 几万条，全交出去界面会卡死，人也看不过来。超过的只报总数，界面提示「改动过多」。
+ */
+export const GIT_STATUS_LIMIT = 5000;
+/** 在工作区里往下找几层子仓库（VS Code 的 git.repositoryScanMaxDepth 默认 1，这里多看一层）。 */
+const REPOSITORY_SCAN_DEPTH = 2;
+const REPOSITORY_SCAN_LIMIT = 2000;
+const REPOSITORY_SCAN_SKIP = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", "dist", "build", "target", ".next", ".cache"]);
 const NETWORK_TIMEOUT_MS = 120_000;
 const LOCAL_TIMEOUT_MS = 30_000;
 
@@ -71,7 +85,7 @@ function fileState(letter: string): GitFileState | undefined {
 
 /** 解析 `git status --porcelain=v2 --branch -z`。 */
 export function parseGitStatus(output: string, root: string): GitStatus {
-  const status: GitStatus = { repository: true, root, detached: false, ahead: 0, behind: 0, unborn: false, files: [] };
+  const status: GitStatus = { repository: true, root, detached: false, ahead: 0, behind: 0, unborn: false, files: [], total: 0, truncated: false };
   const records = output.split("\0");
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index];
@@ -116,17 +130,38 @@ export function parseGitStatus(output: string, root: string): GitStatus {
       status.files.push({ path, unstaged: "conflicted" });
     }
   }
+  status.total = status.files.length;
   return status;
 }
 
+/**
+ * 仓库现在的状态。未跟踪的文件按文件夹聚合（git 默认的 normal，路径以 `/` 结尾），
+ * 最多交出 GIT_STATUS_LIMIT 条，其余只报总数。
+ */
 export async function gitStatus(cwd: string): Promise<GitStatus> {
   const root = await repositoryRoot(cwd);
-  if (!root) return { repository: false, detached: false, ahead: 0, behind: 0, unborn: false, files: [] };
-  return parseGitStatus(await runGit(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]), root);
+  if (!root) return { repository: false, detached: false, ahead: 0, behind: 0, unborn: false, files: [], total: 0, truncated: false };
+  return limitStatus(parseGitStatus(await runGit(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"]), root));
+}
+
+/**
+ * 超过上限时先留冲突和未跟踪的条目，再按 git 的顺序补满：git 把未跟踪的排在最后，
+ * 直接截断的话，几千个已跟踪文件的改动会把「多出来一个没跟踪的小项目」挤出列表，
+ * 而那往往正是用户要找的。未跟踪的已经按文件夹聚合，一般没几条。
+ */
+export function limitStatus(status: GitStatus, limit = GIT_STATUS_LIMIT): GitStatus {
+  if (status.files.length <= limit) return status;
+  const rank = (file: GitFileChange): number => (file.unstaged === "conflicted" ? 0 : file.unstaged === "untracked" ? 1 : 2);
+  const files = status.files.map((file, index) => ({ file, index }))
+    .sort((a, b) => rank(a.file) - rank(b.file) || a.index - b.index)
+    .slice(0, limit)
+    .map(({ file }) => file);
+  return { ...status, files, truncated: true };
 }
 
 async function gitDiff(cwd: string, path: string, staged: boolean): Promise<GitDiff> {
   const root = await requireRoot(cwd);
+  if (path.endsWith("/")) throw new Error("这是一个整体没被跟踪的文件夹，暂存之后才能看到里面每个文件的改动。");
   const status = await gitStatus(root);
   const untracked = !staged && status.files.some((file) => file.path === path && file.unstaged === "untracked");
   const args = untracked
@@ -173,8 +208,67 @@ async function discard(cwd: string, paths: string[]): Promise<GitStatus> {
   const untracked = status.files.filter((file) => wanted.has(file.path) && file.unstaged === "untracked").map((file) => file.path);
   const tracked = status.files.filter((file) => wanted.has(file.path) && file.unstaged && file.unstaged !== "untracked").map((file) => file.path);
   if (tracked.length) await runGit(root, ["restore", "--worktree", "--", ...tracked]);
-  if (untracked.length) await runGit(root, ["clean", "-f", "-q", "--", ...untracked]);
+  // -d：聚合成一条的未跟踪文件夹（路径以 / 结尾）要连文件夹一起删。
+  if (untracked.length) await runGit(root, ["clean", "-f", "-d", "-q", "--", ...untracked]);
   return gitStatus(root);
+}
+
+/** 整个仓库一起暂存。列表可能被截断，所以「全部」不能按列表里的条目来。 */
+async function stageAll(cwd: string): Promise<GitStatus> {
+  const root = await requireRoot(cwd);
+  await runGit(root, ["add", "-A"]);
+  return gitStatus(root);
+}
+
+async function unstageAll(cwd: string): Promise<GitStatus> {
+  const root = await requireRoot(cwd);
+  const status = await gitStatus(root);
+  // 还没有提交时没有 HEAD 可以恢复，取消暂存就是清空索引；否则让索引回到 HEAD，工作区不动。
+  await runGit(root, status.unborn ? ["rm", "--cached", "-r", "-q", "--", "."] : ["reset", "-q"]);
+  return gitStatus(root);
+}
+
+/** 丢弃整个仓库工作区里的改动：已跟踪的回到暂存区的样子，未跟踪的删掉（.gitignore 管的不动）。 */
+async function discardAll(cwd: string): Promise<GitStatus> {
+  const root = await requireRoot(cwd);
+  await runGit(root, ["restore", "--worktree", "--", "."]).catch((error: unknown) => {
+    // 一个跟踪文件都没有时 restore 会说 pathspec 不匹配，那就是没有可恢复的。
+    if (!(error instanceof GitCommandError && /did not match any file/i.test(error.message))) throw error;
+  });
+  await runGit(root, ["clean", "-f", "-d", "-q"]);
+  return gitStatus(root);
+}
+
+/**
+ * 工作区里的 git 仓库：工作区本身所在的那个，加上往下 REPOSITORY_SCAN_DEPTH 层子文件夹里
+ * 的（和 VS Code 的 git.autoRepositoryDetection 一样）。一个上层文件夹里放着好几个
+ * 小项目时，界面可以只看其中一个，不用把所有小项目的改动混在一起。
+ */
+async function repositories(cwd: string): Promise<GitRepository[]> {
+  const workspace = resolve(cwd);
+  const found = new Map<string, GitRepository>();
+  const own = await repositoryRoot(workspace);
+  if (own) found.set(own, { root: own, name: "." });
+  let scanned = 0;
+  const walk = (dir: string, depth: number): void => {
+    if (depth > REPOSITORY_SCAN_DEPTH || scanned >= REPOSITORY_SCAN_LIMIT) return;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || REPOSITORY_SCAN_SKIP.has(entry.name) || entry.name.startsWith(".")) continue;
+      if (++scanned > REPOSITORY_SCAN_LIMIT) return;
+      const child = join(dir, entry.name);
+      // .git 可能是文件夹，也可能是 worktree / 子模块用的 .git 文件。
+      if (existsSync(join(child, ".git")) && !found.has(child)) found.set(child, { root: child, name: relative(workspace, child) || basename(child) });
+      walk(child, depth + 1);
+    }
+  };
+  walk(workspace, 1);
+  return [...found.values()].sort((a, b) => (a.name === "." ? -1 : b.name === "." ? 1 : a.name.localeCompare(b.name)));
 }
 
 async function commit(cwd: string, message: string, stageAll: boolean): Promise<GitStatus> {
@@ -357,13 +451,17 @@ async function commitDiff(cwd: string, hash: string, path: string, originalPath?
 }
 
 /** Git 面板的每个操作。改动类操作都返回改完之后的状态，面板不用再问一次。 */
-export async function runGitAction(cwd: string, action: GitAction): Promise<GitStatus | GitDiff | GitBranch[] | GitLog | GitCommitFile[]> {
+export async function runGitAction(cwd: string, action: GitAction): Promise<GitStatus | GitDiff | GitBranch[] | GitLog | GitCommitFile[] | GitRepository[]> {
   switch (action.op) {
     case "status": return gitStatus(cwd);
     case "diff": return gitDiff(cwd, action.path, action.staged);
     case "stage": return stage(cwd, action.paths);
     case "unstage": return unstage(cwd, action.paths);
     case "discard": return discard(cwd, action.paths);
+    case "stage_all": return stageAll(cwd);
+    case "unstage_all": return unstageAll(cwd);
+    case "discard_all": return discardAll(cwd);
+    case "repositories": return repositories(cwd);
     case "commit": return commit(cwd, action.message, action.stageAll === true);
     case "push": return push(cwd);
     case "pull": return pull(cwd);

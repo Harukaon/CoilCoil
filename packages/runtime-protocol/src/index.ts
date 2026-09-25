@@ -810,16 +810,18 @@ export interface ChatMessage {
   isError?: boolean;
   /** `steering` is a message Pi has accepted for the running turn but has not delivered yet. */
   status?: "queued" | "steering" | "running" | "succeeded" | "failed" | "aborted";
-  /** 用户消息：发出前存过工作区快照，编辑它重新发送时可以把代码退回那时的样子。 */
+  /** 用户消息：之后 Agent 改过文件，编辑它重新发送时可以把那些文件退回那时的样子。 */
   checkpoint?: boolean;
 }
 
 /** 编辑一条历史消息之前问一下：代码要不要回退、回退会动到哪些文件。 */
 export interface RewindPreview {
-  /** 这条消息有检查点。 */
+  /** 找得到这条消息。 */
   checkpoint: boolean;
-  /** 从这条消息发出到现在，工作区里变过的文件；回退就是把它们恢复原样。 */
+  /** 这条消息之后 Agent 改过、现在和当时不一样的文件；回退就是把它们恢复原样。 */
   files: GitCommitFile[];
+  /** Agent 改过但没备份下来（太大、已过期）的文件，回退时不动。 */
+  skipped?: string[];
 }
 
 export interface TodoItem {
@@ -1335,7 +1337,21 @@ export interface GitStatus {
   unborn: boolean;
   /** HEAD 指向的提交；还没有提交时是 undefined。 */
   head?: string;
+  /**
+   * 改动（最多 GIT_STATUS_LIMIT 条）。未跟踪的文件按文件夹聚合：一整个没被跟踪的
+   * 文件夹只算一条，路径以 `/` 结尾——和 git 自己默认的显示方式一样。
+   */
   files: GitFileChange[];
+  /** 一共有多少条改动；比 files 多时就是 truncated。 */
+  total: number;
+  truncated: boolean;
+}
+
+/** 工作区里找到的一个 git 仓库：工作区本身所在的，或者子文件夹里的。 */
+export interface GitRepository {
+  root: string;
+  /** 相对工作区的路径；工作区本身所在的仓库是 `.`。 */
+  name: string;
 }
 
 export interface GitBranch {
@@ -1403,9 +1419,15 @@ export type GitAction =
   | { op: "discard"; paths: string[] }
   /** `stageAll`：暂存区是空的就先把所有改动暂存再提交。 */
   | { op: "commit"; message: string; stageAll?: boolean }
+  /** 整个仓库一起暂存 / 取消暂存 / 丢弃（不按列表里的条目，列表可能被截断）。 */
+  | { op: "stage_all" }
+  | { op: "unstage_all" }
+  | { op: "discard_all" }
   | { op: "push" }
   | { op: "pull" }
   | { op: "branches" }
+  /** 工作区本身所在的仓库，加上子文件夹里找到的仓库。cwd 是工作区。 */
+  | { op: "repositories" }
   | { op: "checkout"; branch: string }
   | { op: "create_branch"; name: string }
   /** 提交历史：默认是当前分支和它的上游，`all` 时是所有分支和标签。 */
@@ -1424,6 +1446,8 @@ export interface ProjectSnapshot {
   cwd: string;
   files: FileNode[];
   changes: ChangedFile[];
+  /** 读 git 改动失败了（和「确实没有改动」区分开）；有值时 changes 不可信。 */
+  changesError?: string;
   terminals: TerminalRun[];
   plan: TodoItem[];
   planApproval?: PlanApprovalState;

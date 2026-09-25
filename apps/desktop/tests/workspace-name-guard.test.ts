@@ -40,6 +40,14 @@ test("另一个已打开的工作区占了这个名字，就不让导入", () =>
   assert.match(prompt?.detail ?? "", /\/a\/project/);
 });
 
+test("父文件夹已打开，再导入子文件夹：各是各的项目，名字不同就不拦", () => {
+  // /Desktop/feedmob 已经打开（是 git 仓库也无所谓），再导入它下面的 fithub。
+  assert.deepEqual(
+    checkWorkspaceName(open("fithub", "/d/feedmob/fithub"), [open("feedmob", "/d/feedmob")], ["feedmob"]),
+    { kind: "ok" },
+  );
+});
+
 test("只有记忆里见过这个名字，就提示一下让用户自己判断", () => {
   const verdict = checkWorkspaceName(open("project", "/b/project"), [], ["project", "feedmob"]);
   assert.deepEqual(verdict, { kind: "name-remembered", name: "project" });
@@ -66,15 +74,14 @@ test("放行的时候没有任何弹窗", () => {
   assert.equal(workspaceNamePrompt({ kind: "already-open" }), undefined);
 });
 
-test("记忆跟着项目根走，所以仓库里的子目录算仓库的名字", () => {
+test("记忆跟着工作区文件夹走，和 git 无关：仓库里的子目录用它自己的名字", () => {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-guard-"));
-  const repo = join(root, "myrepo");
-  const inside = join(repo, "apps", "web");
+  const repo = join(root, "feedmob");
+  const inside = join(repo, "fithub");
   mkdirSync(inside, { recursive: true });
   mkdirSync(join(repo, ".git"), { recursive: true });
-  // 这一条错了，检查的就是另一个名字，重名照样漏过去。
-  assert.equal(memoryBucketName(inside), "myrepo");
-  assert.equal(memoryBucketName(repo), "myrepo");
+  assert.equal(memoryBucketName(inside), "fithub");
+  assert.equal(memoryBucketName(repo), "feedmob");
 
   const plain = join(root, "notarepo");
   mkdirSync(plain, { recursive: true });
