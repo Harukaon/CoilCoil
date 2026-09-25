@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import {
   clampPanelWidth,
@@ -10,6 +12,10 @@ import {
   PANEL_OPEN_WINDOW_WIDTH,
   panelOpenGrowth,
 } from "../src/renderer/src/hooks/usePanelLayout.ts";
+
+const rendererRoot = resolve(import.meta.dirname, "../src/renderer/src");
+const panelLayoutSource = readFileSync(resolve(rendererRoot, "hooks/usePanelLayout.ts"), "utf8");
+const rendererStyles = readFileSync(resolve(rendererRoot, "styles.css"), "utf8");
 
 const fit = (windowWidth: number) => fitPanelWidths({
   windowWidth,
@@ -134,4 +140,19 @@ test("the visible tracks always fit the window", () => {
       if (rightOpen) assert.ok(rightWidth >= MINIMUM_RIGHT_PANEL_WIDTH);
     }
   }
+});
+
+test("live panel resizing batches layout and freezes the transcript until release", () => {
+  assert.match(panelLayoutSource, /requestAnimationFrame\(applyWidth\)/);
+  assert.match(panelLayoutSource, /cancelAnimationFrame\(resizeFrame\)/);
+  assert.match(panelLayoutSource, /setPointerCapture\(pointerId\)/);
+  assert.match(panelLayoutSource, /addEventListener\("blur", stopOnBlur/);
+  assert.match(panelLayoutSource, /removeEventListener\("blur", stopOnBlur\)/);
+  assert.match(panelLayoutSource, /classList\.add\("conversation-layout-frozen"\)/);
+  assert.match(panelLayoutSource, /classList\.remove\("conversation-layout-frozen"\)/);
+  assert.match(panelLayoutSource, /style\.removeProperty\("--conversation-resize-width"\)/);
+  assert.match(
+    rendererStyles,
+    /\.app-shell\.conversation-layout-frozen \.conversation-body \{ width: var\(--conversation-resize-width\); \}/,
+  );
 });
