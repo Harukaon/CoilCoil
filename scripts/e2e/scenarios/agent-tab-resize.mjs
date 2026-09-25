@@ -32,11 +32,11 @@ export async function run({ app, page, ui, site, check, shot }) {
 
   for (const [label, delta] of [["缩窄", -480], ["拉宽", 480]]) {
     const before = await viewSize(page);
+    const src = await frame.getAttribute("src");
     await resizeWindow(app, delta);
     check(`${label}窗口后面板确实变了`, await ui.waitFor(async () => (await viewSize(page)).width !== before.width), JSON.stringify(await viewSize(page)));
     check(`${label}窗口后离屏页面跟着变成面板大小`, await ui.waitFor(async () => sameSize(await offscreenSize(app), await viewSize(page))),
       JSON.stringify({ offscreen: await offscreenSize(app), view: await viewSize(page) }));
-    const src = await frame.getAttribute("src");
     check(`${label}窗口后界面收到了新画面`, await ui.waitFor(async () => (await frame.getAttribute("src")) !== src));
     await shot(label);
   }
