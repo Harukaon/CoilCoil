@@ -74,3 +74,11 @@ test("行首敲错命令说没有匹配，句子里写到斜杠就不挡着人",
   assert.equal(resolveSlashMenu(items, findSlashToken("/ xxx", 5)).active, true, "行首是在敲命令，说没匹配而不是默默消失");
   assert.equal(resolveSlashMenu(items, findSlashToken("看 /a/b 不存在", 12)).active, false, "中文正文里的斜杠不该弹菜单");
 });
+
+test("命令选完接着写正文时菜单收起，不挡着正在写的那句话", () => {
+  const items = buildSlashMenuItems([skill("pdf")], []);
+  assert.equal(resolveSlashMenu(items, findSlashToken("/skill:pdf 帮我总结这份文件", 20)).active, false);
+  assert.equal(resolveSlashMenu(items, findSlashToken("/mcp beeswax 看下这个网页", 22)).active, false);
+  // 命令还没写完时还是列出来让选。
+  assert.equal(resolveSlashMenu(items, findSlashToken("/skill:pd", 9)).items.length, 1);
+});

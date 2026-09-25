@@ -70,14 +70,18 @@ export type SlashMenuState = { active: boolean; items: SlashMenuItem[] };
 /**
  * 光标处算不算停在一条斜杠命令里，以及这一屏该列哪些条目。
  * 命令名里带空格的（`/mcp chrome-devtools`）光标走到下一个词时不能把菜单收掉，
- * 所以整段一起筛。筛空时：行首的 `/` 是明确在敲命令，留着菜单说「没有匹配的命令」；
- * 句子中间的（“看 /a/b 不存在”）说明人已经在写正文，就别拿菜单挡着他。
+ * 所以整段一起筛。一条也筛不到时再分两种：行首的 `/` 是明确在敲命令，留着菜单说
+ * 「没有匹配的命令」；但命令已经写完整、后面接着正文（`/skill:pdf 帮我…`）或者这斜杠
+ * 本来就在句子中间（“看 /a/b 不存在”），说明人已经在写话，就别拿菜单挡着他。
  */
 export function resolveSlashMenu(items: SlashMenuItem[], token: SlashToken | null): SlashMenuState {
   if (!token) return { active: false, items: [] };
   const matched = items.filter((item) => matchesQuery(item, token.query)).slice(0, 12);
-  if (!matched.length && /\s/.test(token.query) && !token.lineStart) return { active: false, items: [] };
-  return { active: true, items: matched };
+  if (matched.length) return { active: true, items: matched };
+  if (!token.lineStart) return { active: false, items: [] };
+  const [firstWord] = token.query.split(/\s+/);
+  const commandFinished = items.some((item) => item.title.replace(/^[/／]/, "").toLowerCase() === firstWord);
+  return commandFinished ? { active: false, items: [] } : { active: true, items: [] };
 }
 
 function matchesQuery(item: SlashMenuItem, needle: string): boolean {
