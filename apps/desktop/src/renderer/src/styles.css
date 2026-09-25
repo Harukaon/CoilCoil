@@ -75,7 +75,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
    padding-left 让位，与这里无关。 */
 :root { --window-controls-width: 0px; }
 [data-platform="win32"], [data-platform="linux"] { --window-controls-width: 138px; }
-.window-controls { position: fixed; z-index: 200; top: 0; right: 0; display: flex; height: 32px; }
+/* 高度 44px = 右栏头部那一行：按钮中心因此落在 22px 中线上，和旁边的添加 / 开关
+   按钮（30px，top 7px）排成一行。照 Windows 原生的 32px 画会明显偏上、图标也小
+   一圈，是自绘 chrome 里最早被看出来的不对齐。 */
+.window-controls { position: fixed; z-index: 200; top: 0; right: 0; display: flex; height: 44px; }
 .window-controls button { display: grid; width: 46px; height: 100%; padding: 0; place-items: center; border: 0; border-radius: 0; color: hsl(var(--th) var(--ts) var(--l-239)); background: transparent; cursor: default; transition: background 90ms ease, color 90ms ease; }
 .window-controls button:hover { background: hsl(var(--th) var(--ts) var(--l-880)); }
 .window-controls button:active { background: hsl(var(--th) var(--ts) var(--l-861)); }

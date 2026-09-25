@@ -200,6 +200,20 @@ test("右侧栏标签条按内容取宽，并给右侧按钮留位", () => {
   assert.equal(horizontalPadding, 16);
 });
 
+test("自绘窗口按钮和右栏头部同高同中线", () => {
+  // 44px 是右栏头部那一行（.inspector-pane 的首行栅格），也是右栏固定控制条的高度。
+  // 窗口按钮照 Windows 原生的 32px 画会整体偏高 6px，夹在旁边的添加 / 开关按钮里
+  // 一眼就看出来没对齐。
+  assert.match(declarations(".window-controls"), /height:\s*44px/, ".window-controls 要和右栏头部同高");
+  assert.match(declarations(".inspector-pane"), /grid-template-rows:\s*44px/, "右栏头部第一行是 44px");
+  assert.equal(pixels(".conversation-inspector-control", "height"), 44);
+  // 图标同样要够大：原生那套 10px 线框配 15-17px 的应用图标明显小一圈。
+  const controls = readFileSync(resolve(rendererRoot, "ui/WindowControls.tsx"), "utf8");
+  const glyphs = controls.match(/<svg width="\d+" height="\d+"/g) ?? [];
+  assert.equal(glyphs.length, 4, "最小化 / 最大化 / 还原 / 关闭共 4 个图标");
+  for (const glyph of glyphs) assert.match(glyph, /width="13" height="13"/, `窗口按钮图标大小应统一：${glyph}`);
+});
+
 test("标题栏里的选择器不能用 :first-child——拖动层永远排在第一个", () => {
   // <WindowDragBar /> 插在最前面，`> div:first-child` 于是一条都匹配不上。记忆页
   // 的标题栏就是这么坏掉的：包图标和标题的那个 div 从 flex 掉回 block，图标被挤
