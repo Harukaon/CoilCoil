@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -319,7 +319,7 @@ test("整个仓库一起暂存、取消暂存、丢弃；.gitignore 管的文件
   assert.equal(readFileSync(join(repo, "local.env"), "utf8"), "SECRET=1\n", "被忽略的文件不删");
 });
 
-test("找仓库：工作区本身所在的，加上子文件夹里的；依赖目录不去翻", async (context) => {
+test("找仓库：工作区本身是仓库时算它，加上子文件夹里的；依赖目录不去翻", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-repos-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   git(root, "init", "-q", "-b", "main");
@@ -331,7 +331,23 @@ test("找仓库：工作区本身所在的，加上子文件夹里的；依赖�
   const found = await runGitAction(root, { op: "repositories" }) as GitRepository[];
   assert.deepEqual(found.map((repository) => repository.name), [".", "app", join("libs", "core")]);
   const plain = await runGitAction(join(root, "plain"), { op: "repositories" }) as GitRepository[];
-  assert.deepEqual(plain.map((repository) => repository.name), ["."], "在子文件夹里打开时，上层仓库仍然算");
+  assert.deepEqual(plain, [], "还没建 git 的子文件夹：上层文件夹的仓库不算它的");
+  const nested = await runGitAction(join(root, "libs"), { op: "repositories" }) as GitRepository[];
+  assert.deepEqual(nested.map((repository) => repository.name), ["core"], "只列它下面自己的仓库，不带上层的");
+  const app = await runGitAction(join(root, "app"), { op: "repositories" }) as GitRepository[];
+  assert.deepEqual(app.map((repository) => repository.name), ["."], "子项目自己有 git：就是它自己");
+});
+
+test("找仓库：同一个文件夹换一种写法（符号链接）打开，仍然认得是它自己的仓库", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-repos-link-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const real = join(root, "real");
+  mkdirSync(real);
+  git(real, "init", "-q", "-b", "main");
+  const link = join(root, "link");
+  symlinkSync(real, link, "dir");
+  const found = await runGitAction(link, { op: "repositories" }) as GitRepository[];
+  assert.deepEqual(found.map((repository) => repository.name), ["."]);
 });
 
 test("项目摘要：读 git 失败时带上原因，不是 git 仓库才算没有改动", async (context) => {

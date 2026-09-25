@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import type { GitAction, GitBranch, GitCommit, GitCommitFile, GitCommitRef, GitDiff, GitFileChange, GitFileState, GitLog, GitRepository, GitStatus } from "@coilcoil/runtime-protocol";
 
@@ -239,16 +239,32 @@ async function discardAll(cwd: string): Promise<GitStatus> {
   return gitStatus(root);
 }
 
+/** 同一个文件夹的不同写法（符号链接、macOS 上的 /var 和 /private/var、Windows 的斜杠）算同一个。 */
+function samePath(a: string, b: string): boolean {
+  const canonical = (path: string): string => {
+    try {
+      return realpathSync.native(resolve(path));
+    } catch {
+      return resolve(path);
+    }
+  };
+  return canonical(a) === canonical(b);
+}
+
 /**
- * 工作区里的 git 仓库：工作区本身所在的那个，加上往下 REPOSITORY_SCAN_DEPTH 层子文件夹里
- * 的（和 VS Code 的 git.autoRepositoryDetection 一样）。一个上层文件夹里放着好几个
- * 小项目时，界面可以只看其中一个，不用把所有小项目的改动混在一起。
+ * 工作区里的 git 仓库：工作区本身就是仓库根目录时算它，再加上往下 REPOSITORY_SCAN_DEPTH
+ * 层子文件夹里的（和 VS Code 的 git.autoRepositoryDetection 一样）。一个上层文件夹里放着
+ * 好几个小项目时，界面可以只看其中一个，不用把所有小项目的改动混在一起。
+ *
+ * 上层文件夹的仓库不算：git 在工作区里找不到仓库会一层层往上找，以前找到上层的就当成
+ * 工作区的——还没建 git 的子项目打开 Git 面板，看到的是别的项目的改动和历史，「全部丢弃」
+ * 还会删到上层文件夹里别的项目。
  */
 async function repositories(cwd: string): Promise<GitRepository[]> {
   const workspace = resolve(cwd);
   const found = new Map<string, GitRepository>();
   const own = await repositoryRoot(workspace);
-  if (own) found.set(own, { root: own, name: "." });
+  if (own && samePath(own, workspace)) found.set(own, { root: own, name: "." });
   let scanned = 0;
   const walk = (dir: string, depth: number): void => {
     if (depth > REPOSITORY_SCAN_DEPTH || scanned >= REPOSITORY_SCAN_LIMIT) return;
