@@ -14,6 +14,14 @@ function declarations(selector: string): string {
   return match[1];
 }
 
+/** 选择器列表换行写的时候，要从列表开头一直读到花括号。 */
+function declarationsOfList(selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^${escaped}[^{}]*\\{([^}]*)\\}`, "m").exec(styles);
+  assert.ok(match, `styles.css 里找不到以 ${selector} 开头的规则`);
+  return match[1];
+}
+
 function pixels(selector: string, property: string): number {
   const match = new RegExp(`(?:^|;)\\s*${property}:\\s*(-?[\\d.]+)(?:px)?\\s*(?:;|$)`).exec(declarations(selector));
   assert.ok(match, `${selector} 上没有 ${property}`);
@@ -144,6 +152,26 @@ test("所有工作区共用 AppView 的左侧栏开关", () => {
   const appView = readFileSync(resolve(rendererRoot, "AppView.tsx"), "utf8");
   assert.equal((appView.match(/className="app-sidebar-control"/g) ?? []).length, 1);
   assert.match(appView, /className="icon-button app-sidebar-toggle no-drag"/);
+});
+
+test("窗口按钮压在右上角，标题栏右侧要给它让位", () => {
+  // Windows / Linux 上窗口按钮由应用自己画在右上角（138px 宽），标题栏高 56px、
+  // 按钮高 32px，于是就压在标题栏右侧那一块上。页头右侧的动作按钮和开关不让位
+  // 就会被压住点不到：实测设置页的「工具目的」开关正好落在关闭按钮底下。
+  const clearance = /padding-right:\s*calc\(26px \+ var\(--window-controls-width\)\)/;
+  for (const selector of [
+    ".app-shell > .skills-workspace > .skills-workspace-header",
+    ".app-shell > .memory-workspace > .memory-workspace-header",
+    ".app-shell > .issue-board > .issue-board-header",
+  ]) {
+    assert.match(declarationsOfList(selector), clearance, `${selector} 要给窗口按钮让位`);
+  }
+  const settingsCss = readFileSync(resolve(rendererRoot, "features/settings/settings.css"), "utf8");
+  assert.match(settingsCss, /\.settings-page-header \{[^}]*padding: 0 calc\(26px \+ var\(--window-controls-width\)\)/, ".settings-page-header 要给窗口按钮让位");
+  assert.match(declarations(".conversation-header"), /padding:\s*0 calc\(8px \+ var\(--window-controls-width\)\) 0 20px/, ".conversation-header 要给窗口按钮让位");
+  // 手机上根本没有窗口按钮，不能凭空留出 138px。
+  const mobileCss = readFileSync(resolve(rendererRoot, "mobile.css"), "utf8");
+  assert.match(mobileCss, /\[data-client="remote"\] \{ --window-controls-width: 0px; \}/, "远程客户端要把窗口按钮宽度归零");
 });
 
 test("右侧栏标签条按内容取宽，并给右侧按钮留位", () => {

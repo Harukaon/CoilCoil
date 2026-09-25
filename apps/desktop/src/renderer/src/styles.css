@@ -398,6 +398,16 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 /* 工作区标题和聊天标题走同一套「左侧可收缩、右侧固定」的布局。原来的
    space-between flex 在拖动侧栏时会重新计算标题组的剩余宽度，副标题换行后就会
    让图标和标题上下抖动；这里用显式两列并锁住标题组的最小宽度。 */
+/* 工作区标题栏是窗口的顶边，右上角正好是 Windows / Linux 自绘的三枚窗口按钮
+   （见 WindowControls）。页头右侧的动作按钮和开关必须让开这块，否则会被压在
+   按钮底下点不到。macOS 的红绿灯在左上角，--window-controls-width 为 0。
+   设置页的页头同理，那条规则在同目录的 settings.css 里。 */
+.app-shell > .skills-workspace > .skills-workspace-header,
+.app-shell > .memory-workspace > .memory-workspace-header,
+.app-shell > .issue-board > .issue-board-header {
+  padding-right: calc(26px + var(--window-controls-width));
+}
+
 .app-shell > .skills-workspace > .skills-workspace-header,
 .app-shell > .memory-workspace > .memory-workspace-header,
 .app-shell > .issue-board > .issue-board-header {
@@ -449,7 +459,7 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
   visibility: hidden;
   transition: none;
 }
-.conversation-header { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; transition: padding-left 220ms cubic-bezier(.22, 1, .36, 1); }
+.conversation-header { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 calc(8px + var(--window-controls-width)) 0 20px; transition: padding-left 220ms cubic-bezier(.22, 1, .36, 1); }
 .app-shell.left-collapsed .conversation-header { padding-left: 60px; }
 [data-platform="darwin"] .app-shell.left-collapsed .conversation-header { padding-left: 122px; }
 .conversation-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; -webkit-user-select: none; user-select: none; }

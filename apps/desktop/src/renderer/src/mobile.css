@@ -98,6 +98,10 @@
   [data-client="remote"] .sidebar-drag,
   [data-client="remote"] .sidebar-drag-region { display: none; }
 
+  /* 没有窗口要拖，也就没有自绘的窗口按钮要躲：手机上的 header 不该凭空留出
+     138px。桌面窗口按钮区的宽度靠这个变量传递，归零即可。 */
+  [data-client="remote"] { --window-controls-width: 0px; }
+
   [data-client="remote"] .window-drag { -webkit-app-region: no-drag; }
   [data-client="remote"] .sidebar-drag-spacer { flex-basis: 12px; }
   [data-client="remote"][data-platform="darwin"] .sidebar-drag-spacer { flex-basis: 12px; }
