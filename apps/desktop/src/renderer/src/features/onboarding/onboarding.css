@@ -170,7 +170,7 @@
 .onboarding-memory-config { gap: 16px; }
 .onboarding-memory-toggles { display: flex; flex-wrap: wrap; gap: 14px 22px; }
 .onboarding-memory-toggles label { display: inline-flex; align-items: center; gap: 7px; color: hsl(var(--th) var(--ts) var(--l-302)); font-size: 11px; }
-.onboarding-memory-toggles input { accent-color: var(--c-green-solid); }
+.onboarding-memory-toggles input { accent-color: hsl(var(--th) var(--ts) var(--l-198)); }
 .onboarding-memory-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .onboarding-memory-fields label { display: grid; gap: 5px; color: hsl(var(--th) var(--ts) var(--l-590)); font-size: 10px; }
 .onboarding-memory-fields input { width: 100%; height: 32px; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-833)); border-radius: var(--radius-lg); outline: 0; background: hsl(var(--th) var(--ts) var(--l-1000) / 60%); font-size: 11px; }

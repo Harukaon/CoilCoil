@@ -13,7 +13,8 @@
 .memory-control-group { display: flex; align-items: center; gap: 8px 16px; }
 .memory-control-group.end { margin-left: auto; gap: 8px; }
 .memory-control-group > label { display: inline-flex; align-items: center; gap: 6px; color: hsl(var(--th) var(--ts) var(--l-431)); font-size: 11px; white-space: nowrap; cursor: pointer; }
-.memory-control-group input[type="checkbox"] { accent-color: var(--c-green-muted); }
+/* 勾选态用中性主色，不用状态绿：绿在这套界面里只表示「运行中/新增」这类状态。 */
+.memory-control-group input[type="checkbox"] { accent-color: hsl(var(--th) var(--ts) var(--l-310)); }
 .memory-control-group input[type="number"] { box-sizing: border-box; width: 68px; height: 26px; padding: 0 7px; border: 1px solid hsl(var(--th) var(--ts) var(--l-870)); border-radius: var(--radius-lg); outline: 0; color: hsl(var(--th) var(--ts) var(--l-286)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 11px; }
 .memory-control-group input:focus { border-color: hsl(var(--th) var(--ts) var(--l-629)); box-shadow: 0 0 0 2px rgb(120 140 117 / 12%); }
 .memory-control-group small { color: hsl(var(--th) var(--ts) var(--l-592)); font-size: 10px; white-space: nowrap; }
