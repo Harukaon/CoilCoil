@@ -810,16 +810,18 @@ export interface ChatMessage {
   isError?: boolean;
   /** `steering` is a message Pi has accepted for the running turn but has not delivered yet. */
   status?: "queued" | "steering" | "running" | "succeeded" | "failed" | "aborted";
-  /** 用户消息：发出前存过工作区快照，编辑它重新发送时可以把代码退回那时的样子。 */
+  /** 用户消息：之后 Agent 改过文件，编辑它重新发送时可以把那些文件退回那时的样子。 */
   checkpoint?: boolean;
 }
 
 /** 编辑一条历史消息之前问一下：代码要不要回退、回退会动到哪些文件。 */
 export interface RewindPreview {
-  /** 这条消息有检查点。 */
+  /** 找得到这条消息。 */
   checkpoint: boolean;
-  /** 从这条消息发出到现在，工作区里变过的文件；回退就是把它们恢复原样。 */
+  /** 这条消息之后 Agent 改过、现在和当时不一样的文件；回退就是把它们恢复原样。 */
   files: GitCommitFile[];
+  /** Agent 改过但没备份下来（太大、已过期）的文件，回退时不动。 */
+  skipped?: string[];
 }
 
 export interface TodoItem {

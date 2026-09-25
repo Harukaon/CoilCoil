@@ -41,7 +41,7 @@ import {
 import { BROWSER_PARTITION, hardenGuestPreferences, restoreTabIdFromSrc } from "./browser-webview-policy";
 import { configureBrowserIdentity } from "./browser-user-agent";
 import { readMountedProjects, writeMountedProjects } from "./mounted-projects";
-import { checkWorkspaceName, memoryBucketName, rememberedMemoryNames, workspaceNamePrompt } from "./workspace-name-guard";
+import { checkWorkspaceName, memoryBucketName, memoryRoot, rememberedMemoryNames, workspaceNamePrompt } from "./workspace-name-guard";
 import { issuesFileFor, readIssues, writeIssues } from "./workspace-issues";
 import { proxyEnvironment, refreshProxyEnvironment } from "./system-proxy";
 import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
@@ -1165,9 +1165,9 @@ app.whenReady().then(async () => {
     // share one memory. Rather than give the store an identity of its own, the
     // person importing the folder decides. See workspace-name-guard.ts.
     const open = readMountedProjects(mountedProjectsFile())
-      .map((project) => ({ name: memoryBucketName(project.path), path: project.path }));
+      .map((project) => ({ name: memoryBucketName(project.path), path: project.path, root: memoryRoot(project.path) }));
     const verdict = checkWorkspaceName(
-      { name: memoryBucketName(path), path },
+      { name: memoryBucketName(path), path, root: memoryRoot(path) },
       open,
       rememberedMemoryNames(join(app.getPath("userData"), "agent", "memory")),
     );

@@ -42,13 +42,7 @@ import {
   ReconstructedSessionState,
   planApprovalState,
 } from "./runtime-state.js";
-import {
-  bindCheckpoint,
-  captureCheckpoint,
-  checkpointsOnBranch,
-  navigateWithCheckpoint,
-  previewRewind,
-} from "./runtime-checkpoints.js";
+import { messagesWithFileChanges, navigateWithCheckpoint, previewRewind } from "./runtime-checkpoints.js";
 import {
   clampText,
   isRecord,
@@ -120,7 +114,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
       const document = promptDocumentFromUnknown(entry.data.document);
       if (messageEntryId && document) promptDocumentsByEntryId.set(messageEntryId, document);
     }
-    const checkpoints = checkpointsOnBranch(branch);
+    const checkpoints = messagesWithFileChanges(branch);
     const branchMessages = branch
       .filter((entry) => entry.type === "message" || entry.type === "custom_message");
     for (const [index, entry] of branchMessages.entries()) {
@@ -405,20 +399,9 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     return true;
   }
 
-  /** 交给 Pi 之前先存这条消息的检查点（见 runtime-checkpoints.ts），再登记客户端消息 id。 */
-  protected async preparePromptTurn(active: ActiveSession, clientMessageId: string | undefined, text: string, promptDocument?: PromptDocument): Promise<void> {
-    const commit = clientMessageId && this.checkpointsEnabled ? await captureCheckpoint(this.agentDir, active.cwd, this.log) : undefined;
-    if (clientMessageId && commit) (active.pendingCheckpoints ??= new Map()).set(clientMessageId, commit);
-    this.queueClientMessage(active, clientMessageId, text, promptDocument);
-  }
-
-  /** 用户消息写进会话之后，把它的提示词文档和检查点挂到它的条目上。 */
+  /** 用户消息写进会话之后，把它的提示词文档挂到它的条目上。 */
   protected persistUserMessageMetadata(active: ActiveSession, clientMessageId: string, rawMessage: unknown): void {
     if (active.promptDocumentsByMessageId?.has(clientMessageId)) this.schedulePromptDocumentPersistence(active, clientMessageId, rawMessage);
-    const commit = active.pendingCheckpoints?.get(clientMessageId);
-    if (!commit) return;
-    active.pendingCheckpoints?.delete(clientMessageId);
-    queueMicrotask(() => { if (this.active === active) bindCheckpoint(active.session.sessionManager, rawMessage, commit); });
   }
 
   async rewindPreview(entryId: string): Promise<RewindPreview> {
@@ -427,7 +410,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
   }
 
   protected navigateWithCheckpoint(active: ActiveSession, entryId: string, restoreCode: boolean): Promise<{ cancelled: boolean }> {
-    return navigateWithCheckpoint({ dataDir: this.agentDir, cwd: active.cwd, session: active.session, entryId, restoreCode, log: this.log });
+    return navigateWithCheckpoint({ agentDir: this.agentDir, session: active.session, entryId, restoreCode, log: this.log });
   }
 
   /**

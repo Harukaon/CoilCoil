@@ -302,7 +302,7 @@ export function MessageView({
   const [images, setImages] = useState<PromptImage[]>(message.images ?? []);
   const [confirmOpen, setConfirmOpen] = useState(false);
   // 有检查点、而且那之后代码变过：问要不要把代码一起退回去。
-  const [codeChanges, setCodeChanges] = useState<RewindPreview["files"]>();
+  const [codeChanges, setCodeChanges] = useState<RewindPreview>();
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<PromptEditorHandle>(null);
@@ -345,7 +345,7 @@ export function MessageView({
       try {
         const preview = await window.coilcoil.request<RewindPreview>({ type: "rewind_preview", entryId: message.entryId }, runtimeId);
         if (preview.checkpoint && preview.files.length) {
-          setCodeChanges(preview.files);
+          setCodeChanges(preview);
           return;
         }
       } catch (caught) {
@@ -450,7 +450,7 @@ export function MessageView({
         <ConfirmDialog
           open={confirmOpen}
           title="从这里重新开始？"
-          description={message.checkpoint ? "对话将从这条消息重新开始。代码和这条消息发出时一样，不需要回退。" : "对话将从这条消息重新开始。这条消息没有代码检查点，当前工作区中已经产生的文件修改不会被恢复。"}
+          description={message.checkpoint ? "对话将从这条消息重新开始。Agent 改过的文件和这条消息发出时一样，不需要回退。" : "对话将从这条消息重新开始。这条消息之后 Agent 没有用编辑工具改过文件；命令行里改的文件不会恢复。"}
           onClose={() => setConfirmOpen(false)}
           actions={[
             { label: "取消", onClick: () => setConfirmOpen(false) },
@@ -461,7 +461,7 @@ export function MessageView({
         <ConfirmDialog
           open={Boolean(codeChanges)}
           title="代码也回退吗？"
-          description={checkpointRewindDescription(codeChanges?.length ?? 0)}
+          description={checkpointRewindDescription(codeChanges?.files.length ?? 0, codeChanges?.skipped?.length ?? 0)}
           onClose={() => setCodeChanges(undefined)}
           actions={[
             { label: "取消", onClick: () => setCodeChanges(undefined) },

@@ -25,11 +25,17 @@ import { basename, dirname, join } from "node:path";
  * `memory-storage.ts`; the two must agree or this guard checks the wrong name.
  */
 export function memoryBucketName(path: string): string {
+  const root = memoryRoot(path);
+  return basename(root) || root;
+}
+
+/** The folder a workspace's memory follows: the enclosing repository, or the folder itself. */
+export function memoryRoot(path: string): string {
   let current = path;
   while (true) {
-    if (existsSync(join(current, ".git"))) return basename(current) || current;
+    if (existsSync(join(current, ".git"))) return current;
     const parent = dirname(current);
-    if (parent === current) return basename(path) || path;
+    if (parent === current) return path;
     current = parent;
   }
 }
@@ -42,6 +48,13 @@ function sameName(left: string, right: string): boolean {
 export interface WorkspaceCandidate {
   name: string;
   path: string;
+  /**
+   * The folder the memory follows ({@link memoryRoot}). Two workspaces with the
+   * same root are one project — a repository and a folder inside it — and
+   * sharing a memory is exactly right for them; only the same name on
+   * different roots is a clash.
+   */
+  root?: string;
 }
 
 export type WorkspaceNameVerdict =
@@ -70,6 +83,8 @@ export function checkWorkspaceName(
   remembered: readonly string[],
 ): WorkspaceNameVerdict {
   if (open.some((project) => project.path === candidate.path)) return { kind: "already-open" };
+  const sameRoot = (project: WorkspaceCandidate): boolean => Boolean(candidate.root) && project.root === candidate.root;
+  if (open.some(sameRoot)) return { kind: "ok" };
   const clash = open.find((project) => sameName(project.name, candidate.name));
   if (clash) return { kind: "name-taken", name: candidate.name, other: clash.path };
   if (remembered.some((name) => sameName(name, candidate.name))) {

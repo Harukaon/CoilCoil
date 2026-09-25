@@ -15,6 +15,8 @@ export async function run({ page, ui, check, shot, paths }) {
     { echo: true },
   ]);
   check("Agent 的改动都落盘了", read("a.txt") === "第二版\n" && read("b.txt") === "第二条消息新建的\n");
+  // Agent 没碰过的文件（用户自己改的、同一个文件夹下别的项目）回退时不动。
+  writeFileSync(join(repo, "user.txt"), "用户自己改的\n");
 
   const bubbles = page.locator(".user-bubble-button");
   check("历史消息可以点开编辑", await ui.waitFor(async () => (await bubbles.count()) === 2 && await bubbles.nth(1).isEnabled()));
@@ -40,6 +42,7 @@ export async function run({ page, ui, check, shot, paths }) {
   await shot("dialog");
   await dialog.getByRole("button", { name: "回退代码并重新发送" }).click();
   check("代码退回了第二条消息发出时的样子", await ui.waitFor(async () => read("a.txt") === "第一版\n" && read("b.txt") === undefined), JSON.stringify([read("a.txt"), read("b.txt")]));
+  check("Agent 没改过的文件原样不动", read("user.txt") === "用户自己改的\n");
   check("重新发送后 Agent 读到的是回退后的文件", await waitForReply("第一版"), (await ui.lastEcho()).slice(0, 80));
   check("回退后对话从第二条重新开始", await ui.waitFor(async () => (await bubbles.count()) === 2));
 

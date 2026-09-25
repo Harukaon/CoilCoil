@@ -1,6 +1,4 @@
-import {
-  clampThinkingLevel,
-} from "@earendil-works/pi-ai";
+import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import {
   DefaultResourceLoader,
   SessionManager,
@@ -27,6 +25,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
+import { fileHistoryExtension } from "./runtime-checkpoints.js";
 import { SessionListingCache } from "./session-listing-cache.js";
 import { listSessionsForCwd, type SessionListEntry } from "./session-index.js";
 import {
@@ -501,6 +500,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       settingsManager,
       eventBus,
       additionalExtensionPaths: this.extensionPaths,
+      extensionFactories: this.checkpointsEnabled ? [fileHistoryExtension(this.agentDir, this.log)] : [],
       additionalSkillPaths: this.skillPaths,
       additionalPromptTemplatePaths: this.promptPaths,
       noExtensions: true,

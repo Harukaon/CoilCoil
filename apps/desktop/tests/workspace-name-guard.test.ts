@@ -40,6 +40,16 @@ test("另一个已打开的工作区占了这个名字，就不让导入", () =>
   assert.match(prompt?.detail ?? "", /\/a\/project/);
 });
 
+test("仓库里的子目录和已打开的仓库是同一个项目，共用记忆是对的，不算重名", () => {
+  // /Desktop/feedmob 是仓库，已经打开；再导入它下面的 fithub（自己没有 .git）。
+  const repo = { name: "feedmob", path: "/d/feedmob", root: "/d/feedmob" };
+  const inside = { name: "feedmob", path: "/d/feedmob/fithub", root: "/d/feedmob" };
+  assert.deepEqual(checkWorkspaceName(inside, [repo], ["feedmob"]), { kind: "ok" });
+  // 同名但根不同，照样拦。
+  const other = { name: "feedmob", path: "/e/feedmob", root: "/e/feedmob" };
+  assert.equal(checkWorkspaceName(other, [repo], []).kind, "name-taken");
+});
+
 test("只有记忆里见过这个名字，就提示一下让用户自己判断", () => {
   const verdict = checkWorkspaceName(open("project", "/b/project"), [], ["project", "feedmob"]);
   assert.deepEqual(verdict, { kind: "name-remembered", name: "project" });

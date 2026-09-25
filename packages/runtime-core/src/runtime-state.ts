@@ -54,7 +54,7 @@ export interface CoilCoilRuntimeOptions {
   legacyAgentDir?: string;
   modelRuntime?: ModelRuntime;
   modelRuntimePromise?: Promise<ModelRuntime>;
-  /** 每条用户消息前给工作区存检查点（编辑历史消息时回退代码用）。默认开。 */
+  /** Agent 改文件前备份原内容（编辑历史消息时回退代码用，见 runtime-checkpoints.ts）。默认开。 */
   checkpoints?: boolean;
   /**
    * Extra Pi extensions for this runtime only, on top of the bundled workflow.
@@ -82,8 +82,6 @@ export interface ActiveSession {
   promptDocumentsByMessageId: Map<string, PromptDocument>;
   /** Documents keyed by persisted Pi entry id for history reconstruction. */
   promptDocumentsByEntryId: Map<string, PromptDocument>;
-  /** 发出前存下的检查点，等 Pi 写下这条用户消息再挂上去；按客户端消息 id。 */
-  pendingCheckpoints?: Map<string, string>;
   messageRevision: number;
   /** Prompts handed to Pi whose user message it has not echoed back yet. */
   pendingUserPrompts: PendingUserPrompt[];
