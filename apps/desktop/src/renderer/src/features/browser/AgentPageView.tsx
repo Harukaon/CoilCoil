@@ -42,9 +42,16 @@ export function AgentPageView({ tab, remoteFrame, onTakeOver }: {
       {shown
         ? <img className="browser-agent-frame" src={shown} alt={tab.title} draggable={false} />
         : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取 Agent 的页面…</strong></div>}
+      {/* 这页归 Agent：四周一圈流动的渐变描边，底部接管按钮附近一团呼吸的光晕加模糊，一眼能看出来；只挡画面，不挡按钮。 */}
+      <div className="browser-agent-presence" aria-hidden="true">
+        <div className="browser-agent-ring" />
+        <div className="browser-agent-veil" />
+        <div className="browser-agent-glow" />
+      </div>
       <div className="browser-agent-bar" role="status">
-        <Bot size={13} />
-        <span>Agent 正在使用这个页面</span>
+        <span className="browser-agent-pulse" aria-hidden="true" />
+        <Bot className="browser-agent-label" size={14} />
+        <span className="browser-agent-label">Agent 正在使用这个页面</span>
         <button
           type="button"
           aria-label="接管这个页面"
@@ -56,7 +63,7 @@ export function AgentPageView({ tab, remoteFrame, onTakeOver }: {
             void onTakeOver().finally(() => setTakingOver(false));
           }}
         >
-          {takingOver ? <LoaderCircle className="spin" size={12} /> : <Hand size={12} />}
+          {takingOver ? <LoaderCircle className="spin" size={14} /> : <Hand size={14} />}
           接管
         </button>
       </div>
