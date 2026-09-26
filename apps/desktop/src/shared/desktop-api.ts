@@ -584,6 +584,11 @@ export interface CoilCoilDesktopApi {
   chooseBrowserSelect(scopeId: string, tabId: string, pickerId: string, index: number | null): Promise<void>;
   /** 页面内查找（面板的查找栏）；结果从 onBrowserPageEvent 的 find 事件回来。网页版没有。 */
   findInBrowserPage(scopeId: string, tabId: string, request: BrowserFindRequest): void;
+  /**
+   * 用户从外面拖到页面上的文件，放进松手的位置（页面坐标），和在 Chrome 里拖进去一样。
+   * 路径由预加载从这些文件上取，网页脚本自己造的文件取不到路径。网页版没有。
+   */
+  dropFilesIntoBrowserPage(scopeId: string, tabId: string, drop: { x: number; y: number; modifiers: BrowserInputModifiers }, files: File[]): void;
   /** 问页面光标在哪儿（输入法候选框跟着它走）；没在能打字的地方时是 null。网页版没有。 */
   readBrowserCaret(scopeId: string, tabId: string): Promise<BrowserCaret | null>;
   onBrowserPageEvent(listener: (event: BrowserPageEvent) => void): () => void;

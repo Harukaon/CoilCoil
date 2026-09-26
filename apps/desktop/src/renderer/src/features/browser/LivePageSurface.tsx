@@ -188,6 +188,40 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     send({ kind: "mouse", type, ...point, button, clickCount: Math.max(1, event.detail), buttons: event.buttons, modifiers: modifiersOf(event) });
   };
 
+  // 从访达拖文件到页面上：拖着经过时面板描一圈提示，松手时把文件交给页面，放进松手的
+  // 位置（见 browser-page-drags.ts）。网页自己拖来拖去的不在这里，在主进程里接。
+  const [fileOver, setFileOver] = useState(false);
+  const carriesFiles = (event: React.DragEvent): boolean => Array.from(event.dataTransfer.types).includes("Files");
+  const fileDrag: Pick<React.HTMLAttributes<HTMLDivElement>, "onDragEnter" | "onDragOver" | "onDragLeave" | "onDrop"> = {
+    onDragEnter: (event) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setFileOver(true);
+    },
+    onDragOver: (event) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: (event) => {
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+      setFileOver(false);
+    },
+    onDrop: (event) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setFileOver(false);
+      const point = pagePoint(event.clientX, event.clientY);
+      const files = Array.from(event.dataTransfer.files);
+      if (!point || !files.length) return;
+      window.coilcoil.dropFilesIntoBrowserPage(scopeId, tab.id, { ...point, modifiers: modifiersOf(event) }, files);
+      proxyRef.current?.focus({ preventScroll: true });
+    },
+  };
+
   const dismissedButton = useRef<number | undefined>(undefined);
   const onMouseDown = (event: React.MouseEvent<HTMLDivElement>): void => {
     // 不让 App 自己处理这次按下（选中文字、把焦点给别的元素）；焦点交给焦点代理。
@@ -300,8 +334,10 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
             followCaret(50);
           }}
           onContextMenu={(event) => event.preventDefault()}
+          {...fileDrag}
         />
       ) : null}
+      {fileOver ? <div className="browser-drop-hint" aria-hidden="true"><span>松手，把文件放进网页</span></div> : null}
       {interactive ? (
         <textarea
           ref={proxyRef}

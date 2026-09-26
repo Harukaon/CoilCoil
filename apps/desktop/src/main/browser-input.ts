@@ -360,6 +360,11 @@ export class PageInputForwarder {
     private readonly interceptDown?: (point: { x: number; y: number }) => Promise<boolean>,
     private readonly isCurrent: () => boolean = () => true,
     private readonly interceptKey?: () => Promise<boolean>,
+    /** 页面里的拖拽（见 browser-page-drags.ts）：用户拖着东西时，鼠标移动、松手换成拖拽送。 */
+    private readonly drags?: {
+      userMouse(event: Extract<BrowserPageInput, { kind: "mouse" }>): Promise<boolean>;
+      userEscape(): Promise<boolean>;
+    },
   ) {}
 
   /** 焦点进出不在这里：页面有没有焦点要和 Agent 那边合起来算，由 BrowserRuntimeManager 管。 */
@@ -373,6 +378,8 @@ export class PageInputForwarder {
       switch (input.kind) {
         case "mouse": {
           const event = clampToPage(input, pageSize);
+          if (this.drags && await this.drags.userMouse(event).catch(() => false)) return;
+          if (!current()) return;
           if (event.type === "down" && event.button === "left") {
             this.swallowUp = false;
             // 只有单击可能打开下拉框；双击、三击选词选段不必再问页面，省一次往返。
@@ -404,6 +411,7 @@ export class PageInputForwarder {
           this.edit(input.command);
           return;
         case "key":
+          if (input.type === "down" && input.key === "Escape" && this.drags && await this.drags.userEscape().catch(() => false)) return;
           if (input.type === "down" && !input.modifiers.control && !input.modifiers.meta
             && (input.key === " " || input.key === "Enter" || (input.key === "ArrowDown" && input.modifiers.alt))
             && this.interceptKey && await this.interceptKey().catch(() => false)) return;

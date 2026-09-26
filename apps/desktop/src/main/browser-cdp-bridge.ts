@@ -5,6 +5,7 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { AGENT_TAB_LIMIT, isAgentTabUse } from "./browser-agent-tabs";
 import { isDirectPageTargetInfoRequest, isSharedStateReset, isTabActivationCommand, routePageCommand } from "./browser-cdp-commands";
 import { detachDebuggerListener } from "./browser-cdp-teardown";
+import type { PageDrags } from "./browser-page-drags";
 import { normalizeBrowserUrl } from "./browser-navigation";
 import {
   BROWSER_TARGET_ID,
@@ -69,6 +70,8 @@ export interface BrowserCdpHost {
    * 用户点进页面时也要打开：两边共用一个开关，由宿主合起来决定，谁也不关掉另一边的。
    */
   setAgentFocusEmulation(tab: BrowserTab, enabled: boolean): Promise<void>;
+  /** 页面里的拖拽：拖拽拦截开关用户和 Agent 共用，Agent 拖着东西时它的鼠标要换成拖拽送。 */
+  pageDrags: PageDrags;
 }
 
 function responseError(error: unknown): { code: number; message: string } {
@@ -273,6 +276,8 @@ export class BrowserCdpBridge {
         .map(([directSessionId]) => directSessionId);
       const hasChildSession = sessionId ? client.childSessions.get(sessionId) === tab.id : false;
       if (!sessions?.pageAttached && directSessionIds.length === 0 && !hasChildSession) return;
+      // 页面开始拖了：用户拖的、或者 Agent 没说要自己接的，由宿主接着办，不转给 Agent。
+      if (method === "Input.dragIntercepted" && !this.host.pageDrags.relayToAgent(this.host.guestOf(tab))) return;
       const payload = params && typeof params === "object" ? params as Record<string, unknown> : {};
       const childSessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
       if (method === "Target.attachedToTarget" && childSessionId) client.childSessions.set(childSessionId, tab.id);
@@ -365,6 +370,13 @@ export class BrowserCdpBridge {
       return {};
     }
     if (!childSession && isSharedStateReset(method, params)) return {};
+    // 拖拽拦截同样共用：Agent 开关只记下来（见 browser-page-drags.ts）；它拖着页面里的东西时，
+    // 鼠标移动、松手换成拖拽送进去。
+    if (method === "Input.setInterceptDrags" && !childSession) {
+      this.host.pageDrags.setAgentIntercepts(guest, params.enabled === true);
+      return {};
+    }
+    if (method === "Input.dispatchMouseEvent" && !childSession && await this.host.pageDrags.agentMouse(guest, params)) return {};
     const normalizedParams = method === "Page.navigate" && typeof params.url === "string"
       ? { ...params, url: normalizeBrowserUrl(params.url) }
       : params;

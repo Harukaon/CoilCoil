@@ -11,6 +11,7 @@ import { fillSavedCredentials } from "./browser-import";
 import { cssCursor, PageInputForwarder, parseFindRequest, parsePageInput } from "./browser-input";
 import { readPageCaret } from "./browser-page-caret";
 import { PageDialogs } from "./browser-page-dialogs";
+import { PageDrags, parseFileDrop } from "./browser-page-drags";
 import { isPrintRequest, PageRequests } from "./browser-page-requests";
 import { PageSelects } from "./browser-page-selects";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
@@ -83,6 +84,7 @@ export class BrowserRuntimeManager {
   private readonly recycledTabs = new RecycledAgentTabs();
   /** 网页弹的 alert/confirm/prompt 挂在标签页上，面板里回答，不弹系统对话框。 */
   private readonly dialogs = new PageDialogs(() => this.publish());
+  private readonly drags = new PageDrags();
   /** 网页下拉框的选项由面板画（离屏页面里原生弹层出不来）。 */
   private readonly selects = new PageSelects((event) => this.publishPageEvent(event), (id, contents) =>
     !this.disposed && this.panelVisible && this.activeTabIds.get(this.uiScopeId) === id && this.tabs.get(id)?.guest === contents);
@@ -153,6 +155,7 @@ export class BrowserRuntimeManager {
       windowForTab: (tab) => this.windowForTab(tab),
       setContentsSize: (tab, params) => this.setContentsSize(tab, params),
       setAgentFocusEmulation: (tab, enabled) => this.setFocusEmulation(tab, "agent", enabled),
+      pageDrags: this.drags,
     });
     this.window.webContents.on("did-start-navigation", this.handleHostReload);
     this.window.webContents.on("render-process-gone", this.handleHostGone);
@@ -433,6 +436,7 @@ export class BrowserRuntimeManager {
     await this.attachDebugger(tab);
     await this.dialogs.watch(page.webContents);
     await this.pageRequests.install(tab.id, page.webContents);
+    await this.drags.install(page.webContents);
     this.applyZoom(tab);
   }
 
@@ -681,7 +685,8 @@ export class BrowserRuntimeManager {
       forwarder = new PageInputForwarder(contents, process.platform,
         (point) => this.selects.intercept(tab.id, contents, point),
         () => !this.disposed && this.panelVisible && this.uiScopeId === tab.scopeId && this.activeTabIds.get(tab.scopeId) === tab.id && tab.guest === contents,
-        () => this.selects.intercept(tab.id, contents));
+        () => this.selects.intercept(tab.id, contents),
+        { userMouse: (event) => this.drags.userMouse(contents, event), userEscape: () => this.drags.userEscape(contents) });
       this.inputForwarders.set(contents, forwarder);
     }
     const now = Date.now();
@@ -749,6 +754,20 @@ export class BrowserRuntimeManager {
     if (index !== null && (scopeId !== this.uiScopeId || !this.panelVisible || this.activeTabIds.get(scopeId) !== tabId)) return;
     tab.userInputAt = Date.now();
     await this.selects.choose(tabId, pickerId, index);
+  }
+
+  /** 用户从访达拖文件到面板的页面上：放进松手的位置（见 browser-page-drags.ts）。只收正显示的那张。 */
+  dropFiles(scopeId: string, tabId: string, rawPoint: unknown, rawPaths: unknown): void {
+    const tab = this.tabs.get(tabId);
+    const contents = tab?.guest;
+    if (!tab?.offscreen || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || !this.panelVisible || this.activeTabIds.get(scopeId) !== tabId || !contents || contents.isDestroyed()) return;
+    const [width, height] = tab.offscreen.getContentSize();
+    const drop = parseFileDrop(rawPoint, rawPaths, { width, height });
+    if (!drop) return;
+    tab.userInputAt = tab.lastUsedAt = Date.now();
+    void this.drags.dropFiles(contents, drop.point, drop.files, drop.modifiers).catch((error: unknown) => {
+      console.warn("[browser] 放进拖来的文件失败", error instanceof Error ? error.message : error);
+    });
   }
 
   /** 用户在面板的查找栏里搜：只在桌面窗口正显示的那张页面里找，结果推回面板。 */

@@ -6,6 +6,7 @@ import type {
   BrowserDataStats,
   BrowserElementSelection,
   BrowserFindRequest,
+  BrowserInputModifiers,
   BrowserImportSummary,
   BrowserPageEvent,
   BrowserPageInput,
@@ -94,6 +95,7 @@ const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
 const BROWSER_SELECT_CHOOSE_CHANNEL = "browser:select-choose";
 const BROWSER_FIND_CHANNEL = "browser:find";
 const BROWSER_CARET_CHANNEL = "browser:caret";
+const BROWSER_DROP_FILES_CHANNEL = "browser:drop-files";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
@@ -236,6 +238,16 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(BROWSER_SELECT_CHOOSE_CHANNEL, scopeId, tabId, pickerId, index) as Promise<void>,
   findInBrowserPage: (scopeId: string, tabId: string, request: BrowserFindRequest) => {
     ipcRenderer.send(BROWSER_FIND_CHANNEL, scopeId, tabId, request);
+  },
+  dropFilesIntoBrowserPage: (scopeId: string, tabId: string, drop: { x: number; y: number; modifiers: BrowserInputModifiers }, files: File[]) => {
+    const paths = Array.from(files, (file) => {
+      try {
+        return webUtils.getPathForFile(file);
+      } catch {
+        return "";
+      }
+    }).filter(Boolean);
+    if (paths.length) ipcRenderer.send(BROWSER_DROP_FILES_CHANNEL, scopeId, tabId, drop, paths);
   },
   readBrowserCaret: (scopeId: string, tabId: string) =>
     ipcRenderer.invoke(BROWSER_CARET_CHANNEL, scopeId, tabId) as Promise<BrowserCaret | null>,

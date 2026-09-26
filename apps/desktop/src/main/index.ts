@@ -165,6 +165,7 @@ const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
 const BROWSER_SELECT_CHOOSE_CHANNEL = "browser:select-choose";
 const BROWSER_FIND_CHANNEL = "browser:find";
 const BROWSER_CARET_CHANNEL = "browser:caret";
+const BROWSER_DROP_FILES_CHANNEL = "browser:drop-files";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_DATA_CHANNEL = "terminal:data";
 const TERMINAL_GET_CHANNEL = "terminal:get";
@@ -1271,6 +1272,9 @@ app.whenReady().then(async () => {
   // 查找栏打一个字搜一次，走单向消息；内容由运行时核对。
   ipcMain.on(BROWSER_FIND_CHANNEL, (event, scopeId: unknown, tabId: unknown, request: unknown) => {
     browserRuntimes.get(event.sender.id)?.findInPage(String(scopeId), String(tabId), request);
+  });
+  ipcMain.on(BROWSER_DROP_FILES_CHANNEL, (event, scopeId: unknown, tabId: unknown, drop: unknown, paths: unknown) => {
+    browserRuntimes.get(event.sender.id)?.dropFiles(String(scopeId), String(tabId), drop, paths);
   });
   ipcMain.handle(BROWSER_CARET_CHANNEL, (event, scopeId: unknown, tabId: unknown) =>
     browserRuntimes.get(event.sender.id)?.caretOf(String(scopeId), String(tabId)) ?? null);
