@@ -155,6 +155,27 @@ test("下拉框截住左键按下，只吞配对的左键抬起，不误吞右�
   assert.deepEqual(sent, ["mouseUp"]);
 });
 
+test("被下拉框接走的按压，抬起丢了也不会冻结悬停：左键松开后的移动照常送", async () => {
+  const { sent, forwarder } = inputFixture(async () => true);
+  forwarder.forward(down, size);
+  forwarder.forward({ ...down, type: "move", button: "none", clickCount: 0, buttons: 1 }, size);
+  forwarder.forward({ ...down, type: "move", button: "none", clickCount: 0, buttons: 0 }, size);
+  forwarder.forward({ ...down, type: "move", button: "none", clickCount: 0, buttons: 0 }, size);
+  await nextTurn();
+  assert.deepEqual(sent, ["mouseMove", "mouseMove"]);
+});
+
+test("双击、三击的第二下以后不再问下拉框，选词选段不多等", async () => {
+  let asked = 0;
+  const { sent, forwarder } = inputFixture(async () => { asked++; return false; });
+  forwarder.forward(down, size);
+  forwarder.forward({ ...down, clickCount: 2 }, size);
+  forwarder.forward({ ...down, clickCount: 3 }, size);
+  await nextTurn();
+  assert.equal(asked, 1);
+  assert.deepEqual(sent, ["mouseDown", "mouseDown", "mouseDown"]);
+});
+
 test("一次鼠标发送失败不会毒死后续键盘与鼠标队列", async (t) => {
   const { sent, contents, forwarder } = inputFixture();
   t.mock.method(console, "warn", () => undefined);

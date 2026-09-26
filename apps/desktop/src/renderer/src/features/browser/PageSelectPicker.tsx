@@ -57,6 +57,7 @@ export function PageSelectPicker({ picker, scale, bounds, onChoose }: {
       role="listbox"
       tabIndex={-1}
       aria-label="网页下拉框的选项"
+      aria-activedescendant={`${picker.id}-${active}`}
       style={{ left, top: placement.top, minWidth, maxHeight: placement.maxHeight }}
       onMouseDown={(event) => { event.stopPropagation(); event.preventDefault(); }}
       onKeyDown={(event) => {
@@ -77,6 +78,7 @@ export function PageSelectPicker({ picker, scale, bounds, onChoose }: {
             <div
               className={`browser-select-option ${index === active ? "active" : ""} ${option.disabled ? "disabled" : ""} ${option.group ? "grouped" : ""}`}
               role="option"
+              id={`${picker.id}-${index}`}
               data-index={index}
               aria-selected={index === picker.selectedIndex}
               aria-disabled={option.disabled}

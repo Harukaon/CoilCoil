@@ -365,17 +365,25 @@ export class PageInputForwarder {
           const event = clampToPage(input, pageSize);
           if (event.type === "down" && event.button === "left") {
             this.swallowUp = false;
-            if (this.interceptDown && await this.interceptDown(event).catch(() => false)) {
+            // 只有单击可能打开下拉框；双击、三击选词选段不必再问页面，省一次往返。
+            if (event.clickCount === 1 && this.interceptDown && await this.interceptDown(event).catch(() => false)) {
               if (current()) this.swallowUp = true;
               return;
             }
           }
           if (!current()) return;
-          if (this.swallowUp && event.button === "left" && event.type === "up") {
-            this.swallowUp = false;
-            return;
+          if (this.swallowUp) {
+            if (event.type === "up" && event.button === "left") {
+              this.swallowUp = false;
+              return;
+            }
+            // 被接走的那次按压期间，移动不送，免得页面以为在拖动；左键已经松开（配对的抬起
+            // 在别处丢了，例如按下后切走又切回），这次按压就算结束，悬停照常送。
+            if (event.type === "move") {
+              if (event.buttons & 1) return;
+              this.swallowUp = false;
+            }
           }
-          if (this.swallowUp && event.type === "move") return;
           contents.sendInputEvent(mouseInputEvent(event));
           return;
         }
