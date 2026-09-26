@@ -690,10 +690,13 @@ export class BrowserRuntimeManager {
       this.inputForwarders.set(contents, forwarder);
     }
     const now = Date.now();
-    tab.userInputAt = now;
     // 真按下去的（点、按键、输入法上屏）才算「用户要的」：网页这时要选文件、要打印，给他弹。
-    if ((input.kind === "mouse" && input.type === "down") || (input.kind === "key" && input.type === "down")
-      || input.kind === "text" || (input.kind === "ime" && input.type === "commit")) tab.userPressAt = now;
+    const pressed = (input.kind === "mouse" && input.type === "down") || (input.kind === "key" && input.type === "down")
+      || input.kind === "text" || (input.kind === "ime" && input.type === "commit");
+    if (pressed) tab.userPressAt = now;
+    // 用户在 Agent 开的页面里动过手（点、打字、滚着看、复制粘贴），这页就归他用，超上限时不收；
+    // 鼠标只是从画面上经过不算——面板一直显示着 Agent 的页面，不然谁的鼠标一晃，上限就没了。
+    if (pressed || input.kind === "wheel" || input.kind === "edit") tab.userInputAt = now;
     // 用户正在用的页面不算「最久没用」，Agent 开新页超上限时不会先收掉它。
     tab.lastUsedAt = now;
     if (input.kind === "mouse" && input.type === "down" && input.button === "right") tab.userContextMenuAt = now;

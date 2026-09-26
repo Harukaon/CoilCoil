@@ -1,12 +1,23 @@
 export const description = "Agent 标签页只留最近用过的 5 张，用户的不动，标签条上分得开";
 
-export async function run({ ui, site, check, shot }) {
+export async function run({ page, ui, site, check, shot }) {
+  // 用户的鼠标就停在面板上：Agent 每开一张，画面上都有鼠标经过。经过不算「用户用过」，
+  // 不能因此让这张页面免收（以前算，鼠标一晃上限就失效了）。
+  const hoverPanel = async () => {
+    const box = await page.locator(".browser-live-page").boundingBox();
+    if (!box) return;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2 + 8);
+  };
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
   await ui.typeAddress(site.url("u.html"));
   await ui.waitFor(async () => (await ui.browserTabs()).some((tab) => tab.label === "u"));
   await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "list_pages" } }, { echo: true }], "回收");
-  for (const name of ["p1", "p2", "p3", "p4", "p5"]) await ui.send([{ tool: "browser_open", args: { url: site.url(`${name}.html`) } }, { echo: true }], "回收");
+  for (const name of ["p1", "p2", "p3", "p4", "p5"]) {
+    await ui.send([{ tool: "browser_open", args: { url: site.url(`${name}.html`) } }, { echo: true }], "回收");
+    await hoverPanel();
+  }
   const five = await ui.browserTabs();
   check("开满 5 张：用户页 + 5 张 Agent 页都在", five.length === 6, JSON.stringify(five));
   check("用户自己开的 u 没有 Agent 标识", five.find((tab) => tab.label === "u")?.agent === false);
