@@ -1,3 +1,5 @@
+import { checkAppWindowFocused } from "../system-focus.mjs";
+
 export const description = "网页弹的 alert/confirm 不弹系统框、不抢焦点：面板里一张卡片，用户能答，Agent 也能答";
 
 const title = (app) => app.evaluate(({ webContents }) => {
@@ -45,7 +47,7 @@ export async function run({ app, page, ui, site, check, shot }) {
   await ui.waitFor(async () => (await page.getByText("工具返回", { exact: false }).count()) > echoes, 60_000);
   check("Agent 收到的是「操作已生效、先处理对话框」，不是点击失败", (await ui.lastEcho()).includes("操作已生效"), (await ui.lastEcho()).slice(0, 200));
   check("面板里出现网页的提示卡片", await ui.waitFor(async () => (await card.count()) === 1 && (await card.innerText()).includes("hello from page")), await card.innerText().catch(() => ""));
-  if (systemFocus) check("App 窗口还是当前窗口：没弹系统对话框", await appWindowFocused(app));
+  if (systemFocus) await checkAppWindowFocused(app, check, "App 窗口还是当前窗口：没弹系统对话框");
   else console.log("SKIP  App 窗口还是当前窗口：这次测试拿不到系统焦点（有人正用着电脑），只查了页面内的焦点");
   check("焦点还在对话框里", await composerFocused());
   await page.keyboard.type("照常打字");

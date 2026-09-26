@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { checkAppWindowFocused } from "../system-focus.mjs";
 
 export const description = "网页要系统窗口的两件事——选文件、打印：Agent 点到时什么都不弹、不抢焦点、App 不卡；Agent 用自己的工具照样能上传；用户自己点时，选文件照常、打印出一份 PDF";
 
@@ -62,7 +63,7 @@ export async function run({ app, page, ui, site, check, shot }) {
   await page.keyboard.press("Enter");
   await ui.waitFor(async () => (await page.getByText("工具返回", { exact: false }).count()) > echoes, 60_000);
   check("Agent 点打印：页面没被打印框卡住，接着往下跑了", await ui.waitFor(async () => (await title(app)) === "printed-1"), await title(app));
-  if (systemFocus) check("App 窗口还是当前窗口：没弹系统面板", await appWindowFocused(app));
+  if (systemFocus) await checkAppWindowFocused(app, check, "App 窗口还是当前窗口：没弹系统面板");
   else console.log("SKIP  App 窗口还是当前窗口：这次测试拿不到系统焦点（有人正用着电脑），只查了页面内的焦点");
   check("焦点还在对话框里", await page.evaluate(() => Boolean(document.activeElement?.closest(".prompt-editor"))));
   await page.keyboard.type("照常打字");
