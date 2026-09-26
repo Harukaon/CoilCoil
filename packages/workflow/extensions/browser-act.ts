@@ -39,9 +39,12 @@ export function selectedPageId(listing: string): number | undefined {
  *
  * 两边都按打开的先后排：先按「标题和网址都一样」对，对不上再只按网址对；同样的有好几张
  * （比如几张空白页）就按先后一一对上，不会两张标签页拿到同一个编号。
+ *
+ * 一行长这样：`1: 标题 (网址) [selected] isolatedContext=...`。网址取这一行最后一个括号
+ * 里的（标题里也可能有括号），后面还跟着别的标记，行尾不能卡死。
  */
 export function pageIdsForTabs(listing: string, tabs: ReadonlyArray<{ title: string; url: string }>): Array<number | undefined> {
-  const pages = [...listing.matchAll(/^(\d+): (.*) \(([^()\s]+)\)(?: \[selected\])?\s*$/gm)]
+  const pages = [...listing.matchAll(/^(\d+): (.*) \(([^()\s]+)\)/gm)]
     .map((match) => ({ id: Number(match[1]), title: match[2].trim(), url: match[3], used: false }));
   const take = (match: (page: typeof pages[number]) => boolean): number | undefined => {
     const page = pages.find((item) => !item.used && match(item));
@@ -167,8 +170,8 @@ export default function browserActExtension(pi: ExtensionAPI): void {
     return handle;
   };
   /** 同一张页面再列一次，还是原来那个句柄。 */
-  const handleFor = (pageId: number | undefined): string => {
-    if (pageId !== undefined) for (const [handle, id] of handleToPage) if (id === pageId) return handle;
+  const handleFor = (pageId: number): string => {
+    for (const [handle, id] of handleToPage) if (id === pageId) return handle;
     return newHandle(pageId);
   };
   const resolvePageId = (handle?: string, pageId?: number): number | undefined => {
@@ -327,14 +330,15 @@ export default function browserActExtension(pi: ExtensionAPI): void {
         if (!tabs.length) return textResult("这个对话里还没有打开的网页。要看网页就用 browser_open 打开。", { tabs });
         // 新开的页面刚出现在浏览器里时，页面列表可能要等一下才列得到。
         let ids: Array<number | undefined> = [];
-        for (let attempt = 0; attempt < 5; attempt += 1) {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
           if (attempt) await new Promise((resolve) => setTimeout(resolve, 200));
           ids = pageIdsForTabs((await callBrowser(pi.events, "list_pages", {}, signal, sessionId)).text, tabs);
           if (ids.every((id) => id !== undefined)) break;
         }
-        const rows = tabs.map((tab, index) => ({ ...tab, pageId: ids[index], handle: handleFor(ids[index]) }));
+        // 对不上编号的不给句柄：没有编号的句柄会落到「当前选中的页」上，可能是另一张。
+        const rows = tabs.map((tab, index) => ({ ...tab, pageId: ids[index], handle: ids[index] === undefined ? undefined : handleFor(ids[index]) }));
         const lines = rows.map((row) =>
-          `- ${row.handle}${row.active ? "（用户正看着）" : ""}${row.owner === "user" ? "（用户开的）" : "（你开的）"}：${row.title || "无标题"}（${row.url}）`);
+          `- ${row.handle ?? "（刚打开，还拿不到句柄，稍后再列一次）"}${row.active ? "（用户正看着）" : ""}${row.owner === "user" ? "（用户开的）" : "（你开的）"}：${row.title || "无标题"}（${row.url}）`);
         return textResult(`这个对话里的网页：\n${lines.join("\n")}\n拿句柄操作。用户开的页面里可能有他正在做的事，没让你动就别去导航、改表单。`, {
           tabs: rows.map(({ handle, pageId, title, url, active, owner }) => ({ handle, pageId, title, url, active, owner })),
         });

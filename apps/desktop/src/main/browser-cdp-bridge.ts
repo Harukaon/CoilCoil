@@ -409,7 +409,10 @@ export class BrowserCdpBridge {
     const blank = this.host.blankPlaceholder(scopeId);
     if (!blank) return undefined;
     // 面板打开时垫的那张空白页也一样：还没人用过它，Agent 直接拿来用，免得多一张。
+    // 用户在空白页上点过的痕迹也清掉，不然这张 Agent 的页永远不会被上限收掉。
     blank.implicit = false;
+    blank.userInputAt = undefined;
+    blank.userPressAt = undefined;
     // 垫出来的空白页被 Agent 拿去用了，就是 Agent 的页。
     blank.owner = "agent";
     blank.lastUsedAt = Date.now();
@@ -501,11 +504,13 @@ export class BrowserCdpBridge {
       const tab = this.findTabByWindowId(params.windowId, client.scopeId) ?? await this.host.ensureActiveTab(client.scopeId);
       return this.host.setContentsSize(tab, params);
     }
-    // 其余的根命令转给一张页面答。点名了哪张就给哪张；没点名就用现有的。不为了答一条
-    // 根命令凭空开一张：Puppeteer 会不停地问 Target.getDevToolsTarget 这类命令，每问一次
-    // 就多一张空白页的话，标签条上会冒出一排谁也没要的空白页。
+    // 其余的根命令转给一张页面答。点名了哪张就给哪张；没点名先用 Agent 自己开的，免得
+    // 动到用户正看着的页。不为了答一条根命令凭空开一张：Puppeteer 会不停地问
+    // Target.getDevToolsTarget 这类命令，每问一次就多一张空白页的话，标签条上会冒出一排
+    // 谁也没要的空白页。
     const named = typeof params.targetId === "string" ? this.findTabByTarget(params.targetId, client.scopeId) : undefined;
-    const tab = named ?? this.host.cdpTabs(client.scopeId).find((item) => item.phase === "ready");
+    const ready = this.host.cdpTabs(client.scopeId).filter((item) => item.phase === "ready");
+    const tab = named ?? ready.find((item) => item.owner === "agent") ?? ready[0];
     if (!tab) throw new Error("内置浏览器里还没有页面，先用 new_page 打开一个。");
     this.installDebuggerRelay(client, tab);
     this.host.attachDebugger(tab);

@@ -189,10 +189,10 @@ test("句柄每个会话一份，两个会话的 btab-1 不会串", async () => 
 });
 
 test("浏览器报的标签页按标题和网址对到页面编号；同样的几张按先后一一对上", () => {
-  const listing = "## Pages\n1: a (http://x/a.html)\n2: form (http://x/form.html)\n3:  (about:blank)\n4: form again (http://x/form.html) [selected]\n5:  (about:blank)";
+  const listing = "## Pages\n1: a (beta) (http://x/a.html) isolatedContext=isolated-context-1\n2: form (http://x/form.html)\n3:  (about:blank)\n4: form again (http://x/form.html) [selected] isolatedContext=isolated-context-1\n5:  (about:blank)";
   const ids = pageIdsForTabs(listing, [
     { title: "form again", url: "http://x/form.html" },
-    { title: "a", url: "http://x/a.html" },
+    { title: "a (beta)", url: "http://x/a.html" },
     { title: "about:blank", url: "about:blank" },
     { title: "about:blank", url: "about:blank" },
     { title: "form", url: "http://x/form.html" },
@@ -203,8 +203,10 @@ test("浏览器报的标签页按标题和网址对到页面编号；同样的�
 
 test("browser_tabs 列出这个对话的全部网页，给句柄、标出用户正看着的，同一页再列还是同一个句柄", async () => {
   const calls: Array<{ server: string; tool: string; args: Record<string, unknown> }> = [];
+  let listPages = "1: mine (http://x/a.html) isolatedContext=isolated-context-1\n2: theirs (http://x/b.html) [selected] isolatedContext=isolated-context-1";
+  let extraTab: Record<string, unknown> | undefined;
   const fake = fakePi(calls, (_server, tool) => tool === "list_pages"
-    ? { content: [{ type: "text", text: "1: mine (http://x/a.html)\n2: theirs (http://x/b.html) [selected]" }] }
+    ? { content: [{ type: "text", text: listPages }] }
     : { content: [{ type: "text", text: "ok" }] });
   const tools = new Map<string, { execute: (id: string, params: never, signal?: AbortSignal) => Promise<{ content: Array<{ type: string; text?: string }>; details: Record<string, unknown> }> }>();
   browserActExtension({
@@ -222,6 +224,7 @@ test("browser_tabs 列出这个对话的全部网页，给句柄、标出用户�
     response.end(JSON.stringify((request.url ?? "").startsWith("/coilcoil/tabs/") ? { tabs: [
       { id: "t1", title: "mine", url: "http://x/a.html", active: false, owner: "agent" },
       { id: "t2", title: "theirs", url: "http://x/b.html", active: true, owner: "user" },
+      ...extraTab ? [extraTab] : [],
     ] } : { recycled: [] }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -238,6 +241,13 @@ test("browser_tabs 列出这个对话的全部网页，给句柄、标出用户�
     assert.ok(requested.some((url) => url.startsWith("/coilcoil/tabs/secret?scope=session-1")), requested.join(","));
     const again = await tabs.execute("2", {}, undefined, undefined, ctx);
     assert.equal(again.content[0].text, text, "同一张页面再列一次还是原来的句柄");
+    // 浏览器里有、页面列表里还没出现的那张：不给句柄，免得句柄落到别的页上。
+    listPages = "1: mine (http://x/a.html)\n2: theirs (http://x/b.html) [selected]";
+    extraTab = { id: "t3", title: "fresh", url: "http://x/fresh.html", active: false, owner: "agent" };
+    const pending = await tabs.execute("3", {}, undefined, undefined, ctx);
+    assert.match(pending.content[0].text ?? "", /还拿不到句柄[^\n]*fresh/, pending.content[0].text);
+    assert.doesNotMatch(pending.content[0].text ?? "", /btab-3/);
+    extraTab = undefined;
     const click = tools.get("browser_click")! as unknown as { execute: (...args: unknown[]) => Promise<unknown> };
     await click.execute("3", { handle: "btab-2", uid: "1_1" }, undefined, undefined, ctx);
     assert.equal(calls.find((call) => call.tool === "click")?.args.pageId, 2, "用户那张页面拿句柄就能直接点");
