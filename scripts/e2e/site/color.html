@@ -1,0 +1,8 @@
+<html><head><title>page-color</title><style>html, body { margin: 0; height: 100%; } #b { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; outline: none; }</style></head>
+<body><button id="b" onclick="document.title = 'clicked-' + location.hostname"></button>
+<script>
+// 整页一个颜色，颜色从地址里来：截图取中间一个点，就能认出截到的是不是这一次跳转后的新页面。
+const color = '#' + (new URLSearchParams(location.search).get('c') || 'ff0000');
+document.body.style.background = color;
+document.getElementById('b').style.background = color;
+</script></body></html>
