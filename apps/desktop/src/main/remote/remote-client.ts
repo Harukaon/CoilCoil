@@ -286,6 +286,7 @@ export function bridgeScript(platform: DesktopPlatform): string {
     // 网页版只看画面，不往 Mac 上的页面里送鼠标键盘。
     sendBrowserInput: function () {},
     chooseBrowserSelect: resolves(undefined),
+    chooseBrowserValue: resolves(undefined),
     findInBrowserPage: function () {},
     readBrowserCaret: resolves(null),
     dropFilesIntoBrowserPage: function () {},

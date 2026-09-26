@@ -152,3 +152,126 @@ test("选项文字过长时截断，异常页面撑不爆消息", async () => {
   assert.ok(event?.kind === "select" && event.picker);
   assert.equal(event.picker.options[0].label.length, 500);
 });
+
+/** 日期、时间、颜色框：假的输入框、假的浏览器内部结构（小日历图标 99 号，在输入框右边 186..206）。 */
+function valueFixture(type: string, options: { iconHidden?: boolean; focusedByKeyboard?: boolean } = {}) {
+  const events: BrowserPageEvent[] = [];
+  const fired: string[] = [];
+  let current = true;
+  const input: Record<string, any> = {
+    nodeType: 1, tagName: "INPUT", type, value: type === "color" ? "#336699" : "2026-09-26", min: "", max: "", step: "",
+    disabled: false, readOnly: false, isConnected: true,
+    ownerDocument: { defaultView: null },
+    closest: () => null,
+    getBoundingClientRect: () => ({ x: 10, y: 20, width: 200, height: 30 }),
+    dispatchEvent: (event: Event) => { fired.push(`${event.type}:${input.value}`); },
+    focus: () => undefined,
+  };
+  const contents = Object.assign(new EventEmitter(), {
+    isDestroyed: () => false,
+    getZoomFactor: () => 1,
+    debugger: {
+      isAttached: () => true,
+      sendCommand: async (method: string, params: Record<string, any>) => {
+        if (method === "DOM.getNodeForLocation") return { backendNodeId: 42 };
+        if (method === "Runtime.evaluate") return { result: { objectId: "focused" } };
+        if (method === "DOM.describeNode" && params.objectId) return { node: { backendNodeId: 42 } };
+        if (method === "DOM.describeNode") {
+          return { node: { backendNodeId: 42, shadowRoots: [{ children: [{ backendNodeId: 7, attributes: ["pseudo", "-webkit-datetime-edit"] },
+            { backendNodeId: 99, attributes: ["pseudo", "-webkit-calendar-picker-indicator"] }] }] } };
+        }
+        if (method === "DOM.getBoxModel") {
+          if (params.backendNodeId === 42) return { model: { border: [10, 20, 210, 20, 210, 50, 10, 50] } };
+          if (options.iconHidden) throw new Error("Could not compute box model.");
+          return { model: { border: [186, 24, 206, 24, 206, 46, 186, 46] } };
+        }
+        if (method === "DOM.resolveNode") return { object: { objectId: "input" } };
+        if (method === "Runtime.callFunctionOn") {
+          const fn = new Function(`return (${params.functionDeclaration});`)();
+          return { result: { value: fn.apply(input, (params.arguments ?? []).map((a: { value: unknown }) => a.value)) } };
+        }
+        return {};
+      },
+    },
+  });
+  const manager = new PageSelects((event) => events.push(event), () => current);
+  return { events, fired, input, contents: contents as unknown as WebContents, manager, setCurrent: (value: boolean) => { current = value; } };
+}
+const valueOpened = (events: BrowserPageEvent[]) => {
+  const event = events.find((item) => item.kind === "value-picker" && item.picker);
+  assert.ok(event?.kind === "value-picker" && event.picker);
+  return event.picker;
+};
+
+test("日期框：点在小日历图标上才打开，点在年月日上照常送进页面", async () => {
+  const text = valueFixture("date");
+  assert.equal(await text.manager.intercept("tab", text.contents, { x: 40, y: 35 }), false);
+  assert.equal(text.events.length, 0);
+  const icon = valueFixture("date");
+  assert.equal(await icon.manager.intercept("tab", icon.contents, { x: 196, y: 35 }), true);
+  const picker = valueOpened(icon.events);
+  assert.equal(picker.type, "date");
+  assert.equal(picker.value, "2026-09-26");
+  assert.deepEqual(picker.rect, { x: 10, y: 20, width: 200, height: 30 });
+});
+
+test("网页把小日历图标藏起来了：点右边也不打开（和 Chrome 一样）", async () => {
+  const f = valueFixture("date", { iconHidden: true });
+  assert.equal(await f.manager.intercept("tab", f.contents, { x: 196, y: 35 }), false);
+  assert.equal(f.events.length, 0);
+});
+
+test("颜色框点哪儿都打开；键盘：颜色框按空格/回车，日期类按 Alt+↓", async () => {
+  const color = valueFixture("color");
+  assert.equal(await color.manager.intercept("tab", color.contents, { x: 40, y: 35 }), true);
+  assert.equal(valueOpened(color.events).type, "color");
+  const colorKey = valueFixture("color");
+  assert.equal(await colorKey.manager.intercept("tab", colorKey.contents, undefined, { key: " ", alt: false }), true);
+  const dateSpace = valueFixture("date");
+  assert.equal(await dateSpace.manager.intercept("tab", dateSpace.contents, undefined, { key: " ", alt: false }), false, "空格在日期框里是改那一格");
+  const dateAltDown = valueFixture("time");
+  assert.equal(await dateAltDown.manager.intercept("tab", dateAltDown.contents, undefined, { key: "ArrowDown", alt: true }), true);
+});
+
+test("选的值写回：中间值只发 input，选完发 change 并收起；收起后再来的不收", async () => {
+  const f = valueFixture("color");
+  await f.manager.intercept("tab", f.contents, { x: 40, y: 35 });
+  const { id } = valueOpened(f.events);
+  await f.manager.chooseValue("tab", id, "#112233", false);
+  await f.manager.chooseValue("tab", id, "#ff0000", true);
+  await f.manager.chooseValue("tab", id, "#00ff00", true);
+  assert.equal(f.input.value, "#ff0000");
+  assert.deepEqual(f.fired, ["input:#112233", "input:#ff0000", "change:#ff0000"]);
+  assert.deepEqual(f.events.at(-1), { tabId: "tab", kind: "value-picker", picker: null });
+});
+
+test("没选就关、别的选择器的回答、类型被网页改了、切走了：都不写页面", async () => {
+  const closed = valueFixture("date");
+  await closed.manager.intercept("tab", closed.contents, { x: 196, y: 35 });
+  const first = valueOpened(closed.events).id;
+  await closed.manager.chooseValue("tab", "someone-else", "2026-01-01", true);
+  await closed.manager.chooseValue("tab", first, null, false);
+  await closed.manager.chooseValue("tab", first, "2026-01-01", true);
+  assert.equal(closed.input.value, "2026-09-26");
+  assert.deepEqual(closed.fired, []);
+
+  const retyped = valueFixture("date");
+  await retyped.manager.intercept("tab", retyped.contents, { x: 196, y: 35 });
+  retyped.input.type = "text";
+  await retyped.manager.chooseValue("tab", valueOpened(retyped.events).id, "2026-01-01", true);
+  assert.equal(retyped.input.value, "2026-09-26");
+
+  const away = valueFixture("date");
+  await away.manager.intercept("tab", away.contents, { x: 196, y: 35 });
+  away.setCurrent(false);
+  await away.manager.chooseValue("tab", valueOpened(away.events).id, "2026-01-01", true);
+  assert.equal(away.input.value, "2026-09-26");
+});
+
+test("禁用、只读的日期框不接", async () => {
+  for (const flag of ["disabled", "readOnly"]) {
+    const f = valueFixture("date");
+    f.input[flag] = true;
+    assert.equal(await f.manager.intercept("tab", f.contents, { x: 196, y: 35 }), false, flag);
+  }
+});

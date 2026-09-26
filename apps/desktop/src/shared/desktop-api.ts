@@ -238,12 +238,30 @@ export interface BrowserSelectPicker {
   selectedIndex: number;
 }
 
+/**
+ * 用户点开了网页里的日期、时间、日期时间、月份、周或颜色输入框：面板在它的位置用 App 窗口里
+ * Chromium 自己的选择器打开，选的值写回页面。
+ */
+export interface BrowserValuePicker {
+  id: string;
+  type: "date" | "time" | "datetime-local" | "month" | "week" | "color";
+  /** 输入框现在的值、可选范围和步长（和网页上的属性一样，空串是没设）。 */
+  value: string;
+  min: string;
+  max: string;
+  step: string;
+  /** 输入框在页面上的位置（页面像素），选择器贴着它弹出。 */
+  rect: { x: number; y: number; width: number; height: number };
+}
+
 /** 网页那边发生的、面板要跟着变的事。 */
 export type BrowserPageEvent =
   /** 鼠标指到的地方该显示什么光标，已经是 CSS 的 cursor 值。 */
   | { tabId: string; kind: "cursor"; cursor: string }
   /** 用户点开了一个下拉框。 */
   | { tabId: string; kind: "select"; picker: BrowserSelectPicker | null }
+  /** 用户点开了日期、时间、颜色这类输入框的选择器；null 是收起。 */
+  | { tabId: string; kind: "value-picker"; picker: BrowserValuePicker | null }
   /** 页面内查找的结果：一共几处、现在是第几处（从 1 数）。 */
   | { tabId: string; kind: "find"; matches: number; active: number };
 
@@ -582,6 +600,11 @@ export interface CoilCoilDesktopApi {
   replyBrowserDialog(scopeId: string, tabId: string, dialogId: string, accept: boolean, text?: string): Promise<void>;
   /** 在面板画的下拉框列表里选了第几项；null 是没选就关掉了。 */
   chooseBrowserSelect(scopeId: string, tabId: string, pickerId: string, index: number | null): Promise<void>;
+  /**
+   * 面板的日期、时间、颜色选择器里选了值：写回页面。final 是选完了（发 change、收起）；
+   * value 为 null 是没选就关了。
+   */
+  chooseBrowserValue(scopeId: string, tabId: string, pickerId: string, value: string | null, final: boolean): Promise<void>;
   /** 页面内查找（面板的查找栏）；结果从 onBrowserPageEvent 的 find 事件回来。网页版没有。 */
   findInBrowserPage(scopeId: string, tabId: string, request: BrowserFindRequest): void;
   /**

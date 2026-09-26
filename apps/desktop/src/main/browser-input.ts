@@ -359,7 +359,8 @@ export class PageInputForwarder {
     /** 左键按下之前先问一句：返回 true 表示这一下由面板接走了，不送进页面。 */
     private readonly interceptDown?: (point: { x: number; y: number }) => Promise<boolean>,
     private readonly isCurrent: () => boolean = () => true,
-    private readonly interceptKey?: () => Promise<boolean>,
+    /** 空格、回车、Alt+↓ 按下之前先问一句（打开下拉框、日期和颜色选择器的键）。 */
+    private readonly interceptKey?: (key: { key: string; alt: boolean }) => Promise<boolean>,
     /** 页面里的拖拽（见 browser-page-drags.ts）：用户拖着东西时，鼠标移动、松手换成拖拽送。 */
     private readonly drags?: {
       userMouse(event: Extract<BrowserPageInput, { kind: "mouse" }>): Promise<boolean>;
@@ -414,7 +415,7 @@ export class PageInputForwarder {
           if (input.type === "down" && input.key === "Escape" && this.drags && await this.drags.userEscape().catch(() => false)) return;
           if (input.type === "down" && !input.modifiers.control && !input.modifiers.meta
             && (input.key === " " || input.key === "Enter" || (input.key === "ArrowDown" && input.modifiers.alt))
-            && this.interceptKey && await this.interceptKey().catch(() => false)) return;
+            && this.interceptKey && await this.interceptKey({ key: input.key, alt: input.modifiers.alt }).catch(() => false)) return;
           if (current()) await this.send(input);
           return;
         default:

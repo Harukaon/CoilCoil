@@ -1,0 +1,22 @@
+<html><head><meta charset="utf-8"><title>pickers</title>
+<style>
+/* 都摆在 340 像素宽以内（测试窗口里面板窄）。 */
+body { margin: 0; font: 16px Arial, sans-serif; }
+input { position: absolute; left: 20px; font-size: 16px; }
+#d { top: 20px; width: 200px; }
+#t { top: 80px; width: 140px; }
+#c { top: 140px; width: 60px; height: 30px; }
+#h { top: 200px; width: 200px; }
+#h::-webkit-calendar-picker-indicator { display: none; }
+</style></head><body>
+<input id="d" type="date" value="2026-09-26" aria-label="日期">
+<input id="t" type="time" value="09:30" aria-label="时间">
+<input id="c" type="color" value="#336699" aria-label="颜色">
+<input id="h" type="date" value="2026-01-01" aria-label="没图标的日期">
+<script>
+window.log = [];
+for (const el of document.querySelectorAll("input")) {
+  el.addEventListener("input", () => log.push(el.id + ":input:" + el.value));
+  el.addEventListener("change", () => log.push(el.id + ":change:" + el.value));
+}
+</script></body></html>

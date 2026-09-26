@@ -1,10 +1,11 @@
 import { Bot, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BrowserInputModifiers, BrowserPageInput, BrowserSelectPicker, BrowserSurfaceInfo, BrowserTabSnapshot } from "../../../../shared/desktop-api";
+import type { BrowserInputModifiers, BrowserPageInput, BrowserSelectPicker, BrowserSurfaceInfo, BrowserTabSnapshot, BrowserValuePicker } from "../../../../shared/desktop-api";
 import { rendererPlatform } from "../../platform";
 import { PageDialog } from "./PageDialog";
 import { PageFindBar } from "./PageFindBar";
 import { PageSelectPicker } from "./PageSelectPicker";
+import { PageValuePicker } from "./PageValuePicker";
 
 /**
  * 面板里的一张离屏页面：显示它的实时画面，用户在画面上的操作原样送进页面。
@@ -73,17 +74,30 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   // 用户点开的网页下拉框：列表由面板画（离屏页面里原生弹层出不来，见 browser-page-selects.ts）。
   const [picker, setPicker] = useState<BrowserSelectPicker>();
   const pickerRef = useRef<BrowserSelectPicker | undefined>(undefined);
+  // 用户点开的日期、时间、颜色选择器：用 App 窗口里 Chromium 自己的（见 PageValuePicker）。
+  const [valuePicker, setValuePicker] = useState<BrowserValuePicker>();
+  const valuePickerRef = useRef<BrowserValuePicker | undefined>(undefined);
 
   useEffect(() => {
     setCursor("default");
     setPicker(undefined);
     pickerRef.current = undefined;
+    setValuePicker(undefined);
+    valuePickerRef.current = undefined;
     if (!interactive) return;
     const stop = window.coilcoil.onBrowserPageEvent((event) => {
       if (event.tabId !== tab.id) return;
       if (event.kind === "cursor") setCursor(event.cursor);
       else if (event.kind === "find") setFindResult({ matches: event.matches, active: event.active });
-      else if (event.kind === "select") {
+      else if (event.kind === "value-picker") {
+        // 用户已经点回 App 别处了：不在他面前弹选择器。
+        if (event.picker && document.activeElement !== proxyRef.current) {
+          void window.coilcoil.chooseBrowserValue(scopeId, tab.id, event.picker.id, null, false).catch(() => undefined);
+          return;
+        }
+        valuePickerRef.current = event.picker ?? undefined;
+        setValuePicker(event.picker ?? undefined);
+      } else if (event.kind === "select") {
         if (event.picker && document.activeElement !== proxyRef.current) {
           void window.coilcoil.chooseBrowserSelect(scopeId, tab.id, event.picker.id, null).catch(() => undefined);
           return;
@@ -97,6 +111,9 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
       const open = pickerRef.current;
       pickerRef.current = undefined;
       if (open) void window.coilcoil.chooseBrowserSelect(scopeId, tab.id, open.id, null).catch(() => undefined);
+      const openValue = valuePickerRef.current;
+      valuePickerRef.current = undefined;
+      if (openValue) void window.coilcoil.chooseBrowserValue(scopeId, tab.id, openValue.id, null, false).catch(() => undefined);
     };
   }, [interactive, scopeId, tab.id]);
 
@@ -112,6 +129,16 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
         proxyRef.current?.focus({ preventScroll: true });
       }
     });
+  }, [scopeId, tab.id]);
+
+  /** 日期、时间、颜色选择器关了（选完、Esc、点别处）：告诉页面那边收起，键盘还给页面。 */
+  const closeValuePicker = useCallback((): void => {
+    const open = valuePickerRef.current;
+    if (!open) return;
+    valuePickerRef.current = undefined;
+    setValuePicker(undefined);
+    void window.coilcoil.chooseBrowserValue(scopeId, tab.id, open.id, null, false).catch(() => undefined);
+    if (document.activeElement === document.body) proxyRef.current?.focus({ preventScroll: true });
   }, [scopeId, tab.id]);
 
   const send = useCallback((input: BrowserPageInput): void => {
@@ -355,6 +382,15 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
         />
       ) : null}
       {findOpen && interactive ? <PageFindBar result={findResult} onFind={find} onClose={closeFind} /> : null}
+      {valuePicker && box ? (
+        <PageValuePicker
+          key={valuePicker.id}
+          picker={valuePicker}
+          scale={scale}
+          onValue={(value, final) => void window.coilcoil.chooseBrowserValue(scopeId, tab.id, valuePicker.id, value, final).catch(() => undefined)}
+          onClose={closeValuePicker}
+        />
+      ) : null}
       {picker && box ? (
         <PageSelectPicker key={picker.id} picker={picker} scale={scale} bounds={{ width: box.width, height: box.height }} onChoose={choose} />
       ) : null}

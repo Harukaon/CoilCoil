@@ -16,8 +16,11 @@ const read = (path: string) => readFile(resolve(repositoryRoot, path), "utf8");
  * 1150、1250：Agent 的标签页改成离屏页面、用户和 Agent 互相接管、用户直接操作页面，一路
  * 涨上去。之后每张标签页都改成离屏页面，<webview>、接管和嵌入页名册整块删掉，运行时
  * 回到九百多行，线收回 1050。
+ *
+ * 1100：离屏页面补上浏览器自带的那些——页内查找、输入法候选框跟光标、页面里拖拽和从访达
+ * 拖文件进来、日期和颜色选择器——每样在运行时里只有一个入口，逻辑各在自己的文件里。
  */
-const MAX_LINES = 1050;
+const MAX_LINES = 1100;
 
 test(`browser runtime source files stay within the ${MAX_LINES}-line architecture limit`, async () => {
   for (const path of [

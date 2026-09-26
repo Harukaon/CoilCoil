@@ -93,6 +93,7 @@ const BROWSER_INPUT_CHANNEL = "browser:input";
 const BROWSER_PAGE_EVENT_CHANNEL = "browser:page-event";
 const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
 const BROWSER_SELECT_CHOOSE_CHANNEL = "browser:select-choose";
+const BROWSER_VALUE_CHOOSE_CHANNEL = "browser:value-choose";
 const BROWSER_FIND_CHANNEL = "browser:find";
 const BROWSER_CARET_CHANNEL = "browser:caret";
 const BROWSER_DROP_FILES_CHANNEL = "browser:drop-files";
@@ -236,6 +237,8 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.invoke(BROWSER_DIALOG_REPLY_CHANNEL, scopeId, tabId, dialogId, accept, text ?? "") as Promise<void>,
   chooseBrowserSelect: (scopeId: string, tabId: string, pickerId: string, index: number | null) =>
     ipcRenderer.invoke(BROWSER_SELECT_CHOOSE_CHANNEL, scopeId, tabId, pickerId, index) as Promise<void>,
+  chooseBrowserValue: (scopeId: string, tabId: string, pickerId: string, value: string | null, final: boolean) =>
+    ipcRenderer.invoke(BROWSER_VALUE_CHOOSE_CHANNEL, scopeId, tabId, pickerId, value, final) as Promise<void>,
   findInBrowserPage: (scopeId: string, tabId: string, request: BrowserFindRequest) => {
     ipcRenderer.send(BROWSER_FIND_CHANNEL, scopeId, tabId, request);
   },

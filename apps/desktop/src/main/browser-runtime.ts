@@ -685,7 +685,7 @@ export class BrowserRuntimeManager {
       forwarder = new PageInputForwarder(contents, process.platform,
         (point) => this.selects.intercept(tab.id, contents, point),
         () => !this.disposed && this.panelVisible && this.uiScopeId === tab.scopeId && this.activeTabIds.get(tab.scopeId) === tab.id && tab.guest === contents,
-        () => this.selects.intercept(tab.id, contents),
+        (key) => this.selects.intercept(tab.id, contents, undefined, key),
         { userMouse: (event) => this.drags.userMouse(contents, event), userEscape: () => this.drags.userEscape(contents) });
       this.inputForwarders.set(contents, forwarder);
     }
@@ -750,13 +750,23 @@ export class BrowserRuntimeManager {
     });
   }
 
+  /** 用户在面板打开的日期、时间、颜色选择器里选了值（或者没选就关了）。 */
+  async chooseValue(scopeId: string, tabId: string, pickerId: string, value: string | null, final: boolean): Promise<void> {
+    if (this.pickerAnswer(scopeId, tabId, value !== null)) await this.selects.chooseValue(tabId, pickerId, value, final);
+  }
+
   /** 用户在面板画的下拉框列表里选了一项（或者没选就关了）。 */
   async chooseSelect(scopeId: string, tabId: string, pickerId: string, index: number | null): Promise<void> {
+    if (this.pickerAnswer(scopeId, tabId, index !== null)) await this.selects.choose(tabId, pickerId, index);
+  }
+
+  /** 面板的选择器回话只认这个会话的标签页；真选了的还得是用户正看着的那张，这一下也算用户用过。 */
+  private pickerAnswer(scopeId: string, tabId: string, chose: boolean): boolean {
     const tab = this.tabs.get(tabId);
-    if (!tab || tab.scopeId !== scopeId) return;
-    if (index !== null && (scopeId !== this.uiScopeId || !this.panelVisible || this.activeTabIds.get(scopeId) !== tabId)) return;
-    tab.userInputAt = Date.now();
-    await this.selects.choose(tabId, pickerId, index);
+    const shown = scopeId === this.uiScopeId && this.panelVisible && this.activeTabIds.get(scopeId) === tabId;
+    if (!tab || tab.scopeId !== scopeId || (chose && !shown)) return false;
+    if (chose) tab.userInputAt = Date.now();
+    return true;
   }
 
   /** 用户从访达拖文件到面板的页面上：放进松手的位置（见 browser-page-drags.ts）。只收正显示的那张。 */

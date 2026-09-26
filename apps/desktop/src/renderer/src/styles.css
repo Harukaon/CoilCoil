@@ -1189,6 +1189,8 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .browser-select-option.active { background: hsl(var(--th) var(--ts) var(--l-925)); }
 .browser-select-option.disabled { opacity: .45; }
 .browser-select-check { display: inline-grid; place-items: center; width: 14px; flex: none; }
+/* 网页日期、时间、颜色框的选择器：隐形的同类输入框，只用来打开 App 窗口里 Chromium 自己的选择器。 */
+.browser-value-picker { position: absolute; z-index: 1; margin: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 /* 从访达拖文件到页面上：画面四周一圈虚线，上方一句提示；不铺底色，用户还看得清网页的上传区在哪儿。 */
 .browser-drop-hint { position: absolute; inset: 6px; z-index: 3; display: flex; justify-content: center; align-items: flex-start; padding-top: 14px; border: 2px dashed hsl(var(--th) var(--ts) var(--l-588)); border-radius: var(--radius-lg); pointer-events: none; }
 .browser-drop-hint span { padding: 5px 12px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-178)); background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: 0 2px 8px rgb(26 26 23 / 12%); font-size: 12px; }
