@@ -1,8 +1,9 @@
 import { Bot, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BrowserInputModifiers, BrowserPageInput, BrowserTabSnapshot } from "../../../../shared/desktop-api";
+import type { BrowserInputModifiers, BrowserPageInput, BrowserSelectPicker, BrowserTabSnapshot } from "../../../../shared/desktop-api";
 import { rendererPlatform } from "../../platform";
 import { PageDialog } from "./PageDialog";
+import { PageSelectPicker } from "./PageSelectPicker";
 
 /**
  * 面板里的一张离屏页面：显示它的实时画面，用户在画面上的操作原样送进页面。
@@ -54,13 +55,48 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     };
   }, [interactive, tab.id]);
 
+  // 用户点开的网页下拉框：列表由面板画（离屏页面里原生弹层出不来，见 browser-page-selects.ts）。
+  const [picker, setPicker] = useState<BrowserSelectPicker>();
+  const pickerRef = useRef<BrowserSelectPicker | undefined>(undefined);
+
   useEffect(() => {
     setCursor("default");
+    setPicker(undefined);
+    pickerRef.current = undefined;
     if (!interactive) return;
-    return window.coilcoil.onBrowserPageEvent((event) => {
-      if (event.tabId === tab.id && event.kind === "cursor") setCursor(event.cursor);
+    const stop = window.coilcoil.onBrowserPageEvent((event) => {
+      if (event.tabId !== tab.id) return;
+      if (event.kind === "cursor") setCursor(event.cursor);
+      else if (event.kind === "select") {
+        if (event.picker && document.activeElement !== proxyRef.current) {
+          void window.coilcoil.chooseBrowserSelect(scopeId, tab.id, event.picker.id, null).catch(() => undefined);
+          return;
+        }
+        pickerRef.current = event.picker ?? undefined;
+        setPicker(event.picker ?? undefined);
+      }
     });
-  }, [interactive, tab.id]);
+    return () => {
+      stop();
+      const open = pickerRef.current;
+      pickerRef.current = undefined;
+      if (open) void window.coilcoil.chooseBrowserSelect(scopeId, tab.id, open.id, null).catch(() => undefined);
+    };
+  }, [interactive, scopeId, tab.id]);
+
+  /** 选了一项或者放弃：写回页面、收起列表，键盘还给页面。只认一次，收起时的失焦不再算第二次。 */
+  const choose = useCallback((index: number | null, restoreFocus = true): void => {
+    const open = pickerRef.current;
+    if (!open) return;
+    pickerRef.current = undefined;
+    setPicker(undefined);
+    const previous = document.activeElement;
+    void window.coilcoil.chooseBrowserSelect(scopeId, tab.id, open.id, index).catch(() => undefined).then(() => {
+      if (restoreFocus && (document.activeElement === previous || document.activeElement === document.body)) {
+        proxyRef.current?.focus({ preventScroll: true });
+      }
+    });
+  }, [scopeId, tab.id]);
 
   const send = useCallback((input: BrowserPageInput): void => {
     window.coilcoil.sendBrowserInput(scopeId, tab.id, input);
@@ -72,7 +108,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
    * 画面按页面比例贴在左上角（object-fit: contain），页面和面板一样大时一比一；Agent
    * 把页面调成手机尺寸时会缩放。落在画面外的（缩放后留出的空白）不算点到页面。
    */
-  const pagePoint = useCallback((clientX: number, clientY: number): { x: number; y: number } | undefined => {
+  const pagePoint = useCallback((clientX: number, clientY: number, captured = false): { x: number; y: number } | undefined => {
     const root = rootRef.current;
     const viewport = viewportRef.current;
     if (!root || !viewport || viewport.width <= 0 || viewport.height <= 0) return undefined;
@@ -81,8 +117,8 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     if (!Number.isFinite(scale) || scale <= 0) return undefined;
     const x = (clientX - box.left) / scale;
     const y = (clientY - box.top) / scale;
-    if (x < 0 || y < 0 || x > viewport.width || y > viewport.height) return undefined;
-    return { x, y };
+    if (!captured && (x < 0 || y < 0 || x > viewport.width || y > viewport.height)) return undefined;
+    return { x: Math.max(0, Math.min(viewport.width - 1, x)), y: Math.max(0, Math.min(viewport.height - 1, y)) };
   }, []);
 
   // 鼠标移动一帧只送一次最新的位置；按下、抬起、滚轮之前先把攒着的那次送掉，顺序不能乱。
@@ -94,7 +130,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     const move = pendingMove.current;
     pendingMove.current = undefined;
     if (!move) return;
-    const point = pagePoint(move.clientX, move.clientY);
+    const point = pagePoint(move.clientX, move.clientY, move.buttons !== 0);
     if (!point) return;
     send({ kind: "mouse", type: "move", ...point, button: "none", clickCount: 0, buttons: move.buttons, modifiers: move.modifiers });
   }, [pagePoint, send]);
@@ -103,15 +139,18 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   const sendButton = (event: React.MouseEvent, type: "down" | "up"): void => {
     const button = event.button === 0 ? "left" : event.button === 1 ? "middle" : event.button === 2 ? "right" : undefined;
     if (!button) return;
-    const point = pagePoint(event.clientX, event.clientY);
+    const point = pagePoint(event.clientX, event.clientY, type === "up");
     if (!point) return;
     flushMove();
     send({ kind: "mouse", type, ...point, button, clickCount: Math.max(1, event.detail), buttons: event.buttons, modifiers: modifiersOf(event) });
   };
 
+  const dismissedButton = useRef<number | undefined>(undefined);
   const onMouseDown = (event: React.MouseEvent<HTMLDivElement>): void => {
     // 不让 App 自己处理这次按下（选中文字、把焦点给别的元素）；焦点交给焦点代理。
     event.preventDefault();
+    // 下拉框的列表开着时，点别处只是把它收起来，和系统下拉菜单一样，这一下不送进页面。
+    if (pickerRef.current) { dismissedButton.current = event.button; choose(null); return; }
     // 鼠标侧键：后退、前进，和浏览器一样。
     if (event.button === 3) { onBack(); return; }
     if (event.button === 4) { onForward(); return; }
@@ -146,7 +185,9 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     const root = rootRef.current;
     if (!root || !interactive) return;
     const onWheel = (event: WheelEvent): void => {
+      if ((event.target as Element | null)?.closest(".browser-select-picker")) return;
       event.preventDefault();
+      if (pickerRef.current) { choose(null); return; }
       const point = pagePoint(event.clientX, event.clientY);
       if (!point) return;
       flushMove();
@@ -156,7 +197,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     };
     root.addEventListener("wheel", onWheel, { passive: false });
     return () => root.removeEventListener("wheel", onWheel);
-  }, [flushMove, interactive, pagePoint, send]);
+  }, [choose, flushMove, interactive, pagePoint, send]);
 
   const keyboard = useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress });
 
@@ -168,6 +209,9 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
 
   const shown = remoteFrame ?? frame;
   const dialog = tab.dialog;
+  const box = rootRef.current?.getBoundingClientRect();
+  const viewport = viewportRef.current;
+  const scale = box && viewport ? Math.min(box.width / viewport.width, box.height / viewport.height) : 1;
   return (
     <div className={`browser-live-page ${interactive ? "interactive" : ""} ${dialog ? "has-dialog" : ""}`} ref={rootRef}>
       {shown
@@ -181,7 +225,10 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
           onPointerMove={onPointerMove}
           onPointerLeave={onPointerLeave}
           onMouseDown={onMouseDown}
-          onMouseUp={(event) => sendButton(event, "up")}
+          onMouseUp={(event) => {
+            if (dismissedButton.current === event.button) { dismissedButton.current = undefined; return; }
+            sendButton(event, "up");
+          }}
           onContextMenu={(event) => event.preventDefault()}
         />
       ) : null}
@@ -200,6 +247,9 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
           onBlur={() => { focusedRef.current = false; send({ kind: "focus", focused: false }); }}
           {...keyboard}
         />
+      ) : null}
+      {picker && box ? (
+        <PageSelectPicker key={picker.id} picker={picker} scale={scale} bounds={{ width: box.width, height: box.height }} onChoose={choose} />
       ) : null}
       {dialog ? (
         // 网页弹的对话框还在等回答：页面脚本停着，画面上的点击送进去也没用，先让用户答它。

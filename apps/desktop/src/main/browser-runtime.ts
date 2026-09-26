@@ -9,6 +9,7 @@ import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
 import { cssCursor, PageInputForwarder, parsePageInput } from "./browser-input";
 import { PageDialogs } from "./browser-page-dialogs";
+import { PageSelects } from "./browser-page-selects";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
 import { createOffscreenPage, OffscreenFrameStream, resizeOffscreenPage } from "./browser-offscreen";
 import { applyGuestUserAgent, browserIdentityEnvironment, configureBrowserIdentity, installChromeObject } from "./browser-user-agent";
@@ -94,6 +95,9 @@ export class BrowserRuntimeManager {
   private readonly recycledTabs = new RecycledAgentTabs();
   /** 网页弹的 alert/confirm/prompt 挂在标签页上，面板里回答，不弹系统对话框。 */
   private readonly dialogs = new PageDialogs(() => this.publish());
+  /** 网页下拉框的选项由面板画（离屏页面里原生弹层出不来）。 */
+  private readonly selects = new PageSelects((event) => this.publishPageEvent(event), (id, contents) =>
+    !this.disposed && this.panelVisible && this.activeTabIds.get(this.uiScopeId) === id && this.tabs.get(id)?.guest === contents);
   /** 每张页面一个：把用户的操作按到达顺序送进去（见 browser-input.ts）。 */
   private readonly inputForwarders = new WeakMap<WebContents, PageInputForwarder>();
   /** 用户正看着的那张 Agent 标签页的画面，送给界面。 */
@@ -763,7 +767,10 @@ export class BrowserRuntimeManager {
     if (!visible) return;
     let forwarder = this.inputForwarders.get(contents);
     if (!forwarder) {
-      forwarder = new PageInputForwarder(contents);
+      forwarder = new PageInputForwarder(contents, process.platform,
+        (point) => this.selects.intercept(tab.id, contents, point),
+        () => !this.disposed && this.panelVisible && this.uiScopeId === tab.scopeId && this.activeTabIds.get(tab.scopeId) === tab.id && tab.guest === contents,
+        () => this.selects.intercept(tab.id, contents));
       this.inputForwarders.set(contents, forwarder);
     }
     const now = Date.now();
@@ -804,6 +811,9 @@ export class BrowserRuntimeManager {
    * 一个菜单，会把他的键盘焦点抢走。
    */
   private installPageFeedback(tab: BrowserTab, contents: WebContents): void {
+    contents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
+      if (mainFrame && !inPlace) this.inputForwarders.get(contents)?.reset();
+    });
     contents.on("cursor-changed", (_event, type, image, _scale, _size, hotspot) => {
       this.publishPageEvent({ tabId: tab.id, kind: "cursor", cursor: cssCursor(type, image, hotspot) });
     });
@@ -813,6 +823,15 @@ export class BrowserRuntimeManager {
       if (at === undefined || Date.now() - at > 1500) return;
       this.showPageContextMenu(contents, params);
     });
+  }
+
+  /** 用户在面板画的下拉框列表里选了一项（或者没选就关了）。 */
+  async chooseSelect(scopeId: string, tabId: string, pickerId: string, index: number | null): Promise<void> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.scopeId !== scopeId) return;
+    if (index !== null && (scopeId !== this.uiScopeId || !this.panelVisible || this.activeTabIds.get(scopeId) !== tabId)) return;
+    tab.userInputAt = Date.now();
+    await this.selects.choose(tabId, pickerId, index);
   }
 
   /** 用户在面板里回答网页弹的对话框。只认桌面窗口或网页版正看着的那个会话里的标签页。 */

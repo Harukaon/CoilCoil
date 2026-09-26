@@ -113,9 +113,12 @@ export async function run({ app, page, ui, site, check, shot }) {
   const line = size.rect.y + size.rect.height / 2;
   const from = at(size.rect.x + 1, line);
   const to = at(size.rect.x + size.rect.width * 0.35, line);
-  await page.mouse.move(from.x, from.y);
+  // 用词中央测悬停光标；行框左边缘 1px 可能还没覆盖实际字形。
+  await page.mouse.move(box.x + box.width - 10, box.y + 10);
+  await page.mouse.move(from.x + 15 * scale, from.y);
   const cursor = () => page.locator(".browser-live-input").evaluate((element) => element.style.cursor);
   check("鼠标移到文字上，光标变成文字光标", await ui.waitFor(async () => (await cursor()) === "text"), await cursor());
+  await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 6 });
   await page.mouse.up();
@@ -127,4 +130,70 @@ export async function run({ app, page, ui, site, check, shot }) {
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, 600);
   check("滚轮往下翻，页面往下走", await ui.waitFor(async () => (await inLong("scrollY")) > 100), String(await inLong("scrollY")));
+
+  // 9. 网页下拉框：离屏页面里原生弹层出不来，面板自己画选项，选好写回页面。
+  await ui.send([{ tool: "browser_navigate", args: { handle: "btab-1", url: site.url("select.html") } }, { echo: true }], "共用");
+  const inSelect = (code) => app.evaluate(({ webContents }, code) => {
+    const contents = webContents.getAllWebContents().find((item) => !item.isDestroyed() && item.getURL().includes("select.html"));
+    return contents ? contents.executeJavaScript(code) : undefined;
+  }, code);
+  await ui.waitFor(async () => (await inSelect("document.readyState")) === "complete");
+  await page.waitForTimeout(600);
+  const selectBox = await page.locator(".browser-live-page").boundingBox();
+  const selectRect = JSON.parse(await inSelect("JSON.stringify(document.querySelector('#s').getBoundingClientRect())"));
+  const selectAt = { x: selectBox.x + selectRect.x + 20, y: selectBox.y + selectRect.y + selectRect.height / 2 };
+  const picker = page.locator(".browser-select-picker");
+  await page.mouse.click(selectAt.x, selectAt.y);
+  check("点下拉框，面板画出选项列表", await ui.waitFor(async () => (await picker.count()) === 1), String(await picker.count()));
+  check("列表里有分组、有选项，当前选中的是香蕉", (await picker.innerText()).includes("水果") && (await picker.locator("[aria-selected=true]").innerText()).includes("香蕉"));
+  await picker.getByRole("option", { name: "苹果" }).click();
+  check("选了苹果：页面收到 change，值写回去了", await ui.waitFor(async () => (await inSelect("document.title")) === "changed-a"), await inSelect("document.title"));
+  check("列表收起来了", await ui.waitFor(async () => (await picker.count()) === 0));
+  await page.mouse.click(selectAt.x, selectAt.y);
+  await ui.waitFor(async () => (await picker.count()) === 1);
+  // 键盘：往下两格跳过不能选的榴莲，回车选葡萄。
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  check("键盘上下选、回车确定，跳过不能选的", await ui.waitFor(async () => (await inSelect("document.querySelector('#s').value")) === "d"), await inSelect("document.querySelector('#s').value"));
+  await page.mouse.click(selectAt.x, selectAt.y);
+  await ui.waitFor(async () => (await picker.count()) === 1);
+  await page.mouse.click(selectBox.x + selectBox.width - 20, selectBox.y + selectBox.height - 20);
+  check("点别处只是收起列表，值不变", await ui.waitFor(async () => (await picker.count()) === 0) && (await inSelect("document.querySelector('#s').value")) === "d");
+  await ui.waitFor(() => page.locator(".browser-live-proxy").evaluate((element) => element === document.activeElement));
+  await page.keyboard.press("Space");
+  check("键盘也能打开当前下拉框", await ui.waitFor(async () => (await picker.count()) === 1));
+  await composer.click();
+  await page.keyboard.type("菜单关闭后继续聊");
+  check("下拉框打开时点回聊天，不把光标抢回网页", await focused() && (await composer.innerText()).includes("菜单关闭后继续聊"));
+  check("焦点离开后菜单收起", await ui.waitFor(async () => (await picker.count()) === 0));
+
+  // 菜单开着时网页自身变化：旧选项不能落到新的选项上。
+  await page.mouse.click(selectAt.x, selectAt.y);
+  await ui.waitFor(async () => (await picker.count()) === 1);
+  await inSelect("document.querySelector('#s').options[0].value = 'not-apple'");
+  await picker.getByRole("option", { name: "苹果" }).click();
+  check("网页改过选项后，旧菜单不会写错值", await inSelect("document.querySelector('#s').value") === "d");
+
+  // 长列表可以滚动，不会被画面层拦下滚轮。
+  await inSelect("document.querySelector('#s').replaceChildren(...Array.from({length:60},(_,i)=>new Option('选项 '+i,String(i))))");
+  await page.mouse.click(selectAt.x, selectAt.y);
+  await ui.waitFor(async () => (await picker.count()) === 1);
+  const menuBox = await picker.boundingBox();
+  await page.mouse.move(menuBox.x + 40, menuBox.y + 45);
+  await page.mouse.wheel(0, 420);
+  check("长下拉列表可以滚动", await ui.waitFor(() => picker.evaluate((element) => element.scrollTop > 100)));
+  await page.keyboard.press("Escape");
+  await ui.waitFor(async () => (await picker.count()) === 0);
+
+  // 放大后的页面仍能准确命中下拉框。
+  await app.evaluate(({ webContents }) => webContents.getAllWebContents().find((item) => item.getURL().includes("select.html")).setZoomFactor(1.5));
+  await page.waitForTimeout(400);
+  const zoomLayout = JSON.parse(await inSelect("JSON.stringify({rect:document.querySelector('#s').getBoundingClientRect(),width:innerWidth,height:innerHeight})"));
+  const zoomScale = Math.min(selectBox.width / zoomLayout.width, selectBox.height / zoomLayout.height);
+  await page.mouse.click(selectBox.x + (zoomLayout.rect.x + 20) * zoomScale, selectBox.y + (zoomLayout.rect.y + 10) * zoomScale);
+  check("页面放大后仍可点开下拉框", await ui.waitFor(async () => (await picker.count()) === 1));
+  await shot("select");
+  await app.evaluate(({ webContents }, url) => webContents.getAllWebContents().find((item) => item.getURL().includes("select.html")).loadURL(url), site.url("form.html"));
+  check("网页跳转后旧菜单立即消失", await ui.waitFor(async () => (await picker.count()) === 0));
 }

@@ -22,7 +22,8 @@ const read = (path: string) => readFile(resolve(repositoryRoot, path), "utf8");
  * 菜单）又加了几十行，怎么送进页面已经单独在 browser-input.ts。等用户自己的标签页也改成
  * 离屏页面、<webview> 和接管整块去掉，这里会少两百多行，到时候把线收回来。
  */
-const MAX_LINES = 1250;
+// 下拉框和面板对话框的入口暂与旧接管并存，P3 删除旧接管后收紧。
+const MAX_LINES = 1300;
 
 test(`browser runtime source files stay within the ${MAX_LINES}-line architecture limit`, async () => {
   for (const path of [

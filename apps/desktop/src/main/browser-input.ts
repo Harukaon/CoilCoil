@@ -263,7 +263,7 @@ export function parsePageInput(value: unknown): BrowserPageInput | undefined {
   const input = value as Record<string, unknown>;
   switch (input.kind) {
     case "mouse":
-      if (!(typeof input.type === "string" && input.type in MOUSE_TYPES)) return undefined;
+      if (!(typeof input.type === "string" && Object.hasOwn(MOUSE_TYPES, input.type))) return undefined;
       if (!finite(input.x) || !finite(input.y) || !finite(input.clickCount) || !finite(input.buttons)) return undefined;
       if (typeof input.button !== "string" || !BUTTONS.has(input.button) || !isModifiers(input.modifiers)) return undefined;
       return {
@@ -334,32 +334,76 @@ export function clampToPage<T extends { x: number; y: number }>(input: T, size: 
 /**
  * 把一次操作送进页面。
  *
- * 键盘、输入法、焦点走调试器（和 Agent 用的是同一个，已经挂上）；它们按到达顺序
- * 排着发，一个没发完下一个等着——同一个页面上「按下 a」绝不能跑到「按下 b」后面。
+ * 所有输入共用一条队列：鼠标按下可能要先检查下拉框，紧跟着的打字和粘贴不能越过
+ * 这一步，否则会打进旧输入框。页面切走或导航后，丢弃旧队列里还没发出去的操作。
  */
 export class PageInputForwarder {
-  private queue: Promise<unknown> = Promise.resolve();
+  private queue: Promise<void> = Promise.resolve();
+  private generation = 0;
+  /** 这次按下被接走了（打开了面板画的下拉框），配对的那次抬起也不送。 */
+  private swallowUp = false;
 
-  constructor(private readonly contents: WebContents, private readonly platform: NodeJS.Platform = process.platform) {}
+  constructor(
+    private readonly contents: WebContents,
+    private readonly platform: NodeJS.Platform = process.platform,
+    /** 左键按下之前先问一句：返回 true 表示这一下由面板接走了，不送进页面。 */
+    private readonly interceptDown?: (point: { x: number; y: number }) => Promise<boolean>,
+    private readonly isCurrent: () => boolean = () => true,
+    private readonly interceptKey?: () => Promise<boolean>,
+  ) {}
 
   /** 焦点进出不在这里：页面有没有焦点要和 Agent 那边合起来算，由 BrowserRuntimeManager 管。 */
   forward(input: Exclude<BrowserPageInput, { kind: "focus" }>, pageSize: { width: number; height: number }): void {
     const contents = this.contents;
-    if (contents.isDestroyed()) return;
-    switch (input.kind) {
-      case "mouse":
-        // 鼠标不排队：sendInputEvent 本身就按调用顺序进页面，排队只会让拖动发涩。
-        contents.sendInputEvent(mouseInputEvent(clampToPage(input, pageSize)));
-        return;
-      case "wheel":
-        contents.sendInputEvent(wheelInputEvent(clampToPage(input, pageSize)));
-        return;
-      case "edit":
-        this.edit(input.command);
-        return;
-      default:
-        this.enqueue(input);
-    }
+    const generation = this.generation;
+    const current = (): boolean => generation === this.generation && !contents.isDestroyed() && this.isCurrent();
+    if (!current()) return;
+    this.queue = this.queue.then(async () => {
+      if (!current()) return;
+      switch (input.kind) {
+        case "mouse": {
+          const event = clampToPage(input, pageSize);
+          if (event.type === "down" && event.button === "left") {
+            this.swallowUp = false;
+            if (this.interceptDown && await this.interceptDown(event).catch(() => false)) {
+              if (current()) this.swallowUp = true;
+              return;
+            }
+          }
+          if (!current()) return;
+          if (this.swallowUp && event.button === "left" && event.type === "up") {
+            this.swallowUp = false;
+            return;
+          }
+          if (this.swallowUp && event.type === "move") return;
+          contents.sendInputEvent(mouseInputEvent(event));
+          return;
+        }
+        case "wheel":
+          contents.sendInputEvent(wheelInputEvent(clampToPage(input, pageSize)));
+          return;
+        case "edit":
+          this.edit(input.command);
+          return;
+        case "key":
+          if (input.type === "down" && !input.modifiers.control && !input.modifiers.meta
+            && (input.key === " " || input.key === "Enter" || (input.key === "ArrowDown" && input.modifiers.alt))
+            && this.interceptKey && await this.interceptKey().catch(() => false)) return;
+          if (current()) await this.send(input);
+          return;
+        default:
+          await this.send(input);
+      }
+    }).catch((error: unknown) => {
+      // 失败只影响这一步，不能让后续鼠标、键盘整条队列失效。
+      console.warn("[browser] 转发输入失败", input.kind, error instanceof Error ? error.message : error);
+    });
+  }
+
+  /** 换页后仍在等命中测试的旧操作不能送进新页面。 */
+  reset(): void {
+    this.generation++;
+    this.swallowUp = false;
   }
 
   private edit(command: Extract<BrowserPageInput, { kind: "edit" }>["command"]): void {
@@ -370,13 +414,6 @@ export class PageInputForwarder {
     else if (command === "undo") contents.undo();
     else if (command === "redo") contents.redo();
     else contents.selectAll();
-  }
-
-  private enqueue(input: Exclude<BrowserPageInput, { kind: "mouse" | "wheel" | "edit" | "focus" }>): void {
-    this.queue = this.queue.then(() => this.send(input)).catch((error: unknown) => {
-      // 页面正在跳转、刚关掉时会发不出去，丢掉这一下就好，别让后面的也跟着卡住。
-      console.warn("[browser] 转发输入失败", input.kind, error instanceof Error ? error.message : error);
-    });
   }
 
   private async send(input: Exclude<BrowserPageInput, { kind: "mouse" | "wheel" | "edit" | "focus" }>): Promise<void> {

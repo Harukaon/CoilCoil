@@ -1180,6 +1180,14 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .browser-page-dialog-input { margin-top: 12px; height: 30px; padding: 0 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: var(--radius-lg); color: inherit; background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 12px; outline: none; }
 .browser-page-dialog-input:focus { border-color: hsl(var(--th) var(--ts) var(--l-547)); }
 .browser-live-page.has-dialog .browser-live-input { pointer-events: none; }
+/* 网页下拉框的选项列表：贴着下拉框弹出，样式和 App 自己的下拉菜单一致。 */
+.browser-select-picker { position: absolute; z-index: 3; overflow: auto; padding: 4px; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-178)); background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: 0 12px 32px rgb(26 26 23 / 18%), 0 2px 8px rgb(26 26 23 / 8%); font-size: 12px; outline: none; }
+.browser-select-group { padding: 6px 8px 2px; color: hsl(var(--th) var(--ts) var(--l-588)); font-size: 10px; font-weight: 600; }
+.browser-select-option { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 10px 0 4px; border-radius: var(--radius-md); white-space: nowrap; cursor: default; }
+.browser-select-option.grouped { padding-left: 12px; }
+.browser-select-option.active { background: hsl(var(--th) var(--ts) var(--l-925)); }
+.browser-select-option.disabled { opacity: .45; }
+.browser-select-check { display: inline-grid; place-items: center; width: 14px; flex: none; }
 .browser-live-proxy { position: absolute; width: 1px; height: 1em; padding: 0; margin: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; caret-color: transparent; background: transparent; pointer-events: none; font-size: 16px; line-height: 1; }
 /* Agent 在用这页时的存在感：流动的渐变描边 + 提示条后面一团呼吸的渐变光晕，底部模糊。颜色只放在光里，提示条保持黑白。
    都不挡操作；用户把鼠标移到页面上、或者正在页面里打字时，底部的光、模糊和提示条淡出，只留描边。 */

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setImmediate as nextTurn } from "node:timers/promises";
+import type { WebContents } from "electron";
 import {
   cdpModifiers,
   clampToPage,
@@ -10,6 +12,7 @@ import {
   macEditingCommands,
   mouseInputEvent,
   parsePageInput,
+  PageInputForwarder,
   wheelInputEvent,
 } from "../src/main/browser-input.ts";
 
@@ -115,6 +118,67 @@ test("界面送来的操作要逐项核对：结构不对、数字不对的一�
   assert.deepEqual(parsePageInput({ kind: "ime", type: "update", text: "ni", selectionStart: 2, selectionEnd: 2 }), { kind: "ime", type: "update", text: "ni", selectionStart: 2, selectionEnd: 2 });
   assert.deepEqual(parsePageInput({ kind: "ime", type: "cancel", text: 5 }), { kind: "ime", type: "cancel" });
   assert.deepEqual(parsePageInput({ kind: "focus", focused: true }), { kind: "focus", focused: true });
+});
+
+function inputFixture(intercept?: () => Promise<boolean>) {
+  const sent: string[] = [];
+  const contents = {
+    isDestroyed: () => false,
+    sendInputEvent: (event: { type: string }) => { sent.push(event.type); },
+    paste: () => { sent.push("paste"); },
+    debugger: { isAttached: () => true, sendCommand: async (method: string) => { sent.push(method); } },
+  } as unknown as WebContents;
+  return { sent, contents, forwarder: new PageInputForwarder(contents, "darwin", intercept) };
+}
+const size = { width: 800, height: 600 };
+const down = { kind: "mouse", type: "down", x: 10, y: 10, button: "left", clickCount: 1, buttons: 1, modifiers: none } as const;
+
+test("下拉命中检查未完成时，紧跟的打字、粘贴不会越过鼠标按下", async () => {
+  let resolve!: (value: boolean) => void;
+  const { sent, forwarder } = inputFixture(() => new Promise<boolean>((done) => { resolve = done; }));
+  forwarder.forward(down, size);
+  forwarder.forward(key(), size);
+  forwarder.forward({ kind: "edit", command: "paste" }, size);
+  await nextTurn();
+  assert.deepEqual(sent, []);
+  resolve(false);
+  await nextTurn();
+  assert.deepEqual(sent, ["mouseDown", "Input.dispatchKeyEvent", "paste"]);
+});
+
+test("下拉框截住左键按下，只吞配对的左键抬起，不误吞右键", async () => {
+  const { sent, forwarder } = inputFixture(async () => true);
+  forwarder.forward(down, size);
+  forwarder.forward({ ...down, type: "up", button: "right", buttons: 1 }, size);
+  forwarder.forward({ ...down, type: "up", buttons: 0 }, size);
+  await nextTurn();
+  assert.deepEqual(sent, ["mouseUp"]);
+});
+
+test("一次鼠标发送失败不会毒死后续键盘与鼠标队列", async (t) => {
+  const { sent, contents, forwarder } = inputFixture();
+  t.mock.method(console, "warn", () => undefined);
+  t.mock.method(contents, "sendInputEvent", () => { throw new Error("navigation"); }, { times: 1 });
+  forwarder.forward(down, size);
+  forwarder.forward(key(), size);
+  forwarder.forward({ ...down, type: "up", buttons: 0 }, size);
+  await nextTurn();
+  assert.deepEqual(sent, ["Input.dispatchKeyEvent", "mouseUp"]);
+});
+
+test("导航中止正在等待的命中检查和排队的旧输入", async () => {
+  let resolve!: (value: boolean) => void;
+  const { sent, forwarder } = inputFixture(() => new Promise<boolean>((done) => { resolve = done; }));
+  forwarder.forward(down, size);
+  forwarder.forward(key(), size);
+  await nextTurn();
+  forwarder.reset();
+  resolve(false);
+  await nextTurn();
+  assert.deepEqual(sent, []);
+  forwarder.forward(key(), size);
+  await nextTurn();
+  assert.deepEqual(sent, ["Input.dispatchKeyEvent"]);
 });
 
 test("网页要的光标换成 CSS 写法，认不出来的当默认箭头", () => {

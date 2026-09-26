@@ -234,10 +234,30 @@ export type BrowserPageInput =
   /** 用户的焦点进出这张页面：页面据此认为自己有没有焦点（光标闪不闪、失焦事件）。 */
   | { kind: "focus"; focused: boolean };
 
+/** 网页下拉框里的一项。 */
+export interface BrowserSelectOption {
+  label: string;
+  value: string;
+  disabled: boolean;
+  /** 所在分组（optgroup）的名字，不在分组里是空串。 */
+  group: string;
+}
+
+/** 用户点开了网页里的下拉框：面板照着画一个选项列表。 */
+export interface BrowserSelectPicker {
+  id: string;
+  /** 下拉框在页面上的位置（页面像素），列表贴着它的下沿弹出。 */
+  rect: { x: number; y: number; width: number; height: number };
+  options: BrowserSelectOption[];
+  selectedIndex: number;
+}
+
 /** 网页那边发生的、面板要跟着变的事。 */
 export type BrowserPageEvent =
   /** 鼠标指到的地方该显示什么光标，已经是 CSS 的 cursor 值。 */
-  | { tabId: string; kind: "cursor"; cursor: string };
+  | { tabId: string; kind: "cursor"; cursor: string }
+  /** 用户点开了一个下拉框。 */
+  | { tabId: string; kind: "select"; picker: BrowserSelectPicker | null };
 
 export interface BrowserGuestRoster {
   tabs: BrowserGuestSlot[];
@@ -574,6 +594,8 @@ export interface CoilCoilDesktopApi {
   sendBrowserInput(scopeId: string, tabId: string, input: BrowserPageInput): void;
   /** 回答网页弹出的对话框：确定（prompt 带上填的字）或取消。卡片过时了就什么都不做。 */
   replyBrowserDialog(scopeId: string, tabId: string, dialogId: string, accept: boolean, text?: string): Promise<void>;
+  /** 在面板画的下拉框列表里选了第几项；null 是没选就关掉了。 */
+  chooseBrowserSelect(scopeId: string, tabId: string, pickerId: string, index: number | null): Promise<void>;
   onBrowserPageEvent(listener: (event: BrowserPageEvent) => void): () => void;
   getTerminalSessions(): Promise<TerminalSessionSnapshot[]>;
   /** Always opens another shell: each one gets its own inspector tab. */

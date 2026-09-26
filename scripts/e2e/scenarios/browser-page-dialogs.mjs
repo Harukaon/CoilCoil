@@ -31,6 +31,13 @@ export async function run({ app, page, ui, site, check, shot }) {
 
   // 1. Agent 点出一个 alert，用户这时正在对话框里打字：焦点不动，系统也不弹框。
   const echoes = await page.getByText("工具返回", { exact: false }).count();
+  await app.evaluate(({ app, BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find((item) => !item.webContents.isOffscreen());
+    app.focus({ steal: true });
+    window?.show();
+    window?.focus();
+  });
+  check("弹窗前 App 已获得系统焦点", await ui.waitFor(() => appWindowFocused(app)));
   await composer.click();
   await page.keyboard.insertText(`弹窗 MOCK:${JSON.stringify([{ tool: "browser_click", args: { handle: "btab-1", uid: uid("弹提示") } }, { echo: true }])}`);
   await page.keyboard.press("Enter");
