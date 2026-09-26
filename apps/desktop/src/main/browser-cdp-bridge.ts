@@ -3,7 +3,7 @@ import { createServer, type Server as HttpServer } from "node:http";
 import type { Event, WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { AGENT_TAB_LIMIT, isAgentTabUse } from "./browser-agent-tabs";
-import { isDirectPageTargetInfoRequest, isTabActivationCommand, routePageCommand } from "./browser-cdp-commands";
+import { isDirectPageTargetInfoRequest, isSharedStateReset, isTabActivationCommand, routePageCommand } from "./browser-cdp-commands";
 import { detachDebuggerListener } from "./browser-cdp-teardown";
 import { normalizeBrowserUrl } from "./browser-navigation";
 import {
@@ -364,6 +364,7 @@ export class BrowserCdpBridge {
       await this.host.setAgentFocusEmulation(tab, params.enabled === true);
       return {};
     }
+    if (!childSession && isSharedStateReset(method, params)) return {};
     const normalizedParams = method === "Page.navigate" && typeof params.url === "string"
       ? { ...params, url: normalizeBrowserUrl(params.url) }
       : params;

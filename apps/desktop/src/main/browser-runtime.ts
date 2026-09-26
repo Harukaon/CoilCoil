@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { app, BrowserWindow, session, sharedTexture, type Session, type WebContents } from "electron";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { app, BrowserWindow, dialog, session, sharedTexture, shell, type Session, type WebContents } from "electron";
 import type { BrowserElementSelection, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabOwner } from "./browser-agent-tabs";
 import { captureGuestFrame } from "./browser-capture";
@@ -8,6 +10,7 @@ import { BrowserElementPicker } from "./browser-element-picker";
 import { fillSavedCredentials } from "./browser-import";
 import { cssCursor, PageInputForwarder, parsePageInput } from "./browser-input";
 import { PageDialogs } from "./browser-page-dialogs";
+import { isPrintRequest, PageRequests } from "./browser-page-requests";
 import { PageSelects } from "./browser-page-selects";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
 import { BrowserSurfaceStream } from "./browser-frame-stream";
@@ -82,6 +85,21 @@ export class BrowserRuntimeManager {
   /** 网页下拉框的选项由面板画（离屏页面里原生弹层出不来）。 */
   private readonly selects = new PageSelects((event) => this.publishPageEvent(event), (id, contents) =>
     !this.disposed && this.panelVisible && this.activeTabIds.get(this.uiScopeId) === id && this.tabs.get(id)?.guest === contents);
+  /** 网页要选文件、要打印：先拦下，是用户要的才弹面板、出 PDF（见 browser-page-requests.ts）。 */
+  private readonly pageRequests = new PageRequests({
+    userJustActed: (id) => Date.now() - (this.tabs.get(id)?.userPressAt ?? 0) < 2000,
+    chooseFiles: async (multiple) => {
+      if (this.window.isDestroyed()) return undefined;
+      const result = await dialog.showOpenDialog(this.window, { properties: multiple ? ["openFile", "multiSelections"] : ["openFile"] });
+      return result.canceled ? undefined : result.filePaths;
+    },
+    printAsPdf: async (contents) => {
+      const file = join(app.getPath("temp"), `coilcoil-print-${Date.now()}.pdf`);
+      await writeFile(file, await contents.printToPDF({ printBackground: true }));
+      const failure = await shell.openPath(file);
+      if (failure) throw new Error(failure);
+    },
+  });
   /** 每张页面一个：把用户的操作按到达顺序送进去（见 browser-input.ts）。 */
   private readonly inputForwarders = new WeakMap<WebContents, PageInputForwarder>();
   /** 用户正看着的那张离屏页面的画面，画到面板里（见 browser-frame-stream.ts）。 */
@@ -413,6 +431,7 @@ export class BrowserRuntimeManager {
     await loadGuestUrl(page.webContents, DEFAULT_URL);
     await this.attachDebugger(tab);
     await this.dialogs.watch(page.webContents);
+    await this.pageRequests.install(tab.id, page.webContents);
     this.applyZoom(tab);
   }
 
@@ -666,6 +685,9 @@ export class BrowserRuntimeManager {
     }
     const now = Date.now();
     tab.userInputAt = now;
+    // 真按下去的（点、按键、输入法上屏）才算「用户要的」：网页这时要选文件、要打印，给他弹。
+    if ((input.kind === "mouse" && input.type === "down") || (input.kind === "key" && input.type === "down")
+      || input.kind === "text" || (input.kind === "ime" && input.type === "commit")) tab.userPressAt = now;
     // 用户正在用的页面不算「最久没用」，Agent 开新页超上限时不会先收掉它。
     tab.lastUsedAt = now;
     if (input.kind === "mouse" && input.type === "down" && input.button === "right") tab.userContextMenuAt = now;
@@ -891,6 +913,11 @@ export class BrowserRuntimeManager {
     // 浏览器里不可能出现。两边都答「没有」，看上去就是一个拒绝过通知的普通用户。
     contents.session.setPermissionCheckHandler(() => false);
     contents.setWindowOpenHandler(({ url }) => {
+      // 页面调 print()：替身借 window.open 报的信，不是真要开窗口（见 browser-page-requests.ts）。
+      if (isPrintRequest(url)) {
+        void this.pageRequests.requestPrint(tab.id, contents);
+        return { action: "deny" };
+      }
       try {
         normalizeBrowserUrl(url);
         // 页面自己弹出的新窗口跟着打开它的那张算：Agent 页里弹出来的还是 Agent 的。

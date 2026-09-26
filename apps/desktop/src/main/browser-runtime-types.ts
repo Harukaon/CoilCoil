@@ -53,6 +53,8 @@ export interface BrowserTab {
   focusEmulation?: { agent: boolean; user: boolean; applied: boolean };
   /** 用户最近一次在这张页面上点、滚、打字的时间；用户动过的，Agent 开页超上限时不会收掉它。 */
   userInputAt?: number;
+  /** 用户最近一次在这张页面上真按下去（点、按键、输入法上屏）的时间：网页这时要选文件、要打印，是用户要的。 */
+  userPressAt?: number;
   /** 用户最近一次在这张页面上按下右键的时间：右键菜单只为用户弹，Agent 右键时不弹。 */
   userContextMenuAt?: number;
 }
