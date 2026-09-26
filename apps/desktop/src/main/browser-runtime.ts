@@ -8,6 +8,7 @@ import { BrowserElementPicker } from "./browser-element-picker";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
 import { cssCursor, PageInputForwarder, parsePageInput } from "./browser-input";
+import { PageDialogs } from "./browser-page-dialogs";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
 import { createOffscreenPage, OffscreenFrameStream, resizeOffscreenPage } from "./browser-offscreen";
 import { applyGuestUserAgent, browserIdentityEnvironment, configureBrowserIdentity, installChromeObject } from "./browser-user-agent";
@@ -91,6 +92,8 @@ export class BrowserRuntimeManager {
   private readonly pendingEnsure = new Map<string, Promise<BrowserTab>>();
   /** 每个会话还没告诉 Agent 的回收记录。 */
   private readonly recycledTabs = new RecycledAgentTabs();
+  /** 网页弹的 alert/confirm/prompt 挂在标签页上，面板里回答，不弹系统对话框。 */
+  private readonly dialogs = new PageDialogs(() => this.publish());
   /** 每张页面一个：把用户的操作按到达顺序送进去（见 browser-input.ts）。 */
   private readonly inputForwarders = new WeakMap<WebContents, PageInputForwarder>();
   /** 用户正看着的那张 Agent 标签页的画面，送给界面。 */
@@ -468,9 +471,11 @@ export class BrowserRuntimeManager {
     this.installTabEvents(tab);
     this.installGuestTeardown(tab, page.webContents);
     this.installPageFeedback(tab, page.webContents);
+    this.dialogs.install(tab.id, page.webContents);
     if (history) await page.webContents.navigationHistory.restore(history);
     else await loadGuestUrl(page.webContents, DEFAULT_URL);
     await this.attachDebugger(tab);
+    await this.dialogs.watch(page.webContents);
     this.applyZoom(tab);
   }
 
@@ -810,6 +815,13 @@ export class BrowserRuntimeManager {
     });
   }
 
+  /** 用户在面板里回答网页弹的对话框。只认桌面窗口或网页版正看着的那个会话里的标签页。 */
+  replyDialog(scopeId: string, tabId: string, dialogId: string, accept: boolean, text: string): void {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.scopeId !== scopeId || !this.isWatched(scopeId)) return;
+    this.dialogs.reply(tabId, dialogId, accept, text);
+  }
+
   private publishPageEvent(event: BrowserPageEvent): void {
     if (this.disposed || this.window.isDestroyed()) return;
     this.window.webContents.send("browser:page-event", event);
@@ -1123,6 +1135,7 @@ export class BrowserRuntimeManager {
       canGoBack: contents.navigationHistory.canGoBack(),
       canGoForward: contents.navigationHistory.canGoForward(),
       agent: tab.control === "agent",
+      ...this.dialogs.snapshot(tab.id) ? { dialog: this.dialogs.snapshot(tab.id) } : {},
     };
   }
 

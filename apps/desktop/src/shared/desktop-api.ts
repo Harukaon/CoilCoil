@@ -128,6 +128,19 @@ export interface BrowserTabSnapshot {
    * 旧版本快照可能带有这个标记；当前界面会过滤其他工作区的标签页，不再展示它们。
    */
   foreign?: boolean;
+  /** 网页弹出的 alert/confirm/prompt 还在等人回答：面板里显示一张卡片，不弹系统对话框。 */
+  dialog?: BrowserPageDialog;
+}
+
+/** 网页自己弹的对话框。页面脚本停在那里，等用户或 Agent 回答。 */
+export interface BrowserPageDialog {
+  id: string;
+  type: "alert" | "confirm" | "prompt";
+  message: string;
+  /** prompt 里预先填好的文字。 */
+  defaultPrompt: string;
+  /** 弹对话框的网站，卡片上写「xxx 显示」，和浏览器一样。 */
+  origin: string;
 }
 
 export interface BrowserStateSnapshot {
@@ -559,6 +572,8 @@ export interface CoilCoilDesktopApi {
    * 不等回音，鼠标移动这种一秒几十次的操作不该每次都来回一趟。
    */
   sendBrowserInput(scopeId: string, tabId: string, input: BrowserPageInput): void;
+  /** 回答网页弹出的对话框：确定（prompt 带上填的字）或取消。卡片过时了就什么都不做。 */
+  replyBrowserDialog(scopeId: string, tabId: string, dialogId: string, accept: boolean, text?: string): Promise<void>;
   onBrowserPageEvent(listener: (event: BrowserPageEvent) => void): () => void;
   getTerminalSessions(): Promise<TerminalSessionSnapshot[]>;
   /** Always opens another shell: each one gets its own inspector tab. */

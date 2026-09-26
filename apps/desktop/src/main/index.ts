@@ -166,6 +166,7 @@ const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
 const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
 const BROWSER_GUEST_FAILED_CHANNEL = "browser:guest-failed";
 const BROWSER_INPUT_CHANNEL = "browser:input";
+const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_DATA_CHANNEL = "terminal:data";
 const TERMINAL_GET_CHANNEL = "terminal:get";
@@ -681,6 +682,7 @@ function remoteController(): RemoteAccessController {
           case BROWSER_BACK_CHANNEL: return browser.back(args[0] as string);
           case BROWSER_FORWARD_CHANNEL: return browser.forward(args[0] as string);
           case BROWSER_RELOAD_CHANNEL: return browser.reload(args[0] as string);
+          case BROWSER_DIALOG_REPLY_CHANNEL: return browser.replyDialog(String(args[0]), String(args[1]), String(args[2]), args[3] === true, String(args[4] ?? ""));
           case BROWSER_IMPORT_LIST_CHANNEL: return listImportableProfiles();
           case MAC_PERMISSIONS_CHANNEL: return macPermissions();
           case OPEN_FULL_DISK_ACCESS_CHANNEL: return openPermissionSettings(args[0] as MacPermissionId);
@@ -1342,6 +1344,9 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_UI_VIEWPORT_CHANNEL, (event, viewport: BrowserUiViewport): void => {
     // Renderer cleanup can race the window's closed event during dev reload/quit.
     browserRuntimes.get(event.sender.id)?.setUiViewport(viewport);
+  });
+  ipcMain.handle(BROWSER_DIALOG_REPLY_CHANNEL, (event, scopeId: unknown, tabId: unknown, dialogId: unknown, accept: unknown, text: unknown): void => {
+    browserFor(event).replyDialog(String(scopeId), String(tabId), String(dialogId), accept === true, String(text ?? ""));
   });
   // 用户对面板里页面的操作：鼠标移动一秒几十次，走单向消息，不等回音。内容由运行时逐项核对。
   ipcMain.on(BROWSER_INPUT_CHANNEL, (event, scopeId: unknown, tabId: unknown, input: unknown): void => {

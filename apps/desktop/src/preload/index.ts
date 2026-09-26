@@ -91,6 +91,7 @@ const BROWSER_TAKE_OVER_CHANNEL = "browser:take-over";
 const BROWSER_FRAME_CHANNEL = "browser:frame";
 const BROWSER_INPUT_CHANNEL = "browser:input";
 const BROWSER_PAGE_EVENT_CHANNEL = "browser:page-event";
+const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
@@ -246,6 +247,8 @@ const api: CoilCoilDesktopApi = {
   sendBrowserInput: (scopeId: string, tabId: string, input: BrowserPageInput) => {
     ipcRenderer.send(BROWSER_INPUT_CHANNEL, scopeId, tabId, input);
   },
+  replyBrowserDialog: (scopeId: string, tabId: string, dialogId: string, accept: boolean, text?: string) =>
+    ipcRenderer.invoke(BROWSER_DIALOG_REPLY_CHANNEL, scopeId, tabId, dialogId, accept, text ?? "") as Promise<void>,
   onBrowserPageEvent: (listener: (event: BrowserPageEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, event: BrowserPageEvent): void => listener(event);
     ipcRenderer.on(BROWSER_PAGE_EVENT_CHANNEL, handler);

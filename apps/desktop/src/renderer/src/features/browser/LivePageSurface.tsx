@@ -2,6 +2,7 @@ import { Bot, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserInputModifiers, BrowserPageInput, BrowserTabSnapshot } from "../../../../shared/desktop-api";
 import { rendererPlatform } from "../../platform";
+import { PageDialog } from "./PageDialog";
 
 /**
  * 面板里的一张离屏页面：显示它的实时画面，用户在画面上的操作原样送进页面。
@@ -166,8 +167,9 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   }, [send]);
 
   const shown = remoteFrame ?? frame;
+  const dialog = tab.dialog;
   return (
-    <div className={`browser-live-page ${interactive ? "interactive" : ""}`} ref={rootRef}>
+    <div className={`browser-live-page ${interactive ? "interactive" : ""} ${dialog ? "has-dialog" : ""}`} ref={rootRef}>
       {shown
         ? <img className="browser-live-frame" src={shown} alt={tab.title} draggable={false} />
         : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取页面…</strong></div>}
@@ -197,6 +199,14 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
           onFocus={() => { focusedRef.current = true; send({ kind: "focus", focused: true }); }}
           onBlur={() => { focusedRef.current = false; send({ kind: "focus", focused: false }); }}
           {...keyboard}
+        />
+      ) : null}
+      {dialog ? (
+        // 网页弹的对话框还在等回答：页面脚本停着，画面上的点击送进去也没用，先让用户答它。
+        <PageDialog
+          key={dialog.id}
+          dialog={dialog}
+          onReply={(accept, text) => void window.coilcoil.replyBrowserDialog(scopeId, tab.id, dialog.id, accept, text)}
         />
       ) : null}
       {tab.agent ? (

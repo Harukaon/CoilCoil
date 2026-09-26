@@ -192,3 +192,13 @@ test("接管后按网址认出新页面的编号；同一个网址有好几张�
   assert.equal(pageIdForUrl(listing, "http://x/a.html"), 1);
   assert.equal(pageIdForUrl(listing, "http://x/none.html"), undefined);
 });
+
+test("点击让网页弹出对话框时，如实说「已生效、先处理对话框」，不当成点击失败", async () => {
+  const { pendingDialogNotice } = await import("../extensions/browser-act.ts");
+  const raw = "# Open dialog\nalert: hello from page. Call handle_dialog to handle it before continuing.\nError: Failed to interact with the element with uid 1_2.";
+  const notice = pendingDialogNotice(raw);
+  assert.ok(notice?.includes("alert"), notice);
+  assert.ok(notice?.includes("「hello from page」"), notice);
+  assert.ok(notice?.includes("handle_dialog"), notice);
+  assert.equal(pendingDialogNotice("Error: element not found"), undefined);
+});

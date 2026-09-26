@@ -42,6 +42,18 @@ export function pageIdForUrl(listing: string, url: string): number | undefined {
   return found;
 }
 
+/**
+ * 这一步操作让网页弹出了 alert / confirm：操作本身已经生效，页面停在对话框上等回答。
+ *
+ * chrome-devtools-mcp 会一直等页面动起来，等不到就报「点击失败」，可按钮其实已经点到了；
+ * 照「失败」处理会让模型再点一次。这里认出这种情况，如实告诉它下一步该做什么。
+ */
+export function pendingDialogNotice(message: string): string | undefined {
+  const match = /Open dialog\s*(alert|confirm|prompt|beforeunload):\s*([^\n]*?)\.?\s*Call handle_dialog/i.exec(message);
+  if (!match) return undefined;
+  return `操作已生效，网页弹出了一个 ${match[1]} 对话框：「${match[2]}」。页面在等回答，别再重复这一步：用 coilcoil-browser 的 handle_dialog（accept 或 dismiss）处理它，用户也可能直接在面板里点掉。`;
+}
+
 interface UserTab {
   id: string;
   title: string;
@@ -229,6 +241,8 @@ export default function browserActExtension(pi: ExtensionAPI): void {
         return textResult(`点击完成。\n${text.slice(0, 800)}\n--- 当前页面 ---\n${state}`, { handle: params.handle, pageId });
       } catch (error) {
         const first = error instanceof Error ? error.message : String(error);
+        const dialog = pendingDialogNotice(first);
+        if (dialog) return textResult(dialog, { dialog: true, handle: params.handle, pageId });
         // uid 过期是最常见的失败：重取一次快照交出去，让模型用新快照里的 uid 再点。
         // 不替它挑元素：新快照里「同一个」元素是谁，只有看得懂页面的模型说得清。
         try {
@@ -271,6 +285,8 @@ export default function browserActExtension(pi: ExtensionAPI): void {
         return textResult(`输入完成。\n${text.slice(0, 500)}\n--- 当前页面 ---\n${state}`, { handle: params.handle, pageId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const dialog = pendingDialogNotice(message);
+        if (dialog) return textResult(dialog, { dialog: true, handle: params.handle, pageId });
         const state = await currentState(pi.events, pageId, signal, sessionId);
         return textResult(
           `输入失败：${message}\n--- 当前页面 ---\n${state}`,

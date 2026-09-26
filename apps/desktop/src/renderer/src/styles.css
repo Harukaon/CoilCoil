@@ -1174,6 +1174,12 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .browser-live-frame { display: block; flex: 1; min-height: 0; width: 100%; object-fit: contain; object-position: top left; user-select: none; pointer-events: none; }
 .browser-live-input { position: absolute; inset: 0; touch-action: none; }
 /* 焦点代理：看不见、点不到，只负责接键盘和输入法；放在用户点的位置，输入法候选框就出现在那附近。 */
+/* 网页弹的 alert/confirm/prompt：一张卡片挂在页面画面顶上，只挡这张页面；页面在等回答时画面不再接鼠标。 */
+.browser-page-dialog { position: absolute; top: 14px; left: 50%; z-index: 2; width: min(380px, calc(100% - 28px)); transform: translateX(-50%); }
+.browser-page-dialog .coil-modal-description { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+.browser-page-dialog-input { margin-top: 12px; height: 30px; padding: 0 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: var(--radius-lg); color: inherit; background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 12px; outline: none; }
+.browser-page-dialog-input:focus { border-color: hsl(var(--th) var(--ts) var(--l-547)); }
+.browser-live-page.has-dialog .browser-live-input { pointer-events: none; }
 .browser-live-proxy { position: absolute; width: 1px; height: 1em; padding: 0; margin: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; caret-color: transparent; background: transparent; pointer-events: none; font-size: 16px; line-height: 1; }
 /* Agent 在用这页时的存在感：流动的渐变描边 + 提示条后面一团呼吸的渐变光晕，底部模糊。颜色只放在光里，提示条保持黑白。
    都不挡操作；用户把鼠标移到页面上、或者正在页面里打字时，底部的光、模糊和提示条淡出，只留描边。 */
