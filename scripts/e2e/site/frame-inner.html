@@ -1,0 +1,13 @@
+<html><head><meta charset="utf-8"><title>frame-inner</title>
+<style>body { margin: 0; font: 16px Arial, sans-serif; } select { position: absolute; left: 12px; top: 14px; font-size: 16px; } input { position: absolute; left: 12px; top: 80px; }</style>
+</head><body>
+<select id="country" aria-label="国家"><option value="cn">中国</option><option value="us" selected>美国</option><option value="jp">日本</option></select>
+<input id="color" type="color" value="#336699" aria-label="颜色">
+<script>
+window.log = [];
+for (const el of document.querySelectorAll("select, input")) {
+  el.addEventListener("input", () => log.push(el.id + ":input:" + el.value));
+  el.addEventListener("change", () => log.push(el.id + ":change:" + el.value));
+}
+</script>
+</body></html>

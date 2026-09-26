@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { WebContents } from "electron";
+import type { WebContents, WebFrameMain } from "electron";
 import type { BrowserPageEvent, BrowserSelectPicker, BrowserValuePicker } from "../shared/desktop-api";
 
 /**
@@ -16,8 +16,11 @@ import type { BrowserPageEvent, BrowserSelectPicker, BrowserValuePicker } from "
  * AI 的 fill/select 工具照常工作，不经过这里。命中检查只读，不在超时、切页后悄悄改变网页焦点。
  * 小日历图标在浏览器自己的内部结构里：只用节点描述量它的位置，不在它上面跑页面脚本。
  *
- * 已知不支持：跨站 iframe 里的这些控件。它在另一个渲染进程里，主页面看不到它的内容，
- * 点击照常送进去（和现在一样没有弹层）。网页脚本自己调 showPicker() 打开的也接不到。
+ * 跨站内嵌页（比如付款表单里的国家下拉框）在另一个渲染进程里，主页面的调试通道看不进去：
+ * 按它在同级框架里排第几个，找到 Electron 里对应的那个框架，在里面找点到的控件、读选项、
+ * 写回（下拉框和颜色框；日期类要量小日历图标，跨站的量不了，不接）。
+ *
+ * 已知不支持：网页脚本自己调 showPicker() 打开的；跨站内嵌页里用键盘打开的。
  */
 
 /** 日期、时间、颜色这类由浏览器弹选择器的输入框。 */
@@ -106,6 +109,62 @@ const FOCUS_TARGET = `function () {
   if (target) target.focus({ preventScroll: true });
   return Boolean(target);
 }`;
+/** 命中的是内嵌页：它在自己那层排第几个、一路往上直到整页（给 Electron 找对应的框架），内容区在整页上从哪儿开始。 */
+const FRAME_SLOT = `function () {
+  if (this.tagName !== "IFRAME" && this.tagName !== "FRAME") return null;
+  const inset = (element) => {
+    const box = element.getBoundingClientRect();
+    const style = element.ownerDocument.defaultView.getComputedStyle(element);
+    return { x: box.x + element.clientLeft + (parseFloat(style.paddingLeft) || 0), y: box.y + element.clientTop + (parseFloat(style.paddingTop) || 0) };
+  };
+  let { x, y } = inset(this);
+  const path = [];
+  let child = this.contentWindow;
+  let view = this.ownerDocument.defaultView;
+  for (let depth = 0; view && depth < 8; depth += 1) {
+    let index = -1;
+    for (let i = 0; i < view.frames.length; i += 1) if (view.frames[i] === child) { index = i; break; }
+    if (index < 0) return null;
+    path.unshift(index);
+    if (view === view.top) return { path, x, y };
+    let owner = null;
+    try { owner = view.frameElement; } catch {}
+    if (!owner) return null;
+    const offset = inset(owner);
+    x += offset.x;
+    y += offset.y;
+    child = view;
+    view = owner.ownerDocument.defaultView;
+  }
+  return null;
+}`;
+/**
+ * 在内嵌页里（经 Electron 的框架跑）找点到的控件。又是一层内嵌页就报它排第几、内容区在哪儿，
+ * 接着往里找；找到的控件存在这个框架的 window[key] 上，写回时用。
+ */
+const READ_IN_FRAME = `((point, key) => {
+  const element = document.elementFromPoint(point.x, point.y);
+  if (!element) return null;
+  if (element.tagName === "IFRAME" || element.tagName === "FRAME") {
+    const child = element.contentWindow;
+    let index = -1;
+    for (let i = 0; i < frames.length; i += 1) if (frames[i] === child) { index = i; break; }
+    if (index < 0) return null;
+    const box = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return { kind: "frame", index, x: box.x + element.clientLeft + (parseFloat(style.paddingLeft) || 0), y: box.y + element.clientTop + (parseFloat(style.paddingTop) || 0) };
+  }
+  const select = (${SELECT_OF})(element);
+  const input = select ? null : (${VALUE_INPUT_OF})(element);
+  const target = select || (input && input.type === "color" ? input : null);
+  if (!target) return null;
+  Object.defineProperty(window, key, { value: target, configurable: true });
+  const rect = target.getBoundingClientRect();
+  const box = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  if (select) return { kind: "select", rect: box, positioned: true, selectedIndex: select.selectedIndex, options: (${OPTIONS})(select) };
+  const text = (value) => String(value || "").slice(0, 64);
+  return { kind: "value", rect: box, positioned: true, type: input.type, value: text(input.value), min: text(input.min), max: text(input.max), step: text(input.step) };
+})`;
 const FOCUSED_ELEMENT = `(() => {
   let element = document.activeElement;
   while (element) {
@@ -120,13 +179,16 @@ const FOCUSED_ELEMENT = `(() => {
 type Rect = { x: number; y: number; width: number; height: number };
 type SelectData = Omit<BrowserSelectPicker, "id">;
 type ValueData = Omit<BrowserValuePicker, "id">;
+/** 控件在哪儿：主页面（和同源内嵌页）里用调试通道的节点号；跨站内嵌页里是那个框架加 window 上的名字。 */
+type Target = { node: number } | { frame: WebFrameMain; key: string };
 type Found =
-  | { kind: "select"; backendNodeId: number; picker: SelectData }
-  | { kind: "value"; backendNodeId: number; picker: ValueData };
+  | { kind: "select"; target: Target; picker: SelectData }
+  | { kind: "value"; target: Target; picker: ValueData };
 type OpenPicker = Found & { id: string; contents: WebContents };
 type ReadResult =
   | ({ kind: "select"; positioned: boolean } & SelectData)
   | ({ kind: "value"; positioned: boolean } & ValueData);
+type FrameHop = { kind: "frame"; index: number; x: number; y: number };
 /** 打开它的是哪个键：Space、Enter、Alt+↓。 */
 type OpeningKey = { key: string; alt: boolean };
 type DomNode = { backendNodeId?: number; attributes?: string[]; children?: DomNode[]; shadowRoots?: DomNode[] };
@@ -175,7 +237,7 @@ export class PageSelects {
       if (!live()) return true;
       if (!found || contents.isDestroyed()) return false;
       // 只有仍有效的用户操作才改变焦点；过期命中结果不会补弹列表或偷焦点。
-      if (!await this.callOnNode(contents, found.backendNodeId, FOCUS_TARGET)) return false;
+      if (!await this.callOnTarget(contents, found.target, FOCUS_TARGET)) return false;
       if (!live()) return true;
       const id = randomUUID();
       this.open.set(tabId, { id, contents, ...found });
@@ -193,11 +255,16 @@ export class PageSelects {
   async choose(tabId: string, pickerId: string, index: number | null): Promise<void> {
     const open = this.open.get(tabId);
     if (!open || open.id !== pickerId || open.kind !== "select") return;
-    this.forget(tabId);
-    if (index === null || !Number.isInteger(index) || index < 0 || index >= open.picker.options.length
-      || open.contents.isDestroyed() || !this.isCurrent(tabId, open.contents)) return;
-    // 选择过程中页面跳走、元素删除：放弃旧选择，不能写进另一张页面。
-    await this.callOnNode(open.contents, open.backendNodeId, WRITE_SELECT, [index, open.picker.options]).catch(() => undefined);
+    // 先收起列表；跨站内嵌页里存着的控件引用等写完再拿掉（反过来就写不进去了）。
+    this.forget(tabId, true);
+    try {
+      if (index === null || !Number.isInteger(index) || index < 0 || index >= open.picker.options.length
+        || open.contents.isDestroyed() || !this.isCurrent(tabId, open.contents)) return;
+      // 选择过程中页面跳走、元素删除：放弃旧选择，不能写进另一张页面。
+      await this.callOnTarget(open.contents, open.target, WRITE_SELECT, [index, open.picker.options]).catch(() => undefined);
+    } finally {
+      if ("frame" in open.target) await this.release(open.target);
+    }
   }
 
   /**
@@ -207,16 +274,23 @@ export class PageSelects {
   async chooseValue(tabId: string, pickerId: string, value: string | null, final: boolean): Promise<void> {
     const open = this.open.get(tabId);
     if (!open || open.id !== pickerId || open.kind !== "value") return;
-    if (value === null || final) this.forget(tabId);
-    if (value === null || value.length > 64 || open.contents.isDestroyed() || !this.isCurrent(tabId, open.contents)) return;
-    await this.callOnNode(open.contents, open.backendNodeId, WRITE_VALUE, [open.picker.type, value, final]).catch(() => undefined);
+    const closing = value === null || final;
+    if (closing) this.forget(tabId, true);
+    try {
+      if (value === null || value.length > 64 || open.contents.isDestroyed() || !this.isCurrent(tabId, open.contents)) return;
+      await this.callOnTarget(open.contents, open.target, WRITE_VALUE, [open.picker.type, value, final]).catch(() => undefined);
+    } finally {
+      if (closing && "frame" in open.target) await this.release(open.target);
+    }
   }
 
-  forget(tabId: string): void {
+  /** 收起。keepTarget：马上还要往控件里写（选了一项），跨站内嵌页里的引用由写的那边用完再拿掉。 */
+  forget(tabId: string, keepTarget = false): void {
     this.requests.delete(tabId);
     const open = this.open.get(tabId);
     if (!open) return;
     this.open.delete(tabId);
+    if (!keepTarget && "frame" in open.target) void this.release(open.target);
     this.publish(open.kind === "select" ? { tabId, kind: "select", picker: null } : { tabId, kind: "value-picker", picker: null });
   }
 
@@ -253,22 +327,28 @@ export class PageSelects {
       }
     }
     if (typeof backendNodeId !== "number") return undefined;
-    const found = await this.callOnNode(contents, backendNodeId, READ_TARGET) as ReadResult | null | undefined;
+    let target: Target = { node: backendNodeId };
+    let found = await this.callOnNode(contents, backendNodeId, READ_TARGET) as ReadResult | null | undefined;
+    // 点到的是跨站内嵌页：到它自己的进程里去找。
+    if (!found && at) {
+      const inFrame = await this.readInFrames(contents, backendNodeId, at);
+      if (inFrame) ({ target, found } = inFrame);
+    }
     if (!found) return undefined;
     if (found.kind === "select") {
       if (!Array.isArray(found.options) || found.options.length === 0) return undefined;
       if (key && !(key.key === " " || key.key === "Enter" || (key.key === "ArrowDown" && key.alt))) return undefined;
       const { kind: _kind, positioned, ...picker } = found;
-      return { kind: "select", backendNodeId, picker: { ...picker, rect: this.windowRect(picker.rect, positioned, at, zoom) } };
+      return { kind: "select", target, picker: { ...picker, rect: this.windowRect(picker.rect, positioned, at, zoom) } };
     }
     if (!(VALUE_TYPES as readonly string[]).includes(found.type)) return undefined;
     const calendar = CALENDAR_TYPES.has(found.type);
     // 键盘：颜色框按空格、回车打开；日期类按 Alt+↓（和 Chrome 一样，空格、回车是改年月日那一格）。
     if (key && !(calendar ? key.key === "ArrowDown" && key.alt : key.key === " " || key.key === "Enter")) return undefined;
     // 鼠标：日期类只有点在小日历图标上才打开。
-    if (at && calendar && !(found.positioned && await this.onCalendarIcon(contents, backendNodeId, at, found.rect))) return undefined;
+    if (at && calendar && !("node" in target && found.positioned && await this.onCalendarIcon(contents, target.node, at, found.rect))) return undefined;
     const { kind: _kind, positioned, ...picker } = found;
-    return { kind: "value", backendNodeId, picker: { ...picker, rect: this.windowRect(picker.rect, positioned, at, zoom) } };
+    return { kind: "value", target, picker: { ...picker, rect: this.windowRect(picker.rect, positioned, at, zoom) } };
   }
 
   /** 控件在页面窗口里的位置。算不出（上层是跨源内嵌页面）时，贴着用户点的地方。 */
@@ -305,6 +385,44 @@ export class PageSelects {
     const slackY = 2 / rect.height;
     return fx >= (box[0] - host[0]) / width - slackX && fx <= (box[2] - host[0]) / width + slackX
       && fy >= (box[1] - host[1]) / height - slackY && fy <= (box[5] - host[1]) / height + slackY;
+  }
+
+  /**
+   * 点到的是内嵌页，而且它在别的进程里（主页面看不进去）：按它排第几个找到 Electron 里的那个
+   * 框架，在里面找点到的控件；里面又是内嵌页就再往里一层。控件在整页上的位置加上每层的偏移。
+   */
+  private async readInFrames(contents: WebContents, frameNode: number, at: { x: number; y: number }): Promise<{ target: Target; found: ReadResult } | undefined> {
+    const slot = await this.callOnNode(contents, frameNode, FRAME_SLOT) as { path: number[]; x: number; y: number } | null | undefined;
+    if (!slot || !Array.isArray(slot.path)) return undefined;
+    let frame: WebFrameMain | undefined = contents.mainFrame;
+    for (const index of slot.path) frame = frame?.frames[index];
+    let origin = { x: slot.x, y: slot.y };
+    const key = `__coilcoilPicker_${randomUUID().replaceAll("-", "")}`;
+    for (let depth = 0; frame && !frame.detached && depth < 4; depth += 1) {
+      const point = { x: at.x - origin.x, y: at.y - origin.y };
+      const result = await frame.executeJavaScript(`${READ_IN_FRAME}(${JSON.stringify(point)}, ${JSON.stringify(key)})`) as ReadResult | FrameHop | null;
+      if (!result) return undefined;
+      if (result.kind === "frame") {
+        frame = frame.frames[result.index];
+        origin = { x: origin.x + result.x, y: origin.y + result.y };
+        continue;
+      }
+      return { target: { frame, key }, found: { ...result, rect: { ...result.rect, x: result.rect.x + origin.x, y: result.rect.y + origin.y }, positioned: true } };
+    }
+    return undefined;
+  }
+
+  /** 在控件上跑一段页面脚本（this 是控件本身）：主页面里走调试通道，跨站内嵌页里走 Electron 的框架。 */
+  private async callOnTarget(contents: WebContents, target: Target, functionDeclaration: string, args: unknown[] = []): Promise<unknown> {
+    if ("node" in target) return this.callOnNode(contents, target.node, functionDeclaration, args);
+    if (target.frame.isDestroyed() || target.frame.detached) return undefined;
+    return target.frame.executeJavaScript(`(${functionDeclaration}).apply(window[${JSON.stringify(target.key)}], ${JSON.stringify(args)})`);
+  }
+
+  /** 收起时把存在内嵌页 window 上的控件引用拿掉。 */
+  private async release(target: { frame: WebFrameMain; key: string }): Promise<void> {
+    if (target.frame.isDestroyed() || target.frame.detached) return;
+    await target.frame.executeJavaScript(`delete window[${JSON.stringify(target.key)}]`).catch(() => undefined);
   }
 
   /** 在这个节点上跑一段页面脚本，拿回结果；节点已经不在了返回 undefined。临时引用用完即还。 */

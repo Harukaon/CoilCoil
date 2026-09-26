@@ -275,3 +275,75 @@ test("禁用、只读的日期框不接", async () => {
     assert.equal(await f.manager.intercept("tab", f.contents, { x: 196, y: 35 }), false, flag);
   }
 });
+
+test("跨站内嵌页里的下拉框：按排第几个找到那个框架，在里面读选项、写回，收起时清掉引用", async () => {
+  const vm = await import("node:vm");
+  const events: BrowserPageEvent[] = [];
+  const fired: string[] = [];
+  const points: Array<[number, number]> = [];
+  const select: Record<string, any> = {
+    nodeType: 1, tagName: "SELECT", multiple: false, size: 0, disabled: false, isConnected: true, selectedIndex: 1,
+    options: ["alpha", "beta", "gamma"].map((label) => ({ label, value: label, disabled: false, parentElement: null })),
+    getBoundingClientRect: () => ({ x: 10, y: 10, width: 80, height: 20 }),
+    dispatchEvent: (event: { type: string }) => { fired.push(event.type); },
+    focus: () => undefined,
+  };
+  select.closest = () => select;
+  // 内嵌页那个进程：在沙箱里跑真的页面脚本。
+  const frameWindow: Record<string, unknown> = {};
+  const sandbox = vm.createContext({
+    document: { elementFromPoint: (x: number, y: number) => { points.push([x, y]); return select; } },
+    frames: { length: 0 },
+    window: frameWindow,
+    getComputedStyle: () => ({}),
+    Event: class { constructor(public type: string) {} },
+  });
+  // Electron 从别的进程拿回结果时是拷一份过来的：这里也拷一份。
+  const frame = {
+    detached: false, isDestroyed: () => false, frames: [],
+    executeJavaScript: async (code: string) => {
+      const result: unknown = vm.runInContext(code, sandbox);
+      return result === undefined ? result : JSON.parse(JSON.stringify(result));
+    },
+  };
+  // 主页面：点到的是一个 iframe（边框 3，左上角在 50,40），它是整页的第 0 个框架。
+  const childWindow = {};
+  const topWindow: Record<string, any> = { frames: { length: 1, 0: childWindow }, getComputedStyle: () => ({ paddingLeft: "0px", paddingTop: "0px" }) };
+  topWindow.top = topWindow;
+  const iframe = {
+    nodeType: 1, tagName: "IFRAME", contentWindow: childWindow, ownerDocument: { defaultView: topWindow },
+    clientLeft: 3, clientTop: 3, closest: () => null, getBoundingClientRect: () => ({ x: 50, y: 40, width: 300, height: 200 }),
+  };
+  const contents = Object.assign(new EventEmitter(), {
+    isDestroyed: () => false,
+    getZoomFactor: () => 1,
+    mainFrame: { frames: [frame] },
+    debugger: {
+      isAttached: () => true,
+      sendCommand: async (method: string, params: Record<string, any>) => {
+        if (method === "DOM.getNodeForLocation") return { backendNodeId: 5 };
+        if (method === "DOM.resolveNode") return { object: { objectId: "iframe" } };
+        if (method === "Runtime.callFunctionOn") {
+          const fn = new Function(`return (${params.functionDeclaration});`)();
+          return { result: { value: fn.apply(iframe, (params.arguments ?? []).map((a: { value: unknown }) => a.value)) } };
+        }
+        return {};
+      },
+    },
+  }) as unknown as WebContents;
+  const manager = new PageSelects((event) => events.push(event));
+  assert.equal(await manager.intercept("tab", contents, { x: 80, y: 62 }), true);
+  assert.deepEqual(points, [[27, 19]], "在内嵌页里按它自己的坐标找");
+  const opened = events.find((event) => event.kind === "select" && event.picker);
+  assert.ok(opened?.kind === "select" && opened.picker);
+  assert.deepEqual(opened.picker.options.map((option) => option.label), ["alpha", "beta", "gamma"]);
+  assert.deepEqual(opened.picker.rect, { x: 63, y: 53, width: 80, height: 20 }, "位置加上内嵌页在整页上的偏移");
+  // 存成不可枚举的：网页脚本遍历 window 时碰不到它。
+  assert.equal(Object.getOwnPropertyNames(frameWindow).length, 1, "控件引用存在内嵌页的 window 上");
+  assert.equal(Object.keys(frameWindow).length, 0);
+  await manager.choose("tab", opened.picker.id, 2);
+  assert.equal(select.selectedIndex, 2);
+  assert.deepEqual(fired, ["input", "change"]);
+  await nextTurn();
+  assert.equal(Object.getOwnPropertyNames(frameWindow).length, 0, "收起后引用拿掉了");
+});
