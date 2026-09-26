@@ -66,6 +66,11 @@ export interface BrowserCdpHost {
   windowBounds(tab: BrowserTab): Record<string, unknown>;
   windowForTab(tab: BrowserTab): Record<string, unknown>;
   setContentsSize(tab: BrowserTab, params: Record<string, unknown>): Promise<Record<string, never>>;
+  /**
+   * Agent 要这张页面「以为自己有焦点」（chrome-devtools-mcp 会给每张页面打开）。
+   * 用户点进页面时也要打开：两边共用一个开关，由宿主合起来决定，谁也不关掉另一边的。
+   */
+  setAgentFocusEmulation(tab: BrowserTab, enabled: boolean): Promise<void>;
 }
 
 function responseError(error: unknown): { code: number; message: string } {
@@ -363,6 +368,12 @@ export class BrowserCdpBridge {
     if (isAgentTabUse(method)) this.host.noteAgentUse(tab);
     const guest = this.host.guestOf(tab);
     const childSession = kind === "child" ? sessionId : undefined;
+    // 页面「以为自己有焦点」这个开关 Agent 和用户共用：Agent 要关的时候用户可能正在页面
+    // 里打字，所以不直接转给页面，交给宿主和用户那边合起来算。
+    if (method === "Emulation.setFocusEmulationEnabled" && !childSession) {
+      await this.host.setAgentFocusEmulation(tab, params.enabled === true);
+      return {};
+    }
     const normalizedParams = method === "Page.navigate" && typeof params.url === "string"
       ? { ...params, url: normalizeBrowserUrl(params.url) }
       : params;

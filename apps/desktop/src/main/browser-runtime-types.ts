@@ -54,6 +54,15 @@ export interface BrowserTab {
    */
   implicit?: boolean;
   emulatedSize?: { width: number; height: number };
+  /**
+   * 页面「以为自己有焦点」的两个来源：Agent（chrome-devtools-mcp 给每张页面都开）和用户
+   * （点进了面板里的这张页面）。任何一边要就开着，两边都不要才关；applied 是页面上现在的样子。
+   */
+  focusEmulation?: { agent: boolean; user: boolean; applied: boolean };
+  /** 用户最近一次在这张页面上点、滚、打字的时间。 */
+  userInputAt?: number;
+  /** 用户最近一次在这张页面上按下右键的时间：右键菜单只为用户弹，Agent 右键时不弹。 */
+  userContextMenuAt?: number;
 }
 
 /**

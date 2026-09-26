@@ -291,6 +291,9 @@ export function bridgeScript(platform: DesktopPlatform): string {
     onBrowserStateUpdated: subscribe("browser:state"),
     // 画面推送只给桌面窗口；网页版按截图看 Agent 的页面（见 BrowserPanel）。
     onBrowserFrame: ignore,
+    // 网页版只看画面，不往 Mac 上的页面里送鼠标键盘。
+    sendBrowserInput: function () {},
+    onBrowserPageEvent: ignore,
     onBrowserAgentActivated: subscribe("browser:agent-activated"),
 
     listImportableBrowsers: function () { return invoke("browser:import-list", []); },

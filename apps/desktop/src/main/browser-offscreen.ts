@@ -78,7 +78,7 @@ const FRAME_QUALITY = 80;
  */
 export class OffscreenFrameStream {
   private target?: { tabId: string; contents: WebContents; listener: (event: unknown, dirty: unknown, image: NativeImage) => void };
-  private latest?: NativeImage;
+  private latest?: { image: NativeImage; viewport: { width: number; height: number } };
   private timer?: ReturnType<typeof setInterval>;
 
   constructor(private readonly send: (frame: BrowserFrame) => void) {}
@@ -87,7 +87,12 @@ export class OffscreenFrameStream {
     if (this.target?.tabId === tabId && this.target?.contents === contents) return;
     this.stop();
     if (!tabId || !contents || contents.isDestroyed()) return;
-    const listener = (_event: unknown, _dirty: unknown, image: NativeImage): void => { this.latest = image; };
+    // 页面多大在出帧的这一刻记下：用户点画面时按这一帧换算位置，面板刚改完大小时也对得上。
+    const page = BrowserWindow.fromWebContents(contents);
+    const listener = (_event: unknown, _dirty: unknown, image: NativeImage): void => {
+      const [width, height] = page && !page.isDestroyed() ? page.getContentSize() : [0, 0];
+      this.latest = { image, viewport: { width, height } };
+    };
     contents.on("paint", listener);
     contents.setFrameRate(VISIBLE_FRAME_RATE);
     this.target = { tabId, contents, listener };
@@ -108,12 +113,13 @@ export class OffscreenFrameStream {
   }
 
   private flush(): void {
-    const image = this.latest;
+    const latest = this.latest;
     const target = this.target;
-    if (!image || !target) return;
+    if (!latest || !target) return;
     this.latest = undefined;
-    const { width, height } = image.getSize();
+    const { width, height } = latest.image.getSize();
     if (width <= 0 || height <= 0) return;
-    this.send({ tabId: target.tabId, width, height, data: image.toJPEG(FRAME_QUALITY) });
+    const viewport = latest.viewport.width > 0 && latest.viewport.height > 0 ? latest.viewport : { width, height };
+    this.send({ tabId: target.tabId, width, height, data: latest.image.toJPEG(FRAME_QUALITY), viewport });
   }
 }

@@ -7,6 +7,8 @@ import type {
   BrowserGuestRoster,
   BrowserImportSummary,
   BrowserFrame,
+  BrowserPageEvent,
+  BrowserPageInput,
   BrowserStateSnapshot,
   BrowserUiViewport,
   BubbleSessionTarget,
@@ -87,6 +89,8 @@ const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
 const BROWSER_TAKE_OVER_CHANNEL = "browser:take-over";
 const BROWSER_FRAME_CHANNEL = "browser:frame";
+const BROWSER_INPUT_CHANNEL = "browser:input";
+const BROWSER_PAGE_EVENT_CHANNEL = "browser:page-event";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
@@ -238,6 +242,14 @@ const api: CoilCoilDesktopApi = {
     const handler = (_event: Electron.IpcRendererEvent, frame: BrowserFrame): void => listener(frame);
     ipcRenderer.on(BROWSER_FRAME_CHANNEL, handler);
     return () => ipcRenderer.removeListener(BROWSER_FRAME_CHANNEL, handler);
+  },
+  sendBrowserInput: (scopeId: string, tabId: string, input: BrowserPageInput) => {
+    ipcRenderer.send(BROWSER_INPUT_CHANNEL, scopeId, tabId, input);
+  },
+  onBrowserPageEvent: (listener: (event: BrowserPageEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: BrowserPageEvent): void => listener(event);
+    ipcRenderer.on(BROWSER_PAGE_EVENT_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(BROWSER_PAGE_EVENT_CHANNEL, handler);
   },
   onBrowserAgentActivated: (listener: (scopeId: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, scopeId: string): void => listener(scopeId);

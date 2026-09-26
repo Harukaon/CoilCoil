@@ -1,12 +1,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { app, BrowserWindow, screen, session, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
-import type { BrowserElementSelection, BrowserGuestRoster, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
+import type { BrowserElementSelection, BrowserGuestRoster, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabControl, type BrowserTabOwner } from "./browser-agent-tabs";
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserElementPicker } from "./browser-element-picker";
 import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
+import { cssCursor, PageInputForwarder, parsePageInput } from "./browser-input";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
 import { createOffscreenPage, OffscreenFrameStream, resizeOffscreenPage } from "./browser-offscreen";
 import { applyGuestUserAgent, browserIdentityEnvironment, configureBrowserIdentity, installChromeObject } from "./browser-user-agent";
@@ -90,6 +91,8 @@ export class BrowserRuntimeManager {
   private readonly pendingEnsure = new Map<string, Promise<BrowserTab>>();
   /** 每个会话还没告诉 Agent 的回收记录。 */
   private readonly recycledTabs = new RecycledAgentTabs();
+  /** 每张页面一个：把用户的操作按到达顺序送进去（见 browser-input.ts）。 */
+  private readonly inputForwarders = new WeakMap<WebContents, PageInputForwarder>();
   /** 用户正看着的那张 Agent 标签页的画面，送给界面。 */
   private readonly frames = new OffscreenFrameStream((frame) => {
     if (!this.disposed && !this.window.isDestroyed()) this.window.webContents.send("browser:frame", frame);
@@ -125,6 +128,8 @@ export class BrowserRuntimeManager {
     private readonly publishState: (state: BrowserStateSnapshot) => void,
     private readonly onAgentActivated: (scopeId: string) => void,
     private readonly publishGuestRoster: (roster: BrowserGuestRoster) => void = () => {},
+    /** 在 App 窗口里弹出网页的右键菜单（菜单本身由主进程入口搭，和 <webview> 的是同一份）。 */
+    private readonly showPageContextMenu: (contents: WebContents, params: Electron.ContextMenuParams) => void = () => {},
   ) {
     this.cdp = new BrowserCdpBridge({
       onAgentActivated: (scopeId) => this.onAgentActivated(scopeId),
@@ -150,6 +155,7 @@ export class BrowserRuntimeManager {
       windowBounds: (tab) => this.windowBounds(tab),
       windowForTab: (tab) => this.windowForTab(tab),
       setContentsSize: (tab, params) => this.setContentsSize(tab, params),
+      setAgentFocusEmulation: (tab, enabled) => this.setFocusEmulation(tab, "agent", enabled),
     });
     // Guests live in the renderer's document, so a reload or crash destroys every
     // one of them. Tear the records down deliberately and tell clients their
@@ -461,6 +467,7 @@ export class BrowserRuntimeManager {
     this.installTabSecurity(tab);
     this.installTabEvents(tab);
     this.installGuestTeardown(tab, page.webContents);
+    this.installPageFeedback(tab, page.webContents);
     if (history) await page.webContents.navigationHistory.restore(history);
     else await loadGuestUrl(page.webContents, DEFAULT_URL);
     await this.attachDebugger(tab);
@@ -640,12 +647,11 @@ export class BrowserRuntimeManager {
   }
 
   /**
-   * 界面上的地址栏、前进后退、刷新作用的那一张：必须是用户自己的。当前那张归 Agent
-   * 时拒绝——用户要先接管；一张都没有就给用户开一张。
+   * 界面上的地址栏、前进后退、刷新作用在当前这一张上，不管是谁开的：用户和 Agent 用的
+   * 是同一个页面，不用先接管。一张都没有就给用户开一张。
    */
   private async userTab(scopeId: string): Promise<BrowserTab> {
     const active = this.activeTab(scopeId);
-    if (active?.control === "agent") throw new Error("这张标签页正由 Agent 使用，接管后才能操作。");
     if (active?.guest && !active.guest.isDestroyed() && active.phase !== "closing") return active;
     return this.createCdpTab(undefined, true, scopeId, false, "user");
   }
@@ -659,7 +665,6 @@ export class BrowserRuntimeManager {
   async pickElement(scopeId = this.uiScopeId): Promise<BrowserElementSelection | undefined> {
     const tab = this.readyTab(scopeId);
     if (!tab) throw new Error("请等待当前网页加载完成后再选择元素。");
-    if (tab.control === "agent") throw new Error("这张标签页正由 Agent 使用，接管后才能选择元素。");
     return this.elementPicker.pick(this.guestOf(tab));
   }
 
@@ -728,6 +733,86 @@ export class BrowserRuntimeManager {
     const tab = await this.userTab(scopeId);
     this.guestOf(tab).reload();
     return this.state(scopeId);
+  }
+
+  /**
+   * 用户在面板里对页面的一次操作。
+   *
+   * 只送进桌面窗口当前会话正显示着的那一张：旧画面、别的会话、后台标签页送来的一律
+   * 不收——界面上看不到的页面，不该被一个迟到的点击点中。焦点进出例外：用户点回 App
+   * 别处、切走标签页时，那张页面已经不是正显示的了，失焦还是要送到。
+   */
+  forwardInput(scopeId: string, tabId: string, raw: unknown): void {
+    const input = parsePageInput(raw);
+    if (!input) return;
+    const tab = this.tabs.get(tabId);
+    const page = tab?.offscreen;
+    if (!tab || tab.scopeId !== scopeId || tab.phase !== "ready" || !page || page.isDestroyed()) return;
+    const contents = tab.guest;
+    if (!contents || contents.isDestroyed()) return;
+    if (input.kind === "focus") {
+      void this.setFocusEmulation(tab, "user", input.focused);
+      return;
+    }
+    const visible = scopeId === this.uiScopeId && this.panelVisible && this.activeTabIds.get(scopeId) === tabId;
+    if (!visible) return;
+    let forwarder = this.inputForwarders.get(contents);
+    if (!forwarder) {
+      forwarder = new PageInputForwarder(contents);
+      this.inputForwarders.set(contents, forwarder);
+    }
+    const now = Date.now();
+    tab.userInputAt = now;
+    // 用户正在用的页面不算「最久没用」，Agent 开新页超上限时不会先收掉它。
+    tab.lastUsedAt = now;
+    if (input.kind === "mouse" && input.type === "down" && input.button === "right") tab.userContextMenuAt = now;
+    const [width, height] = page.getContentSize();
+    forwarder.forward(input, { width, height });
+  }
+
+  /**
+   * 页面「以为自己有焦点」：Agent 和用户任何一边要就开着，两边都不要才关（见
+   * BrowserTab.focusEmulation）。离屏页面本来永远没有焦点，不开的话输入框不闪光标、
+   * 有的网页不响应键盘。
+   */
+  private async setFocusEmulation(tab: BrowserTab, who: "agent" | "user", enabled: boolean): Promise<void> {
+    const state = tab.focusEmulation ?? { agent: false, user: false, applied: false };
+    state[who] = enabled;
+    tab.focusEmulation = state;
+    const wanted = state.agent || state.user;
+    if (wanted === state.applied) return;
+    const contents = tab.guest;
+    if (!contents || contents.isDestroyed() || !contents.debugger.isAttached()) return;
+    state.applied = wanted;
+    try {
+      await contents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: wanted });
+    } catch (error) {
+      state.applied = !wanted;
+      console.warn("[browser] 切换页面焦点失败", error instanceof Error ? error.message : error);
+    }
+  }
+
+  /**
+   * 离屏页面自己的反馈，面板要跟着变：鼠标指到的地方该显示什么光标，用户右键时的菜单。
+   *
+   * 右键菜单只为用户弹：Agent 在页面上右键（CDP 按右键）也会触发，那时在用户面前弹出
+   * 一个菜单，会把他的键盘焦点抢走。
+   */
+  private installPageFeedback(tab: BrowserTab, contents: WebContents): void {
+    contents.on("cursor-changed", (_event, type, image, _scale, _size, hotspot) => {
+      this.publishPageEvent({ tabId: tab.id, kind: "cursor", cursor: cssCursor(type, image, hotspot) });
+    });
+    contents.on("context-menu", (_event, params) => {
+      const at = tab.userContextMenuAt;
+      tab.userContextMenuAt = undefined;
+      if (at === undefined || Date.now() - at > 1500) return;
+      this.showPageContextMenu(contents, params);
+    });
+  }
+
+  private publishPageEvent(event: BrowserPageEvent): void {
+    if (this.disposed || this.window.isDestroyed()) return;
+    this.window.webContents.send("browser:page-event", event);
   }
 
   /**

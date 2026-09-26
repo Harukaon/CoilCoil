@@ -17,8 +17,12 @@ const read = (path: string) => readFile(resolve(repositoryRoot, path), "utf8");
  * 成块的已经各自成文件（离屏页面和画面推送 browser-offscreen.ts、接管用 guest 的认领
  * 在 browser-guests.ts），剩下的是标签页在两种形态之间切换本身，和标签页生命周期是
  * 同一件事，拆开反而要在两处对着看。
+ *
+ * 1250：用户可以直接操作 Agent 的页面（把操作送进页面、页面焦点两边合着算、光标和右键
+ * 菜单）又加了几十行，怎么送进页面已经单独在 browser-input.ts。等用户自己的标签页也改成
+ * 离屏页面、<webview> 和接管整块去掉，这里会少两百多行，到时候把线收回来。
  */
-const MAX_LINES = 1150;
+const MAX_LINES = 1250;
 
 test(`browser runtime source files stay within the ${MAX_LINES}-line architecture limit`, async () => {
   for (const path of [

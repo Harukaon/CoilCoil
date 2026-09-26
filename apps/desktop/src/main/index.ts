@@ -165,6 +165,7 @@ const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
 const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
 const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
 const BROWSER_GUEST_FAILED_CHANNEL = "browser:guest-failed";
+const BROWSER_INPUT_CHANNEL = "browser:input";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_DATA_CHANNEL = "terminal:data";
 const TERMINAL_GET_CHANNEL = "terminal:get";
@@ -742,53 +743,61 @@ function remoteController(): RemoteAccessController {
  * own, which is why the built-in browser appeared to have no menu at all.
  */
 function installGuestContextMenu(guest: Electron.WebContents, window: BrowserWindow): void {
-  guest.on("context-menu", (_event, params) => {
-    if (guest.isDestroyed()) return;
-    const menuParams: GuestContextMenuParams = {
-      x: params.x,
-      y: params.y,
-      linkURL: params.linkURL,
-      srcURL: params.srcURL,
-      mediaType: params.mediaType,
-      selectionText: params.selectionText,
-      isEditable: params.isEditable,
-      pageURL: params.pageURL,
-      editFlags: {
-        canCut: params.editFlags.canCut,
-        canCopy: params.editFlags.canCopy,
-        canPaste: params.editFlags.canPaste,
-        canSelectAll: params.editFlags.canSelectAll,
-      },
-    };
-    const history = guest.navigationHistory;
-    const items = browserContextMenuItems(menuParams, {
-      canGoBack: history.canGoBack(),
-      canGoForward: history.canGoForward(),
-    });
-    const template = items.map((item) => item.type === "separator"
-      ? { type: "separator" as const }
-      : {
-        label: item.label,
-        enabled: item.enabled,
-        click: () => {
-          if (guest.isDestroyed() || !item.action) return;
-          runContextMenuAction(item.action, menuParams, {
-            copyToClipboard: (text) => clipboard.writeText(text),
-            copyImageAt: (x, y) => guest.copyImageAt(x, y),
-            cut: () => guest.cut(),
-            copy: () => guest.copy(),
-            paste: () => guest.paste(),
-            selectAll: () => guest.selectAll(),
-            goBack: () => { if (history.canGoBack()) history.goBack(); },
-            goForward: () => { if (history.canGoForward()) history.goForward(); },
-            reload: () => guest.reload(),
-            inspectElement: (x, y) => guest.inspectElement(x, y),
-          });
-        },
-      });
-    if (window.isDestroyed()) return;
-    Menu.buildFromTemplate(template).popup({ window });
+  guest.on("context-menu", (_event, params) => popupGuestContextMenu(guest, window, params));
+}
+
+/**
+ * 在 App 窗口里、鼠标所在的地方弹出网页的右键菜单。
+ *
+ * 嵌在面板里的 <webview> 和离屏页面用的是同一份菜单；离屏页面的画面就在面板里，用户
+ * 右键的位置就是鼠标现在的位置，所以不用另算坐标。
+ */
+function popupGuestContextMenu(guest: Electron.WebContents, window: BrowserWindow, params: Electron.ContextMenuParams): void {
+  if (guest.isDestroyed()) return;
+  const menuParams: GuestContextMenuParams = {
+    x: params.x,
+    y: params.y,
+    linkURL: params.linkURL,
+    srcURL: params.srcURL,
+    mediaType: params.mediaType,
+    selectionText: params.selectionText,
+    isEditable: params.isEditable,
+    pageURL: params.pageURL,
+    editFlags: {
+      canCut: params.editFlags.canCut,
+      canCopy: params.editFlags.canCopy,
+      canPaste: params.editFlags.canPaste,
+      canSelectAll: params.editFlags.canSelectAll,
+    },
+  };
+  const history = guest.navigationHistory;
+  const items = browserContextMenuItems(menuParams, {
+    canGoBack: history.canGoBack(),
+    canGoForward: history.canGoForward(),
   });
+  const template = items.map((item) => item.type === "separator"
+    ? { type: "separator" as const }
+    : {
+      label: item.label,
+      enabled: item.enabled,
+      click: () => {
+        if (guest.isDestroyed() || !item.action) return;
+        runContextMenuAction(item.action, menuParams, {
+          copyToClipboard: (text) => clipboard.writeText(text),
+          copyImageAt: (x, y) => guest.copyImageAt(x, y),
+          cut: () => guest.cut(),
+          copy: () => guest.copy(),
+          paste: () => guest.paste(),
+          selectAll: () => guest.selectAll(),
+          goBack: () => { if (history.canGoBack()) history.goBack(); },
+          goForward: () => { if (history.canGoForward()) history.goForward(); },
+          reload: () => guest.reload(),
+          inspectElement: (x, y) => guest.inspectElement(x, y),
+        });
+      },
+    });
+  if (window.isDestroyed()) return;
+  Menu.buildFromTemplate(template).popup({ window });
 }
 
 let primaryWindow: BrowserWindow | undefined;
@@ -940,7 +949,7 @@ async function createWindow(): Promise<void> {
   }, (roster) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_GUEST_ROSTER_CHANNEL, roster);
     remoteAccess?.broadcast(BROWSER_GUEST_ROSTER_CHANNEL, roster);
-  });
+  }, (contents, params) => popupGuestContextMenu(contents, mainWindow, params));
   const terminalRuntime = new TerminalRuntimeManager((state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_STATE_CHANNEL, state);
     remoteAccess?.broadcast(TERMINAL_STATE_CHANNEL, state);
@@ -1333,6 +1342,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_UI_VIEWPORT_CHANNEL, (event, viewport: BrowserUiViewport): void => {
     // Renderer cleanup can race the window's closed event during dev reload/quit.
     browserRuntimes.get(event.sender.id)?.setUiViewport(viewport);
+  });
+  // 用户对面板里页面的操作：鼠标移动一秒几十次，走单向消息，不等回音。内容由运行时逐项核对。
+  ipcMain.on(BROWSER_INPUT_CHANNEL, (event, scopeId: unknown, tabId: unknown, input: unknown): void => {
+    if (typeof scopeId !== "string" || typeof tabId !== "string") return;
+    browserRuntimes.get(event.sender.id)?.forwardInput(scopeId, tabId, input);
   });
   const terminalFor = (event: Electron.IpcMainInvokeEvent): TerminalRuntimeManager => {
     const value = terminalRuntimes.get(event.sender.id);

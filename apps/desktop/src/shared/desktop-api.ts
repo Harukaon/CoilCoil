@@ -164,7 +164,67 @@ export interface BrowserFrame {
   width: number;
   height: number;
   data: Uint8Array;
+  /**
+   * 这一帧画的页面有多大（网页自己的 CSS 像素，不是图片像素）。
+   *
+   * 用户在画面上点哪儿，要按这一帧换算成页面上的位置：面板刚改完大小、新画面还没
+   * 到的时候，用户看到的是旧尺寸的画面，点的也是旧画面上的位置。
+   */
+  viewport: { width: number; height: number };
 }
+
+/** 同时按着的修饰键。 */
+export interface BrowserInputModifiers {
+  shift: boolean;
+  control: boolean;
+  alt: boolean;
+  meta: boolean;
+}
+
+/**
+ * 用户在面板里对网页做的一次操作，由主进程原样送进那张页面。
+ *
+ * 坐标已经换算成页面上的位置（CSS 像素，见 BrowserFrame.viewport）。按键带的是
+ * 键盘事件本来的 key/code/keyCode，主进程据此拼出和真实按键一样的事件。
+ */
+export type BrowserPageInput =
+  | {
+    kind: "mouse";
+    type: "down" | "up" | "move" | "enter" | "leave";
+    x: number;
+    y: number;
+    button: "left" | "middle" | "right" | "none";
+    clickCount: number;
+    /** 同 MouseEvent.buttons：拖动时哪些键还按着。 */
+    buttons: number;
+    modifiers: BrowserInputModifiers;
+  }
+  | { kind: "wheel"; x: number; y: number; deltaX: number; deltaY: number; modifiers: BrowserInputModifiers }
+  | {
+    kind: "key";
+    type: "down" | "up";
+    key: string;
+    code: string;
+    keyCode: number;
+    location: number;
+    repeat: boolean;
+    modifiers: BrowserInputModifiers;
+  }
+  /** 输入法：组字中（update）、上屏（commit）、放弃（cancel）。 */
+  | { kind: "ime"; type: "update"; text: string; selectionStart: number; selectionEnd: number }
+  | { kind: "ime"; type: "commit"; text: string }
+  | { kind: "ime"; type: "cancel" }
+  /** 不是敲键盘来的文字：表情面板、听写、系统服务插进来的。 */
+  | { kind: "text"; text: string }
+  /** 菜单栏「编辑」里的命令，作用在网页里选中的内容上。 */
+  | { kind: "edit"; command: "copy" | "cut" | "paste" | "undo" | "redo" | "selectAll" }
+  /** 用户的焦点进出这张页面：页面据此认为自己有没有焦点（光标闪不闪、失焦事件）。 */
+  | { kind: "focus"; focused: boolean };
+
+/** 网页那边发生的、面板要跟着变的事。 */
+export type BrowserPageEvent =
+  /** 鼠标指到的地方该显示什么光标，已经是 CSS 的 cursor 值。 */
+  | { tabId: string; kind: "cursor"; cursor: string };
 
 export interface BrowserGuestRoster {
   tabs: BrowserGuestSlot[];
@@ -174,6 +234,9 @@ export interface BrowserGuestRoster {
 export interface BrowserUiViewport {
   width: number;
   height: number;
+  /** 面板左上角在窗口里的位置（CSS 像素）：网页的右键菜单要弹在用户点的地方。 */
+  left?: number;
+  top?: number;
 }
 
 export interface BrowserElementSourceLocation {
@@ -491,6 +554,12 @@ export interface CoilCoilDesktopApi {
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
   onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
   onBrowserFrame(listener: (frame: BrowserFrame) => void): () => void;
+  /**
+   * 把用户对面板里那张页面的一次操作送进去。只对当前会话正显示着的那张生效；
+   * 不等回音，鼠标移动这种一秒几十次的操作不该每次都来回一趟。
+   */
+  sendBrowserInput(scopeId: string, tabId: string, input: BrowserPageInput): void;
+  onBrowserPageEvent(listener: (event: BrowserPageEvent) => void): () => void;
   getTerminalSessions(): Promise<TerminalSessionSnapshot[]>;
   /** Always opens another shell: each one gets its own inspector tab. */
   createTerminal(cwd: string): Promise<TerminalSessionSnapshot[]>;
