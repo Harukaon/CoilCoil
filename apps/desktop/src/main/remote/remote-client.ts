@@ -289,8 +289,8 @@ export function bridgeScript(platform: DesktopPlatform): string {
     reportBrowserGuestFailure: resolves(undefined),
     onBrowserGuestRoster: subscribe("browser:guest-roster"),
     onBrowserStateUpdated: subscribe("browser:state"),
-    // 画面推送只给桌面窗口；网页版按截图看 Agent 的页面（见 BrowserPanel）。
-    onBrowserFrame: ignore,
+    // 画面只画进桌面窗口；网页版按截图看页面（见 BrowserPanel）。
+    attachBrowserSurface: ignore,
     // 网页版只看画面，不往 Mac 上的页面里送鼠标键盘。
     sendBrowserInput: function () {},
     chooseBrowserSelect: resolves(undefined),

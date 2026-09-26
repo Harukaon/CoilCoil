@@ -50,8 +50,11 @@ function freePort() {
 /**
  * `remote: true` 时同时打开远程访问（网页版 / 手机连的那个入口），返回的 remotePort
  * 交给 openRemoteClient，接一个真的网页客户端进来。
+ *
+ * 默认关着 GPU（稳定、和没有显卡的机器一样，浏览器面板走普通画面）；`gpu: true` 的
+ * 场景开着 GPU，浏览器面板走共享纹理画面，和真实用户的 Mac 一样。
  */
-export async function launch({ projects = ["projA", "projB"], remote = false } = {}) {
+export async function launch({ projects = ["projA", "projB"], remote = false, gpu = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-e2e-"));
   const data = join(root, "data");
   const home = join(root, "home");
@@ -84,7 +87,7 @@ export async function launch({ projects = ["projA", "projB"], remote = false } =
   const remotePort = remote ? await freePort() : undefined;
   const app = await electron.launch({
     executablePath: require("electron"),
-    args: [join(repositoryRoot, "apps/desktop"), `--user-data-dir=${data}`, "--no-sandbox", "--disable-gpu"],
+    args: [join(repositoryRoot, "apps/desktop"), `--user-data-dir=${data}`, "--no-sandbox", ...gpu ? [] : ["--disable-gpu"]],
     env: { ...process.env, HOME: home, USERPROFILE: home, ...remote ? { COILCOIL_REMOTE_PORT: String(remotePort) } : {} },
     timeout: 90_000,
   });

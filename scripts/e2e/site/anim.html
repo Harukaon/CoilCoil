@@ -1,0 +1,11 @@
+<html><head><meta charset="utf-8"><title>page-anim</title><style>html, body { margin: 0; height: 100%; }</style></head>
+<body><script>
+// 整页每一帧换一种颜色：面板画面正中间的颜色一秒变几次，就是面板一秒画了几帧。
+let frame = 0;
+const tick = () => {
+  frame += 1;
+  document.body.style.background = `hsl(${(frame * 37) % 360}, 70%, 50%)`;
+  requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+</script></body></html>

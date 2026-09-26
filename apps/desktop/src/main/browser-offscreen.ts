@@ -1,5 +1,5 @@
-import { BrowserWindow, screen, type NativeImage, type WebContents } from "electron";
-import type { BrowserFrame } from "../shared/desktop-api";
+import { BrowserWindow, screen, type NativeImage, type OffscreenSharedTexture, type WebContents } from "electron";
+import { BACKGROUND_FRAME_RATE } from "./browser-frame-stream";
 
 /**
  * Agent 用的标签页：离屏渲染的页面。
@@ -12,13 +12,19 @@ import type { BrowserFrame } from "../shared/desktop-api";
  * 所以 Agent 的页面不嵌进窗口：每张标签页一个隐藏、离屏的 BrowserWindow。它不在任何
  * 可见窗口的焦点链上，Chromium 那条规则只在它自己身上生效，用户的焦点不受影响；输入
  * 照样是真实的输入（CDP 的鼠标、键盘），网站看到的也是真实事件。画面通过 paint 事件
- * 拿出来，画在面板里给用户看；用户要自己操作时「接管」，换成正常的 <webview>。
+ * 拿出来（有 GPU 时是共享纹理，见 browser-frame-stream.ts），画在面板里；用户在画面上
+ * 的操作转进页面（browser-input.ts）。
  *
  * 为什么是 BrowserWindow 而不是不挂窗口的 WebContentsView：离屏页面的大小取自承载它
  * 的窗口，不挂窗口的视图是 0×0，什么都不渲染，点击落空、截图卡死；挂在 App 窗口上
  * 又只能和 App 窗口一样大。每张标签页一个自己的窗口，才能各自设大小。
  */
-export function createOffscreenPage(partition: string, size: { width: number; height: number }): BrowserWindow {
+export function createOffscreenPage(
+  partition: string,
+  size: { width: number; height: number },
+  /** 页面每画一帧都交出来：有人看就画到面板里，没人看就立刻还掉纹理。 */
+  onPaint: (contents: WebContents, texture: OffscreenSharedTexture | undefined, image: NativeImage) => void,
+): BrowserWindow {
   const page = new BrowserWindow({
     show: false,
     // 双保险：这个窗口永远不该成为系统焦点窗口，也不该出现在任务栏、窗口切换里。
@@ -29,7 +35,7 @@ export function createOffscreenPage(partition: string, size: { width: number; he
     width: size.width,
     height: size.height,
     webPreferences: {
-      offscreen: { deviceScaleFactor: displayScale() },
+      offscreen: { useSharedTexture: sharedTextureFrames(), deviceScaleFactor: displayScale() },
       partition,
       // 和 <webview> guest 同一套加固（见 browser-webview-policy.ts）。
       sandbox: true,
@@ -45,7 +51,17 @@ export function createOffscreenPage(partition: string, size: { width: number; he
     },
   });
   page.webContents.setFrameRate(BACKGROUND_FRAME_RATE);
+  const contents = page.webContents;
+  contents.on("paint", (event, _dirty, image) => onPaint(contents, event.texture, image));
   return page;
+}
+
+/**
+ * 页面画面走 GPU 共享纹理。出问题时设 COILCOIL_BROWSER_GPU_FRAMES=0 退回改造前的 JPEG
+ * 画面（新开的页面生效），不用发新版。关了 GPU 的机器上页面本来就只出位图，自动退回。
+ */
+export function sharedTextureFrames(): boolean {
+  return process.env.COILCOIL_BROWSER_GPU_FRAMES !== "0";
 }
 
 export function resizeOffscreenPage(page: BrowserWindow, size: { width: number; height: number }): void {
@@ -62,64 +78,5 @@ function displayScale(): number {
     return screen.getPrimaryDisplay().scaleFactor || 1;
   } catch {
     return 1;
-  }
-}
-
-/** 用户正看着的那张出画面要流畅；其余的只要还在渲染（截图要用），不必每秒几十帧。 */
-const VISIBLE_FRAME_RATE = 30;
-const BACKGROUND_FRAME_RATE = 1;
-const FRAME_QUALITY = 80;
-
-/**
- * 把「用户正看着的那张 Agent 标签页」的画面送给界面。
- *
- * 同一时刻只看一张：换标签、面板收起时换目标或停下。paint 事件比界面画得快时只留
- * 最新一帧，按帧率节拍发出去，不堆积。
- */
-export class OffscreenFrameStream {
-  private target?: { tabId: string; contents: WebContents; listener: (event: unknown, dirty: unknown, image: NativeImage) => void };
-  private latest?: { image: NativeImage; viewport: { width: number; height: number } };
-  private timer?: ReturnType<typeof setInterval>;
-
-  constructor(private readonly send: (frame: BrowserFrame) => void) {}
-
-  watch(tabId: string | undefined, contents: WebContents | undefined): void {
-    if (this.target?.tabId === tabId && this.target?.contents === contents) return;
-    this.stop();
-    if (!tabId || !contents || contents.isDestroyed()) return;
-    // 页面多大在出帧的这一刻记下：用户点画面时按这一帧换算位置，面板刚改完大小时也对得上。
-    const page = BrowserWindow.fromWebContents(contents);
-    const listener = (_event: unknown, _dirty: unknown, image: NativeImage): void => {
-      const [width, height] = page && !page.isDestroyed() ? page.getContentSize() : [0, 0];
-      this.latest = { image, viewport: { width, height } };
-    };
-    contents.on("paint", listener);
-    contents.setFrameRate(VISIBLE_FRAME_RATE);
-    this.target = { tabId, contents, listener };
-    // 页面静止时不出新帧，先要一帧，面板一打开就有画面。
-    contents.invalidate();
-    this.timer = setInterval(() => this.flush(), Math.round(1000 / VISIBLE_FRAME_RATE));
-  }
-
-  stop(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = undefined;
-    this.latest = undefined;
-    const target = this.target;
-    this.target = undefined;
-    if (!target || target.contents.isDestroyed()) return;
-    target.contents.off("paint", target.listener);
-    target.contents.setFrameRate(BACKGROUND_FRAME_RATE);
-  }
-
-  private flush(): void {
-    const latest = this.latest;
-    const target = this.target;
-    if (!latest || !target) return;
-    this.latest = undefined;
-    const { width, height } = latest.image.getSize();
-    if (width <= 0 || height <= 0) return;
-    const viewport = latest.viewport.width > 0 && latest.viewport.height > 0 ? latest.viewport : { width, height };
-    this.send({ tabId: target.tabId, width, height, data: latest.image.toJPEG(FRAME_QUALITY), viewport });
   }
 }

@@ -171,19 +171,25 @@ export interface BrowserGuestSlot {
 /** 接管用的 <webview> 带这个 src 报到，后面接 tab id（见主进程 browser-webview-policy.ts）。 */
 export const BROWSER_RESTORE_SRC_PREFIX = "about:blank#coilcoil-restore=";
 
-/** Agent 标签页的一帧画面（JPEG），面板里显示给用户看。 */
-export interface BrowserFrame {
-  tabId: string;
+/**
+ * 面板里正在画的页面画面：多大、用的哪种方式。只在这些变了的时候通知，不是每一帧。
+ *
+ * 画面本身由预加载直接画进画布（GPU 纹理，不经过界面脚本）；界面只用这些信息换算
+ * 用户点在页面上的哪个位置、摆下拉框列表。
+ */
+export interface BrowserSurfaceInfo {
+  /** 画面的像素大小（页面大小乘屏幕缩放）。 */
   width: number;
   height: number;
-  data: Uint8Array;
   /**
-   * 这一帧画的页面有多大（网页自己的 CSS 像素，不是图片像素）。
+   * 画面上这一帧的页面有多大（网页自己的 CSS 像素，不是图片像素）。
    *
    * 用户在画面上点哪儿，要按这一帧换算成页面上的位置：面板刚改完大小、新画面还没
    * 到的时候，用户看到的是旧尺寸的画面，点的也是旧画面上的位置。
    */
   viewport: { width: number; height: number };
+  /** texture：GPU 共享纹理；jpeg：没有 GPU 或纹理传不过去时的普通画面。 */
+  mode: "texture" | "jpeg";
 }
 
 /** 同时按着的修饰键。 */
@@ -197,7 +203,7 @@ export interface BrowserInputModifiers {
 /**
  * 用户在面板里对网页做的一次操作，由主进程原样送进那张页面。
  *
- * 坐标已经换算成页面上的位置（CSS 像素，见 BrowserFrame.viewport）。按键带的是
+ * 坐标已经换算成页面上的位置（CSS 像素，见 BrowserSurfaceInfo.viewport）。按键带的是
  * 键盘事件本来的 key/code/keyCode，主进程据此拼出和真实按键一样的事件。
  */
 export type BrowserPageInput =
@@ -586,7 +592,11 @@ export interface CoilCoilDesktopApi {
   onBrowserGuestRoster(listener: (roster: BrowserGuestRoster) => void): () => void;
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
   onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
-  onBrowserFrame(listener: (frame: BrowserFrame) => void): () => void;
+  /**
+   * 把面板里的画布交给预加载：这张页面的画面直接画进去。返回的函数摘下画布。
+   * 网页版没有这条路（它看定时截图），调用什么也不做。
+   */
+  attachBrowserSurface(tabId: string, canvas: HTMLCanvasElement, onInfo: (info: BrowserSurfaceInfo) => void): () => void;
   /**
    * 把用户对面板里那张页面的一次操作送进去。只对当前会话正显示着的那张生效；
    * 不等回音，鼠标移动这种一秒几十次的操作不该每次都来回一趟。

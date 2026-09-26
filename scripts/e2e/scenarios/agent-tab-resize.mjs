@@ -25,19 +25,21 @@ const sameSize = (a, b) => Boolean(a && b) && Math.abs(a.width - b.width) <= 1 &
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
   await ui.send([{ tool: "browser_open", args: { url: site.url("form.html") } }, { echo: true }], "尺寸");
-  const frame = page.locator("img.browser-live-frame");
-  check("面板里显示 Agent 页面的画面", await ui.waitFor(async () => ((await frame.getAttribute("src").catch(() => null)) ?? "").startsWith("blob:")));
+  const frame = page.locator("canvas.browser-live-frame");
+  // 画布的像素大小跟着页面大小走：页面换了尺寸，新画面到了，画布大小就变。
+  const frameSize = () => frame.evaluate((canvas) => `${canvas.width}x${canvas.height}`).catch(() => "");
+  check("面板里显示 Agent 页面的画面", await ui.waitFor(async () => Boolean(await frame.getAttribute("data-mode").catch(() => null))));
   check("一开始离屏页面和面板一样大", await ui.waitFor(async () => sameSize(await offscreenSize(app), await viewSize(page))),
     JSON.stringify({ offscreen: await offscreenSize(app), view: await viewSize(page) }));
 
   for (const [label, delta] of [["缩窄", -480], ["拉宽", 480]]) {
     const before = await viewSize(page);
-    const src = await frame.getAttribute("src");
+    const drawn = await frameSize();
     await resizeWindow(app, delta);
     check(`${label}窗口后面板确实变了`, await ui.waitFor(async () => (await viewSize(page)).width !== before.width), JSON.stringify(await viewSize(page)));
     check(`${label}窗口后离屏页面跟着变成面板大小`, await ui.waitFor(async () => sameSize(await offscreenSize(app), await viewSize(page))),
       JSON.stringify({ offscreen: await offscreenSize(app), view: await viewSize(page) }));
-    check(`${label}窗口后界面收到了新画面`, await ui.waitFor(async () => (await frame.getAttribute("src")) !== src));
+    check(`${label}窗口后界面收到了新尺寸的画面`, await ui.waitFor(async () => (await frameSize()) !== drawn), `${drawn} -> ${await frameSize()}`);
     await shot(label);
   }
 }

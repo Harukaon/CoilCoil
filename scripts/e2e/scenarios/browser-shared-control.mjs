@@ -52,8 +52,8 @@ export async function run({ app, page, ui, site, check, shot }) {
   check("用户接着打的字进了对话框", (await composer.innerText()).includes("我接着打"));
 
   // 2. 面板里是这张页面的画面，没有「接管」，地址栏、前进后退照常能用。
-  const frame = page.locator("img.browser-live-frame");
-  check("面板里显示页面的画面", await ui.waitFor(async () => ((await frame.getAttribute("src").catch(() => null)) ?? "").startsWith("blob:")));
+  const frame = page.locator("canvas.browser-live-frame");
+  check("面板里显示页面的画面", await ui.waitFor(async () => Boolean(await frame.getAttribute("data-mode").catch(() => null))), String(await frame.getAttribute("data-mode").catch(() => null)));
   check("没有「接管」按钮了", (await page.getByRole("button", { name: "接管这个页面" }).count()) === 0);
   check("地址栏不再是只读的", !(await page.getByRole("textbox", { name: "网页地址" }).evaluate((element) => element.readOnly)));
   const tabs = await ui.browserTabs();

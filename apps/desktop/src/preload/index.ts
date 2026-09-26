@@ -6,7 +6,6 @@ import type {
   BrowserElementSelection,
   BrowserGuestRoster,
   BrowserImportSummary,
-  BrowserFrame,
   BrowserPageEvent,
   BrowserPageInput,
   BrowserStateSnapshot,
@@ -41,6 +40,7 @@ import type {
   TerminalSessionSnapshot,
   UpdateAvailable,
 } from "../shared/desktop-api";
+import { attachBrowserSurface } from "./browser-surfaces";
 
 const PROJECT_SELECT_CHANNEL = "project:select";
 const PROJECT_HOME_CHANNEL = "project:home";
@@ -88,7 +88,6 @@ const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
 const BROWSER_TAKE_OVER_CHANNEL = "browser:take-over";
-const BROWSER_FRAME_CHANNEL = "browser:frame";
 const BROWSER_INPUT_CHANNEL = "browser:input";
 const BROWSER_PAGE_EVENT_CHANNEL = "browser:page-event";
 const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
@@ -240,11 +239,7 @@ const api: CoilCoilDesktopApi = {
     ipcRenderer.on(BROWSER_STATE_CHANNEL, handler);
     return () => ipcRenderer.removeListener(BROWSER_STATE_CHANNEL, handler);
   },
-  onBrowserFrame: (listener: (frame: BrowserFrame) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, frame: BrowserFrame): void => listener(frame);
-    ipcRenderer.on(BROWSER_FRAME_CHANNEL, handler);
-    return () => ipcRenderer.removeListener(BROWSER_FRAME_CHANNEL, handler);
-  },
+  attachBrowserSurface,
   sendBrowserInput: (scopeId: string, tabId: string, input: BrowserPageInput) => {
     ipcRenderer.send(BROWSER_INPUT_CHANNEL, scopeId, tabId, input);
   },

@@ -1,6 +1,6 @@
 import { Bot, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BrowserInputModifiers, BrowserPageInput, BrowserSelectPicker, BrowserTabSnapshot } from "../../../../shared/desktop-api";
+import type { BrowserInputModifiers, BrowserPageInput, BrowserSelectPicker, BrowserSurfaceInfo, BrowserTabSnapshot } from "../../../../shared/desktop-api";
 import { rendererPlatform } from "../../platform";
 import { PageDialog } from "./PageDialog";
 import { PageSelectPicker } from "./PageSelectPicker";
@@ -16,6 +16,9 @@ import { PageSelectPicker } from "./PageSelectPicker";
  * Agent 怎么操作都碰不到这个输入框：它的点击和打字只进离屏页面，所以用户在对话框里
  * 打字时，焦点一直在对话框里。
  *
+ * 画面由预加载直接画进这里的画布（有 GPU 时是共享纹理，60 帧，不经过 React），
+ * 这里只拿「画面多大」来换算点击位置，不会每帧重画界面。
+ *
  * `remoteFrame` 是网页版、手机用的：它们拿的是定时截图，只看不点。
  */
 export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, onForward, onFocusAddress }: {
@@ -27,7 +30,8 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   onForward(): void;
   onFocusAddress(): void;
 }): React.JSX.Element {
-  const [frame, setFrame] = useState<string>();
+  const [info, setInfo] = useState<BrowserSurfaceInfo>();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cursor, setCursor] = useState("default");
   const [proxyAt, setProxyAt] = useState({ x: 0, y: 0 });
   const rootRef = useRef<HTMLDivElement>(null);
@@ -37,22 +41,14 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   const interactive = remoteFrame === undefined;
 
   useEffect(() => {
-    setFrame(undefined);
+    setInfo(undefined);
     viewportRef.current = undefined;
-    if (!interactive) return;
-    let current: string | undefined;
-    const stop = window.coilcoil.onBrowserFrame((next) => {
-      if (next.tabId !== tab.id) return;
+    const canvas = canvasRef.current;
+    if (!interactive || !canvas) return;
+    return window.coilcoil.attachBrowserSurface(tab.id, canvas, (next) => {
       viewportRef.current = next.viewport;
-      const url = URL.createObjectURL(new Blob([next.data as BlobPart], { type: "image/jpeg" }));
-      setFrame(url);
-      if (current) URL.revokeObjectURL(current);
-      current = url;
+      setInfo(next);
     });
-    return () => {
-      stop();
-      if (current) URL.revokeObjectURL(current);
-    };
   }, [interactive, tab.id]);
 
   // 用户点开的网页下拉框：列表由面板画（离屏页面里原生弹层出不来，见 browser-page-selects.ts）。
@@ -207,16 +203,31 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     if (focusedRef.current) send({ kind: "focus", focused: false });
   }, [send]);
 
-  const shown = remoteFrame ?? frame;
+  // 面板大小变了（拖分隔条、窗口缩放）：下拉列表收起，和系统下拉菜单一样，不留在错位的地方。
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!picker || !root) return;
+    let first = true;
+    const observer = new ResizeObserver(() => {
+      if (first) { first = false; return; }
+      choose(null);
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [picker, choose]);
+
   const dialog = tab.dialog;
   const box = rootRef.current?.getBoundingClientRect();
-  const viewport = viewportRef.current;
+  const viewport = info?.viewport;
   const scale = box && viewport ? Math.min(box.width / viewport.width, box.height / viewport.height) : 1;
+  const loading = interactive ? !info : !remoteFrame;
   return (
     <div className={`browser-live-page ${interactive ? "interactive" : ""} ${dialog ? "has-dialog" : ""}`} ref={rootRef}>
-      {shown
-        ? <img className="browser-live-frame" src={shown} alt={tab.title} draggable={false} />
-        : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取页面…</strong></div>}
+      {interactive
+        // 第一帧到之前藏着：切标签时画布里还是上一张页面的画面。
+        ? <canvas ref={canvasRef} className={`browser-live-frame ${info ? "" : "waiting"}`} data-mode={info?.mode} role="img" aria-label={tab.title} />
+        : remoteFrame ? <img className="browser-live-frame" src={remoteFrame} alt={tab.title} draggable={false} /> : null}
+      {loading ? <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取页面…</strong></div> : null}
       {interactive ? (
         <div
           className="browser-live-input"

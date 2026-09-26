@@ -3,10 +3,16 @@ import { driver, openRemoteClient } from "../harness.mjs";
 export const description = "Agent 新开标签页实时跟上：桌面面板开着时不用动手就出现、画面立刻出来；电脑上同时开着网页版、看着别的会话也不受影响；网页版自己也看得到 Agent 的页面";
 export const launchOptions = { remote: true };
 
-/** 面板里显示的是这张 Agent 页的画面（不是「正在读取」，也不是上一张的旧画面）。 */
-const showsAgentPage = (page, title) => page.locator("img.browser-live-frame").evaluate(
-  (img, title) => img.alt === title && Boolean(img.getAttribute("src")) && img.naturalWidth > 0, title,
-).catch(() => false);
+/**
+ * 面板里显示的是这张 Agent 页的画面（不是「正在读取」，也不是上一张的旧画面）。
+ * 桌面画在画布上（画出第一帧后才显示），网页版是定时截图。
+ */
+const showsAgentPage = (page, title) => page.locator(".browser-live-frame").evaluate((element, title) => {
+  if (element instanceof HTMLCanvasElement) {
+    return element.getAttribute("aria-label") === title && Boolean(element.dataset.mode) && !element.classList.contains("waiting") && element.width > 0;
+  }
+  return element.alt === title && Boolean(element.getAttribute("src")) && element.naturalWidth > 0;
+}, title).catch(() => false);
 
 const hasTab = async (ui, label) => (await ui.browserTabs()).some((tab) => tab.label === label && tab.agent);
 

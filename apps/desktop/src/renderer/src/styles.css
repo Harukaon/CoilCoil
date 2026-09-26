@@ -1172,6 +1172,7 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 /* 离屏页面：面板里是它的实时画面，上面盖一层透明的输入层接住鼠标，键盘和输入法落在看不见的焦点代理里。 */
 .browser-live-page { position: absolute; inset: 0; display: flex; flex-direction: column; container-type: size; }
 .browser-live-frame { display: block; flex: 1; min-height: 0; width: 100%; object-fit: contain; object-position: top left; user-select: none; pointer-events: none; }
+.browser-live-frame.waiting { visibility: hidden; }
 .browser-live-input { position: absolute; inset: 0; touch-action: none; }
 /* 焦点代理：看不见、点不到，只负责接键盘和输入法；放在用户点的位置，输入法候选框就出现在那附近。 */
 /* 网页弹的 alert/confirm/prompt：一张卡片挂在页面画面顶上，只挡这张页面；页面在等回答时画面不再接鼠标。 */

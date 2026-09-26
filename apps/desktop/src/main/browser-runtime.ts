@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { app, BrowserWindow, screen, session, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
+import { app, BrowserWindow, screen, session, sharedTexture, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
 import type { BrowserElementSelection, BrowserGuestRoster, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabControl, type BrowserTabOwner } from "./browser-agent-tabs";
 import { captureGuestFrame } from "./browser-capture";
@@ -11,7 +11,8 @@ import { cssCursor, PageInputForwarder, parsePageInput } from "./browser-input";
 import { PageDialogs } from "./browser-page-dialogs";
 import { PageSelects } from "./browser-page-selects";
 import { loadGuestUrl, normalizeBrowserUrl } from "./browser-navigation";
-import { createOffscreenPage, OffscreenFrameStream, resizeOffscreenPage } from "./browser-offscreen";
+import { BrowserSurfaceStream } from "./browser-frame-stream";
+import { createOffscreenPage, resizeOffscreenPage } from "./browser-offscreen";
 import { applyGuestUserAgent, browserIdentityEnvironment, configureBrowserIdentity, installChromeObject } from "./browser-user-agent";
 import {
   DEFAULT_BROWSER_SCOPE_ID as DEFAULT_SCOPE_ID,
@@ -100,10 +101,8 @@ export class BrowserRuntimeManager {
     !this.disposed && this.panelVisible && this.activeTabIds.get(this.uiScopeId) === id && this.tabs.get(id)?.guest === contents);
   /** 每张页面一个：把用户的操作按到达顺序送进去（见 browser-input.ts）。 */
   private readonly inputForwarders = new WeakMap<WebContents, PageInputForwarder>();
-  /** 用户正看着的那张 Agent 标签页的画面，送给界面。 */
-  private readonly frames = new OffscreenFrameStream((frame) => {
-    if (!this.disposed && !this.window.isDestroyed()) this.window.webContents.send("browser:frame", frame);
-  });
+  /** 用户正看着的那张离屏页面的画面，画到面板里（见 browser-frame-stream.ts）。 */
+  private readonly frames: BrowserSurfaceStream;
   private disposed = false;
   /** Correlates renderer-created <webview> guests with tab records. Unused until the switch. */
   private readonly guests = new BrowserGuestRegistry({
@@ -138,6 +137,13 @@ export class BrowserRuntimeManager {
     /** 在 App 窗口里弹出网页的右键菜单（菜单本身由主进程入口搭，和 <webview> 的是同一份）。 */
     private readonly showPageContextMenu: (contents: WebContents, params: Electron.ContextMenuParams) => void = () => {},
   ) {
+    this.frames = new BrowserSurfaceStream(window.webContents, {
+      textures: sharedTexture,
+      viewportOf: (contents) => {
+        const [width, height] = BrowserWindow.fromWebContents(contents)?.getContentSize() ?? [0, 0];
+        return { width, height };
+      },
+    });
     this.cdp = new BrowserCdpBridge({
       onAgentActivated: (scopeId) => this.onAgentActivated(scopeId),
       ensureActiveTab: (scopeId) => this.ensureAgentTab(scopeId),
@@ -463,7 +469,7 @@ export class BrowserRuntimeManager {
    * 从用户那边接管过来的，这一步就是把页面状态恢复进来——恢复只肯往没加载过的页面里恢复。
    */
   private async attachOffscreen(tab: BrowserTab, history?: { entries: Electron.NavigationEntry[]; index: number }): Promise<void> {
-    const page = createOffscreenPage(tab.partition, this.offscreenSize(tab));
+    const page = createOffscreenPage(tab.partition, this.offscreenSize(tab), (contents, texture, image) => this.frames.paint(tab.id, contents, texture, image));
     if (tab.phase === "closing" || !this.tabs.has(tab.id)) {
       page.destroy();
       throw new Error("标签页已关闭。");
@@ -1068,7 +1074,7 @@ export class BrowserRuntimeManager {
     if (this.disposed) return;
     this.disposed = true;
     this.elementPicker.cancel();
-    this.frames.stop();
+    this.frames.dispose();
     this.guests.dispose();
     if (!this.window.isDestroyed()) {
       this.window.webContents.off("did-start-navigation", this.handleHostNavigation);
