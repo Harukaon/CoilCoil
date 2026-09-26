@@ -1169,29 +1169,31 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .browser-toolbar input { min-width: 0; height: 25px; flex: 1; padding: 0 9px; border: 1px solid hsl(var(--th) var(--ts) var(--l-865)); border-radius: var(--radius-lg); outline: 0; color: hsl(var(--th) var(--ts) var(--l-324)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 8px; }
 .browser-toolbar input:focus { border-color: hsl(var(--th) var(--ts) var(--l-735)); box-shadow: 0 0 0 2px rgb(110 130 106 / 10%); }
 .browser-native-host { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: hsl(var(--th) var(--ts) var(--l-1000)); }
-/* 归 Agent 的标签页：离屏页面的画面，只能看；底下一条说明和「接管」按钮。 */
-.browser-agent-view { position: absolute; inset: 0; display: flex; flex-direction: column; container-type: size; }
-.browser-agent-frame { display: block; flex: 1; min-height: 0; width: 100%; object-fit: contain; object-position: top left; user-select: none; pointer-events: none; }
-/* Agent 在用这页时的存在感：流动的渐变描边 + 接管按钮后面一团呼吸的渐变光晕，底部模糊。颜色只放在光里，提示条保持黑白。 */
+/* 离屏页面：面板里是它的实时画面，上面盖一层透明的输入层接住鼠标，键盘和输入法落在看不见的焦点代理里。 */
+.browser-live-page { position: absolute; inset: 0; display: flex; flex-direction: column; container-type: size; }
+.browser-live-frame { display: block; flex: 1; min-height: 0; width: 100%; object-fit: contain; object-position: top left; user-select: none; pointer-events: none; }
+.browser-live-input { position: absolute; inset: 0; touch-action: none; }
+/* 焦点代理：看不见、点不到，只负责接键盘和输入法；放在用户点的位置，输入法候选框就出现在那附近。 */
+.browser-live-proxy { position: absolute; width: 1px; height: 1em; padding: 0; margin: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; caret-color: transparent; background: transparent; pointer-events: none; font-size: 16px; line-height: 1; }
+/* Agent 在用这页时的存在感：流动的渐变描边 + 提示条后面一团呼吸的渐变光晕，底部模糊。颜色只放在光里，提示条保持黑白。
+   都不挡操作；用户把鼠标移到页面上、或者正在页面里打字时，底部的光、模糊和提示条淡出，只留描边。 */
 @property --agent-angle { syntax: "<angle>"; inherits: true; initial-value: 0deg; }
 .browser-agent-presence { --agent-hues: #4f7bff, #9b5cff, #ff5caa, #ffb84d, #4f7bff; position: absolute; inset: 0; overflow: hidden; pointer-events: none; animation: agent-turn 7s linear infinite; }
 .browser-agent-ring { position: absolute; inset: 0; box-shadow: inset 0 0 28px 2px rgb(155 92 255 / 28%); animation: agent-breathe 3.2s ease-in-out infinite; }
 .browser-agent-ring::before { content: ""; position: absolute; inset: 0; padding: 3px; background: conic-gradient(from var(--agent-angle), var(--agent-hues)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
-.browser-agent-veil { position: absolute; left: 0; right: 0; bottom: 0; height: min(40%, 240px); backdrop-filter: blur(10px) saturate(1.1); -webkit-mask: linear-gradient(to top, #000 35%, transparent); mask: linear-gradient(to top, #000 35%, transparent); }
-.browser-agent-glow { position: absolute; left: 50%; bottom: -150px; width: min(560px, 110%); aspect-ratio: 1; border-radius: 50%; background: conic-gradient(from var(--agent-angle), var(--agent-hues)); filter: blur(48px); opacity: .7; transform: translateX(-50%) scale(1); animation: agent-glow 3.2s ease-in-out infinite; }
+.browser-agent-veil { position: absolute; left: 0; right: 0; bottom: 0; height: min(40%, 240px); backdrop-filter: blur(10px) saturate(1.1); -webkit-mask: linear-gradient(to top, #000 35%, transparent); mask: linear-gradient(to top, #000 35%, transparent); transition: opacity .25s ease; }
+.browser-agent-glow { transition: opacity .25s ease; position: absolute; left: 50%; bottom: -150px; width: min(560px, 110%); aspect-ratio: 1; border-radius: 50%; background: conic-gradient(from var(--agent-angle), var(--agent-hues)); filter: blur(48px); opacity: .7; transform: translateX(-50%) scale(1); animation: agent-glow 3.2s ease-in-out infinite; }
 @keyframes agent-turn { to { --agent-angle: 360deg; } }
 @keyframes agent-breathe { 0%, 100% { opacity: .65; } 50% { opacity: 1; } }
 @keyframes agent-glow { 0%, 100% { opacity: .5; transform: translateX(-50%) scale(.86); } 50% { opacity: .85; transform: translateX(-50%) scale(1.04); } }
-.browser-agent-bar { position: absolute; left: 50%; bottom: 18px; display: flex; align-items: center; gap: 8px; padding: 5px 5px 5px 14px; transform: translateX(-50%); border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-247) / 92%); backdrop-filter: blur(12px); box-shadow: 0 8px 28px hsl(0 0% 0% / 24%), 0 0 0 1px hsl(0 0% 100% / 10%) inset; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.browser-agent-bar { pointer-events: none; transition: opacity .25s ease; position: absolute; left: 50%; bottom: 18px; display: flex; align-items: center; gap: 8px; padding: 7px 14px; transform: translateX(-50%); border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-247) / 92%); backdrop-filter: blur(12px); box-shadow: 0 8px 28px hsl(0 0% 0% / 24%), 0 0 0 1px hsl(0 0% 100% / 10%) inset; font-size: 13px; font-weight: 500; white-space: nowrap; }
 .browser-agent-pulse { position: relative; width: 8px; height: 8px; border-radius: 50%; background: conic-gradient(#4f7bff, #9b5cff, #ff5caa, #ffb84d, #4f7bff); }
 .browser-agent-pulse::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: #9b5cff; animation: agent-pulse 1.6s ease-out infinite; }
 @keyframes agent-pulse { from { opacity: .7; transform: scale(1); } to { opacity: 0; transform: scale(2.8); } }
-.browser-agent-bar button { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; padding: 6px 14px; border: 0; border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-247)); background: hsl(var(--th) var(--ts) var(--l-1000)); font: inherit; font-weight: 600; cursor: pointer; transition: transform .12s ease; }
-.browser-agent-bar button:hover:not(:disabled) { transform: scale(1.04); }
-.browser-agent-bar button:focus-visible { outline: 2px solid #9b5cff; outline-offset: 2px; }
-.browser-agent-bar button:disabled { opacity: .6; cursor: default; }
-/* 面板很窄时（比如拉到最小 200px）提示条放不下文字，只留呼吸圆点和「接管」。 */
-@container (max-width: 300px) { .browser-agent-bar .browser-agent-label { display: none; } .browser-agent-bar { padding-left: 12px; } }
+.browser-live-page.interactive:hover .browser-agent-veil, .browser-live-page.interactive:hover .browser-agent-glow, .browser-live-page.interactive:hover .browser-agent-bar,
+.browser-live-page:focus-within .browser-agent-veil, .browser-live-page:focus-within .browser-agent-glow, .browser-live-page:focus-within .browser-agent-bar { opacity: 0; animation-play-state: paused; }
+/* 面板很窄时（比如拉到最小 200px）提示条放不下文字，只留呼吸圆点。 */
+@container (max-width: 300px) { .browser-agent-bar .browser-agent-label { display: none; } .browser-agent-bar { padding: 7px; } }
 @media (prefers-reduced-motion: reduce) {
   .browser-agent-presence, .browser-agent-ring, .browser-agent-glow, .browser-agent-pulse::after { animation: none; }
 }

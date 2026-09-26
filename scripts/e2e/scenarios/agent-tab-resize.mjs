@@ -9,7 +9,7 @@ const offscreenSize = (app) => app.evaluate(({ BrowserWindow }) => {
 });
 
 /** 面板里放 Agent 画面的那块区域有多大。 */
-const viewSize = (page) => page.locator(".browser-agent-view").evaluate((element) => {
+const viewSize = (page) => page.locator(".browser-live-page").evaluate((element) => {
   const rect = element.getBoundingClientRect();
   return { width: Math.round(rect.width), height: Math.round(rect.height) };
 });
@@ -25,7 +25,7 @@ const sameSize = (a, b) => Boolean(a && b) && Math.abs(a.width - b.width) <= 1 &
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
   await ui.send([{ tool: "browser_open", args: { url: site.url("form.html") } }, { echo: true }], "尺寸");
-  const frame = page.locator("img.browser-agent-frame");
+  const frame = page.locator("img.browser-live-frame");
   check("面板里显示 Agent 页面的画面", await ui.waitFor(async () => ((await frame.getAttribute("src").catch(() => null)) ?? "").startsWith("blob:")));
   check("一开始离屏页面和面板一样大", await ui.waitFor(async () => sameSize(await offscreenSize(app), await viewSize(page))),
     JSON.stringify({ offscreen: await offscreenSize(app), view: await viewSize(page) }));

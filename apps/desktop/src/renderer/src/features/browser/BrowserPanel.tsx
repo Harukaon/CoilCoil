@@ -6,8 +6,8 @@ import { isRemoteClient } from "../../hooks/useMobileRemote";
 import { platformComputerLabel, rendererPlatform } from "../../platform";
 import { visibleBrowserTabs } from "../inspector/inspectorTabs";
 import { toastError } from "../../ui/toast";
-import { AgentPageView } from "./AgentPageView";
 import { BrowserDataMenu } from "./BrowserDataMenu";
+import { LivePageSurface } from "./LivePageSurface";
 import { setGuestPlacement } from "./guestLayer";
 
 /** Fast enough to follow the agent clicking through a page, cheap enough to stream. */
@@ -33,6 +33,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   const [picking, setPicking] = useState(false);
   const pickRequestRef = useRef(0);
   const hostRef = useRef<HTMLDivElement>(null);
+  const addressRef = useRef<HTMLInputElement>(null);
   // 网页版不管窗口多宽都不是桌面窗口：放不了 <webview>，也收不到画面推送，只能按截图看
   // Mac 上的页面。以前只按手机宽度判断，电脑上开网页版时 Agent 的页面一直「正在读取」。
   const remote = isRemoteClient();
@@ -48,8 +49,6 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   useEffect(() => setAddress(activeTab?.url === "about:blank" ? "" : activeTab?.url ?? ""), [activeTab?.id, activeTab?.url]);
 
   const activeTabId = activeTab?.id;
-  // 归 Agent 的标签页只能看：地址栏、前进后退这些都要先接管。
-  const agentTab = activeTab?.agent === true;
 
   useEffect(() => {
     pickRequestRef.current += 1;
@@ -141,7 +140,6 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
 
   const submitAddress = (event: React.FormEvent): void => {
     event.preventDefault();
-    if (agentTab) return;
     void apply(window.coilcoil.navigateBrowser(scopeId, address));
   };
 
@@ -167,10 +165,10 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   return (
     <section className="browser-panel">
       <form className="browser-toolbar no-drag" onSubmit={submitAddress}>
-        <button type="button" aria-label="后退" disabled={agentTab || !activeTab?.canGoBack} onClick={() => apply(window.coilcoil.browserBack(scopeId))}><ArrowLeft size={13} /></button>
-        <button type="button" aria-label="前进" disabled={agentTab || !activeTab?.canGoForward} onClick={() => apply(window.coilcoil.browserForward(scopeId))}><ArrowRight size={13} /></button>
-        <button type="button" aria-label="刷新网页" disabled={agentTab || !activeTab} onClick={() => apply(window.coilcoil.reloadBrowser(scopeId))}><RotateCw size={12} /></button>
-        <input aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} readOnly={agentTab} onChange={(event) => setAddress(event.target.value)} />
+        <button type="button" aria-label="后退" disabled={!activeTab?.canGoBack} onClick={() => apply(window.coilcoil.browserBack(scopeId))}><ArrowLeft size={13} /></button>
+        <button type="button" aria-label="前进" disabled={!activeTab?.canGoForward} onClick={() => apply(window.coilcoil.browserForward(scopeId))}><ArrowRight size={13} /></button>
+        <button type="button" aria-label="刷新网页" disabled={!activeTab} onClick={() => apply(window.coilcoil.reloadBrowser(scopeId))}><RotateCw size={12} /></button>
+        <input ref={addressRef} aria-label="网页地址" value={address} placeholder="输入网址或搜索内容" spellCheck={false} onChange={(event) => setAddress(event.target.value)} />
         {remote ? null : (
           <button
             className={`browser-element-picker ${picking ? "active" : ""}`}
@@ -178,7 +176,7 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
             aria-label={picking ? "取消选择网页元素" : "选择网页元素"}
             aria-pressed={picking}
             title={picking ? "取消选择" : "选择页面元素并附加到对话"}
-            disabled={agentTab || !activeTab || activeTab.loading}
+            disabled={!activeTab || activeTab.loading}
             onClick={toggleElementPicker}
           >
             <MousePointer2 size={13} />
@@ -207,15 +205,21 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
       </form>
       <div className={`browser-native-host ${remote ? "browser-remote-host" : ""}`} ref={hostRef}>
         {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => apply(window.coilcoil.createBrowserTab(scopeId))}>新建标签页</button></div> : null}
-        {activeTab && agentTab ? (
-          <AgentPageView
+        {/* Agent 开的页面是离屏页面：面板里显示它的画面，用户直接在画面上点、打字，和
+            Agent 用的是同一个页面。 */}
+        {activeTab?.agent ? (
+          <LivePageSurface
             key={activeTab.id}
             tab={activeTab}
+            scopeId={scopeId}
             remoteFrame={remote ? frame ?? "" : undefined}
-            onTakeOver={() => apply(window.coilcoil.takeOverBrowserTab(scopeId, activeTab.id))}
+            onReload={() => void apply(window.coilcoil.reloadBrowser(scopeId))}
+            onBack={() => void apply(window.coilcoil.browserBack(scopeId))}
+            onForward={() => void apply(window.coilcoil.browserForward(scopeId))}
+            onFocusAddress={() => { addressRef.current?.focus(); addressRef.current?.select(); }}
           />
         ) : null}
-        {remote && activeTab && !agentTab ? (
+        {remote && activeTab && !activeTab.agent ? (
           frame
             ? <img className="browser-remote-frame" src={frame} alt={activeTab.title} />
             : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取 {platformLabel} 上的页面…</strong></div>

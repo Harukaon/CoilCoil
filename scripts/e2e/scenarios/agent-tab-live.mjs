@@ -4,7 +4,7 @@ export const description = "Agent 新开标签页实时跟上：桌面面板开�
 export const launchOptions = { remote: true };
 
 /** 面板里显示的是这张 Agent 页的画面（不是「正在读取」，也不是上一张的旧画面）。 */
-const showsAgentPage = (page, title) => page.locator("img.browser-agent-frame").evaluate(
+const showsAgentPage = (page, title) => page.locator("img.browser-live-frame").evaluate(
   (img, title) => img.alt === title && Boolean(img.getAttribute("src")) && img.naturalWidth > 0, title,
 ).catch(() => false);
 
