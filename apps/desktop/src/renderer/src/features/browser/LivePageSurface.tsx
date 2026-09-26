@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserInputModifiers, BrowserPageInput, BrowserSelectPicker, BrowserSurfaceInfo, BrowserTabSnapshot } from "../../../../shared/desktop-api";
 import { rendererPlatform } from "../../platform";
 import { PageDialog } from "./PageDialog";
+import { PageFindBar } from "./PageFindBar";
 import { PageSelectPicker } from "./PageSelectPicker";
 
 /**
@@ -51,6 +52,22 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     });
   }, [interactive, tab.id]);
 
+  // 页面内查找（⌘F）：查找栏开着吗、最近一次的结果。
+  const [findOpen, setFindOpen] = useState(false);
+  const [findResult, setFindResult] = useState<{ matches: number; active: number }>();
+  const find = useCallback((text: string, forward: boolean, newSearch: boolean): void => {
+    if (newSearch) setFindResult(undefined);
+    window.coilcoil.findInBrowserPage(scopeId, tab.id, text ? { text, forward, newSearch } : { stop: true });
+  }, [scopeId, tab.id]);
+  const closeFind = useCallback((): void => {
+    setFindOpen(false);
+    setFindResult(undefined);
+    window.coilcoil.findInBrowserPage(scopeId, tab.id, { stop: true });
+    proxyRef.current?.focus({ preventScroll: true });
+  }, [scopeId, tab.id]);
+  // 换了标签页（这个组件按标签页重建）或组件收起时，清掉那张页面上的高亮。
+  useEffect(() => () => window.coilcoil.findInBrowserPage(scopeId, tab.id, { stop: true }), [scopeId, tab.id]);
+
   // 用户点开的网页下拉框：列表由面板画（离屏页面里原生弹层出不来，见 browser-page-selects.ts）。
   const [picker, setPicker] = useState<BrowserSelectPicker>();
   const pickerRef = useRef<BrowserSelectPicker | undefined>(undefined);
@@ -63,6 +80,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     const stop = window.coilcoil.onBrowserPageEvent((event) => {
       if (event.tabId !== tab.id) return;
       if (event.kind === "cursor") setCursor(event.cursor);
+      else if (event.kind === "find") setFindResult({ matches: event.matches, active: event.active });
       else if (event.kind === "select") {
         if (event.picker && document.activeElement !== proxyRef.current) {
           void window.coilcoil.chooseBrowserSelect(scopeId, tab.id, event.picker.id, null).catch(() => undefined);
@@ -195,7 +213,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     return () => root.removeEventListener("wheel", onWheel);
   }, [choose, flushMove, interactive, pagePoint, send]);
 
-  const keyboard = useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress });
+  const keyboard = useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress, onFind: () => setFindOpen(true) });
 
   // 用户点回 App 别处（焦点代理失焦）或者这张页面不再显示：告诉页面它失焦了。
   const focusedRef = useRef(false);
@@ -259,6 +277,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
           {...keyboard}
         />
       ) : null}
+      {findOpen && interactive ? <PageFindBar result={findResult} onFind={find} onClose={closeFind} /> : null}
       {picker && box ? (
         <PageSelectPicker key={picker.id} picker={picker} scale={scale} bounds={{ width: box.width, height: box.height }} onChoose={choose} />
       ) : null}
@@ -316,12 +335,14 @@ function isAppShortcut(event: React.KeyboardEvent, mac: boolean): boolean {
  * - 菜单栏「编辑」里的复制粘贴会落在焦点代理上，转成对页面的复制粘贴；按 ⌘C 这类
  *   快捷键时已经随按键送过，菜单那一下就不再送第二遍。
  */
-function useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress }: {
+function useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress, onFind }: {
   send(input: BrowserPageInput): void;
   onReload(): void;
   onBack(): void;
   onForward(): void;
   onFocusAddress(): void;
+  /** ⌘F / Ctrl+F：打开面板的查找栏。 */
+  onFind(): void;
 }): Pick<React.TextareaHTMLAttributes<HTMLTextAreaElement>,
   "onKeyDown" | "onKeyUp" | "onCompositionUpdate" | "onCompositionEnd" | "onInput" | "onCopy" | "onCut" | "onPaste" | "onBeforeInput"> {
   const mac = rendererPlatform() === "darwin";
@@ -345,7 +366,7 @@ function useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress 
       const mod = mac ? event.metaKey : event.ctrlKey;
       if (mod && !event.altKey && !event.shiftKey) {
         const key = event.key.toLowerCase();
-        const panel = key === "l" ? onFocusAddress : key === "r" ? onReload : key === "[" ? onBack : key === "]" ? onForward : undefined;
+        const panel = key === "l" ? onFocusAddress : key === "r" ? onReload : key === "[" ? onBack : key === "]" ? onForward : key === "f" ? onFind : undefined;
         if (panel) {
           event.preventDefault();
           event.stopPropagation();

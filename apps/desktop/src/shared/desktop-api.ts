@@ -243,7 +243,12 @@ export type BrowserPageEvent =
   /** 鼠标指到的地方该显示什么光标，已经是 CSS 的 cursor 值。 */
   | { tabId: string; kind: "cursor"; cursor: string }
   /** 用户点开了一个下拉框。 */
-  | { tabId: string; kind: "select"; picker: BrowserSelectPicker | null };
+  | { tabId: string; kind: "select"; picker: BrowserSelectPicker | null }
+  /** 页面内查找的结果：一共几处、现在是第几处（从 1 数）。 */
+  | { tabId: string; kind: "find"; matches: number; active: number };
+
+/** 页面内查找：换了要找的字就从头找（newSearch），回车是找下一处（forward 为 false 是上一处）。 */
+export type BrowserFindRequest = { text: string; forward: boolean; newSearch: boolean } | { stop: true };
 
 
 /** Visible size of the browser panel, so agents see the viewport the user sees. */
@@ -574,6 +579,8 @@ export interface CoilCoilDesktopApi {
   replyBrowserDialog(scopeId: string, tabId: string, dialogId: string, accept: boolean, text?: string): Promise<void>;
   /** 在面板画的下拉框列表里选了第几项；null 是没选就关掉了。 */
   chooseBrowserSelect(scopeId: string, tabId: string, pickerId: string, index: number | null): Promise<void>;
+  /** 页面内查找（面板的查找栏）；结果从 onBrowserPageEvent 的 find 事件回来。网页版没有。 */
+  findInBrowserPage(scopeId: string, tabId: string, request: BrowserFindRequest): void;
   onBrowserPageEvent(listener: (event: BrowserPageEvent) => void): () => void;
   getTerminalSessions(): Promise<TerminalSessionSnapshot[]>;
   /** Always opens another shell: each one gets its own inspector tab. */

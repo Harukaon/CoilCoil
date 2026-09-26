@@ -1189,6 +1189,13 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .browser-select-option.active { background: hsl(var(--th) var(--ts) var(--l-925)); }
 .browser-select-option.disabled { opacity: .45; }
 .browser-select-check { display: inline-grid; place-items: center; width: 14px; flex: none; }
+/* 页面内查找（⌘F）：右上角一条小栏，和 App 的浮层一个样子。 */
+.browser-find-bar { position: absolute; top: 8px; right: 12px; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 3px 3px 3px 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-178)); background: hsl(var(--th) var(--ts) var(--l-976)); box-shadow: 0 8px 24px rgb(26 26 23 / 14%), 0 2px 6px rgb(26 26 23 / 6%); font-size: 12px; }
+.browser-find-bar input { width: min(180px, 36cqw); min-width: 80px; border: 0; outline: none; color: inherit; background: transparent; font-size: 12px; }
+.browser-find-count { min-width: 40px; padding: 0 4px; color: hsl(var(--th) var(--ts) var(--l-588)); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.browser-find-bar button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-355)); background: transparent; cursor: pointer; }
+.browser-find-bar button:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-925)); }
+.browser-find-bar button:disabled { opacity: .4; cursor: default; }
 .browser-live-proxy { position: absolute; width: 1px; height: 1em; padding: 0; margin: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; caret-color: transparent; background: transparent; pointer-events: none; font-size: 16px; line-height: 1; }
 /* Agent 在用这页时的存在感：流动的渐变描边 + 提示条后面一团呼吸的渐变光晕，底部模糊。颜色只放在光里，提示条保持黑白。
    都不挡操作；用户把鼠标移到页面上、或者正在页面里打字时，底部的光、模糊和提示条淡出，只留描边。 */

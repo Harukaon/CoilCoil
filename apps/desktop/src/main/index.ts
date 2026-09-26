@@ -163,6 +163,7 @@ const BROWSER_DATA_CLEAR_CHANNEL = "browser:data-clear";
 const BROWSER_INPUT_CHANNEL = "browser:input";
 const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
 const BROWSER_SELECT_CHOOSE_CHANNEL = "browser:select-choose";
+const BROWSER_FIND_CHANNEL = "browser:find";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_DATA_CHANNEL = "terminal:data";
 const TERMINAL_GET_CHANNEL = "terminal:get";
@@ -1265,6 +1266,10 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(BROWSER_DIALOG_REPLY_CHANNEL, (event, scopeId: unknown, tabId: unknown, dialogId: unknown, accept: unknown, text: unknown): void => {
     browserFor(event).replyDialog(String(scopeId), String(tabId), String(dialogId), accept === true, String(text ?? ""));
+  });
+  // 查找栏打一个字搜一次，走单向消息；内容由运行时核对。
+  ipcMain.on(BROWSER_FIND_CHANNEL, (event, scopeId: unknown, tabId: unknown, request: unknown) => {
+    browserRuntimes.get(event.sender.id)?.findInPage(String(scopeId), String(tabId), request);
   });
   ipcMain.handle(BROWSER_SELECT_CHOOSE_CHANNEL, (event, scopeId: unknown, tabId: unknown, pickerId: unknown, index: unknown): Promise<void> =>
     browserFor(event).chooseSelect(String(scopeId), String(tabId), String(pickerId), typeof index === "number" && Number.isFinite(index) ? index : null));

@@ -11,6 +11,7 @@ import {
   keyText,
   macEditingCommands,
   mouseInputEvent,
+  parseFindRequest,
   parsePageInput,
   PageInputForwarder,
   wheelInputEvent,
@@ -207,4 +208,13 @@ test("网页要的光标换成 CSS 写法，认不出来的当默认箭头", () 
   assert.equal(cssCursor("text"), "text");
   assert.equal(cssCursor("nodrop"), "no-drop");
   assert.equal(cssCursor("something-new"), "default");
+});
+
+test("查找栏送来的请求逐项核对", () => {
+  assert.deepEqual(parseFindRequest({ text: "apple", forward: true, newSearch: true }), { text: "apple", forward: true, newSearch: true });
+  assert.deepEqual(parseFindRequest({ stop: true, text: "ignored" }), { stop: true });
+  assert.equal(parseFindRequest({ text: 42, forward: true, newSearch: true }), undefined);
+  assert.equal(parseFindRequest({ text: "a", forward: "yes", newSearch: true }), undefined);
+  assert.equal(parseFindRequest({ text: "x".repeat(1001), forward: true, newSearch: true }), undefined);
+  assert.equal(parseFindRequest(undefined), undefined);
 });

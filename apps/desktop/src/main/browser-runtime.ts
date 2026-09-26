@@ -8,7 +8,7 @@ import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserElementPicker } from "./browser-element-picker";
 import { fillSavedCredentials } from "./browser-import";
-import { cssCursor, PageInputForwarder, parsePageInput } from "./browser-input";
+import { cssCursor, PageInputForwarder, parseFindRequest, parsePageInput } from "./browser-input";
 import { PageDialogs } from "./browser-page-dialogs";
 import { isPrintRequest, PageRequests } from "./browser-page-requests";
 import { PageSelects } from "./browser-page-selects";
@@ -727,6 +727,9 @@ export class BrowserRuntimeManager {
     contents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
       if (mainFrame && !inPlace) this.inputForwarders.get(contents)?.reset();
     });
+    contents.on("found-in-page", (_event, result) => {
+      this.publishPageEvent({ tabId: tab.id, kind: "find", matches: result.matches, active: result.activeMatchOrdinal });
+    });
     contents.on("cursor-changed", (_event, type, image, _scale, _size, hotspot) => {
       this.publishPageEvent({ tabId: tab.id, kind: "cursor", cursor: cssCursor(type, image, hotspot) });
     });
@@ -745,6 +748,21 @@ export class BrowserRuntimeManager {
     if (index !== null && (scopeId !== this.uiScopeId || !this.panelVisible || this.activeTabIds.get(scopeId) !== tabId)) return;
     tab.userInputAt = Date.now();
     await this.selects.choose(tabId, pickerId, index);
+  }
+
+  /** 用户在面板的查找栏里搜：只在桌面窗口正显示的那张页面里找，结果推回面板。 */
+  findInPage(scopeId: string, tabId: string, raw: unknown): void {
+    const request = parseFindRequest(raw);
+    const tab = this.tabs.get(tabId);
+    const contents = tab?.guest;
+    if (!request || !tab || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || !contents || contents.isDestroyed()) return;
+    if ("stop" in request || !request.text) {
+      contents.stopFindInPage("keepSelection");
+      this.publishPageEvent({ tabId, kind: "find", matches: 0, active: 0 });
+      return;
+    }
+    // Electron 的 findNext 意思是「开始一次新的查找」：换了字时为 true，找下一处时为 false。
+    contents.findInPage(request.text, { forward: request.forward, findNext: request.newSearch });
   }
 
   /** 用户在面板里回答网页弹的对话框。只认桌面窗口或网页版正看着的那个会话里的标签页。 */

@@ -1,5 +1,5 @@
 import type { InputEvent, MouseInputEvent, MouseWheelInputEvent, NativeImage, WebContents } from "electron";
-import type { BrowserInputModifiers, BrowserPageInput } from "../shared/desktop-api";
+import type { BrowserFindRequest, BrowserInputModifiers, BrowserPageInput } from "../shared/desktop-api";
 
 /**
  * 把用户在面板里对网页的操作，原样送进那张离屏页面。
@@ -320,6 +320,16 @@ export function parsePageInput(value: unknown): BrowserPageInput | undefined {
     default:
       return undefined;
   }
+}
+
+/** 查找栏送来的请求也逐项核对。 */
+export function parseFindRequest(value: unknown): BrowserFindRequest | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const request = value as Record<string, unknown>;
+  if (request.stop === true) return { stop: true };
+  if (typeof request.text !== "string" || request.text.length > 1000) return undefined;
+  if (typeof request.forward !== "boolean" || typeof request.newSearch !== "boolean") return undefined;
+  return { text: request.text, forward: request.forward, newSearch: request.newSearch };
 }
 
 /** 坐标只能落在页面里：画面边上拖出去的那一截，贴在边上。 */
