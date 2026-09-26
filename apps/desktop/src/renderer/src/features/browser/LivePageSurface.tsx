@@ -34,7 +34,9 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   const [info, setInfo] = useState<BrowserSurfaceInfo>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cursor, setCursor] = useState("default");
-  const [proxyAt, setProxyAt] = useState({ x: 0, y: 0 });
+  // 焦点代理（接键盘的隐形输入框）在画面上的位置：输入法候选框总出现在它旁边。
+  const [proxyAt, setProxyAt] = useState({ x: 0, y: 0, height: 16 });
+  const composingRef = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const proxyRef = useRef<HTMLTextAreaElement>(null);
   /** 最近一帧画的页面有多大：用户点画面上哪儿，按这一帧换算成页面上的位置。 */
@@ -116,6 +118,33 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     window.coilcoil.sendBrowserInput(scopeId, tab.id, input);
   }, [scopeId, tab.id]);
 
+  // 输入法候选框跟着页面里的光标走：点完、按完键、输完一段字之后问一下页面光标在哪儿，
+  // 把焦点代理挪过去。问不到（没在能打字的地方、跨源内嵌页）就留在用户点的地方；
+  // 正在组字时不挪，候选框不跳。
+  const caretTimer = useRef(0);
+  const caretAsk = useRef(0);
+  const followCaret = useCallback((delay: number): void => {
+    window.clearTimeout(caretTimer.current);
+    caretTimer.current = window.setTimeout(() => {
+      const ask = ++caretAsk.current;
+      void window.coilcoil.readBrowserCaret(scopeId, tab.id).then((caret) => {
+        const root = rootRef.current;
+        const viewport = viewportRef.current;
+        if (ask !== caretAsk.current || composingRef.current || !caret || !root || !viewport) return;
+        const box = root.getBoundingClientRect();
+        const scale = Math.min(box.width / viewport.width, box.height / viewport.height);
+        if (!Number.isFinite(scale) || scale <= 0) return;
+        const height = Math.max(8, Math.min(96, caret.height * scale));
+        setProxyAt({
+          x: Math.max(0, Math.min(box.width - 1, caret.x * scale)),
+          y: Math.max(0, Math.min(box.height - height, caret.y * scale)),
+          height,
+        });
+      }).catch(() => undefined);
+    }, delay);
+  }, [scopeId, tab.id]);
+  useEffect(() => () => window.clearTimeout(caretTimer.current), []);
+
   /**
    * 画面上的一点对应页面上的哪一点。
    *
@@ -172,7 +201,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     if (root) {
       const box = root.getBoundingClientRect();
       // 输入法的候选框跟着焦点代理走，放在用户点的地方，候选框就出现在他打字的位置附近。
-      setProxyAt({ x: Math.max(0, event.clientX - box.left), y: Math.max(0, event.clientY - box.top) });
+      setProxyAt({ x: Math.max(0, event.clientX - box.left), y: Math.max(0, event.clientY - box.top), height: 16 });
     }
     proxyRef.current?.focus({ preventScroll: true });
     sendButton(event, "down");
@@ -208,12 +237,23 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
       // 按行、按页滚的鼠标（deltaMode 1、2）换成像素，页面里的滚动距离才对。
       const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? root.clientHeight : 1;
       send({ kind: "wheel", ...point, deltaX: event.deltaX * unit, deltaY: event.deltaY * unit, modifiers: modifiersOf(event) });
+      // 页面滚了，光标在画面上的位置也跟着变。
+      if (document.activeElement === proxyRef.current) followCaret(250);
     };
     root.addEventListener("wheel", onWheel, { passive: false });
     return () => root.removeEventListener("wheel", onWheel);
-  }, [choose, flushMove, interactive, pagePoint, send]);
+  }, [choose, flushMove, followCaret, interactive, pagePoint, send]);
 
-  const keyboard = useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress, onFind: () => setFindOpen(true) });
+  const keyboard = useSurfaceKeyboard({
+    send,
+    composing: composingRef,
+    onCaretMoved: () => followCaret(60),
+    onReload,
+    onBack,
+    onForward,
+    onFocusAddress,
+    onFind: () => setFindOpen(true),
+  });
 
   // 用户点回 App 别处（焦点代理失焦）或者这张页面不再显示：告诉页面它失焦了。
   const focusedRef = useRef(false);
@@ -257,6 +297,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
           onMouseUp={(event) => {
             if (dismissedButton.current === event.button) { dismissedButton.current = undefined; return; }
             sendButton(event, "up");
+            followCaret(50);
           }}
           onContextMenu={(event) => event.preventDefault()}
         />
@@ -265,14 +306,14 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
         <textarea
           ref={proxyRef}
           className="browser-live-proxy"
-          style={{ left: proxyAt.x, top: proxyAt.y }}
+          style={{ left: proxyAt.x, top: proxyAt.y, fontSize: proxyAt.height }}
           aria-label={`网页：${tab.title}`}
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
           tabIndex={-1}
-          onFocus={() => { focusedRef.current = true; send({ kind: "focus", focused: true }); }}
+          onFocus={() => { focusedRef.current = true; send({ kind: "focus", focused: true }); followCaret(50); }}
           onBlur={() => { focusedRef.current = false; send({ kind: "focus", focused: false }); }}
           {...keyboard}
         />
@@ -335,8 +376,12 @@ function isAppShortcut(event: React.KeyboardEvent, mac: boolean): boolean {
  * - 菜单栏「编辑」里的复制粘贴会落在焦点代理上，转成对页面的复制粘贴；按 ⌘C 这类
  *   快捷键时已经随按键送过，菜单那一下就不再送第二遍。
  */
-function useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress, onFind }: {
+function useSurfaceKeyboard({ send, composing, onCaretMoved, onReload, onBack, onForward, onFocusAddress, onFind }: {
   send(input: BrowserPageInput): void;
+  /** 正在组字吗：面板这边也要知道，组字时不挪候选框。 */
+  composing: React.MutableRefObject<boolean>;
+  /** 按完键、输完一段字：页面里的光标可能挪了。 */
+  onCaretMoved(): void;
   onReload(): void;
   onBack(): void;
   onForward(): void;
@@ -347,7 +392,6 @@ function useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress,
   "onKeyDown" | "onKeyUp" | "onCompositionUpdate" | "onCompositionEnd" | "onInput" | "onCopy" | "onCut" | "onPaste" | "onBeforeInput"> {
   const mac = rendererPlatform() === "darwin";
   const pressed = useRef(new Set<string>());
-  const composing = useRef(false);
   /** 刚随按键送过的编辑命令，菜单栏紧跟着再触发一次时不重复送。 */
   const recentEdit = useRef<{ command: string; at: number } | undefined>(undefined);
 
@@ -408,6 +452,7 @@ function useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress,
         repeat: false,
         modifiers: modifiersOf(event),
       });
+      onCaretMoved();
     },
     onCompositionUpdate: (event) => {
       composing.current = true;
@@ -419,6 +464,7 @@ function useSurfaceKeyboard({ send, onReload, onBack, onForward, onFocusAddress,
       const text = event.data;
       send(text ? { kind: "ime", type: "commit", text } : { kind: "ime", type: "cancel" });
       clear(event.currentTarget);
+      onCaretMoved();
     },
     onInput: (event) => {
       const native = event.nativeEvent as InputEvent;

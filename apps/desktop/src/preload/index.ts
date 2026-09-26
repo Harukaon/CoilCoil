@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { DiagnosticLogBatch, RuntimeCommand, RuntimeEvent } from "@coilcoil/runtime-protocol";
 import type { FileNode } from "@coilcoil/runtime-protocol";
 import type {
+  BrowserCaret,
   BrowserDataStats,
   BrowserElementSelection,
   BrowserFindRequest,
@@ -92,6 +93,7 @@ const BROWSER_PAGE_EVENT_CHANNEL = "browser:page-event";
 const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
 const BROWSER_SELECT_CHOOSE_CHANNEL = "browser:select-choose";
 const BROWSER_FIND_CHANNEL = "browser:find";
+const BROWSER_CARET_CHANNEL = "browser:caret";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
@@ -235,6 +237,8 @@ const api: CoilCoilDesktopApi = {
   findInBrowserPage: (scopeId: string, tabId: string, request: BrowserFindRequest) => {
     ipcRenderer.send(BROWSER_FIND_CHANNEL, scopeId, tabId, request);
   },
+  readBrowserCaret: (scopeId: string, tabId: string) =>
+    ipcRenderer.invoke(BROWSER_CARET_CHANNEL, scopeId, tabId) as Promise<BrowserCaret | null>,
   onBrowserPageEvent: (listener: (event: BrowserPageEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, event: BrowserPageEvent): void => listener(event);
     ipcRenderer.on(BROWSER_PAGE_EVENT_CHANNEL, handler);

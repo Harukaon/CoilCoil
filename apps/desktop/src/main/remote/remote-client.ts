@@ -287,6 +287,7 @@ export function bridgeScript(platform: DesktopPlatform): string {
     sendBrowserInput: function () {},
     chooseBrowserSelect: resolves(undefined),
     findInBrowserPage: function () {},
+    readBrowserCaret: resolves(null),
     replyBrowserDialog: function (scopeId, tabId, dialogId, accept, text) { return invoke("browser:dialog-reply", [scopeId, tabId, dialogId, accept, text || ""]); },
     onBrowserPageEvent: ignore,
     onBrowserAgentActivated: subscribe("browser:agent-activated"),

@@ -247,6 +247,9 @@ export type BrowserPageEvent =
   /** 页面内查找的结果：一共几处、现在是第几处（从 1 数）。 */
   | { tabId: string; kind: "find"; matches: number; active: number };
 
+/** 页面里光标的位置（页面坐标，CSS 像素）：面板把输入法候选框放在这儿。 */
+export interface BrowserCaret { x: number; y: number; height: number }
+
 /** 页面内查找：换了要找的字就从头找（newSearch），回车是找下一处（forward 为 false 是上一处）。 */
 export type BrowserFindRequest = { text: string; forward: boolean; newSearch: boolean } | { stop: true };
 
@@ -581,6 +584,8 @@ export interface CoilCoilDesktopApi {
   chooseBrowserSelect(scopeId: string, tabId: string, pickerId: string, index: number | null): Promise<void>;
   /** 页面内查找（面板的查找栏）；结果从 onBrowserPageEvent 的 find 事件回来。网页版没有。 */
   findInBrowserPage(scopeId: string, tabId: string, request: BrowserFindRequest): void;
+  /** 问页面光标在哪儿（输入法候选框跟着它走）；没在能打字的地方时是 null。网页版没有。 */
+  readBrowserCaret(scopeId: string, tabId: string): Promise<BrowserCaret | null>;
   onBrowserPageEvent(listener: (event: BrowserPageEvent) => void): () => void;
   getTerminalSessions(): Promise<TerminalSessionSnapshot[]>;
   /** Always opens another shell: each one gets its own inspector tab. */

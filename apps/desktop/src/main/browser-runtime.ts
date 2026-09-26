@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, session, sharedTexture, shell, type Session, type WebContents } from "electron";
-import type { BrowserElementSelection, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
+import type { BrowserCaret, BrowserElementSelection, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabOwner } from "./browser-agent-tabs";
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserElementPicker } from "./browser-element-picker";
 import { fillSavedCredentials } from "./browser-import";
 import { cssCursor, PageInputForwarder, parseFindRequest, parsePageInput } from "./browser-input";
+import { readPageCaret } from "./browser-page-caret";
 import { PageDialogs } from "./browser-page-dialogs";
 import { isPrintRequest, PageRequests } from "./browser-page-requests";
 import { PageSelects } from "./browser-page-selects";
@@ -763,6 +764,14 @@ export class BrowserRuntimeManager {
     }
     // Electron 的 findNext 意思是「开始一次新的查找」：换了字时为 true，找下一处时为 false。
     contents.findInPage(request.text, { forward: request.forward, findNext: request.newSearch });
+  }
+
+  /** 用户在面板里打字的位置，输入法候选框跟着它。只问桌面窗口正显示的页面；停在网页对话框上时不问。 */
+  caretOf(scopeId: string, tabId: string): Promise<BrowserCaret | null> {
+    const tab = this.tabs.get(tabId);
+    const contents = tab?.guest;
+    if (!tab || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || this.dialogs.snapshot(tabId) || !contents || contents.isDestroyed()) return Promise.resolve(null);
+    return readPageCaret(contents);
   }
 
   /** 用户在面板里回答网页弹的对话框。只认桌面窗口或网页版正看着的那个会话里的标签页。 */
