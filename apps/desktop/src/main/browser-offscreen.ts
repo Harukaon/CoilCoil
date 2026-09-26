@@ -1,15 +1,16 @@
 import { BrowserWindow, screen, type NativeImage, type OffscreenSharedTexture, type WebContents } from "electron";
 import { BACKGROUND_FRAME_RATE } from "./browser-frame-stream";
+import { browserPagePreferences } from "./browser-page-policy";
 
 /**
- * Agent 用的标签页：离屏渲染的页面。
+ * 内置浏览器的每张标签页：离屏渲染的页面。
  *
  * Chromium 在把一次鼠标按下、触摸、点按派发给某个页面之前，会无条件地把焦点交给那个
  * 页面（RenderWidgetHostImpl::OnInputEventPreDispatch → FocusOwningWebContents）。
  * 页面嵌在 App 窗口里（<webview>）时，Agent 一点击，焦点就从用户正在打字的输入框
  * 挪进网页，接着打的字全进了网页——这是 Chromium 的规则，绕不开。
  *
- * 所以 Agent 的页面不嵌进窗口：每张标签页一个隐藏、离屏的 BrowserWindow。它不在任何
+ * 所以页面不嵌进窗口：每张标签页一个隐藏、离屏的 BrowserWindow。它不在任何
  * 可见窗口的焦点链上，Chromium 那条规则只在它自己身上生效，用户的焦点不受影响；输入
  * 照样是真实的输入（CDP 的鼠标、键盘），网站看到的也是真实事件。画面通过 paint 事件
  * 拿出来（有 GPU 时是共享纹理，见 browser-frame-stream.ts），画在面板里；用户在画面上
@@ -34,21 +35,7 @@ export function createOffscreenPage(
     useContentSize: true,
     width: size.width,
     height: size.height,
-    webPreferences: {
-      offscreen: { useSharedTexture: sharedTextureFrames(), deviceScaleFactor: displayScale() },
-      partition,
-      // 和 <webview> guest 同一套加固（见 browser-webview-policy.ts）。
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      nodeIntegrationInWorker: false,
-      nodeIntegrationInSubFrames: false,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-      experimentalFeatures: false,
-      webviewTag: false,
-      backgroundThrottling: false,
-    },
+    webPreferences: browserPagePreferences({ partition, deviceScaleFactor: displayScale(), sharedTexture: sharedTextureFrames() }),
   });
   page.webContents.setFrameRate(BACKGROUND_FRAME_RATE);
   const contents = page.webContents;

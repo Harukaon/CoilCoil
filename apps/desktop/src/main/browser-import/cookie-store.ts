@@ -2,7 +2,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { app, session } from "electron";
 import type { Session } from "electron";
-import { BROWSER_PARTITION } from "../browser-webview-policy";
+import { BROWSER_PARTITION } from "../browser-page-policy";
 import { toElectronCookie, type ImportedCookie } from "./cookie-record";
 
 /**

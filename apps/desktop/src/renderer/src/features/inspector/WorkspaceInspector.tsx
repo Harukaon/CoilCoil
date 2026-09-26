@@ -159,10 +159,10 @@ export function WorkspaceInspector({
     ? browserPaneTabs(browser.state).map((page) => ({
       id: page.id,
       label: page.label,
-      // 归 Agent 的换成 Agent 图标：同一排标签里一眼分得出哪几张是 Agent 在操作（只能
-      // 看、要接管才能动），哪几张是自己的。
+      // Agent 开的换成 Agent 图标：同一排标签里一眼分得出哪几张是 Agent 开的、哪几张是
+      // 自己开的。哪一张两边都能直接用。
       icon: page.loading ? LoaderCircle : page.agent || page.foreign ? Bot : Globe2,
-      hint: page.agent ? `${page.label}（Agent 在用）` : undefined,
+      hint: page.agent ? `${page.label}（Agent 开的）` : undefined,
       spinning: page.loading,
       closable: true,
     }))

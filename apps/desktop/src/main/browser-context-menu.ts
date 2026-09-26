@@ -1,5 +1,5 @@
 /**
- * The right-click menu for the built-in browser's `<webview>` guests.
+ * The right-click menu for the built-in browser's pages.
  *
  * Electron ships no default context menu, so without this a right-click inside
  * a guest page does nothing at all — no copy, no paste, no "copy link address".

@@ -38,7 +38,7 @@ import {
   runContextMenuAction,
   type GuestContextMenuParams,
 } from "./browser-context-menu";
-import { BROWSER_PARTITION, hardenGuestPreferences, restoreTabIdFromSrc } from "./browser-webview-policy";
+import { BROWSER_PARTITION } from "./browser-page-policy";
 import { configureBrowserIdentity } from "./browser-user-agent";
 import { readMountedProjects, writeMountedProjects } from "./mounted-projects";
 import { checkWorkspaceName, memoryBucketName, rememberedMemoryNames, workspaceNamePrompt } from "./workspace-name-guard";
@@ -147,7 +147,6 @@ const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
-const BROWSER_TAKE_OVER_CHANNEL = "browser:take-over";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
 const BROWSER_BACK_CHANNEL = "browser:back";
@@ -161,10 +160,6 @@ const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
 const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
 const BROWSER_SAVED_LOGINS_CHANNEL = "browser:saved-logins";
 const BROWSER_DATA_CLEAR_CHANNEL = "browser:data-clear";
-const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
-const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
-const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
-const BROWSER_GUEST_FAILED_CHANNEL = "browser:guest-failed";
 const BROWSER_INPUT_CHANNEL = "browser:input";
 const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
 const BROWSER_SELECT_CHOOSE_CHANNEL = "browser:select-choose";
@@ -179,8 +174,6 @@ const UPDATE_AVAILABLE_CHANNEL = "update:available";
 let isQuitting = false;
 const moduleRequire = createRequire(import.meta.url);
 const browserRuntimes = new Map<number, BrowserRuntimeManager>();
-/** WebContents ids allowed to host <webview> guests — app windows, never previews or guests. */
-const webviewHostIds = new Set<number>();
 const terminalRuntimes = new Map<number, TerminalRuntimeManager>();
 let primaryBrowserRuntime: BrowserRuntimeManager | undefined;
 let primaryTerminalRuntime: TerminalRuntimeManager | undefined;
@@ -677,7 +670,6 @@ function remoteController(): RemoteAccessController {
           case BROWSER_CREATE_TAB_CHANNEL: return browser.createTab(args[1] as string | undefined, true, args[0] as string, args[2] === true);
           case BROWSER_SELECT_TAB_CHANNEL: return browser.selectTab(args[1] as string, args[0] as string);
           case BROWSER_CLOSE_TAB_CHANNEL: return browser.closeTab(args[1] as string, args[0] as string);
-          case BROWSER_TAKE_OVER_CHANNEL: return browser.takeOverForUser(args[1] as string, args[0] as string);
           case BROWSER_NAVIGATE_CHANNEL: return browser.navigate(args[1] as string, args[0] as string);
           case BROWSER_ZOOM_CHANNEL: return browser.setZoom(args[1] as "in" | "out" | "reset", args[0] as string);
           case BROWSER_BACK_CHANNEL: return browser.back(args[0] as string);
@@ -691,8 +683,6 @@ function remoteController(): RemoteAccessController {
           case BROWSER_DATA_STATS_CHANNEL: return browserDataStats(browser.partitionName());
           case BROWSER_SAVED_LOGINS_CHANNEL: return savedLogins(browser.partitionName());
           case BROWSER_DATA_CLEAR_CHANNEL: return clearBrowserData((name, data) => diagnosticLog().info("browser-data", name, data));
-          case BROWSER_GUEST_LAYER_READY_CHANNEL: return browser.markGuestLayerReady();
-          case BROWSER_GUEST_FAILED_CHANNEL: return undefined;
           case BROWSER_UI_VIEWPORT_CHANNEL: return undefined;
           default: break;
         }
@@ -740,20 +730,10 @@ function remoteController(): RemoteAccessController {
 }
 
 /**
- * Give a browser guest the right-click menu Electron does not provide.
- *
- * Chromium raises `context-menu` for every right-click but shows nothing on its
- * own, which is why the built-in browser appeared to have no menu at all.
- */
-function installGuestContextMenu(guest: Electron.WebContents, window: BrowserWindow): void {
-  guest.on("context-menu", (_event, params) => popupGuestContextMenu(guest, window, params));
-}
-
-/**
  * 在 App 窗口里、鼠标所在的地方弹出网页的右键菜单。
  *
- * 嵌在面板里的 <webview> 和离屏页面用的是同一份菜单；离屏页面的画面就在面板里，用户
- * 右键的位置就是鼠标现在的位置，所以不用另算坐标。
+ * Chromium 对每次右键都发 context-menu，但自己什么都不弹，所以得我们来搭。离屏页面的
+ * 画面就在面板里，用户右键的位置就是鼠标现在的位置，所以不用另算坐标。
  */
 function popupGuestContextMenu(guest: Electron.WebContents, window: BrowserWindow, params: Electron.ContextMenuParams): void {
   if (guest.isDestroyed()) return;
@@ -831,16 +811,12 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
-      // The built-in browser renders as <webview> guests so DOM overlays can paint
-      // over it. This is the only window allowed to host them; every other
-      // WebContents refuses attachment outright (see app.on("web-contents-created")).
-      webviewTag: true,
+      // 内置浏览器的页面都是离屏页面（见 browser-offscreen.ts），不嵌 <webview>：关掉它，
+      // 界面里的脚本也就造不出一个自带权限的网页来。
+      webviewTag: false,
     },
   });
 
-  // Enabling webviewTag means any script in this renderer could mint a guest and
-  // choose its own preferences. This is the gate that rewrites them into the only
-  // shape CoilCoil allows, or refuses the attachment.
   if (platform !== "darwin") {
     mainWindow.setMenuBarVisibility(false);
     mainWindow.autoHideMenuBar = true;
@@ -902,45 +878,6 @@ async function createWindow(): Promise<void> {
   mainWindow.on("move", () => logWindowMove("move"));
   mainWindow.on("moved", () => logWindowMove("moved"));
 
-  const webviewHostId = mainWindow.webContents.id;
-  webviewHostIds.add(webviewHostId);
-  // Capture the id up front: by the time "closed" fires the window is destroyed
-  // and reading webContents throws.
-  mainWindow.once("closed", () => webviewHostIds.delete(webviewHostId));
-  // 接管用的元素在 will-attach 里认出来，到 did-attach 才拿得到它的 guest。两个事件
-  // 对同一个元素是紧挨着同步发的，中间不会插进别的元素的事件，所以记一个就够。
-  let pendingRestoreAttach: string | undefined;
-  mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
-    const allowed = hardenGuestPreferences(
-      webPreferences as unknown as Record<string, unknown>,
-      params as unknown as Record<string, unknown>,
-      (partition) => browserRuntime.expectsPartition(partition),
-    );
-    if (!allowed) {
-      event.preventDefault();
-      return;
-    }
-    // 用户接管 Agent 标签页：确认真有这张在等，再清空 src，guest 什么都不加载，页面
-    // 状态由主进程恢复进去（见 browser-webview-policy.ts 的 restoreGuestSrc）。
-    const restoreTabId = restoreTabIdFromSrc(params.src);
-    if (!restoreTabId) return;
-    if (!browserRuntime.acceptsRestoreAttach(restoreTabId, params.partition)) {
-      event.preventDefault();
-      return;
-    }
-    params.src = "";
-    pendingRestoreAttach = restoreTabId;
-  });
-  // Baseline until the tab record claims the guest and installs its own handler;
-  // a guest must never be able to open an OS window.
-  mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
-    guest.setWindowOpenHandler(() => ({ action: "deny" }));
-    installGuestContextMenu(guest, mainWindow);
-    const restoreTabId = pendingRestoreAttach;
-    pendingRestoreAttach = undefined;
-    if (restoreTabId) browserRuntime.claimRestoreGuest(restoreTabId, guest);
-  });
-
   const browserRuntime = new BrowserRuntimeManager(mainWindow, (state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_STATE_CHANNEL, state);
     // 手机看的是同一个浏览器：标签开了关了、地址变了，那边也得跟着变，否则它只能
@@ -949,9 +886,6 @@ async function createWindow(): Promise<void> {
   }, (scopeId) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
     remoteAccess?.broadcast(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
-  }, (roster) => {
-    if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_GUEST_ROSTER_CHANNEL, roster);
-    remoteAccess?.broadcast(BROWSER_GUEST_ROSTER_CHANNEL, roster);
   }, (contents, params) => popupGuestContextMenu(contents, mainWindow, params));
   const terminalRuntime = new TerminalRuntimeManager((state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_STATE_CHANNEL, state);
@@ -1026,10 +960,10 @@ async function createWindow(): Promise<void> {
   mainWindow.on("restore", logActivation("restore"));
 
   // `once`, not `on`. Electron re-emits this on the window every time a new
-  // WebContents inside it becomes ready to display, and every <webview> the
-  // built-in browser creates is one — so an Agent opening a page in the
-  // background made the app show itself, raising it over whatever the user was
-  // doing. Showing the window is a startup step; it happens exactly once.
+  // WebContents inside it becomes ready to display (the built-in browser used to
+  // create one per page), which made the app show itself while an Agent opened
+  // pages in the background. Showing the window is a startup step; it happens
+  // exactly once.
   // 透明度在 show() 之前落下去，否则窗口会先按不透明画出来再跳一下。
   // 不再用 BrowserWindow.setOpacity() 做透明：它会连同文字一起变淡。
   // 透明效果由渲染层的表面毛玻璃控制，窗口本身保持不透明，避免启动时出现一帧旧透明度。
@@ -1151,17 +1085,10 @@ app.whenReady().then(async () => {
     locale: app.getLocale(),
   });
 
-  // Only the main window may host <webview> guests, and only through the handler
-  // installed in createWindow. Preview windows and anything added later refuse
-  // attachment, so a future webPreferences default cannot widen the surface.
+  // 没有哪个窗口该嵌 <webview>（内置浏览器全是离屏页面）。各窗口都关了 webviewTag，这里
+  // 再兜一层底：以后谁的 webPreferences 默认值变了，也挂不上。
   app.on("web-contents-created", (_event, contents) => {
-    if (contents.getType() === "webview") return;
-    contents.on("will-attach-webview", (event) => {
-      // Checked at attach time, not creation time: this fires while the window is
-      // still being constructed, before createWindow can allowlist its id.
-      if (webviewHostIds.has(contents.id)) return;
-      event.preventDefault();
-    });
+    contents.on("will-attach-webview", (event) => event.preventDefault());
   });
 
   ipcMain.handle(MCP_TEST_CHANNEL, async (_event, input: McpConnectionTestInput) => testMcpConnection(input));
@@ -1312,7 +1239,6 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_CREATE_TAB_CHANNEL, (event, scopeId: string, url?: string, placeholder?: boolean) => browserFor(event).createTab(url, true, scopeId, placeholder === true));
   ipcMain.handle(BROWSER_SELECT_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).selectTab(id, scopeId));
   ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).closeTab(id, scopeId));
-  ipcMain.handle(BROWSER_TAKE_OVER_CHANNEL, (event, scopeId: string, id: string) => browserFor(event).takeOverForUser(id, scopeId));
   ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, (event, scopeId: string, url: string) => browserFor(event).navigate(url, scopeId));
   ipcMain.handle(BROWSER_ZOOM_CHANNEL, (event, scopeId: string, step: "in" | "out" | "reset") => browserFor(event).setZoom(step, scopeId));
   ipcMain.handle(BROWSER_BACK_CHANNEL, (event, scopeId: string) => browserFor(event).back(scopeId));
@@ -1333,15 +1259,6 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_DATA_CLEAR_CHANNEL, () => clearBrowserData(
     (name, data) => diagnosticLog().info("browser-data", name, data),
   ));
-  ipcMain.handle(BROWSER_GUEST_LAYER_READY_CHANNEL, (event) => browserFor(event).markGuestLayerReady());
-  ipcMain.handle(BROWSER_REGISTER_GUEST_CHANNEL, (event, tabId: string, nonce: string, webContentsId: number): void => {
-    // Throws on any failed check so the renderer drops the element it created
-    // rather than leaving a live guest that nothing owns.
-    browserFor(event).registerGuest(tabId, nonce, webContentsId);
-  });
-  ipcMain.handle(BROWSER_GUEST_FAILED_CHANNEL, (event, tabId: string, nonce: string, reason: string): void => {
-    browserRuntimes.get(event.sender.id)?.reportGuestFailure(tabId, nonce, String(reason).slice(0, 500));
-  });
   ipcMain.handle(BROWSER_UI_VIEWPORT_CHANNEL, (event, viewport: BrowserUiViewport): void => {
     // Renderer cleanup can race the window's closed event during dev reload/quit.
     browserRuntimes.get(event.sender.id)?.setUiViewport(viewport);

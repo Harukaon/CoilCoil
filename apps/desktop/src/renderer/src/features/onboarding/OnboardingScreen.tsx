@@ -57,7 +57,7 @@ const HEADINGS: Record<OnboardingStepId, { title: React.ReactNode; lead: string 
 
 /** 三条产品理念。放在这里而不是散在 JSX 里，改文案不用动结构。 */
 const PRINCIPLES: readonly { label: string; body: string }[] = [
-  { label: "同一个界面", body: "Agent 打开的网页、跑的终端、改的文件，都画在你眼前那一排标签里。你随时能点进去接管，也能直接关掉。" },
+  { label: "同一个界面", body: "Agent 打开的网页、跑的终端、改的文件，都画在你眼前那一排标签里。你随时能点进去接着用，也能直接关掉。" },
   { label: "一区一世界", body: "每个工作区各自的会话、浏览器登录状态和记忆互不串门。换一个项目，就是换一整套环境。" },
   { label: "在你机器上", body: "读你本地的目录，用你已经登录好的浏览器。代码不用搬走，东西还是你的。" },
 ];

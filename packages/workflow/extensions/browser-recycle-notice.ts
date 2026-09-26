@@ -27,7 +27,7 @@ export function recycledTabsEndpoint(scope: string, env: NodeJS.ProcessEnv = pro
   return browserBridgeEndpoint("recycled-tabs", scope, env);
 }
 
-/** 桌面端 CDP 桥上 CoilCoil 自己的 HTTP 接口（回收记录、接管标签页），和 CDP 连接同一套地址和令牌。 */
+/** 桌面端 CDP 桥上 CoilCoil 自己的 HTTP 接口（回收记录、标签页列表），和 CDP 连接同一套地址和令牌。 */
 export function browserBridgeEndpoint(path: string, scope: string, env: NodeJS.ProcessEnv = process.env): Endpoint | undefined {
   try {
     const args = JSON.parse(env.COILCOIL_BROWSER_MCP_ARGS ?? "") as unknown;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import browserActExtension, { pageIdForUrl, selectedPageId } from "../extensions/browser-act.ts";
+import browserActExtension, { pageIdsForTabs, selectedPageId } from "../extensions/browser-act.ts";
 import { MCP_MANAGER_CHANNEL } from "../extensions/mcp-tools.ts";
 
 function fakePi(calls: Array<{ server: string; tool: string; args: Record<string, unknown> }>, behavior?: (server: string, tool: string) => unknown): {
@@ -40,11 +40,13 @@ function collectTools(): { tools: Map<string, { description: string; execute: (i
   return { tools, pi };
 }
 
-test("browser-act 注册四个交互工具，描述里分清交互与调试", () => {
+test("browser-act 注册交互工具，描述里分清交互与调试；接管工具已经没有了", () => {
   const { tools } = collectTools();
-  for (const name of ["browser_open", "browser_navigate", "browser_click", "browser_type", "browser_user_tabs", "browser_take_over"]) {
+  for (const name of ["browser_open", "browser_navigate", "browser_click", "browser_type", "browser_tabs"]) {
     assert.ok(tools.has(name), `缺少 ${name}`);
   }
+  for (const name of ["browser_user_tabs", "browser_take_over"]) assert.equal(tools.has(name), false, `${name} 应该删掉了`);
+  for (const [name, tool] of tools) assert.doesNotMatch(tool.description, /browser_take_over|browser_user_tabs/, `${name} 的描述里不该再让模型去调已经删掉的工具`);
   const open = tools.get("browser_open")!;
   assert.match(open.description, /coilcoil-browser/, "browser_open 描述要指明调试继续用 coilcoil-browser");
 });
@@ -186,11 +188,63 @@ test("句柄每个会话一份，两个会话的 btab-1 不会串", async () => 
   assert.equal(first.calls.find((call) => call.tool === "navigate_page")?.args.pageId, 1);
 });
 
-test("接管后按网址认出新页面的编号；同一个网址有好几张时要最新的", () => {
-  const listing = "## Pages\n1: a (http://x/a.html)\n2: form (http://x/form.html)\n3: form again (http://x/form.html) [selected]";
-  assert.equal(pageIdForUrl(listing, "http://x/form.html"), 3);
-  assert.equal(pageIdForUrl(listing, "http://x/a.html"), 1);
-  assert.equal(pageIdForUrl(listing, "http://x/none.html"), undefined);
+test("浏览器报的标签页按标题和网址对到页面编号；同样的几张按先后一一对上", () => {
+  const listing = "## Pages\n1: a (http://x/a.html)\n2: form (http://x/form.html)\n3:  (about:blank)\n4: form again (http://x/form.html) [selected]\n5:  (about:blank)";
+  const ids = pageIdsForTabs(listing, [
+    { title: "form again", url: "http://x/form.html" },
+    { title: "a", url: "http://x/a.html" },
+    { title: "about:blank", url: "about:blank" },
+    { title: "about:blank", url: "about:blank" },
+    { title: "form", url: "http://x/form.html" },
+    { title: "gone", url: "http://x/none.html" },
+  ]);
+  assert.deepEqual(ids, [4, 1, 3, 5, 2, undefined]);
+});
+
+test("browser_tabs 列出这个对话的全部网页，给句柄、标出用户正看着的，同一页再列还是同一个句柄", async () => {
+  const calls: Array<{ server: string; tool: string; args: Record<string, unknown> }> = [];
+  const fake = fakePi(calls, (_server, tool) => tool === "list_pages"
+    ? { content: [{ type: "text", text: "1: mine (http://x/a.html)\n2: theirs (http://x/b.html) [selected]" }] }
+    : { content: [{ type: "text", text: "ok" }] });
+  const tools = new Map<string, { execute: (id: string, params: never, signal?: AbortSignal) => Promise<{ content: Array<{ type: string; text?: string }>; details: Record<string, unknown> }> }>();
+  browserActExtension({
+    events: fake.events,
+    registerTool: (tool: never) => {
+      const entry = tool as unknown as { name: string; execute: (id: string, params: never, signal?: AbortSignal) => Promise<{ content: Array<{ type: string; text?: string }>; details: Record<string, unknown> }> };
+      tools.set(entry.name, entry);
+    },
+  } as never);
+  // 桌面端 CDP 桥上 CoilCoil 自己的接口：标签页列表，和每次调用后取一次的回收记录。
+  const requested: string[] = [];
+  const server = (await import("node:http")).createServer((request, response) => {
+    requested.push(request.url ?? "");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify((request.url ?? "").startsWith("/coilcoil/tabs/") ? { tabs: [
+      { id: "t1", title: "mine", url: "http://x/a.html", active: false, owner: "agent" },
+      { id: "t2", title: "theirs", url: "http://x/b.html", active: true, owner: "user" },
+    ] } : { recycled: [] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as { port: number };
+  const previous = process.env.COILCOIL_BROWSER_MCP_ARGS;
+  process.env.COILCOIL_BROWSER_MCP_ARGS = JSON.stringify(["--wsEndpoint", `ws://127.0.0.1:${port}/devtools/browser/secret`, "--wsHeaders", JSON.stringify({ Authorization: "Bearer token" })]);
+  const ctx = { sessionManager: { getSessionId: () => "session-1" } };
+  try {
+    const tabs = tools.get("browser_tabs")! as unknown as { execute: (...args: unknown[]) => Promise<{ content: Array<{ text?: string }> }> };
+    const first = await tabs.execute("1", {}, undefined, undefined, ctx);
+    const text = first.content[0].text ?? "";
+    assert.match(text, /btab-1（你开的）：mine/, text);
+    assert.match(text, /btab-2（用户正看着）（用户开的）：theirs/, text);
+    assert.ok(requested.some((url) => url.startsWith("/coilcoil/tabs/secret?scope=session-1")), requested.join(","));
+    const again = await tabs.execute("2", {}, undefined, undefined, ctx);
+    assert.equal(again.content[0].text, text, "同一张页面再列一次还是原来的句柄");
+    const click = tools.get("browser_click")! as unknown as { execute: (...args: unknown[]) => Promise<unknown> };
+    await click.execute("3", { handle: "btab-2", uid: "1_1" }, undefined, undefined, ctx);
+    assert.equal(calls.find((call) => call.tool === "click")?.args.pageId, 2, "用户那张页面拿句柄就能直接点");
+  } finally {
+    server.close();
+    if (previous === undefined) delete process.env.COILCOIL_BROWSER_MCP_ARGS; else process.env.COILCOIL_BROWSER_MCP_ARGS = previous;
+  }
 });
 
 test("点击让网页弹出对话框时，如实说「已生效、先处理对话框」，不当成点击失败", async () => {

@@ -10,7 +10,8 @@
  * - browser_navigate：导航含等待可加载，超时报错带当前状态
  * - browser_click：点击后自动重读快照；点不中时把新快照交回去，让模型用新 uid 再点
  * - browser_type：输入后回读确认
- * - browser_user_tabs / browser_take_over：用户自己开的标签页 Agent 碰不了，要用就先接管
+ * - browser_tabs：这个对话里的全部网页（用户开的也在），每张给一个句柄；用户和 Agent
+ *   用的是同一个页面，不用接管、不会刷新
  *
  * 调试继续用 coilcoil-browser，两层分家。
  */
@@ -33,13 +34,23 @@ export function selectedPageId(listing: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-/** 在 chrome-devtools-mcp 的页面列表里找某个网址的页面编号；有好几张就要最新（编号最大）的。 */
-export function pageIdForUrl(listing: string, url: string): number | undefined {
-  let found: number | undefined;
-  for (const match of listing.matchAll(/^(\d+): .* \(([^()\s]+)\)/gm)) {
-    if (match[2] === url) found = Math.max(found ?? 0, Number(match[1]));
-  }
-  return found;
+/**
+ * 把浏览器报的标签页一张张对到 chrome-devtools-mcp 的页面编号上。
+ *
+ * 两边都按打开的先后排：先按「标题和网址都一样」对，对不上再只按网址对；同样的有好几张
+ * （比如几张空白页）就按先后一一对上，不会两张标签页拿到同一个编号。
+ */
+export function pageIdsForTabs(listing: string, tabs: ReadonlyArray<{ title: string; url: string }>): Array<number | undefined> {
+  const pages = [...listing.matchAll(/^(\d+): (.*) \(([^()\s]+)\)(?: \[selected\])?\s*$/gm)]
+    .map((match) => ({ id: Number(match[1]), title: match[2].trim(), url: match[3], used: false }));
+  const take = (match: (page: typeof pages[number]) => boolean): number | undefined => {
+    const page = pages.find((item) => !item.used && match(item));
+    if (!page) return undefined;
+    page.used = true;
+    return page.id;
+  };
+  const ids: Array<number | undefined> = tabs.map((tab) => take((page) => page.url === tab.url && page.title === tab.title.trim()));
+  return ids.map((id, index) => id ?? take((page) => page.url === tabs[index].url));
 }
 
 /**
@@ -54,11 +65,13 @@ export function pendingDialogNotice(message: string): string | undefined {
   return `操作已生效，网页弹出了一个 ${match[1]} 对话框：「${match[2]}」。页面在等回答，别再重复这一步：用 coilcoil-browser 的 handle_dialog（accept 或 dismiss）处理它，用户也可能直接在面板里点掉。`;
 }
 
-interface UserTab {
+interface BrowserTabInfo {
   id: string;
   title: string;
   url: string;
+  /** 用户正看着的那张。 */
   active: boolean;
+  owner: "agent" | "user";
 }
 
 async function bridgeRequest<T>(path: string, scope: string | undefined, init: { method?: string; query?: Record<string, string> } = {}): Promise<T> {
@@ -153,6 +166,11 @@ export default function browserActExtension(pi: ExtensionAPI): void {
     if (pageId !== undefined) handleToPage.set(handle, pageId);
     return handle;
   };
+  /** 同一张页面再列一次，还是原来那个句柄。 */
+  const handleFor = (pageId: number | undefined): string => {
+    if (pageId !== undefined) for (const [handle, id] of handleToPage) if (id === pageId) return handle;
+    return newHandle(pageId);
+  };
   const resolvePageId = (handle?: string, pageId?: number): number | undefined => {
     if (pageId !== undefined) return pageId;
     if (handle && handleToPage.has(handle)) return handleToPage.get(handle);
@@ -162,12 +180,12 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   registerTool({
     name: "browser_open",
     label: "Browser Open",
-    description: "打开一个网页并返回句柄。交互（点击/输入/导航）用 browser_navigate、browser_click、browser_type 拿句柄操作；调试（脚本/控制台/网络/性能）继续用 coilcoil-browser。你只能操作自己开的、或者用 browser_take_over 接管过来的标签页。",
+    description: "打开一个网页并返回句柄。交互（点击/输入/导航）用 browser_navigate、browser_click、browser_type 拿句柄操作；调试（脚本/控制台/网络/性能）继续用 coilcoil-browser。",
     promptSnippet: "browser_open: 打开网页拿句柄，后续交互拿句柄操作",
     promptGuidelines: [
       "需要像人一样点页面、填表单时用这一组；看 DOM、跑脚本、查控制台网络性能时用 coilcoil-browser。",
       "返回的 handle 贯穿后续操作，不要自己记 pageId 数字。",
-      "用户自己开着的网页你看不到也碰不了；用户让你看「这个页面」「我开的那个」时，先 browser_user_tabs 找到它，再 browser_take_over 接管。",
+      "自己的活在自己新开的页面里做；用户说「这个页面」「我开的那个」时，用 browser_tabs 找到用户正看着的那张，拿它的句柄操作。用户开的页面里可能有他正在做的事，没让你动就别去导航、改表单。",
     ],
     parameters: Type.Object({
       url: Type.String({ description: "要打开的地址" }),
@@ -298,51 +316,31 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   });
 
   registerTool({
-    name: "browser_user_tabs",
-    label: "Browser User Tabs",
-    description: "列出用户自己在内置浏览器里开着的标签页（标题、网址、是不是用户正看着的那张）。这些标签页你碰不了，要用哪一张就用 browser_take_over 接管。",
-    promptSnippet: "browser_user_tabs: 看用户开着哪些网页，要用再接管",
+    name: "browser_tabs",
+    label: "Browser Tabs",
+    description: "列出这个对话里内置浏览器的全部网页（你开的、用户开的都在），每张给一个句柄，标出用户正看着哪一张。用户和你用的是同一个页面：拿句柄直接用 browser_click、browser_type、browser_navigate 操作，不用接管，页面也不会刷新。",
+    promptSnippet: "browser_tabs: 列出这个对话的全部网页并给句柄，标出用户正看着的那张",
     parameters: Type.Object({}),
-    async execute() {
+    async execute(_toolCallId, _params, signal) {
       try {
-        const { tabs } = await bridgeRequest<{ tabs: UserTab[] }>("user-tabs", sessionId);
-        if (!tabs.length) return textResult("用户现在没有开着的标签页。", { tabs });
-        const lines = tabs.map((tab) => `- tab=${tab.id}${tab.active ? "（用户正看着）" : ""}：${tab.title || "无标题"}（${tab.url}）`);
-        return textResult(`用户开着的标签页：\n${lines.join("\n")}\n要操作哪一张，用 browser_take_over 传它的 tab。`, { tabs });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return textResult(`读取失败：${message}`, { error: "user_tabs_failed", message }, true);
-      }
-    },
-  });
-
-  registerTool({
-    name: "browser_take_over",
-    label: "Browser Take Over",
-    description: "接管用户的一张标签页：它变成你的，页面原样保留（网址、前进后退、表单里填的内容；登录状态也在），之后拿返回的句柄操作。用户在界面上会看到这张标签页交给了你，随时可以再接管回去。",
-    promptSnippet: "browser_take_over: 接管用户的标签页，返回句柄",
-    parameters: Type.Object({
-      tab: Type.String({ description: "browser_user_tabs 列出来的 tab" }),
-    }),
-    async execute(_toolCallId, params, signal) {
-      try {
-        const taken = await bridgeRequest<{ url: string; title: string }>("take-over", sessionId, { method: "POST", query: { tab: params.tab } });
-        // 新页面刚出现在浏览器里，页面列表可能要等一下才列得到。
-        let pageId: number | undefined;
-        let listing = "";
-        for (let attempt = 0; attempt < 10 && pageId === undefined; attempt += 1) {
+        const { tabs } = await bridgeRequest<{ tabs: BrowserTabInfo[] }>("tabs", sessionId);
+        if (!tabs.length) return textResult("这个对话里还没有打开的网页。要看网页就用 browser_open 打开。", { tabs });
+        // 新开的页面刚出现在浏览器里时，页面列表可能要等一下才列得到。
+        let ids: Array<number | undefined> = [];
+        for (let attempt = 0; attempt < 5; attempt += 1) {
           if (attempt) await new Promise((resolve) => setTimeout(resolve, 200));
-          listing = (await callBrowser(pi.events, "list_pages", {}, signal, sessionId)).text;
-          pageId = pageIdForUrl(listing, taken.url);
+          ids = pageIdsForTabs((await callBrowser(pi.events, "list_pages", {}, signal, sessionId)).text, tabs);
+          if (ids.every((id) => id !== undefined)) break;
         }
-        const handle = newHandle(pageId);
-        return textResult(
-          `已接管：${taken.title || "无标题"}（${taken.url}），句柄 ${handle}。${pageId !== undefined ? `（pageId ${pageId}）` : ""}\n${listing.slice(0, 1200)}`,
-          { handle, pageId, url: taken.url },
-        );
+        const rows = tabs.map((tab, index) => ({ ...tab, pageId: ids[index], handle: handleFor(ids[index]) }));
+        const lines = rows.map((row) =>
+          `- ${row.handle}${row.active ? "（用户正看着）" : ""}${row.owner === "user" ? "（用户开的）" : "（你开的）"}：${row.title || "无标题"}（${row.url}）`);
+        return textResult(`这个对话里的网页：\n${lines.join("\n")}\n拿句柄操作。用户开的页面里可能有他正在做的事，没让你动就别去导航、改表单。`, {
+          tabs: rows.map(({ handle, pageId, title, url, active, owner }) => ({ handle, pageId, title, url, active, owner })),
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return textResult(`接管失败：${message}`, { error: "take_over_failed", message }, true);
+        return textResult(`读取失败：${message}`, { error: "tabs_failed", message }, true);
       }
     },
   });

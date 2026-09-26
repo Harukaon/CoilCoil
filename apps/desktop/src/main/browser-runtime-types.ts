@@ -1,12 +1,12 @@
 import type { BrowserWindow, WebContents } from "electron";
-import type { BrowserTabControl, BrowserTabOwner } from "./browser-agent-tabs";
+import type { BrowserTabOwner } from "./browser-agent-tabs";
 
 export const DEFAULT_BROWSER_URL = "about:blank";
 export const DEFAULT_BROWSER_SCOPE_ID = "default";
 export const BROWSER_TARGET_ID = "coilcoil-browser";
 export const BROWSER_CONTEXT_ID = "coilcoil-browser-context";
 
-/** Logical size used while a guest is parked in its 1x1 renderer slot. */
+/** 用户没在看的标签页的视口：常见的桌面尺寸（AI 截图、操作都按这个）。 */
 export const DEFAULT_BROWSER_VIEWPORT = { width: 1280, height: 720 };
 
 export interface BrowserTab {
@@ -15,31 +15,23 @@ export interface BrowserTab {
   /**
    * 这张标签页所属的 cookie jar（一个工作区一份）。
    *
-   * 记在标签页上而不是记在窗口上：guest 的分区创建时就定死了，改不了，所以换工作
-   * 区时不能拿窗口当前那份去套老标签页——各自带着自己那份活着，切回去还在。
+   * 记在标签页上而不是记在窗口上：页面的分区创建时就定死了，改不了，所以换工作区时
+   * 不能拿窗口当前那份去套老标签页——各自带着自己那份活着，切回去还在。
    */
   partition: string;
-  /** 谁开的这张：只有 Agent 开的、而且现在还归 Agent 的，才会被上限收掉。 */
-  owner: BrowserTabOwner;
   /**
-   * 这张现在归谁操作。
-   *
-   * - agent：离屏渲染的页面（offscreen 窗口），Agent 通过 CDP 操作，用户只看画面；
-   *   Agent 点击、打字不会碰用户的焦点（见 browser-offscreen.ts）。
-   * - user：正常嵌在面板里的 <webview>，用户自己操作；Agent 看不到、也碰不了它。
-   *
-   * 两边都能「接管」：用户按接管按钮，Agent 调接管工具。接管时页面状态（网址、历史、
-   * 表单内容）原样搬过去。
+   * 谁开的这张（标签条上的标识、上限回收用）。用户和 Agent 都能直接用任何一张，不用
+   * 接管：Agent 点击、打字只进这个离屏页面，碰不到用户的焦点（见 browser-offscreen.ts）。
    */
-  control: BrowserTabControl;
-  /** control 是 agent 时，承载这个离屏页面的隐藏窗口。 */
+  owner: BrowserTabOwner;
+  /** 承载这个页面的隐藏离屏窗口（每张标签页一个）。 */
   offscreen?: BrowserWindow;
   /** 最近一次被 Agent 操作或被选中的时间，上限收页时先关最久没用的。 */
   lastUsedAt: number;
   tabTargetId: string;
   pageTargetId: string;
+  /** 页面本身（离屏窗口的 webContents）。 */
   guest?: WebContents;
-  guestNonce: string;
   phase: "awaiting-guest" | "loading" | "ready" | "closing";
   announced: boolean;
   /**
@@ -50,7 +42,7 @@ export interface BrowserTab {
    * `Target.createTarget`（也就是 agent 的 new_page）就直接拿它用，不再开第二张
    * ——否则每个会话都是「一张没人要的空白页 + 一张真正在用的页」起步。
    * 标记本身不会随导航清掉，因为「能不能拿去用」每次都拿当前地址现算：只要它已经
-   * 导航到别处，就不再是空白页，也就不会被接管。
+   * 导航到别处，就不再是空白页，也就不会被拿去用。
    */
   implicit?: boolean;
   emulatedSize?: { width: number; height: number };
@@ -59,7 +51,7 @@ export interface BrowserTab {
    * （点进了面板里的这张页面）。任何一边要就开着，两边都不要才关；applied 是页面上现在的样子。
    */
   focusEmulation?: { agent: boolean; user: boolean; applied: boolean };
-  /** 用户最近一次在这张页面上点、滚、打字的时间。 */
+  /** 用户最近一次在这张页面上点、滚、打字的时间；用户动过的，Agent 开页超上限时不会收掉它。 */
   userInputAt?: number;
   /** 用户最近一次在这张页面上按下右键的时间：右键菜单只为用户弹，Agent 右键时不弹。 */
   userContextMenuAt?: number;

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { app, safeStorage } from "electron";
 import type { ImportedLogin } from "./chromium-passwords";
-import { BROWSER_PARTITION } from "../browser-webview-policy";
+import { BROWSER_PARTITION } from "../browser-page-policy";
 
 /**
  * Where imported logins live.

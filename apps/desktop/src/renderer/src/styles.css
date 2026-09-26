@@ -1212,15 +1212,6 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   .browser-agent-presence, .browser-agent-ring, .browser-agent-glow, .browser-agent-pulse::after { animation: none; }
 }
-/* Guests composite above the app shell but below every overlay: resizer 20, app-sidebar-control 80,
-   context-menu 100, dialog 240, subagent backdrop 300, popovers 1000, tooltip 1500. */
-.browser-guest-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
-/* Parked guests stay 1x1 and on-screen. Anything that stops them compositing —
-   display:none, visibility:hidden, opacity:0, offscreen, zero size — permanently
-   hangs Page.captureScreenshot; their real viewport comes from Emulation in main. */
-.browser-guest-layer > webview { position: absolute; top: 0; left: 0; width: 1px; height: 1px; border: 0; background: hsl(var(--th) var(--ts) var(--l-1000)); }
-.browser-guest-layer > webview.visible { pointer-events: auto; }
-.resizing-panels .browser-guest-layer > webview { pointer-events: none; }
 .browser-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 9px; color: hsl(var(--th) var(--ts) var(--l-588)); font-size: 9px; }
 .browser-empty strong { color: hsl(var(--th) var(--ts) var(--l-355)); font-size: 11px; }
 .browser-empty button { padding: 6px 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-355)); background: hsl(var(--th) var(--ts) var(--l-959)); cursor: pointer; }

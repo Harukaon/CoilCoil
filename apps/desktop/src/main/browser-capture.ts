@@ -16,8 +16,8 @@ const QUALITY = 70;
 /**
  * A picture of what a browser guest is showing right now.
  *
- * A phone cannot host the `<webview>` the desktop window renders a page into,
- * but the page itself is live on the Mac and the agent is driving it. The
+ * A phone cannot receive the live picture the desktop window draws, but the
+ * page itself is live on the Mac and the agent is driving it. The
  * remote browser panel watches frames of it rather than embedding a browser of
  * its own, which is why this exists at all.
  */

@@ -3,7 +3,7 @@ export const description = "AI 在后台照常干活：窗口最小化、应用�
 /** 同一个测试站点换一个主机名：localhost 和 127.0.0.1 是两个网站，跳过去要换渲染进程。 */
 const colorUrl = (site, host, color) => `${site.url("color.html").replace("localhost", host)}?c=${color}`;
 
-/** 主进程里找到那张纯色测试页（Agent 的离屏页面或用户的 webview）。 */
+/** 主进程里找到那张纯色测试页（离屏页面）。 */
 const findPage = `(webContents) => webContents.getAllWebContents().find((item) => !item.isDestroyed() && item.getURL().includes("color.html"))`;
 
 /**

@@ -120,8 +120,8 @@ export interface BrowserTabSnapshot {
   canGoBack: boolean;
   canGoForward: boolean;
   /**
-   * 这张标签页现在归 Agent：离屏渲染，面板里只显示画面，用户按「接管」才能操作。
-   * 标签条上带 Agent 标识。Agent 只能操作这种标签页。
+   * 这张是 Agent 开的：标签条上带 Agent 标识。只是「谁开的」，不是「归谁」：每张标签页
+   * 用户和 Agent 都能直接用，不用接管。
    */
   agent?: boolean;
   /**
@@ -150,26 +150,6 @@ export interface BrowserStateSnapshot {
   /** 这个内置浏览器当前的缩放倍数，1 就是 100%。 */
   zoom: number;
 }
-
-/**
- * One `<webview>` the renderer must keep mounted. Deliberately carries no URL and
- * no scope id: the app document never holds one agent's browsing state, and there
- * is no scope value in the renderer for a bug to mis-associate.
- */
-export interface BrowserGuestSlot {
-  tabId: string;
-  nonce: string;
-  /** 这张标签页要建在哪份 cookie jar 里——一个工作区一份。 */
-  partition: string;
-  /**
-   * 用户刚从 Agent 手里接管这张标签页：元素建好后先别加载任何东西，主进程要把 Agent
-   * 那边的页面（网址、历史、表单里填的内容）原样恢复进来。
-   */
-  restore?: boolean;
-}
-
-/** 接管用的 <webview> 带这个 src 报到，后面接 tab id（见主进程 browser-webview-policy.ts）。 */
-export const BROWSER_RESTORE_SRC_PREFIX = "about:blank#coilcoil-restore=";
 
 /**
  * 面板里正在画的页面画面：多大、用的哪种方式。只在这些变了的时候通知，不是每一帧。
@@ -265,9 +245,6 @@ export type BrowserPageEvent =
   /** 用户点开了一个下拉框。 */
   | { tabId: string; kind: "select"; picker: BrowserSelectPicker | null };
 
-export interface BrowserGuestRoster {
-  tabs: BrowserGuestSlot[];
-}
 
 /** Visible size of the browser panel, so agents see the viewport the user sees. */
 export interface BrowserUiViewport {
@@ -547,8 +524,8 @@ export interface CoilCoilDesktopApi {
   getBrowserState(scopeId: string): Promise<BrowserStateSnapshot>;
   /**
    * A JPEG data URL of the built-in browser's current page, or undefined when
-   * no tab can be captured. Used by the remote client, which cannot host the
-   * `<webview>` the desktop window renders the page into.
+   * no tab can be captured. Used by the remote client, which cannot receive the
+   * live picture the desktop window draws into its panel.
    */
   captureBrowserTab(scopeId: string): Promise<string | undefined>;
   /** Enter Chromium's native element picker and resolve after a click or cancel. */
@@ -561,8 +538,6 @@ export interface CoilCoilDesktopApi {
   createBrowserTab(scopeId: string, url?: string, placeholder?: boolean): Promise<BrowserStateSnapshot>;
   selectBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
   closeBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
-  /** 用户从 Agent 手里接管这张标签页：换成正常网页，页面状态原样带过来。 */
-  takeOverBrowserTab(scopeId: string, id: string): Promise<BrowserStateSnapshot>;
   navigateBrowser(scopeId: string, url: string): Promise<BrowserStateSnapshot>;
   browserBack(scopeId: string): Promise<BrowserStateSnapshot>;
   browserForward(scopeId: string): Promise<BrowserStateSnapshot>;
@@ -583,13 +558,6 @@ export interface CoilCoilDesktopApi {
   listSavedLogins(): Promise<SavedLoginSummary[]>;
   /** Sign the built-in browser out of everything, including saved logins. */
   clearBrowserData(): Promise<BrowserDataStats>;
-  /** The guest layer has mounted; returns the roster it must reconcile against. */
-  browserGuestLayerReady(): Promise<BrowserGuestRoster>;
-  /** Report the guest created for a roster slot. Rejects rather than rebinding. */
-  registerBrowserGuest(tabId: string, nonce: string, webContentsId: number): Promise<void>;
-  /** The element could not be created or died before registering. */
-  reportBrowserGuestFailure(tabId: string, nonce: string, reason: string): Promise<void>;
-  onBrowserGuestRoster(listener: (roster: BrowserGuestRoster) => void): () => void;
   onBrowserStateUpdated(listener: (state: BrowserStateSnapshot) => void): () => void;
   onBrowserAgentActivated(listener: (scopeId: string) => void): () => void;
   /**

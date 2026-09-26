@@ -198,12 +198,6 @@
   background: hsl(var(--th) var(--ts) var(--l-920));
 }
 
-[data-client="remote"] .browser-remote-frame {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
 /*
  * Settings on a phone: one wide canvas, panned.
  *

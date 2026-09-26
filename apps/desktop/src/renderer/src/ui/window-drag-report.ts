@@ -75,23 +75,6 @@ function paintedRegionAt(target: Document, x: number, y: number): { region?: Dra
   return { stack: elements.slice(0, 8).map(label) };
 }
 
-function guestSnapshot(target: Document): Array<Record<string, unknown>> {
-  return [...target.querySelectorAll("webview")].slice(0, 12).map((element) => {
-    const box = element.getBoundingClientRect();
-    const style = target.defaultView?.getComputedStyle(element);
-    return {
-      element: label(element),
-      className: element.className,
-      visibleClass: element.classList.contains("visible"),
-      pointerEvents: style?.pointerEvents,
-      left: Math.round(box.left),
-      top: Math.round(box.top),
-      width: Math.round(box.width),
-      height: Math.round(box.height),
-    };
-  });
-}
-
 /**
  * 按 Chromium 收集可拖动矩形的规则走一遍文档。
  *
@@ -170,7 +153,6 @@ export function installWindowDragFailureReport(target: Document = document): () 
           paintStack: painted.stack,
           target: event.target instanceof Element ? label(event.target) : undefined,
           nativeWindowFocused: undefined,
-          guests: guestSnapshot(target),
         });
       }
       return;
@@ -199,7 +181,6 @@ export function installWindowDragFailureReport(target: Document = document): () 
       looksFullscreen: view ? view.outerHeight >= view.screen.height : undefined,
       activeElement: target.activeElement ? label(target.activeElement) : undefined,
       selectionEmpty: view?.getSelection()?.isCollapsed ?? true,
-      guests: guestSnapshot(target),
     });
   };
   target.addEventListener("mousedown", onMouseDown, { capture: true, passive: true });

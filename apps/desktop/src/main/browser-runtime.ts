@@ -1,11 +1,10 @@
-import { randomBytes, randomUUID } from "node:crypto";
-import { app, BrowserWindow, screen, session, sharedTexture, webContents as webContentsRegistry, type Session, type WebContents } from "electron";
-import type { BrowserElementSelection, BrowserGuestRoster, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
-import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabControl, type BrowserTabOwner } from "./browser-agent-tabs";
+import { randomUUID } from "node:crypto";
+import { app, BrowserWindow, session, sharedTexture, type Session, type WebContents } from "electron";
+import type { BrowserElementSelection, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
+import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabOwner } from "./browser-agent-tabs";
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserElementPicker } from "./browser-element-picker";
-import { BrowserGuestRegistry } from "./browser-guests";
 import { fillSavedCredentials } from "./browser-import";
 import { cssCursor, PageInputForwarder, parsePageInput } from "./browser-input";
 import { PageDialogs } from "./browser-page-dialogs";
@@ -22,7 +21,7 @@ import {
   orderTabsForUi,
   type BrowserTab,
 } from "./browser-runtime-types";
-import { BROWSER_PARTITION, browserPartitionFor } from "./browser-webview-policy";
+import { BROWSER_PARTITION, browserPartitionFor } from "./browser-page-policy";
 
 /**
  * 缩放挡位，和 Chrome 的一样。
@@ -36,26 +35,10 @@ const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 
 const REMOTE_SCOPE_LIMIT = 8;
 
 /**
- * Owns CoilCoil browser tabs, guest WebContents and renderer-facing state.
- * Browser-level CDP protocol adaptation lives in BrowserCdpBridge.
+ * 内置浏览器的全部标签页：每一张都是一个离屏页面（见 browser-offscreen.ts），用户在
+ * 面板里看它的画面、直接在上面操作，Agent 通过 CDP（BrowserCdpBridge）操作同一个页面。
+ * 这里管标签页的生老病死、给界面的快照，以及用户操作怎么送进页面。
  */
-/**
- * 这台机器屏幕的真实尺寸。
- *
- * 后台标签页要靠 `setDeviceMetricsOverride` 拿到一个像样的视口才能截图，但那条命令
- * 会把 `screen` 一起改掉。原来传的是视口自己的尺寸，于是页面看到的是「屏幕正好
- * 1280×720、像素比 1」——屏幕和视口一模一样，这在真机上不会发生，是自动化最容易被
- * 认出来的一处。视口照旧，屏幕报真的。
- */
-function realScreenMetrics(): { screenWidth: number; screenHeight: number } {
-  try {
-    const { width, height } = screen.getPrimaryDisplay().size;
-    return { screenWidth: width, screenHeight: height };
-  } catch {
-    return { screenWidth: 1920, screenHeight: 1080 };
-  }
-}
-
 export class BrowserRuntimeManager {
   private readonly tabs = new Map<string, BrowserTab>();
   private readonly cdp: BrowserCdpBridge;
@@ -104,37 +87,23 @@ export class BrowserRuntimeManager {
   /** 用户正看着的那张离屏页面的画面，画到面板里（见 browser-frame-stream.ts）。 */
   private readonly frames: BrowserSurfaceStream;
   private disposed = false;
-  /** Correlates renderer-created <webview> guests with tab records. Unused until the switch. */
-  private readonly guests = new BrowserGuestRegistry({
-    hostWebContentsId: () => this.window.webContents.id,
-    inspect: (webContentsId, expected) => {
-      const contents = webContentsRegistry.fromId(webContentsId);
-      if (!contents) return undefined;
-      // Sessions are cached per partition string, so identity is an exact test
-      // that the guest really was created in the browser's own session.
-      // Electron 不肯说一个 session 叫什么名字，只能拿「是不是这一份」来问。
-      const expectedSession = session.fromPartition(expected);
-      return {
-        hostWebContentsId: contents.hostWebContents?.id,
-        type: contents.getType(),
-        partition: contents.session === expectedSession ? expected : undefined,
-        destroyed: contents.isDestroyed(),
-      };
-    },
-  });
-  private readonly handleHostNavigation = (
-    _event: unknown, _url: string, _isInPlace: boolean, isMainFrame: boolean,
+  /**
+   * App 界面重载、崩溃重开：标签页都是离屏页面，不跟着界面走，一张都不关。界面那边的
+   * 状态没了：用户点进页面时开的「页面有焦点」撤掉，开着的下拉列表收起。
+   */
+  private readonly handleHostReload = (
+    _event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean,
   ): void => {
-    if (isMainFrame) this.dropAllGuests();
+    if (!isMainFrame || isInPlace) return;
+    this.forgetUiState();
   };
-  private readonly handleHostGone = (): void => this.dropAllGuests();
+  private readonly handleHostGone = (): void => this.forgetUiState();
 
   constructor(
     private readonly window: BrowserWindow,
     private readonly publishState: (state: BrowserStateSnapshot) => void,
     private readonly onAgentActivated: (scopeId: string) => void,
-    private readonly publishGuestRoster: (roster: BrowserGuestRoster) => void = () => {},
-    /** 在 App 窗口里弹出网页的右键菜单（菜单本身由主进程入口搭，和 <webview> 的是同一份）。 */
+    /** 在 App 窗口里弹出网页的右键菜单（菜单本身由主进程入口搭）。 */
     private readonly showPageContextMenu: (contents: WebContents, params: Electron.ContextMenuParams) => void = () => {},
   ) {
     this.frames = new BrowserSurfaceStream(window.webContents, {
@@ -148,14 +117,10 @@ export class BrowserRuntimeManager {
       onAgentActivated: (scopeId) => this.onAgentActivated(scopeId),
       ensureActiveTab: (scopeId) => this.ensureAgentTab(scopeId),
       createTab: (rawUrl, activate, scopeId) => this.createCdpTab(rawUrl, activate, scopeId, false, "agent"),
-      userTabs: (scopeId) => this.userTabsFor(scopeId),
-      anyReadyTab: (scopeId) => {
-        const ready = this.tabsForScope(scopeId).filter((tab) => tab.phase === "ready" && tab.guest && !tab.guest.isDestroyed());
-        return ready.find((tab) => tab.control === "agent") ?? ready[0];
-      },
+      tabList: (scopeId) => this.tabList(scopeId),
+      anyReadyTab: (scopeId) => this.tabsForScope(scopeId).find((tab) => tab.phase === "ready" && tab.guest && !tab.guest.isDestroyed()),
       blankPlaceholder: (scopeId) => this.tabsForScope(scopeId).find((tab) =>
         tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab(tab, tab.guest.getURL())),
-      takeOverForAgent: (id, scopeId) => this.takeOverForAgent(id, scopeId),
       noteAgentUse: (tab) => { tab.lastUsedAt = Date.now(); },
       takeRecycledTabs: (scopeId) => this.recycledTabs.take(scopeId),
       selectTab: (id, scopeId) => { this.selectTab(id, scopeId); },
@@ -170,11 +135,7 @@ export class BrowserRuntimeManager {
       setContentsSize: (tab, params) => this.setContentsSize(tab, params),
       setAgentFocusEmulation: (tab, enabled) => this.setFocusEmulation(tab, "agent", enabled),
     });
-    // Guests live in the renderer's document, so a reload or crash destroys every
-    // one of them. Tear the records down deliberately and tell clients their
-    // targets are gone; resurrecting them under an old page target id would
-    // leave any CDP client attached to stale execution contexts.
-    this.window.webContents.on("did-start-navigation", this.handleHostNavigation);
+    this.window.webContents.on("did-start-navigation", this.handleHostReload);
     this.window.webContents.on("render-process-gone", this.handleHostGone);
   }
 
@@ -394,81 +355,48 @@ export class BrowserRuntimeManager {
    */
   private dropBlankPlaceholders(scopeId: string, keepId: string): void {
     for (const tab of this.tabsForScope(scopeId)) {
-      if (tab.id === keepId || !tab.implicit || tab.control !== "user") continue;
+      if (tab.id === keepId || !tab.implicit || tab.owner !== "user") continue;
       const url = tab.guest && !tab.guest.isDestroyed() ? tab.guest.getURL() : "";
       if (!url || /^about:blank$/i.test(url)) this.closeTab(tab.id, scopeId);
     }
   }
 
   /**
-   * Reserve the tab synchronously, before any await.
+   * 先同步占好这张标签页的位置，再去等页面建好。
    *
-   * The guest itself is created by the renderer, which is asynchronous, but the
-   * record and its claim on activeTabIds must land in this turn: ensureActiveTab
-   * has thirteen callers that would otherwise each start their own tab while the
-   * first was still in flight. The tab is quarantined until its page commits —
-   * announced stays false and pageTargetId is a placeholder — so no CDP client
-   * can see a target that has no WebContents behind it yet.
+   * 记录和它在 activeTabIds 里的位置必须在同一轮里落下：ensureActiveTab 有十几个调用方，
+   * 不这样每个都会在第一张还没建好时各开一张。页面提交之前它是隔离的——announced 为
+   * false、pageTargetId 是占位的——CDP 客户端看不到一个背后还没有页面的目标。
    */
-  private createTabRecord(activate: boolean, scopeId: string, implicit: boolean, owner: BrowserTabOwner, control: BrowserTabControl): BrowserTab {
+  private createTabRecord(activate: boolean, scopeId: string, implicit: boolean, owner: BrowserTabOwner): BrowserTab {
     const id = randomUUID();
     const tab: BrowserTab = {
       id,
       scopeId,
       partition: this.partitionForScope(scopeId),
       owner,
-      control,
       lastUsedAt: Date.now(),
       tabTargetId: `tab-${id}`,
       pageTargetId: `pending-page-${id}`,
-      guestNonce: randomBytes(16).toString("hex"),
       phase: "awaiting-guest",
       announced: false,
       ...implicit ? { implicit: true } : {},
     };
     this.tabs.set(id, tab);
     if (activate || !this.activeTabIds.has(scopeId)) this.activeTabIds.set(scopeId, id);
-    // The tab strip shows a placeholder immediately, and the roster tells the
-    // renderer to mint the element this tab is waiting for.
+    // 标签条上立刻出现一个「新标签页」，页面建好再换成真的标题。
     this.publish();
-    this.publishRoster();
     return tab;
   }
 
   /**
-   * Wait for the renderer to create and report this tab's <webview>, then wire it
-   * up in the same order the main-process view used: security, events, debugger —
-   * all before the first navigation.
-   */
-  private async attachGuest(tab: BrowserTab): Promise<void> {
-    const webContentsId = await this.guests.expectGuest(tab.id, tab.guestNonce, tab.partition)
-      .catch(async (error: unknown) => {
-        // A guest cannot arrive if the layer never mounted; report that instead.
-        await this.guests.waitForLayer();
-        throw error;
-      });
-    const guest = webContentsRegistry.fromId(webContentsId);
-    if (!guest || guest.isDestroyed()) throw new Error("内置浏览器视图已失效。");
-    if (tab.phase === "closing" || !this.tabs.has(tab.id)) throw new Error("标签页已关闭。");
-    tab.guest = guest;
-    tab.phase = "loading";
-    this.installTabSecurity(tab);
-    this.installTabEvents(tab);
-    this.installGuestTeardown(tab, guest);
-    await this.attachDebugger(tab);
-    await this.applyViewportOverride(tab);
-    this.applyZoom(tab);
-  }
-
-  /**
-   * Agent 的标签页：建一个离屏页面，按和 guest 一样的顺序接好——安全、事件、调试器，
-   * 都在第一次真正的导航之前（见 browser-offscreen.ts 为什么 Agent 用离屏页面）。
+   * 建一个离屏页面，按这个顺序接好：安全、事件、调试器，都在第一次真正的导航之前
+   * （为什么用离屏页面见 browser-offscreen.ts）。
    *
    * 调试器之前先让它加载点东西：从没加载过页面的离屏页面还没有渲染进程，这时发的
-   * CDP 命令会一直等下去（<webview> 挂上时已经加载过 about:blank，所以没这个问题）。
-   * 从用户那边接管过来的，这一步就是把页面状态恢复进来——恢复只肯往没加载过的页面里恢复。
+   * CDP 命令会一直等下去。
    */
-  private async attachOffscreen(tab: BrowserTab, history?: { entries: Electron.NavigationEntry[]; index: number }): Promise<void> {
+  private async attachOffscreen(tab: BrowserTab): Promise<void> {
     const page = createOffscreenPage(tab.partition, this.offscreenSize(tab), (contents, texture, image) => this.frames.paint(tab.id, contents, texture, image));
     if (tab.phase === "closing" || !this.tabs.has(tab.id)) {
       page.destroy();
@@ -482,8 +410,7 @@ export class BrowserRuntimeManager {
     this.installGuestTeardown(tab, page.webContents);
     this.installPageFeedback(tab, page.webContents);
     this.dialogs.install(tab.id, page.webContents);
-    if (history) await page.webContents.navigationHistory.restore(history);
-    else await loadGuestUrl(page.webContents, DEFAULT_URL);
+    await loadGuestUrl(page.webContents, DEFAULT_URL);
     await this.attachDebugger(tab);
     await this.dialogs.watch(page.webContents);
     this.applyZoom(tab);
@@ -499,47 +426,9 @@ export class BrowserRuntimeManager {
     return visible ? this.uiViewport : DEFAULT_VIEWPORT;
   }
 
-  /**
-   * Give a parked guest a real logical viewport.
-   *
-   * A parked guest is a 1x1 element, and a guest hidden any other way stops
-   * compositing — which makes Page.captureScreenshot hang forever. Keeping it
-   * tiny but on screen and overriding the metrics is what lets an agent drive and
-   * screenshot a tab the user is not looking at.
-   *
-   * The visible tab must NOT carry this override: its element is already the size
-   * of the panel, and forcing 1280x720 on top would render the page wider than the
-   * space it is drawn into and clip it.
-   */
+  /** 每张离屏页面都有自己的窗口，视口就是窗口大小：用户正看着的和面板一样大，其余按常见桌面尺寸。 */
   private async applyViewportOverride(tab: BrowserTab): Promise<void> {
-    // 离屏页面有自己的窗口，直接改窗口大小，不用模拟。
-    if (tab.offscreen) {
-      resizeOffscreenPage(tab.offscreen, this.offscreenSize(tab));
-      return;
-    }
-    if (tab.emulatedSize) return;
-    const guest = tab.guest;
-    if (!guest || guest.isDestroyed()) return;
-    // 停不停靠只看「用户现在是不是正看着它」。这里以前还要求标签页属于界面这个
-    // scope——那是多余的（tab id 全局唯一），而且现在是错的：用户点开别的会话那张
-    // 标签页时，它就是屏幕上那一张，再按 1280x720 铺一遍会画到面板外面去。
-    const parked = !this.panelVisible || tab.id !== this.activeTabIds.get(this.uiScopeId);
-    try {
-      if (!parked) {
-        // Let the element's own box drive layout again.
-        await guest.debugger.sendCommand("Emulation.clearDeviceMetricsOverride");
-        return;
-      }
-      await guest.debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
-        width: DEFAULT_VIEWPORT.width,
-        height: DEFAULT_VIEWPORT.height,
-        ...realScreenMetrics(),
-        deviceScaleFactor: 1,
-        mobile: false,
-      });
-    } catch (error) {
-      console.error("[browser] 设置视口失败", error);
-    }
+    if (tab.offscreen) resizeOffscreenPage(tab.offscreen, this.offscreenSize(tab));
   }
 
   /** Re-evaluate every tab's viewport after the visible tab changes. */
@@ -551,17 +440,16 @@ export class BrowserRuntimeManager {
     this.refreshFrames();
   }
 
-  /** 面板正显示一张 Agent 标签页时，把它的画面送过去；换了、收起了就换目标或停下。 */
+  /** 面板正显示哪一张，就把它的画面送过去；换了、收起了就换目标或停下。 */
   private refreshFrames(): void {
     const tab = this.panelVisible ? this.activeTab(this.uiScopeId) : undefined;
-    const watched = tab?.control === "agent" && tab.phase !== "closing" ? tab : undefined;
+    const watched = tab && tab.phase !== "closing" ? tab : undefined;
     this.frames.watch(watched?.id, watched?.guest);
   }
 
-  /** A guest can die on its own — renderer reload, crash, or element removal. */
+  /** 页面自己没了（被系统回收、异常销毁）：这张标签页跟着关掉。 */
   private installGuestTeardown(tab: BrowserTab, guest: WebContents): void {
     guest.once("destroyed", () => {
-      // 接管时换下来的旧页面会被销毁，那不是这张标签页没了。
       if (this.tabs.get(tab.id) !== tab || tab.guest !== guest) return;
       this.closeTabRecord(tab);
       this.publish();
@@ -605,13 +493,11 @@ export class BrowserRuntimeManager {
     scopeId: string,
     implicit = false,
     owner: BrowserTabOwner = "user",
-    control: BrowserTabControl = owner,
   ): Promise<BrowserTab> {
     const url = normalizeBrowserUrl(rawUrl);
-    const tab = this.createTabRecord(activate, scopeId, implicit, owner, control);
+    const tab = this.createTabRecord(activate, scopeId, implicit, owner);
     try {
-      if (control === "agent") await this.attachOffscreen(tab);
-      else await this.attachGuest(tab);
+      await this.attachOffscreen(tab);
       await loadGuestUrl(tab.guest!, url);
       await this.finishTabCreation(tab);
     } catch (error) {
@@ -619,7 +505,7 @@ export class BrowserRuntimeManager {
       this.publish();
       throw error;
     }
-    if (control === "agent") {
+    if (owner === "agent") {
       this.keepAgentTabsWithinLimit(tab);
       if (!implicit) this.dropBlankPlaceholders(scopeId, tab.id);
     }
@@ -642,17 +528,16 @@ export class BrowserRuntimeManager {
    * issues several at once.
    */
   async ensureAgentTab(scopeId = this.uiScopeId): Promise<BrowserTab> {
-    // Agent 只能碰归它的标签页：当前那张不归它，就用它最近用过的那张。
+    // 用户和 Agent 用的是同一批页面：当前那张能用就是它，不然用最近用过的那张。
     const active = this.readyTab(scopeId);
-    if (active?.control === "agent") return active;
+    if (active?.announced) return active;
     const recent = this.cdpTabs(scopeId)
       .filter((tab) => tab.phase === "ready" && tab.guest && !tab.guest.isDestroyed())
       .sort((a, b) => b.lastUsedAt - a.lastUsedAt)[0];
     if (recent) return recent;
     const inFlight = this.pendingEnsure.get(scopeId);
     if (inFlight) return inFlight;
-    // 桥为 CDP 客户端垫的空白页：没人要过它，算 Agent 的，Agent 第一次 new_page 就拿它用。
-    // 用户正看着自己的标签页时不把面板切过去。
+    // 一张都没有：给 CDP 客户端垫一张空白页，算 Agent 的，Agent 第一次 new_page 就拿它用。
     const attempt = this.createCdpTab(undefined, !this.activeTabIds.has(scopeId), scopeId, true, "agent")
       .finally(() => {
         if (this.pendingEnsure.get(scopeId) === attempt) this.pendingEnsure.delete(scopeId);
@@ -869,8 +754,8 @@ export class BrowserRuntimeManager {
     if (this.panelVisible === !hidden) {
       if (hidden || (width === this.uiViewport.width && height === this.uiViewport.height)) return;
       this.uiViewport = { width, height };
-      // 面板只是变了大小：正看着的那张 Agent 标签页是离屏页面，得跟着改窗口大小，
-      // 不然画面还按旧尺寸画，拉宽后多出来的地方留白。用户的 guest 跟着元素走，不用管。
+      // 面板只是变了大小：正看着的那张离屏页面得跟着改窗口大小，不然画面还按旧尺寸画，
+      // 拉宽后多出来的地方留白。
       const tab = this.activeTab(this.uiScopeId);
       if (tab?.offscreen && tab.phase !== "closing") resizeOffscreenPage(tab.offscreen, this.offscreenSize(tab));
       return;
@@ -880,194 +765,30 @@ export class BrowserRuntimeManager {
     this.refreshViewportOverrides();
   }
 
-  /** 用户在这个会话里开着的标签页，给 Agent 挑一张接管。Agent 碰不了它们，只能看到有哪些。 */
-  private userTabsFor(scopeId: string): Array<{ id: string; title: string; url: string; active: boolean }> {
-    return this.tabsForScope(scopeId)
-      .filter((tab) => tab.control === "user" && tab.phase === "ready" && tab.guest && !tab.guest.isDestroyed())
+  /**
+   * 这个会话里的全部标签页，给 Agent 的 browser_tabs：用户开的、Agent 开的都在，用户
+   * 正看着哪一张也标出来。用户和 Agent 用的是同一批页面，不用接管、不会刷新。
+   */
+  private tabList(scopeId: string): Array<{ id: string; title: string; url: string; active: boolean; owner: BrowserTabOwner }> {
+    return this.cdpTabs(scopeId)
+      .filter((tab) => tab.phase === "ready" && tab.guest && !tab.guest.isDestroyed())
       .map((tab) => ({
         id: tab.id,
         title: tab.guest!.getTitle(),
         url: tab.guest!.getURL() || DEFAULT_URL,
         active: this.activeTabIds.get(scopeId) === tab.id,
+        owner: tab.owner,
       }));
   }
 
-  /**
-   * Agent 接管用户的标签页：换成离屏页面，页面状态原样搬过去。
-   *
-   * 用 Chromium 恢复标签页的那套机制（navigationHistory.getAllEntries / restore）：
-   * 网址、前进后退历史、表单里填的内容、滚动位置都带过去；页面脚本会重新跑一遍，
-   * 内存里没保存的东西（单页应用的临时状态、正在播放的位置）带不过去。cookie 是同一
-   * 份，登录状态还在。不用用户同意，界面上这张标签页换成 Agent 的样子。
-   */
-  async takeOverForAgent(id: string, scopeId: string): Promise<BrowserTab> {
-    const tab = this.tabs.get(id);
-    if (!tab || tab.scopeId !== scopeId) throw new Error("标签页不存在。");
-    if (tab.control === "agent") return tab;
-    const source = tab.guest;
-    if (tab.phase !== "ready" || !source || source.isDestroyed()) throw new Error("这张标签页还没加载好，稍后再接管。");
-    const history = await this.historyOf(source);
-    const previous = { nonce: tab.guestNonce, guest: source };
-    tab.control = "agent";
-    try {
-      await this.attachOffscreen(tab, history);
-      await this.refreshPageTargetIdentity(tab);
-    } catch (error) {
-      // 没搬成就原样退回：还是用户那张 <webview>。
-      if (tab.offscreen && !tab.offscreen.isDestroyed()) tab.offscreen.destroy();
-      Object.assign(tab, { control: "user", offscreen: undefined, guest: previous.guest, phase: "ready" });
-      this.publish();
-      throw error;
-    }
-    // 旧的 <webview> 从名册里拿掉，渲染层会删掉元素、销毁它。
-    this.guests.release(tab.id);
-    if (previous.guest.debugger.isAttached()) previous.guest.debugger.detach();
-    tab.guestNonce = randomBytes(16).toString("hex");
-    tab.phase = "ready";
-    tab.announced = true;
-    tab.lastUsedAt = Date.now();
-    this.publishRoster();
-    this.refreshViewportOverrides();
-    this.cdp.announceCreated(tab);
-    this.publish();
-    return tab;
-  }
-
-  /**
-   * 用户接管 Agent 的标签页：换成正常的 <webview>，页面状态原样搬过去。
-   *
-   * Chromium 只肯往从没加载过页面的 WebContents 里恢复，所以新元素带着接管标记报到，
-   * 主进程让它什么都不加载、在 did-attach 里直接认领（见 browser-webview-policy.ts
-   * 的 restoreGuestSrc），恢复完页面，渲染层再照常用 nonce 登记确认。Agent 从这一刻
-   * 起看不到这张标签页了。
-   */
-  async takeOverForUser(id: string, scopeId = this.uiScopeId): Promise<BrowserStateSnapshot> {
-    const tab = this.tabs.get(id);
-    if (!tab || tab.scopeId !== scopeId) return this.state(scopeId);
-    if (tab.control === "user") return this.state(scopeId);
-    const source = tab.guest;
-    const page = tab.offscreen;
-    if (tab.phase !== "ready" || !source || source.isDestroyed() || !page) throw new Error("这张标签页还没加载好，稍后再接管。");
-    const history = await this.historyOf(source);
-    this.cdp.announceDestroyed(tab);
-    tab.announced = false;
-    tab.control = "user";
-    tab.phase = "awaiting-guest";
-    tab.guestNonce = randomBytes(16).toString("hex");
-    tab.guest = undefined;
-    tab.offscreen = undefined;
-    const claimed = this.guests.expectRestoreGuest(tab.id, tab.partition);
-    const registered = this.guests.expectGuest(tab.id, tab.guestNonce, tab.partition);
-    this.refreshFrames();
-    this.publishRoster();
-    this.publish();
-    try {
-      const guest = webContentsRegistry.fromId(await claimed);
-      if (!guest || guest.isDestroyed()) throw new Error("内置浏览器视图已失效。");
-      tab.guest = guest;
-      tab.phase = "loading";
-      this.installTabSecurity(tab);
-      this.installTabEvents(tab);
-      this.installGuestTeardown(tab, guest);
-      // 先恢复再挂调试器：从没加载过页面的 guest 上挂调试器、发 CDP 命令，恢复会卡住。
-      await guest.navigationHistory.restore(history);
-      await this.attachDebugger(tab);
-      this.applyZoom(tab);
-      await registered;
-    } catch (error) {
-      // 没搬成：退回成 Agent 那张离屏页面，它还活着。
-      this.guests.release(tab.id);
-      Object.assign(tab, { control: "agent", guest: source, offscreen: page, phase: "ready", announced: true });
-      this.publishRoster();
-      this.refreshViewportOverrides();
-      this.cdp.announceCreated(tab);
-      this.publish();
-      throw error;
-    }
-    if (source.debugger.isAttached()) source.debugger.detach();
-    page.destroy();
-    tab.phase = "ready";
-    this.refreshViewportOverrides();
-    this.publish();
-    return this.state(scopeId);
-  }
-
-  /**
-   * 接管时要搬走的东西：历史，加上每一页的页面状态（表单内容、滚动位置）。
-   *
-   * Chromium 平时是隔一阵子才把页面状态同步出来一次，页面不在前台时隔得更久——刚填进
-   * 去的内容很可能还没记上，搬过去输入框就是空的。先做一次同文档的 replaceState（网址、
-   * history.state 都不变），Chromium 会随这次提交把当前页面状态立刻带出来。
-   */
-  private async historyOf(contents: WebContents): Promise<{ entries: Electron.NavigationEntry[]; index: number }> {
-    await contents.executeJavaScript("history.replaceState(history.state, '')", true).catch(() => undefined);
-    return { entries: contents.navigationHistory.getAllEntries(), index: contents.navigationHistory.getActiveIndex() };
-  }
-
-  /** will-attach-webview 里问：这个带接管标记的元素，是不是真有这张标签页在等接管。 */
-  acceptsRestoreAttach(tabId: string, partition: unknown): boolean {
-    return this.guests.acceptsRestore(tabId, partition);
-  }
-
-  /** did-attach-webview 里认领接管用的 guest；核对不过就关掉它。 */
-  claimRestoreGuest(tabId: string, guest: WebContents): void {
-    try {
-      this.guests.claimRestore(tabId, guest.id);
-    } catch (error) {
-      console.error("[browser] 接管用的浏览器视图校验失败", error);
-      if (!guest.isDestroyed()) guest.close();
-    }
-  }
-
-  /**
-   * The `<webview>` elements the renderer must keep mounted. Carries no URL and no
-   * scope id, so the app document never holds an agent's browsing state.
-   *
-   * Empty until the switch to guest-backed tabs; the layer and its IPC land first
-   * so the handshake can be exercised before anything depends on it.
-   */
-  guestRoster(): BrowserGuestRoster {
-    return {
-      // 只有归用户的标签页才是嵌在面板里的 <webview>；Agent 的是离屏页面，不在这里。
-      tabs: [...this.tabs.values()]
-        .filter((tab) => tab.phase !== "closing" && tab.control === "user")
-        .map((tab) => ({
-          tabId: tab.id,
-          nonce: tab.guestNonce,
-          partition: tab.partition,
-          ...this.guests.restorePending(tab.id) ? { restore: true } : {},
-        })),
-    };
-  }
-
-  /** The renderer's guest layer has mounted and can create elements. */
-  markGuestLayerReady(): BrowserGuestRoster {
-    this.guests.markLayerReady();
-    return this.guestRoster();
-  }
-
-  /** Push the roster after the tab set changes so the renderer mints or drops elements. */
-  private publishRoster(): void {
-    if (this.disposed || this.window.isDestroyed()) return;
-    this.publishGuestRoster(this.guestRoster());
-  }
-
-  registerGuest(tabId: string, nonce: string, webContentsId: number): void {
-    this.guests.register(tabId, nonce, webContentsId);
-  }
-
-  /** The renderer that owned every guest went away; close the records it backed. */
-  private dropAllGuests(): void {
+  /** 界面重载、崩溃：界面上的状态没了，页面还在。 */
+  private forgetUiState(): void {
     if (this.disposed) return;
-    this.guests.markLayerGone();
-    const tabs = [...this.tabs.values()];
-    if (tabs.length === 0) return;
-    for (const tab of tabs) this.closeTabRecord(tab);
-    this.publish();
-  }
-
-  reportGuestFailure(tabId: string, nonce: string, reason: string): void {
-    this.guests.fail(tabId, nonce, reason);
+    this.elementPicker.cancel();
+    for (const tab of this.tabs.values()) {
+      this.selects.forget(tab.id);
+      if (tab.focusEmulation?.user) void this.setFocusEmulation(tab, "user", false);
+    }
   }
 
   async dispose(): Promise<void> {
@@ -1075,9 +796,8 @@ export class BrowserRuntimeManager {
     this.disposed = true;
     this.elementPicker.cancel();
     this.frames.dispose();
-    this.guests.dispose();
     if (!this.window.isDestroyed()) {
-      this.window.webContents.off("did-start-navigation", this.handleHostNavigation);
+      this.window.webContents.off("did-start-navigation", this.handleHostReload);
       this.window.webContents.off("render-process-gone", this.handleHostGone);
     }
     for (const tab of [...this.tabs.values()]) this.closeTabRecord(tab);
@@ -1096,8 +816,8 @@ export class BrowserRuntimeManager {
    * `tabsForScope` stays for the UI, which does show tabs while they load.
    */
   private cdpTabs(scopeId: string): BrowserTab[] {
-    // Agent 看得到、碰得到的只有归它的标签页；用户的要先接管（takeOverForAgent）。
-    return this.tabsForScope(scopeId).filter((tab) => tab.announced && tab.control === "agent");
+    // 这个会话里的标签页 Agent 都看得到、都能用：用户开的也一样（用户拍板的）。
+    return this.tabsForScope(scopeId).filter((tab) => tab.announced);
   }
 
   private activeTab(scopeId: string): BrowserTab | undefined {
@@ -1127,30 +847,23 @@ export class BrowserRuntimeManager {
       if (replacement) this.activeTabIds.set(tab.scopeId, replacement.id);
       else this.activeTabIds.delete(tab.scopeId);
     }
-    // Frees the pending reservation and the guest binding; a late registration
-    // for this tab is then refused rather than silently bound.
-    this.guests.release(tab.id);
-    // Notify CDP clients while the guest still exists, so relay listeners can be
-    // detached from the exact debugger they were registered on.
+    // 趁页面还在先告诉 CDP 客户端，它们挂在这个调试器上的转发才摘得干净。
     this.cdp.announceDestroyed(tab);
+    this.selects.forget(tab.id);
     const guest = tab.guest;
-    if (guest && !guest.isDestroyed()) {
-      if (guest.debugger.isAttached()) guest.debugger.detach();
-      // beforeunload must not let a page keep an agent's tab alive.
-      if (!tab.offscreen) guest.close({ waitForBeforeUnload: false });
-    }
+    if (guest && !guest.isDestroyed() && guest.debugger.isAttached()) guest.debugger.detach();
+    // 直接销毁窗口：页面的 beforeunload 不能把一张标签页留住。
     if (tab.offscreen && !tab.offscreen.isDestroyed()) tab.offscreen.destroy();
     tab.offscreen = undefined;
     tab.guest = undefined;
     this.refreshFrames();
-    this.publishRoster();
   }
 
   private tabSnapshot(tab: BrowserTab): BrowserTabSnapshot {
     const contents = tab.guest;
     // A tab exists in the strip while its guest is still being created.
     if (!contents || contents.isDestroyed()) {
-      return { id: tab.id, title: "新标签页", url: DEFAULT_URL, loading: true, canGoBack: false, canGoForward: false, agent: tab.control === "agent" };
+      return { id: tab.id, title: "新标签页", url: DEFAULT_URL, loading: true, canGoBack: false, canGoForward: false, agent: tab.owner === "agent" };
     }
     return {
       id: tab.id,
@@ -1159,7 +872,7 @@ export class BrowserRuntimeManager {
       loading: contents.isLoading(),
       canGoBack: contents.navigationHistory.canGoBack(),
       canGoForward: contents.navigationHistory.canGoForward(),
-      agent: tab.control === "agent",
+      agent: tab.owner === "agent",
       ...this.dialogs.snapshot(tab.id) ? { dialog: this.dialogs.snapshot(tab.id) } : {},
     };
   }
@@ -1181,7 +894,7 @@ export class BrowserRuntimeManager {
       try {
         normalizeBrowserUrl(url);
         // 页面自己弹出的新窗口跟着打开它的那张算：Agent 页里弹出来的还是 Agent 的。
-        void this.createCdpTab(url, true, tab.scopeId, false, tab.owner, tab.control).catch((error) => console.error("[browser] 打开新标签页失败", error));
+        void this.createCdpTab(url, true, tab.scopeId, false, tab.owner).catch((error) => console.error("[browser] 打开新标签页失败", error));
       } catch {
         // Keep unsupported protocols inside the browser sandbox.
       }
@@ -1221,7 +934,7 @@ export class BrowserRuntimeManager {
     contents.on("render-process-gone", update);
   }
 
-  /** 返回的 promise 是给第一次导航用的：身份必须在导航发出之前盖上（见 attachGuest）。 */
+  /** 返回的 promise 是给第一次导航用的：身份必须在导航发出之前盖上（见 attachOffscreen）。 */
   private attachDebugger(tab: BrowserTab): Promise<void> {
     const debug = this.guestOf(tab).debugger;
     if (debug.isAttached()) return Promise.resolve();
@@ -1248,18 +961,7 @@ export class BrowserRuntimeManager {
       throw new Error("浏览器视口尺寸无效。");
     }
     tab.emulatedSize = { width, height };
-    if (tab.offscreen) {
-      resizeOffscreenPage(tab.offscreen, tab.emulatedSize);
-      return {};
-    }
-    this.attachDebugger(tab);
-    await this.guestOf(tab).debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
-      width,
-      height,
-      ...realScreenMetrics(),
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
+    if (tab.offscreen) resizeOffscreenPage(tab.offscreen, tab.emulatedSize);
     return {};
   }
 

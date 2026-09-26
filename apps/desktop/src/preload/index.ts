@@ -4,7 +4,6 @@ import type { FileNode } from "@coilcoil/runtime-protocol";
 import type {
   BrowserDataStats,
   BrowserElementSelection,
-  BrowserGuestRoster,
   BrowserImportSummary,
   BrowserPageEvent,
   BrowserPageInput,
@@ -87,7 +86,6 @@ const BROWSER_SET_SCOPE_CHANNEL = "browser:set-scope";
 const BROWSER_CREATE_TAB_CHANNEL = "browser:create-tab";
 const BROWSER_SELECT_TAB_CHANNEL = "browser:select-tab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:close-tab";
-const BROWSER_TAKE_OVER_CHANNEL = "browser:take-over";
 const BROWSER_INPUT_CHANNEL = "browser:input";
 const BROWSER_PAGE_EVENT_CHANNEL = "browser:page-event";
 const BROWSER_DIALOG_REPLY_CHANNEL = "browser:dialog-reply";
@@ -110,10 +108,6 @@ const BROWSER_IMPORT_COOKIES_CHANNEL = "browser:import-cookies";
 const BROWSER_DATA_STATS_CHANNEL = "browser:data-stats";
 const BROWSER_SAVED_LOGINS_CHANNEL = "browser:saved-logins";
 const BROWSER_DATA_CLEAR_CHANNEL = "browser:data-clear";
-const BROWSER_GUEST_ROSTER_CHANNEL = "browser:guest-roster";
-const BROWSER_GUEST_LAYER_READY_CHANNEL = "browser:guest-layer-ready";
-const BROWSER_REGISTER_GUEST_CHANNEL = "browser:register-guest";
-const BROWSER_GUEST_FAILED_CHANNEL = "browser:guest-failed";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_DATA_CHANNEL = "terminal:data";
 const TERMINAL_GET_CHANNEL = "terminal:get";
@@ -209,7 +203,6 @@ const api: CoilCoilDesktopApi = {
   createBrowserTab: (scopeId: string, url?: string, placeholder?: boolean) => ipcRenderer.invoke(BROWSER_CREATE_TAB_CHANNEL, scopeId, url, placeholder === true) as Promise<BrowserStateSnapshot>,
   selectBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_SELECT_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
   closeBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
-  takeOverBrowserTab: (scopeId: string, id: string) => ipcRenderer.invoke(BROWSER_TAKE_OVER_CHANNEL, scopeId, id) as Promise<BrowserStateSnapshot>,
   navigateBrowser: (scopeId: string, url: string) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, scopeId, url) as Promise<BrowserStateSnapshot>,
   setBrowserZoom: (scopeId: string, step: "in" | "out" | "reset") => ipcRenderer.invoke(BROWSER_ZOOM_CHANNEL, scopeId, step) as Promise<BrowserStateSnapshot>,
   browserBack: (scopeId: string) => ipcRenderer.invoke(BROWSER_BACK_CHANNEL, scopeId) as Promise<BrowserStateSnapshot>,
@@ -224,16 +217,6 @@ const api: CoilCoilDesktopApi = {
   getBrowserDataStats: () => ipcRenderer.invoke(BROWSER_DATA_STATS_CHANNEL) as Promise<BrowserDataStats>,
   listSavedLogins: () => ipcRenderer.invoke(BROWSER_SAVED_LOGINS_CHANNEL) as Promise<SavedLoginSummary[]>,
   clearBrowserData: () => ipcRenderer.invoke(BROWSER_DATA_CLEAR_CHANNEL) as Promise<BrowserDataStats>,
-  browserGuestLayerReady: () => ipcRenderer.invoke(BROWSER_GUEST_LAYER_READY_CHANNEL) as Promise<BrowserGuestRoster>,
-  registerBrowserGuest: (tabId: string, nonce: string, webContentsId: number) =>
-    ipcRenderer.invoke(BROWSER_REGISTER_GUEST_CHANNEL, tabId, nonce, webContentsId) as Promise<void>,
-  reportBrowserGuestFailure: (tabId: string, nonce: string, reason: string) =>
-    ipcRenderer.invoke(BROWSER_GUEST_FAILED_CHANNEL, tabId, nonce, reason) as Promise<void>,
-  onBrowserGuestRoster: (listener: (roster: BrowserGuestRoster) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, roster: BrowserGuestRoster): void => listener(roster);
-    ipcRenderer.on(BROWSER_GUEST_ROSTER_CHANNEL, handler);
-    return () => ipcRenderer.removeListener(BROWSER_GUEST_ROSTER_CHANNEL, handler);
-  },
   onBrowserStateUpdated: (listener: (state: BrowserStateSnapshot) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: BrowserStateSnapshot): void => listener(state);
     ipcRenderer.on(BROWSER_STATE_CHANNEL, handler);

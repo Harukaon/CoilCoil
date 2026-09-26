@@ -1,14 +1,12 @@
 import * as Popover from "@radix-ui/react-popover";
-import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Minus, MousePointer2, Plus, RotateCw, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Globe2, Minus, MousePointer2, Plus, RotateCw, Search } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BrowserElementSelection, BrowserStateSnapshot } from "../../../../shared/desktop-api";
 import { isRemoteClient } from "../../hooks/useMobileRemote";
-import { platformComputerLabel, rendererPlatform } from "../../platform";
 import { visibleBrowserTabs } from "../inspector/inspectorTabs";
 import { toastError } from "../../ui/toast";
 import { BrowserDataMenu } from "./BrowserDataMenu";
 import { LivePageSurface } from "./LivePageSurface";
-import { setGuestPlacement } from "./guestLayer";
 
 /** Fast enough to follow the agent clicking through a page, cheap enough to stream. */
 const REMOTE_FRAME_INTERVAL_MS = 1_200;
@@ -27,15 +25,14 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   onState(next: BrowserStateSnapshot): void;
   onElementPicked(selection: BrowserElementSelection): void;
 }): React.JSX.Element {
-  const platformLabel = platformComputerLabel(rendererPlatform());
   const [address, setAddress] = useState("");
   const [zoomOpen, setZoomOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const pickRequestRef = useRef(0);
   const hostRef = useRef<HTMLDivElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
-  // 网页版不管窗口多宽都不是桌面窗口：放不了 <webview>，也收不到画面推送，只能按截图看
-  // Mac 上的页面。以前只按手机宽度判断，电脑上开网页版时 Agent 的页面一直「正在读取」。
+  // 网页版不管窗口多宽都不是桌面窗口：收不到画面，只能按截图看 Mac 上的页面。以前只按
+  // 手机宽度判断，电脑上开网页版时页面一直「正在读取」。
   const remote = isRemoteClient();
   const [frame, setFrame] = useState<string>();
   const activeTab = useMemo(() => {
@@ -62,11 +59,8 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
   }, []);
 
   /**
-   * On the phone or the web client the page is captured on the Mac and shown as frames.
-   *
-   * The desktop renders the page into a `<webview>` guest, which a browser tab
-   * cannot host. The page is live on the Mac either way — the agent is driving
-   * it — so the remote panel watches it instead of embedding it.
+   * 手机、网页版：页面在 Mac 上，定时截一张图看。桌面窗口是把页面的实时画面直接画进
+   * 面板（见 LivePageSurface），网页版拿不到那条通道。
    */
   useEffect(() => {
     if (!remote) { setFrame(undefined); return; }
@@ -89,25 +83,19 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
     };
   }, [remote, active, activeTabId]);
 
-  // The guest is a <webview> in the layer at the app root, so this measures the
-  // hole it should fill rather than pushing native bounds over IPC.
+  // 面板多大，正看着的那张页面就多大（主进程把它的离屏窗口改成这个尺寸，Agent 问窗口
+  // 大小时也答这个）；面板收起、窗口藏起来时报 0，那张页面就按后台尺寸渲染。
   useLayoutEffect(() => {
     const host = hostRef.current;
-    // A remote client has no guest layer to place anything into, and reporting
-    // its panel size would resize the agent's browser to a phone screen.
+    // 网页版报自己的面板大小，会把 Mac 上的页面改成手机那么窄。
     if (!host || remote) return;
     const update = (): void => {
       const visible = active && document.visibilityState === "visible";
       const rect = host.getBoundingClientRect();
       if (!visible || !activeTabId || rect.width <= 0 || rect.height <= 0) {
-        setGuestPlacement(undefined);
-        // Zero tells main the panel is hidden, so the tab parks and keeps a real
-        // emulated viewport instead of rendering into its 1x1 element box.
         void window.coilcoil.setBrowserUiViewport({ width: 0, height: 0 });
         return;
       }
-      setGuestPlacement({ tabId: activeTabId, x: rect.left, y: rect.top, width: rect.width, height: rect.height });
-      // Agents ask for the window size; report what the user is actually looking at.
       void window.coilcoil.setBrowserUiViewport({ width: rect.width, height: rect.height });
     };
     const observer = new ResizeObserver(update);
@@ -121,7 +109,6 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
       document.removeEventListener("visibilitychange", update);
-      setGuestPlacement(undefined);
       void window.coilcoil.setBrowserUiViewport({ width: 0, height: 0 });
     };
   }, [active, activeTabId, remote]);
@@ -205,9 +192,9 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
       </form>
       <div className={`browser-native-host ${remote ? "browser-remote-host" : ""}`} ref={hostRef}>
         {!activeTab ? <div className="browser-empty"><Globe2 size={24} /><strong>打开内置浏览器</strong><button type="button" onClick={() => apply(window.coilcoil.createBrowserTab(scopeId))}>新建标签页</button></div> : null}
-        {/* Agent 开的页面是离屏页面：面板里显示它的画面，用户直接在画面上点、打字，和
+        {/* 每张标签页都是离屏页面：面板里显示它的画面，用户直接在画面上点、打字，和
             Agent 用的是同一个页面。 */}
-        {activeTab?.agent ? (
+        {activeTab ? (
           <LivePageSurface
             key={activeTab.id}
             tab={activeTab}
@@ -218,11 +205,6 @@ export function BrowserPanel({ active, scopeId, state, onState, onElementPicked 
             onForward={() => void apply(window.coilcoil.browserForward(scopeId))}
             onFocusAddress={() => { addressRef.current?.focus(); addressRef.current?.select(); }}
           />
-        ) : null}
-        {remote && activeTab && !activeTab.agent ? (
-          frame
-            ? <img className="browser-remote-frame" src={frame} alt={activeTab.title} />
-            : <div className="browser-empty"><LoaderCircle className="spin" size={20} /><strong>正在读取 {platformLabel} 上的页面…</strong></div>
         ) : null}
       </div>
     </section>

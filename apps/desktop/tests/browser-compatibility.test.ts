@@ -13,17 +13,11 @@ const read = (path: string) => readFile(resolve(repositoryRoot, path), "utf8");
  * browser-runtime.ts 三次越线。为了这几十行把它拆开，只会让同一件事分散在两处——
  * 用户明确说过，宁可一个长文件，也不要为了压行数把复杂逻辑切开。所以抬上限，不动代码。
  *
- * 1150：Agent 的标签页改成离屏页面、用户和 Agent 互相接管之后又涨了两百多行。能独立
- * 成块的已经各自成文件（离屏页面和画面推送 browser-offscreen.ts、接管用 guest 的认领
- * 在 browser-guests.ts），剩下的是标签页在两种形态之间切换本身，和标签页生命周期是
- * 同一件事，拆开反而要在两处对着看。
- *
- * 1250：用户可以直接操作 Agent 的页面（把操作送进页面、页面焦点两边合着算、光标和右键
- * 菜单）又加了几十行，怎么送进页面已经单独在 browser-input.ts。等用户自己的标签页也改成
- * 离屏页面、<webview> 和接管整块去掉，这里会少两百多行，到时候把线收回来。
+ * 1150、1250：Agent 的标签页改成离屏页面、用户和 Agent 互相接管、用户直接操作页面，一路
+ * 涨上去。之后每张标签页都改成离屏页面，<webview>、接管和嵌入页名册整块删掉，运行时
+ * 回到九百多行，线收回 1050。
  */
-// 下拉框和面板对话框的入口暂与旧接管并存，P3 删除旧接管后收紧。
-const MAX_LINES = 1300;
+const MAX_LINES = 1050;
 
 test(`browser runtime source files stay within the ${MAX_LINES}-line architecture limit`, async () => {
   for (const path of [
