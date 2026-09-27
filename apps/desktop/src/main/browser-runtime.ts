@@ -157,6 +157,15 @@ export class BrowserRuntimeManager {
       setAgentFocusEmulation: (tab, enabled) => this.setFocusEmulation(tab, "agent", enabled),
       pageDrags: this.drags,
     });
+    // 窗口最小化、隐藏、⌘H 隐藏整个 App、被别的窗口完全挡住（macOS 也发 hide，但 isVisible
+    // 还是 true）时，面板谁也看不见：正看着的那张也降到一秒一帧。页面大小不变，Agent 照常用。
+    const covered = (value: boolean) => (): void => {
+      this.frames.setDisplayed(!value && !window.isDestroyed() && window.isVisible() && !window.isMinimized());
+    };
+    window.on("hide", covered(true));
+    window.on("minimize", covered(true));
+    window.on("show", covered(false));
+    window.on("restore", covered(false));
     this.window.webContents.on("did-start-navigation", this.handleHostReload);
     this.window.webContents.on("render-process-gone", this.handleHostGone);
   }

@@ -264,3 +264,25 @@ test("画布挂载消息逐项核对", () => {
   assert.equal(parseSurfaceRegistration({ tabId: "a".repeat(200), surfaceId: "b", attached: true, sharedTexture: true }), undefined);
   assert.equal(parseSurfaceRegistration({ tabId: "a", surfaceId: "b", attached: "yes", sharedTexture: true }), undefined);
 });
+
+test("App 窗口看不见了（最小化、隐藏、被挡住）：正看着的也降到一秒一帧，照常送；露出来先要一帧、回到 60", () => {
+  const f = fixture();
+  const p = page();
+  f.stream.watch("tab", p.contents);
+  f.attach();
+  assert.equal(p.rates.at(-1), TEXTURE_FRAME_RATE);
+  f.stream.setDisplayed(false);
+  assert.equal(p.rates.at(-1), BACKGROUND_FRAME_RATE);
+  f.stream.paint("tab", p.contents, texture(f.log), image(true));
+  assert.equal(p.rates.at(-1), BACKGROUND_FRAME_RATE, "每帧核对帧率时不能又提回 60");
+  assert.equal(f.sent.length, 1, "看不见时画出来的那一帧照常送到面板");
+  p.requests.length = 0;
+  f.stream.setDisplayed(true);
+  assert.equal(p.rates.at(-1), TEXTURE_FRAME_RATE);
+  assert.deepEqual(p.requests, ["invalidate", "stop", "start"], "露出来先要一帧新的");
+  // 看不见的时候换了一张看：换过去的那张也按一秒一帧。
+  f.stream.setDisplayed(false);
+  const other = page();
+  f.stream.watch("other", other.contents);
+  assert.equal(other.rates.at(-1), BACKGROUND_FRAME_RATE);
+});

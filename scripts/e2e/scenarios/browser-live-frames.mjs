@@ -1,3 +1,5 @@
+import { keepAppWindowUncovered } from "../system-focus.mjs";
+
 export const description = "开着 GPU：面板里的页面画面走共享纹理，一秒约 60 帧、画的就是当前页面；新开、切换标签，收起再展开、拖宽面板、最小化再恢复后，画面照常跟上";
 export const launchOptions = { gpu: true };
 
@@ -71,6 +73,8 @@ export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
   await onMainWindow(app, "restore");
+  // 窗口被别人的窗口整个挡住时画面会按设计降帧省电，量帧率前先让它一直露着。
+  const release = await keepAppWindowUncovered(app);
   await ui.send([{ tool: "browser_open", args: { url: site.url("anim.html") } }, { echo: true }], "画面");
   const mode = () => frame(page).getAttribute("data-mode").catch(() => null);
   check("开着 GPU 时，面板画面走共享纹理", await ui.waitFor(async () => (await mode()) === "texture", 20_000), String(await mode()));
@@ -141,4 +145,5 @@ export async function run({ app, page, ui, site, check, shot }) {
   const after = await measureFps(page);
   check(`来回折腾之后，一秒照样画 45 帧以上（实测 ${after} 帧）`, after >= 45, after >= 45 ? "" : await diagnose(app, page));
   await shot("after");
+  await release();
 }

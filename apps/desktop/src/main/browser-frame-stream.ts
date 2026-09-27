@@ -56,6 +56,11 @@ export class BrowserSurfaceStream {
   private lastJpegAt = 0;
   /** 给正在看的页面设过的帧率：每帧都核对一遍，状态怎么变都不会卡在错的帧率上。 */
   private appliedRate?: number;
+  /**
+   * App 窗口现在看得见吗。最小化、隐藏、被别的窗口完全挡住时看不见：正看着的那张也按后台的
+   * 一秒一帧画（省电，页面自己的动画也跟着慢下来），但还照常往面板送——画面不会停在很久以前。
+   */
+  private displayed = true;
   private readonly leases: BrowserFrameLeases;
   private readonly cleanups: Array<() => void> = [];
   /** 发出去多少帧、因为窗口跟不上丢了多少：排查、测试用。 */
@@ -92,6 +97,14 @@ export class BrowserSurfaceStream {
     this.applyFrameRate();
     // 没人看的这段时间页面可能变过（那些帧都还掉了），画布上是旧画面：先要一帧。
     this.requestFreshFrame();
+  }
+
+  /** App 窗口看得见、看不见了。重新露出来时先要一帧新的，马上回到流畅。 */
+  setDisplayed(displayed: boolean): void {
+    if (this.displayed === displayed) return;
+    this.displayed = displayed;
+    this.applyFrameRate();
+    if (displayed) this.requestFreshFrame();
   }
 
   stop(): void {
@@ -292,7 +305,8 @@ export class BrowserSurfaceStream {
   private applyFrameRate(): void {
     const target = this.target;
     if (!target || target.contents.isDestroyed()) return;
-    const rate = this.texturesUsable() && !this.paintsBitmaps ? TEXTURE_FRAME_RATE : JPEG_FRAME_RATE;
+    const rate = !this.displayed ? BACKGROUND_FRAME_RATE
+      : this.texturesUsable() && !this.paintsBitmaps ? TEXTURE_FRAME_RATE : JPEG_FRAME_RATE;
     if (rate === this.appliedRate) return;
     this.appliedRate = rate;
     target.contents.setFrameRate(rate);

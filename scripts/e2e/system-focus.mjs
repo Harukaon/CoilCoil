@@ -36,3 +36,19 @@ export async function checkAppWindowFocused(app, check, label) {
   }
   check(label, false, `App 自己在前台，当前窗口却是：${focused}`);
 }
+
+/**
+ * 让测试里的 App 窗口一直露在最上面（浮动层），不被正用着电脑的人的其他窗口挡住。
+ *
+ * 窗口被完全挡住时，面板里的网页按设计降到一秒一帧省电（和最小化一样）；量帧率、看画面
+ * 跟不跟得上的场景要先确保窗口露着，不然测出来的是「挡住了」而不是毛病。返回还原的函数。
+ */
+export async function keepAppWindowUncovered(app) {
+  const level = (onTop) => app.evaluate(({ BrowserWindow }, onTop) => {
+    const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed() && !item.webContents.isOffscreen());
+    if (onTop) window?.setAlwaysOnTop(true, "floating");
+    else window?.setAlwaysOnTop(false);
+  }, onTop);
+  await level(true);
+  return () => level(false).catch(() => undefined);
+}
