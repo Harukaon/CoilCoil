@@ -203,7 +203,8 @@ test("导航中止正在等待的命中检查和排队的旧输入", async () =>
   assert.deepEqual(sent, ["Input.dispatchKeyEvent"]);
 });
 
-test("网页要的光标换成 CSS 写法，认不出来的当默认箭头", () => {
+test("网页要的光标换成 CSS 写法，Electron 的 pointer 是箭头而 hand 才是小手", () => {
+  assert.equal(cssCursor("pointer"), "default");
   assert.equal(cssCursor("hand"), "pointer");
   assert.equal(cssCursor("text"), "text");
   assert.equal(cssCursor("nodrop"), "no-drop");

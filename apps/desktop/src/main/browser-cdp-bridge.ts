@@ -47,6 +47,8 @@ export interface BrowserCdpHost {
   createTab(rawUrl: string | undefined, activate: boolean, scopeId: string): Promise<BrowserTab>;
   /** Agent 刚操作过这张标签页：上限收页时它就不是「最久没用的」。 */
   noteAgentUse(tab: BrowserTab): void;
+  /** Agent 的虚拟鼠标刚移动，别让它改掉用户面板里的真实光标。 */
+  noteAgentPointer(tab: BrowserTab): void;
   /** 这个作用域里因为超过上限被关掉的 Agent 标签页，取一次就清空。 */
   takeRecycledTabs(scopeId: string): Array<{ url: string; title: string }>;
   /** 这个作用域（会话）里的全部标签页，用户开的、Agent 开的都在；用户正看着哪张也标出来。 */
@@ -364,6 +366,9 @@ export class BrowserCdpBridge {
     sessionId: string,
   ): Promise<unknown> {
     if (isAgentTabUse(method)) this.host.noteAgentUse(tab);
+    if (/^Input\.(dispatch(Mouse|Touch|Drag)Event|emulateTouchFromMouseEvent|synthesize)/.test(method)) {
+      this.host.noteAgentPointer(tab);
+    }
     const guest = this.host.guestOf(tab);
     const childSession = kind === "child" ? sessionId : undefined;
     // 页面「以为自己有焦点」这个开关 Agent 和用户共用：Agent 要关的时候用户可能正在页面

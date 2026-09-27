@@ -10,6 +10,7 @@ import { BrowserElementPicker } from "./browser-element-picker";
 import { fillSavedCredentials } from "./browser-import";
 import { cssCursor, PageInputForwarder, parseFindRequest, parsePageInput } from "./browser-input";
 import { readPageCaret } from "./browser-page-caret";
+import { PageCursors } from "./browser-page-cursor";
 import { readPageTooltip } from "./browser-page-tooltip";
 import { PageDialogs } from "./browser-page-dialogs";
 import { PageDrags, parseFileDrop } from "./browser-page-drags";
@@ -88,6 +89,8 @@ export class BrowserRuntimeManager {
   /** 网页弹的 alert/confirm/prompt 挂在标签页上，面板里回答，不弹系统对话框。 */
   private readonly dialogs = new PageDialogs(() => this.publish());
   private readonly drags = new PageDrags();
+  private readonly pageCursors = new PageCursors((tabId, cursor) =>
+    this.publishPageEvent({ tabId, kind: "cursor", cursor }));
   /** 每张页面「正在操作」提示的收起计时。 */
   private readonly agentIdle = new Map<string, ReturnType<typeof setTimeout>>();
   /** 网页下拉框的选项由面板画（离屏页面里原生弹层出不来）。 */
@@ -148,6 +151,7 @@ export class BrowserRuntimeManager {
       blankPlaceholder: (scopeId) => this.tabsForScope(scopeId).find((tab) =>
         tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab(tab, tab.guest.getURL())),
       noteAgentUse: (tab) => this.noteAgentUse(tab),
+      noteAgentPointer: (tab) => this.pageCursors.agentMoved(tab.id),
       takeRecycledTabs: (scopeId) => this.recycledTabs.take(scopeId),
       selectTab: (id, scopeId) => { this.selectTab(id, scopeId); },
       closeTab: (id, scopeId) => { this.closeTab(id, scopeId); },
@@ -619,6 +623,7 @@ export class BrowserRuntimeManager {
     if (!tab) throw new Error("浏览器标签页不存在。");
     if (tab.scopeId !== scopeId) return this.state(scopeId);
     this.elementPicker.cancel();
+    if (this.activeTabIds.get(scopeId) !== id) this.pageCursors.switched(id);
     this.activeTabIds.set(scopeId, id);
     tab.lastUsedAt = Date.now();
     this.refreshViewportOverrides();
@@ -713,6 +718,7 @@ export class BrowserRuntimeManager {
     // 用户正在用的页面不算「最久没用」，Agent 开新页超上限时不会先收掉它。
     tab.lastUsedAt = now;
     if (input.kind === "mouse" && input.type === "down" && input.button === "right") tab.userContextMenuAt = now;
+    if (input.kind === "mouse" || input.kind === "wheel") this.pageCursors.userMoved(tab.id);
     const [width, height] = page.getContentSize();
     forwarder.forward(input, { width, height });
   }
@@ -753,7 +759,7 @@ export class BrowserRuntimeManager {
       this.publishPageEvent({ tabId: tab.id, kind: "find", matches: result.matches, active: result.activeMatchOrdinal });
     });
     contents.on("cursor-changed", (_event, type, image, _scale, _size, hotspot) => {
-      this.publishPageEvent({ tabId: tab.id, kind: "cursor", cursor: cssCursor(type, image, hotspot) });
+      this.pageCursors.pageChanged(tab.id, cssCursor(type, image, hotspot));
     });
     contents.on("context-menu", (_event, params) => {
       const at = tab.userContextMenuAt;
@@ -872,7 +878,11 @@ export class BrowserRuntimeManager {
       return;
     }
     this.panelVisible = !hidden;
-    if (!hidden) this.uiViewport = { width, height };
+    if (!hidden) {
+      this.uiViewport = { width, height };
+      const tab = this.activeTab(this.uiScopeId);
+      if (tab) this.pageCursors.switched(tab.id);
+    }
     this.refreshViewportOverrides();
   }
 
@@ -898,6 +908,7 @@ export class BrowserRuntimeManager {
     this.elementPicker.cancel();
     for (const tab of this.tabs.values()) {
       this.selects.forget(tab.id);
+      this.pageCursors.switched(tab.id);
       if (tab.focusEmulation?.user) void this.setFocusEmulation(tab, "user", false);
     }
   }
@@ -976,6 +987,7 @@ export class BrowserRuntimeManager {
     // 趁页面还在先告诉 CDP 客户端，它们挂在这个调试器上的转发才摘得干净。
     this.cdp.announceDestroyed(tab);
     this.selects.forget(tab.id);
+    this.pageCursors.forget(tab.id);
     const guest = tab.guest;
     if (guest && !guest.isDestroyed() && guest.debugger.isAttached()) guest.debugger.detach();
     // 直接销毁窗口：页面的 beforeunload 不能把一张标签页留住。

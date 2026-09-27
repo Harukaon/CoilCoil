@@ -471,7 +471,8 @@ export class PageInputForwarder {
 
 const CSS_CURSORS: Record<string, string> = {
   default: "default",
-  pointer: "pointer",
+  // Electron 的 pointer 是普通箭头；网页链接的手型在 Electron 里叫 hand。
+  pointer: "default",
   hand: "pointer",
   text: "text",
   "vertical-text": "vertical-text",
