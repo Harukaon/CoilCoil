@@ -718,7 +718,8 @@ export class BrowserRuntimeManager {
     // 用户正在用的页面不算「最久没用」，Agent 开新页超上限时不会先收掉它。
     tab.lastUsedAt = now;
     if (input.kind === "mouse" && input.type === "down" && input.button === "right") tab.userContextMenuAt = now;
-    if (input.kind === "mouse" || input.kind === "wheel") this.pageCursors.userMoved(tab.id);
+    // 滚轮不移动页面里的虚拟鼠标；Agent 刚停在链接上时不能借一次滚动把它的小手换到用户身上。
+    if (input.kind === "mouse") this.pageCursors.userMoved(tab.id);
     const [width, height] = page.getContentSize();
     forwarder.forward(input, { width, height });
   }

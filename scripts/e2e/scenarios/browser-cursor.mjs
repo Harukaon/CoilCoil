@@ -22,6 +22,9 @@ export async function run({ app, page, ui, site, check }) {
     return contents?.getTitle();
   })) === "clicked"));
   check("Agent 移到链接、点击时，不把用户停在空白处的箭头改成小手", await cursor() === "default", await cursor());
+  await page.mouse.wheel(0, 80);
+  await page.waitForTimeout(200);
+  check("用户只滚轮没移动鼠标，仍是自己的箭头", await cursor() === "default", await cursor());
 
   await page.mouse.move(box.x + 80, box.y + 45);
   check("用户自己移到链接上才变小手", await ui.waitFor(async () => (await cursor()) === "pointer"), await cursor());
