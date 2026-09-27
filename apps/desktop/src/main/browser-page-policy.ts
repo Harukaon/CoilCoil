@@ -49,6 +49,10 @@ export function sharedTextureFrames(platform: NodeJS.Platform = process.platform
 /**
  * 网页页面的设置：沙箱、隔离，没有 Node、没有预加载脚本，也不许再嵌网页。后台照常渲染：
  * 用户看别处时 Agent 还在操作它。
+ *
+ * 网页请求全屏按约定忽略（权限一律拒绝，见 BrowserRuntimeManager.installTabSecurity）。这里再
+ * 加一道：就算以后放开了全屏，也只在网页区域里全屏，不动窗口——离屏页面的窗口是藏着的，
+ * Electron 默认会把它变成全屏窗口，冒出来占满屏幕、抢走 App 的焦点，退出后还挂在屏幕上（实测）。
  */
 export function browserPagePreferences(options: { partition: string; deviceScaleFactor: number; sharedTexture: boolean }): Electron.WebPreferences {
   return {
@@ -64,5 +68,6 @@ export function browserPagePreferences(options: { partition: string; deviceScale
     experimentalFeatures: false,
     webviewTag: false,
     backgroundThrottling: false,
+    disableHtmlFullscreenWindowResize: true,
   };
 }

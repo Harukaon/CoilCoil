@@ -12,7 +12,7 @@ test("每个工作区一份 cookie，换文件夹就换一个 jar", () => {
   assert.equal(browserPartitionFor("   "), BROWSER_PARTITION);
 });
 
-test("网页页面一律沙箱、隔离，没有 Node、没有预加载，不许再嵌网页，后台照常渲染", () => {
+test("网页页面一律沙箱、隔离，没有 Node、没有预加载，不许再嵌网页，后台照常渲染，全屏不动窗口", () => {
   const partition = browserPartitionFor("/Users/hao/work/alpha");
   const preferences = browserPagePreferences({ partition, deviceScaleFactor: 2, sharedTexture: true });
   assert.deepEqual(preferences, {
@@ -28,6 +28,7 @@ test("网页页面一律沙箱、隔离，没有 Node、没有预加载，不许
     experimentalFeatures: false,
     webviewTag: false,
     backgroundThrottling: false,
+    disableHtmlFullscreenWindowResize: true,
   });
   assert.equal("preload" in preferences, false);
 });
