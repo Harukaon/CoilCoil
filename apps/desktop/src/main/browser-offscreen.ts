@@ -1,6 +1,6 @@
 import { BrowserWindow, screen, type NativeImage, type OffscreenSharedTexture, type WebContents } from "electron";
 import { BACKGROUND_FRAME_RATE } from "./browser-frame-stream";
-import { browserPagePreferences } from "./browser-page-policy";
+import { browserPagePreferences, sharedTextureFrames } from "./browser-page-policy";
 
 /**
  * 内置浏览器的每张标签页：离屏渲染的页面。
@@ -41,14 +41,6 @@ export function createOffscreenPage(
   const contents = page.webContents;
   contents.on("paint", (event, _dirty, image) => onPaint(contents, event.texture, image));
   return page;
-}
-
-/**
- * 页面画面走 GPU 共享纹理。出问题时设 COILCOIL_BROWSER_GPU_FRAMES=0 退回改造前的 JPEG
- * 画面（新开的页面生效），不用发新版。关了 GPU 的机器上页面本来就只出位图，自动退回。
- */
-export function sharedTextureFrames(): boolean {
-  return process.env.COILCOIL_BROWSER_GPU_FRAMES !== "0";
 }
 
 export function resizeOffscreenPage(page: BrowserWindow, size: { width: number; height: number }): void {

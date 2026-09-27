@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWSER_PARTITION, browserPagePreferences, browserPartitionFor } from "../src/main/browser-page-policy.ts";
+import { BROWSER_PARTITION, browserPagePreferences, browserPartitionFor, sharedTextureFrames } from "../src/main/browser-page-policy.ts";
 
 test("每个工作区一份 cookie，换文件夹就换一个 jar", () => {
   const one = browserPartitionFor("/Users/hao/work/alpha");
@@ -35,4 +35,14 @@ test("网页页面一律沙箱、隔离，没有 Node、没有预加载，不许
 test("关掉 GPU 画面时页面照样离屏渲染，只是不出共享纹理", () => {
   const preferences = browserPagePreferences({ partition: BROWSER_PARTITION, deviceScaleFactor: 1, sharedTexture: false });
   assert.deepEqual(preferences.offscreen, { useSharedTexture: false, deviceScaleFactor: 1 });
+});
+
+test("GPU 画面只在实测过的 macOS 上默认打开；Windows、Linux 先用 JPEG；开关能强制开、关", () => {
+  assert.equal(sharedTextureFrames("darwin", undefined), true);
+  assert.equal(sharedTextureFrames("win32", undefined), false);
+  assert.equal(sharedTextureFrames("linux", undefined), false);
+  assert.equal(sharedTextureFrames("win32", "1"), true, "Windows 真机上验证时强制打开");
+  assert.equal(sharedTextureFrames("darwin", "0"), false, "出问题时退回 JPEG");
+  assert.equal(sharedTextureFrames("darwin", "yes"), true, "看不懂的值不改变默认");
+  assert.equal(sharedTextureFrames("win32", "yes"), false);
 });

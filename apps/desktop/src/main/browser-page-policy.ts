@@ -33,6 +33,20 @@ export function browserPartitionFor(workspacePath?: string): string {
 }
 
 /**
+ * 页面画面走不走 GPU 共享纹理（见 browser-frame-stream.ts）。
+ *
+ * macOS 上实测稳定：60 帧、窗口看不见时 Agent 照常截图。Windows、Linux 还没在真机上验过，
+ * 先用改造前一直在用的 JPEG 画面（每秒 30 帧），其余功能两种画面完全一样。
+ * COILCOIL_BROWSER_GPU_FRAMES=1 强制打开（在 Windows 真机上验证时用），=0 强制关掉（出问题时
+ * 退回，不用发新版）。只对之后新开的页面生效。关了 GPU 的机器上页面本来就只出位图，自动退回。
+ */
+export function sharedTextureFrames(platform: NodeJS.Platform = process.platform, setting = process.env.COILCOIL_BROWSER_GPU_FRAMES): boolean {
+  if (setting === "0") return false;
+  if (setting === "1") return true;
+  return platform === "darwin";
+}
+
+/**
  * 网页页面的设置：沙箱、隔离，没有 Node、没有预加载脚本，也不许再嵌网页。后台照常渲染：
  * 用户看别处时 Agent 还在操作它。
  */
