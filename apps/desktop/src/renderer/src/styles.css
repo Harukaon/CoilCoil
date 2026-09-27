@@ -1205,28 +1205,13 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .browser-find-bar button:hover:not(:disabled) { background: hsl(var(--th) var(--ts) var(--l-925)); }
 .browser-find-bar button:disabled { opacity: .4; cursor: default; }
 .browser-live-proxy { position: absolute; width: 1px; height: 1em; padding: 0; margin: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; caret-color: transparent; background: transparent; pointer-events: none; font-size: 16px; line-height: 1; }
-/* Agent 在用这页时的存在感：流动的渐变描边 + 提示条后面一团呼吸的渐变光晕，底部模糊。颜色只放在光里，提示条保持黑白。
-   都不挡操作；用户把鼠标移到页面上、或者正在页面里打字时，底部的光、模糊和提示条淡出，只留描边。 */
-@property --agent-angle { syntax: "<angle>"; inherits: true; initial-value: 0deg; }
-.browser-agent-presence { --agent-hues: #4f7bff, #9b5cff, #ff5caa, #ffb84d, #4f7bff; position: absolute; inset: 0; overflow: hidden; pointer-events: none; animation: agent-turn 7s linear infinite; }
-.browser-agent-ring { position: absolute; inset: 0; box-shadow: inset 0 0 28px 2px rgb(155 92 255 / 28%); animation: agent-breathe 3.2s ease-in-out infinite; }
-.browser-agent-ring::before { content: ""; position: absolute; inset: 0; padding: 3px; background: conic-gradient(from var(--agent-angle), var(--agent-hues)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
-.browser-agent-veil { position: absolute; left: 0; right: 0; bottom: 0; height: min(40%, 240px); backdrop-filter: blur(10px) saturate(1.1); -webkit-mask: linear-gradient(to top, #000 35%, transparent); mask: linear-gradient(to top, #000 35%, transparent); transition: opacity .25s ease; }
-.browser-agent-glow { transition: opacity .25s ease; position: absolute; left: 50%; bottom: -150px; width: min(560px, 110%); aspect-ratio: 1; border-radius: 50%; background: conic-gradient(from var(--agent-angle), var(--agent-hues)); filter: blur(48px); opacity: .7; transform: translateX(-50%) scale(1); animation: agent-glow 3.2s ease-in-out infinite; }
-@keyframes agent-turn { to { --agent-angle: 360deg; } }
-@keyframes agent-breathe { 0%, 100% { opacity: .65; } 50% { opacity: 1; } }
-@keyframes agent-glow { 0%, 100% { opacity: .5; transform: translateX(-50%) scale(.86); } 50% { opacity: .85; transform: translateX(-50%) scale(1.04); } }
-.browser-agent-bar { pointer-events: none; transition: opacity .25s ease; position: absolute; left: 50%; bottom: 18px; display: flex; align-items: center; gap: 8px; padding: 7px 14px; transform: translateX(-50%); border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-1000)); background: hsl(var(--th) var(--ts) var(--l-247) / 92%); backdrop-filter: blur(12px); box-shadow: 0 8px 28px hsl(0 0% 0% / 24%), 0 0 0 1px hsl(0 0% 100% / 10%) inset; font-size: 13px; font-weight: 500; white-space: nowrap; }
-.browser-agent-pulse { position: relative; width: 8px; height: 8px; border-radius: 50%; background: conic-gradient(#4f7bff, #9b5cff, #ff5caa, #ffb84d, #4f7bff); }
-.browser-agent-pulse::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: #9b5cff; animation: agent-pulse 1.6s ease-out infinite; }
-@keyframes agent-pulse { from { opacity: .7; transform: scale(1); } to { opacity: 0; transform: scale(2.8); } }
-.browser-live-page.interactive:hover .browser-agent-veil, .browser-live-page.interactive:hover .browser-agent-glow, .browser-live-page.interactive:hover .browser-agent-bar,
-.browser-live-page:focus-within .browser-agent-veil, .browser-live-page:focus-within .browser-agent-glow, .browser-live-page:focus-within .browser-agent-bar { opacity: 0; animation-play-state: paused; }
-/* 面板很窄时（比如拉到最小 200px）提示条放不下文字，只留呼吸圆点。 */
-@container (max-width: 300px) { .browser-agent-bar .browser-agent-label { display: none; } .browser-agent-bar { padding: 7px; } }
-@media (prefers-reduced-motion: reduce) {
-  .browser-agent-presence, .browser-agent-ring, .browser-agent-glow, .browser-agent-pulse::after { animation: none; }
-}
+/* Agent 正在操作这个页面：底部一句安静的提示，和 App 的其他浮层（提示框、查找栏）一个样子。不动、不发光、
+   不盖住网页、不挡点击。用户把鼠标移到页面上、或者正在页面里打字时变淡，不挡他看底下的内容。 */
+.browser-agent-bar { position: absolute; left: 50%; bottom: 14px; display: flex; align-items: center; gap: 6px; padding: 5px 11px; transform: translateX(-50%); border: 1px solid hsl(var(--th) var(--ts) var(--l-837)); border-radius: var(--radius-pill); color: hsl(var(--th) var(--ts) var(--l-324)); background: hsl(var(--th) var(--ts) var(--l-1000)); box-shadow: 0 4px 14px rgb(26 26 23 / 10%); font-size: 12px; white-space: nowrap; pointer-events: none; transition: opacity .2s ease; }
+.browser-agent-bar svg { flex: none; color: hsl(var(--th) var(--ts) var(--l-512)); }
+.browser-live-page.interactive:hover .browser-agent-bar, .browser-live-page:focus-within .browser-agent-bar { opacity: .35; }
+/* 面板很窄时（比如拉到最小 200px）放不下这句话，只留小机器人图标。 */
+@container (max-width: 300px) { .browser-agent-bar span { display: none; } .browser-agent-bar { padding: 5px; } }
 .browser-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 9px; color: hsl(var(--th) var(--ts) var(--l-588)); font-size: 9px; }
 .browser-empty strong { color: hsl(var(--th) var(--ts) var(--l-355)); font-size: 11px; }
 .browser-empty button { padding: 6px 10px; border: 1px solid hsl(var(--th) var(--ts) var(--l-861)); border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-355)); background: hsl(var(--th) var(--ts) var(--l-959)); cursor: pointer; }

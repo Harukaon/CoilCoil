@@ -456,21 +456,13 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
         />
       ) : null}
       {tab.agentActive ? (
-        // Agent 这会儿正在操作这张页面（不管是谁开的；停手几秒后收起）：四周一圈流动的渐变描边，
-        // 底部一团呼吸的光晕和一句提示。都不挡操作——用户和 Agent 可以同时操作，不排队；用户把
-        // 鼠标移上来、或者正在页面里打字时，底部那团光和提示条淡出，不挡他看页面。
-        <>
-          <div className="browser-agent-presence" aria-hidden="true">
-            <div className="browser-agent-ring" />
-            <div className="browser-agent-veil" />
-            <div className="browser-agent-glow" />
-          </div>
-          <div className="browser-agent-bar" role="status">
-            <span className="browser-agent-pulse" aria-hidden="true" />
-            <Bot className="browser-agent-label" size={14} />
-            <span className="browser-agent-label">Agent 正在操作这个页面</span>
-          </div>
-        </>
+        // Agent 这会儿正在操作这张页面（不管是谁开的；停手几秒后收起）：底部一句安静的提示。以前
+        // 还有流动的彩色描边、光晕和毛玻璃，用户嫌太重，去掉了。不挡操作——用户和 Agent 可以同时
+        // 操作，不排队；用户把鼠标移上来、或者正在页面里打字时，提示变淡，不挡他看页面。
+        <div className="browser-agent-bar" role="status">
+          <Bot size={13} aria-hidden="true" />
+          <span>Agent 正在操作这个页面</span>
+        </div>
       ) : null}
     </div>
   );
