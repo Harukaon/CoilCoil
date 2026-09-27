@@ -1,7 +1,7 @@
 # 内置浏览器「共用页面」改造技术方案
 
 - 日期：2026-09-26
-- 状态：**方向已定（2026-09-26）：采用本文推荐的「离屏统一 + 输入转发」，全部阶段都做。** 另已定：AI 可直接使用当前对话的全部标签页；页面不加锁（见第 11 节）
+- 状态：**已实施（2026-09-27），P0–P5 完成，只在本地提交、未推送，等验收。** 做了什么、和计划哪里不同、还剩什么，见第 12 节「实施记录」。方向（2026-09-26 定）：采用本文推荐的「离屏统一 + 输入转发」；AI 可直接使用当前对话的全部标签页；页面不加锁（见第 11 节）
 - 适用：Electron 43.3.0，macOS 与 Windows 都支持（CoilCoil 发 Windows 版；Windows 尚未实机验证，见第 10 节）
 - 依据：本机实测（第 4 节，十余组对照实验）+ 源码核对（Chromium、Electron、VS Code）+ 拆包分析（Codex 26.917、Cursor 3.22.7）
 
@@ -361,8 +361,9 @@
 
 **待定**
 
-1. **「你优先」规则**（6.7）按现在的写法执行，可以吗？
-2. **Windows 实机验证**：需要一台 Windows 机器跑测试。验证之前，Windows 版的画面先走位图回退，可以吗？
+1. **「你优先」规则**（6.7）按现在的写法执行，可以吗？——**还没做**（P1e），等你确认。现在用户和 AI 的操作按到达先后进页面，谁也不等谁。
+2. **Windows 实机验证**：需要一台 Windows 机器跑测试。验证之前，Windows 版的画面先走位图回退，可以吗？——**已按这个默认做了**（Windows、Linux 默认走 JPEG 画面，`COILCOIL_BROWSER_GPU_FRAMES=1` 可强制打开 GPU 画面做验证），你不同意可以改回；真机验证还没做。
+3. **网页全屏**（实施中发现，6.7 写的是「忽略」）：现在按「忽略」做，视频点全屏没反应。要不要改成「在面板里全屏」（全屏内容铺满面板，按 Esc 退出），等你定。
 
 ---
 
@@ -424,3 +425,38 @@ await cdp('Input.insertText', { text: '你好' });
 - VS Code：`src/vs/platform/browserView/electron-main/browserView.ts`、`src/vs/workbench/contrib/browserView/electron-browser/overlayManager.ts`
 - Cursor 3.22.7：`/Applications/Cursor.app/Contents/Resources/app/out/vs/workbench/workbench.desktop.main.js`（`WebviewBrowserManager`）、`extensions/cursor-browser-automation/dist/extension.js`（工具定义与合成事件）
 - Codex 26.917：`/Applications/ChatGPT.app/Contents/Resources/app.asar`（`.vite/build/main-*.js`、`webview/assets/app-shared-*.js`），运行时 `Codex Framework.framework`（Owl）
+
+---
+
+## 12. 实施记录（2026-09-27）
+
+从 `a8cf059bf`（本文档）起的这一批提交，只在本地，没有推送。
+
+### 12.1 各阶段交付
+
+| 阶段 | 交付 | 验证（e2e 场景） |
+|---|---|---|
+| P0 | 回归基线：最小化、Cmd+H 隐藏、面板收起时 AI 跨站跳转后截图新鲜、点击生效 | `browser-background`（及 GPU 版） |
+| P1a–b | 用户的鼠标、滚轮、键盘、输入法、Mac 编辑快捷键、光标形状、右键菜单转进离屏页；去掉接管按钮和只读限制 | `browser-shared-control`（22 项，含真实按键） |
+| P1c | 网页 alert / confirm 改成面板卡片，用户和 AI 都能答；点击触发对话框时告诉 AI「操作已生效」 | `browser-page-dialogs` |
+| P1d | 原生下拉框由面板画列表，写回前逐项核对选项没被改过 | `browser-shared-control` |
+| P2 | GPU 共享纹理画面（实测 61 帧），JPEG 退路 | `browser-live-frames`、`*-gpu` |
+| P3 | 全部标签页统一为离屏页；删除 `<webview>` 图层、嵌入页登记、接管与恢复；AI 用 `browser_tabs` 直接使用当前对话全部标签页，不刷新 | `draft-handoff`、`browser-handles`、`agent-tab-*` |
+| P4a | AI 点到选文件、打印：什么都不弹、App 不卡；用户点：照常选文件、打印出 PDF | `browser-page-system` |
+| P4b | 页内查找（⌘F）、输入法候选框跟光标、页面内拖拽与从访达拖文件、日期/时间/颜色选择器（Chromium 自己的）、跨站内嵌页的下拉框和颜色框、悬停提示 | `browser-find`、`browser-caret`、`browser-drag`、`browser-value-pickers`、`browser-frame-pickers`、`browser-tooltip` |
+| P5 | 窗口最小化、隐藏、被完全挡住时降到一秒一帧（唤醒从每秒 32 次降到 0）；Windows、Linux 默认 JPEG 画面；安全底线改在主进程核对；全屏请求不会让藏着的窗口冒出来；清理旧检查脚本、旧命名和文档 | `browser-power`、`browser-security`、`browser-fullscreen` |
+
+### 12.2 和计划不一样的地方
+
+- **没有做功能开关**（第 8 节写的 `browser.sharedPage`）。P3 直接删掉了旧结构，出问题的退路是回退这批提交；GPU 画面单独有开关（`COILCOIL_BROWSER_GPU_FRAMES`）。
+- **拖面板时**网页跟着实时改大小，没做「拖动时只缩放画面、停下再改尺寸」。目前没测到卡顿；重页面上拖着卡再做。
+- **右键菜单、悬停提示、日期选择器**都比计划做得更贴近原生：日期、时间、颜色用的是 Chromium 自己的选择器（在输入框位置放一个同类型的隐形输入框打开），不是自绘。
+- **全屏**按 6.7 的「忽略」做；实施中发现 Electron 默认会把藏着的窗口变成全屏窗口冒出来（被权限拒绝挡住了），又在页面设置里加了一道「全屏不改窗口」。
+- **实施中顺带修的**：鼠标只是从画面上经过，也会让 AI 的标签页永久免于回收（上限失效），改成只有点击、按键、滚动才算「用户用过」。
+
+### 12.3 还剩的事
+
+- 「你优先」规则（P1e）等确认；网页全屏要不要放开等确认（第 11 节）。
+- Windows 真机验证（GPU 画面、后台降频、输入法）。
+- 不支持：网页无障碍读屏、网页脚本自己调 `showPicker()`、跨站内嵌页里的日期框。
+- `scripts/desktop-smoke.mjs`（打包版总检查）在新手引导一带就过时了（期待首次启动自动开设置页等），到不了浏览器那段；浏览器那段已按新结构改写，并在 e2e 里对着现在的界面验证过。

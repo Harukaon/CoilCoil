@@ -1,79 +1,111 @@
 # CoilCoil 内置浏览器
 
-CoilCoil 的内置浏览器由 Renderer 中的 `<webview>` guest 渲染，元素挂在应用根部一个
-常驻图层里，主进程通过 `getWebContentsId()` 拿到 guest 的 WebContents 后接管全部
-控制。Agent 侧只接入官方
-[`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp)：服务器
-启动后预加载可搜索的工具元数据，但 `directTools: false` 保证浏览器工具 schema 不进入
-模型的默认工具面。Agent 必须通过统一 MCP 网关按需搜索、描述和调用，普通编码会话的
-浏览器直接工具数始终为零。
+内置浏览器的每张标签页，都是主进程里的一个**离屏页面**：一个隐藏、不可聚焦的
+`BrowserWindow`（`offscreen: true`，见 `apps/desktop/src/main/browser-offscreen.ts`）。
+右侧面板里看到的是它的实时画面；用户在画面上点、打字、用输入法、滚动，由主进程转进
+页面；Agent 通过 CDP 桥操作的也是这同一张页面。所以用户和 Agent 之间没有「接管」，
+页面也不会因为换人而刷新。
+
+Agent 有两层浏览器工具：
+
+- 交互层 `browser_open` / `browser_navigate` / `browser_click` / `browser_type` /
+  `browser_tabs`（`packages/workflow/extensions/browser-act.ts`）：拿句柄操作页面，
+  每一步自带页面状态，是模型直接看得到的工具。
+- 调试层官方 [`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp)：
+  脚本、控制台、网络、性能、快照等约 30 个工具。服务器启动后预加载可搜索的工具元数据，
+  `directTools: false` 保证这些 schema 不进模型的默认工具面，Agent 通过统一 MCP 网关
+  按需搜索、描述和调用。
+
+## 用户和 Agent 共用同一张页面（2026-09）
+
+方案、实测和取舍见 `docs/browser-shared-page-plan.md`。
+
+- **看**：macOS 上画面走 GPU 共享纹理（主进程把页面的纹理借给 App 窗口，窗口画完还回来，
+  全程不拷像素），一秒约 60 帧；Windows、Linux 和关了 GPU 的机器走 JPEG，一秒约 30 帧
+  （`browser-frame-stream.ts`、`preload/browser-surfaces.ts`）。Windows 上的 GPU 画面还没
+  在真机上验证，`COILCOIL_BROWSER_GPU_FRAMES=1` 强制打开、`=0` 强制关掉。
+- **操作**：鼠标、滚轮用 `sendInputEvent` 送进页面，键盘、输入法、编辑命令走 CDP；Mac 上
+  ⌘A/⌘C/⌘V/⌘Z 这类编辑快捷键按 Playwright 的编辑命令表转（`browser-input.ts`）。面板上
+  一个看不见的输入框接住键盘和输入法组字，它跟着网页里的光标挪，输入法候选框就出现在打字
+  的地方（`browser-page-caret.ts`）。
+- **浏览器自带、离屏页面里没有的，由面板补上**：
+  - 网页的 alert / confirm：面板里的一张卡片，用户和 Agent 都能答（`browser-page-dialogs.ts`）。
+    `prompt` 在 Electron 里本来就不支持。
+  - 原生下拉框：面板画出选项列表；日期、时间、颜色框：在输入框的位置打开 Chromium 自己的
+    选择器；跨站内嵌页（比如付款表单）里的下拉框、颜色框也一样（`browser-page-selects.ts`）。
+  - 选文件、打印：用户点的照常（打印存成 PDF，用系统查看器打开）；Agent 点的什么都不弹，
+    上传用它自己的 `upload_file` 工具（`browser-page-requests.ts`）。
+  - 页内查找（⌘F）、悬停提示（元素的 `title`）、右键菜单（只在用户右键时弹）、页面里的拖拽、
+    从访达拖文件进网页（`browser-page-drags.ts`、`browser-page-tooltip.ts`）。
+  - 网页请求全屏：忽略（见「安全边界」）。
+- **焦点**：离屏页面不在任何可见窗口的焦点链上，Agent 的点击、打字只进页面，用户在对话框里
+  打字不受影响。网页「以为自己有焦点」这个开关由用户和 Agent 合起来算，任一方要就开着。
+- **看不见的时候**：只有用户正看着的那张每秒几十帧；别的标签页、面板收起、窗口最小化 /
+  隐藏 / 被别的窗口完全挡住时都降到一秒一帧，页面大小不变，Agent 照常截图、点击
+  （e2e：`browser-background`、`browser-power`）。
+- **Agent 能用哪些页面**：当前对话里的全部标签页，用户开的也在（`browser_tabs` 列出来、给
+  句柄、标出用户正看着哪张）。Agent 自己开的最多留最近用过的 5 张，超了先关最久没用的；
+  用户在里面点过、打过字、滚过的不收。
+- **不支持**：网页的无障碍读屏（离屏页面没有接到系统的无障碍接口）；网页脚本自己调
+  `showPicker()` 打开的选择器；跨站内嵌页里的日期框；「用户正在操作时 Agent 先等一等」的
+  规则还没定（见方案文档第 11 节）。
 
 ## 安全边界
 
-- 不启动外部 Chrome，也不下载独立浏览器内核。
-- 不开启 Electron 全局 `--remote-debugging-port`。
-- 主进程只为已绑定的浏览器 guest 暴露私有 CDP 桥；应用 Renderer、设置页和其他
-  WebContents 不在可发现目标中。所有目标枚举与查找都只走主进程的标签页表，
-  且过滤掉尚未公告的标签页。
-- **guest 绑定是本方案的信任边界。** 元素由 Renderer 创建，因此由它提名
-  `tabId → webContentsId` 的对应关系。主进程逐条校验后才绑定，任何一条不过即拒绝
-  并抛错（Renderer 随即移除该元素）：每标签页一次性 nonce、
-  `hostWebContents` 必须是本窗口、`getType()` 必须是 `webview`、session 必须是
-  `persist:coilcoil-browser`、且该 webContentsId 未绑定到其他标签页。最后一条是防止
-  跨 scope 串线的承重墙 —— 下游的 scope 校验只检查标签页记录上的 scope，
-  不检查其背后 WebContents 的身份。绑定一次成立后永不静默改绑。
-- 下发给 Renderer 的 guest 名册只含 `{tabId, nonce}`，不含 URL、不含 scopeId：
-  应用 DOM 因此永远不持有任何 agent 的浏览状态。
-- `webviewTag` 只在主窗口开启，且由 `will-attach-webview` 兜底：删除
-  `preload`/`preloadURL`/`preloadURLs`，强制 sandbox、contextIsolation 与
-  `nodeIntegration=false`，覆写（而非读取）`webpreferences`/`disablewebsecurity`
-  等属性字符串，并拒绝分区不符或自行指定 `src` 的 guest。其余所有 WebContents
-  一律 `preventDefault()`。
-- CDP WebSocket 仅监听 `127.0.0.1`，使用随机路径和随机 Bearer Token；地址与
-  凭据只通过内置 Runtime 子进程环境传递。
-- `Browser.close` 会被拦截；网页、本地文件、`data:` 等 Chromium 可加载地址均由
-  内置浏览器承载，不把应用 Renderer 暴露给 Agent。
-- 浏览器 MCP 只注入 Agent 的有效能力视图，不写入用户或工作区的 MCP 配置文件。
-- 每个 Agent 会话拥有独立的 capability scope。它只能发现和操作自己创建的标签页；
-  后台会话不会切走用户当前右栏，运行时归档或被回收时会同时关闭其 CDP 连接和网页。
+- 不启动外部 Chrome，也不下载独立浏览器内核；不开启 Electron 全局 `--remote-debugging-port`。
+- **每张页面由主进程创建，设置写死**（`browser-page-policy.ts`）：沙箱、上下文隔离、没有
+  Node、没有预加载脚本、不许再嵌 `<webview>`、全屏时不改窗口。Cookie 按工作区分开存
+  （`persist:coilcoil-browser-<工作区路径哈希>`）。权限请求一律拒绝，权限查询也一律答
+  「没有」，看上去就是一个拒绝过授权的普通用户。
+- **界面造不出网页**：主窗口关了 `webviewTag`，所有窗口的 `will-attach-webview` 一律拒绝。
+  以前网页嵌在界面里时，要靠「界面登记、主进程逐条核对」防止串线；现在网页只由主进程建，
+  这个口子没有了。e2e 的 `browser-security` 场景在主进程里逐项核对这些设置。
+- 主进程只为这些离屏页面暴露私有 CDP 桥；App 自己的界面、设置页和其他 WebContents 不在
+  可发现目标里。桥只从主进程的标签页表里找目标，每个 Agent 连接只看得到它所在对话的
+  标签页；后台会话不会切走用户当前看着的标签页，会话归档或被回收时一并关掉它的连接和网页。
+- CDP WebSocket 仅监听 `127.0.0.1`，使用随机路径和随机 Bearer Token；地址与凭据只通过
+  内置 Runtime 子进程环境传递。
+- `Browser.close` 被拦截；`Page.bringToFront` 这类「切到前台」只切换面板里显示的标签页，
+  不碰系统焦点。
+- **桥和 App 共用每张页面的同一条调试会话**，有几条规矩：App 从不打开 Runtime 域（不然
+  后连上来的 Agent 拿不到执行上下文，连字都打不进去）；Agent 发的 `Page.disable`、关掉
+  选文件拦截会把 App 的设置一起清掉，桥直接吞掉；「页面以为自己有焦点」、拖拽拦截这两个
+  开关由宿主合起来算，Agent 关不掉用户那边的。App 自己要在页面里跑的只读脚本（光标位置、
+  悬停提示）放在一个隔离环境里，不走这条会话。
+- 页面要系统窗口的出口全部收进面板或拦下：对话框在面板里显示成卡片；选文件、打印只在用户
+  自己点时才弹，Agent 点的什么都不弹；全屏一律忽略。浏览器 MCP 只注入 Agent 的有效能力
+  视图，不写入用户或工作区的 MCP 配置文件。
 
-## 渲染方式的取舍（2026-08 复审）
+## 渲染方式的取舍
 
-内置浏览器最初由主进程 `WebContentsView` 渲染。该方案的致命问题是**原生视图无条件
-合成在 Renderer 之上**：应用内 20+ 个浮层（Radix popover / tooltip / context menu、
-`createPortal` 模态、toast）全部 portal 到 `document.body`，只要浏览器页签处于激活
-状态就会被遮挡，`z-index` 完全够不着。Electron 至今没有 per-View 的点击穿透
-API（[#1335](https://github.com/electron/electron/issues/1335) 2015 起、
-[#23863](https://github.com/electron/electron/issues/23863) 2020、
-[#49039](https://github.com/electron/electron/issues/49039) 2025 均未排期，
-维护者回复为 "PRs welcome"），因此在原架构内无解。
+### 现在：离屏页面（2026-09）
 
-已验证并排除的替代路径：
+`<webview>` 解决了浮层遮挡（见下），却留下一个绕不开的问题：Chromium 在把一次鼠标按下、
+按键派发给某个页面之前，会无条件把焦点交给那个页面（`RenderWidgetHostImpl::OnInputEventPreDispatch`
+→ `FocusOwningWebContents`）。网页嵌在 App 窗口里时，Agent 一点击，用户正在打字的输入框
+就丢了焦点，接着打的字进了网页。当时的折中是 Agent 的标签页做成离屏页面、用户的还是
+`<webview>`，两边靠「接管」交接——接管要把页面换个地方重建，页面会刷新，用户填了一半的
+表单就没了。
 
-- **透明浮层 View**：透明本身可行（`setBackgroundColor('#00000000')`），但顶层视图会
-  吞掉所有指针事件，无法穿透到下层。
-- **离屏渲染（OSR）**：Electron v43 的 `osr_render_widget_host_view.cc` 中 IME 钩子
-  全部是空实现，`GetTextInputClient()` 返回 `nullptr`，**中文输入不可用**；
-  共享纹理模式下 popup 坐标从未暴露，`<select>` 结构性不可修。
-- **截图冻结 + 隐藏原生视图**：可行但需要每个浮层手动接入，新增浮层必然遗漏；
-  且冻结期间页面静止。
+2026-09 改成全部标签页都是离屏页面。离屏页面不在任何可见窗口的焦点链上，Chromium 那条
+规则只在它自己身上生效；画面画在界面里的一块画布上，App 的浮层天然盖得住。
 
-因此改为 `<webview>`。**这是一个明牌的取舍，代价如下：**
+代价是浏览器替网页做的那一层要自己补：画面传输、输入转发、Mac 编辑快捷键、输入法候选框
+位置、原生弹层（下拉框、日期和颜色选择器、对话框）、选文件、打印、拖放、页内查找、悬停
+提示——上一节列的都已补上。早先否决离屏渲染时担心的两件事也有了答案：中文输入法不靠页面
+自己的输入法接口，而是面板上的隐形输入框接住组字，用 CDP 的 `Input.imeSetComposition` /
+`Input.insertText` 转进去；`<select>` 的弹层确实出不来（纹理模式下弹层一帧都不送），由面板
+自己画列表、写回。
 
-- **Electron 官方不推荐 `<webview>`**，理由是 Chromium 的 OOPIF 架构变动会影响其
-  渲染、导航与事件路由的稳定性。
-- **启用 `webviewTag` 是新增攻击面**，由上文「安全边界」中的加固措施补偿。
-- **Renderer 重载或崩溃会摧毁所有 agent 标签页**（guest 存活于 Renderer 文档中，
-  dev HMR 下尤其明显）。主进程的处理方式是干净地向所有 CDP client 广播
-  `Target.targetDestroyed`，**不尝试用旧 `pageTargetId` 复活** —— 那会让 Puppeteer
-  持有绑定到旧 execution context 的无效 Page。
+### 更早的两种（留作记录）
 
-**顺带修复的既有缺陷**：任何停止合成的隐藏方式都会让 `Page.captureScreenshot`
-永久挂起。旧架构的 `BACKGROUND_VIEWPORT + setVisible(false)`（非活动标签页）和
-`OFFSCREEN_VIEWPORT`（面板隐藏时的活动标签页）都属此列，即 agent 对后台标签页
-截图此前一直是坏的。现在非活动 guest 保持 1×1 在屏并叠加
-`Emulation.setDeviceMetricsOverride` 给出真实视口，截图恢复可用；活动标签页则清除
-该覆盖，让页面按面板实际宽度回流。
+- **主进程 `WebContentsView`（至 2026-08）**：原生视图无条件合成在 Renderer 之上，应用内
+  20 多个浮层（Radix popover / tooltip / context menu、`createPortal` 模态、toast）全被遮挡，
+  `z-index` 够不着；Electron 没有 per-View 的点击穿透（[#1335](https://github.com/electron/electron/issues/1335)、
+  [#23863](https://github.com/electron/electron/issues/23863)、[#49039](https://github.com/electron/electron/issues/49039)
+  均未排期）。另外 App 最小化或隐藏时页面一跳转，Agent 就截不到图（实测，见方案文档 E5）。
+- **Renderer `<webview>`（2026-08 至 2026-09）**：解决了遮挡，但 Agent 点击抢焦点（见上），
+  用户和 Agent 交接只能靠会刷新页面的「接管」；Renderer 重载或崩溃会带走所有网页。
 
 ## 导入登录状态与一键清空
 
@@ -105,25 +137,30 @@ Agent 因此在每个网站都是未登录状态。「设置 → 浏览器」提
 ## 上游复用方式
 
 Chrome DevTools MCP 作为 Apache-2.0 npm 依赖保留，CoilCoil 不复制它的通用工具层。
-浏览器实现按职责拆成三层，所有源文件都受 600 行架构上限约束：
+浏览器的主进程实现按职责拆开：
 
-- `browser-runtime.ts` 只管理标签页、guest 生命周期和 Renderer 状态；
+- `browser-runtime.ts` 管理标签页、面板状态和各项补齐的入口；每一项补齐的逻辑各在自己的
+  文件里（`browser-input.ts`、`browser-frame-stream.ts`、`browser-page-*.ts`）；
 - `browser-cdp-bridge.ts` 把上游 Puppeteer 需要的 browser → tab → page 目标层级映射到
-  Electron 单页 debugger；
+  每张页面自己的 debugger；
 - `browser-cdp-commands.ts` 保存可独立回归的协议改写规则。
 
-当前固定使用 `chrome-devtools-mcp@1.7.0`。该版本有少量会破坏 Electron guest 的上游
+运行时、桥这几份文件有行数上限（`apps/desktop/tests/browser-compatibility.test.ts`），防的是
+「一个文件什么都装」，不是防长文件本身。
+
+当前固定使用 `chrome-devtools-mcp@1.7.0`。该版本有少量会破坏 Electron 页面的上游
 行为，由 `scripts/patch-chrome-devtools-mcp.mjs` 在安装后做版本锁定、幂等的兼容修正；
 版本不匹配会直接失败，避免升级后静默套错补丁。主要兼容点是：stale selected page
 不能阻塞 `list_pages`/`close_page` 的恢复，导航失败必须返回 MCP error，`wait_for.text`
 同时接受字符串和数组，以及 Network/Performance 的明确错误语义。`setup` 即使使用
 `npm ci --ignore-scripts` 也会显式执行该补丁。
 
-Electron 的 `Page.reload` 可能替换 `<webview>` 主 frame，导致 Puppeteer 报
+Electron 的 `Page.reload` 可能替换页面的主 frame（最初在 `<webview>` 上发现，离屏页面上
+保留这条路由），导致 Puppeteer 报
 `Navigating frame was detached`；移动端/触摸 viewport 又会由 Puppeteer 隐式触发
 同一 reload。因此 CDP 桥把 `Page.reload` 路由成当前 URL 的 `Page.navigate`，保持
 target identity 不变。Lighthouse 的临时 direct session 查询 target 时，桥接层返回
-合成的 `type: page` 身份（而不是 Electron 原生的 `webview`），使其 session 能进入
+合成的 `type: page` 身份（而不是 Electron 自己报的类型），使其 session 能进入
 Lighthouse TargetManager。MCP 同时开启 structured content 和可选 pageId routing，
 但仍保持 `directTools: false`，不会把 30 个 schema 注入模型默认上下文。
 
@@ -136,15 +173,6 @@ Performance 与 Lighthouse。CoilCoil 只额外增加一个页级 `intercept_net
 
 CoilCoil 不再同时装载 Playwright MCP，也不再维护独立的 Debugger/Fetch/Storage MCP；
 能力缺口按真实需求逐项评估，不通过叠加整套控制框架补齐。
-
-## 当前界面
-
-右侧“浏览器”页签提供多标签页、地址/搜索输入、前进、后退、刷新与关闭。UI 与
-Agent 操作的是同一组 `<webview>` guest；Agent 新建、选择、关闭或导航页面时，右栏
-会实时同步。非活动标签页保持 1×1 在屏并常驻 1280×720 的模拟视口 —— **不会被
-`display:none`/`visibility:hidden`/离屏隐藏**，否则 guest 停止合成，agent 的截图
-会永久挂起。Agent 首次连接内置 MCP 时，CoilCoil 会自动打开右侧浏览器页签，避免
-模型在用户不可见的后台页面中执行交互。
 
 ## 同类项目源码对比
 
@@ -169,6 +197,8 @@ Agent 操作的是同一组 `<webview>` guest；Agent 新建、选择、关闭�
   传给主进程；其浏览器菜单为纯 DOM 组件，天然浮于网页之上。
   （对照：ChatGPT/Codex 桌面端不是 Electron 应用，而是完整的 Chromium 分支，
   其菜单为浏览器原生 views 菜单，不构成同类参照。）
+  **2026-09 又改为离屏页面**：`<webview>` 下 Agent 一点击就抢走用户的输入焦点，用户和
+  Agent 交接页面只能靠会刷新页面的「接管」（见上文「渲染方式的取舍」）。
 - [`bah-browser`](https://github.com/alexvilelabah/bah-browser/blob/953522e5dc095eb4067e4ba65ab17f1cc3ec09e5/src/renderer/components/WebViewContainer.tsx)
   也是 `<webview>` 加直接 CDP/AX Tree 工具，适合独立浏览器产品，但没有一个可供
   Pi 直接复用的标准 MCP 控制层。
