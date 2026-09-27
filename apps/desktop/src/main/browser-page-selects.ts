@@ -203,7 +203,7 @@ export function parseReadResult(raw: unknown): ReadResult | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const found = raw as Record<string, unknown>;
   const text = (value: unknown, max: number): string | undefined => (typeof value === "string" && value.length <= max ? value : undefined);
-  const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 100_000;
+  const number = pageCoordinate;
   const box = found.rect as Record<string, unknown> | null | undefined;
   if (!box || typeof box !== "object" || !number(box.x) || !number(box.y) || !number(box.width) || !number(box.height)
     || box.width < 0 || box.height < 0) return undefined;
@@ -231,6 +231,28 @@ export function parseReadResult(raw: unknown): ReadResult | undefined {
   const step = text(found.step, 64);
   if (value === undefined || min === undefined || max === undefined || step === undefined) return undefined;
   return { kind: "value", positioned, rect, type: found.type as ValueData["type"], value, min, max, step };
+}
+
+/** 网页交回来的坐标：有限、不离谱（正常网页远在这个范围以内）。 */
+function pageCoordinate(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 100_000;
+}
+
+/**
+ * 点到的内嵌页在各层里排第几、内容区从哪儿开始（FRAME_SLOT 在网页自己的环境里算的，一样要核）：
+ * 最多 8 层（它自己就只往上走 8 层），每层是非负整数，坐标不离谱。不对就当没点到。
+ */
+export function parseFrameSlot(raw: unknown): { path: number[]; x: number; y: number } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const slot = raw as Record<string, unknown>;
+  if (!Array.isArray(slot.path) || slot.path.length === 0 || slot.path.length > 8) return undefined;
+  const path: number[] = [];
+  for (const index of slot.path as unknown[]) {
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= 1000) return undefined;
+    path.push(index);
+  }
+  if (!pageCoordinate(slot.x) || !pageCoordinate(slot.y)) return undefined;
+  return { path, x: slot.x, y: slot.y };
 }
 
 /** 浏览器内部结构里带某个 pseudo 标记的节点（日期框的小日历图标是 -webkit-calendar-picker-indicator）。 */
@@ -435,8 +457,8 @@ export class PageSelects {
    * 框架，在里面找点到的控件；里面又是内嵌页就再往里一层。控件在整页上的位置加上每层的偏移。
    */
   private async readInFrames(contents: WebContents, frameNode: number, at: { x: number; y: number }): Promise<{ target: Target; found: ReadResult } | undefined> {
-    const slot = await this.callOnNode(contents, frameNode, FRAME_SLOT) as { path: number[]; x: number; y: number } | null | undefined;
-    if (!slot || !Array.isArray(slot.path)) return undefined;
+    const slot = parseFrameSlot(await this.callOnNode(contents, frameNode, FRAME_SLOT));
+    if (!slot) return undefined;
     let frame: WebFrameMain | undefined = contents.mainFrame;
     for (const index of slot.path) frame = frame?.frames[index];
     let origin = { x: slot.x, y: slot.y };
@@ -446,17 +468,19 @@ export class PageSelects {
       const raw = await frame.executeJavaScript(`${READ_IN_FRAME}(${JSON.stringify(point)}, ${JSON.stringify(key)})`) as unknown;
       const hop = raw as FrameHop | null;
       if (hop?.kind === "frame") {
-        if (!Number.isInteger(hop.index) || hop.index < 0 || !Number.isFinite(hop.x) || !Number.isFinite(hop.y)) return undefined;
+        if (!Number.isInteger(hop.index) || hop.index < 0 || !pageCoordinate(hop.x) || !pageCoordinate(hop.y)) return undefined;
         frame = frame.frames[hop.index];
         origin = { x: origin.x + hop.x, y: origin.y + hop.y };
+        if (!pageCoordinate(origin.x) || !pageCoordinate(origin.y)) return undefined;
         continue;
       }
       const result = parseReadResult(raw);
-      if (!result) {
+      const rect = result && { ...result.rect, x: result.rect.x + origin.x, y: result.rect.y + origin.y };
+      if (!result || !rect || !pageCoordinate(rect.x) || !pageCoordinate(rect.y)) {
         await this.release({ frame, key });
         return undefined;
       }
-      return { target: { frame, key }, found: { ...result, rect: { ...result.rect, x: result.rect.x + origin.x, y: result.rect.y + origin.y }, positioned: true } };
+      return { target: { frame, key }, found: { ...result, rect, positioned: true } };
     }
     return undefined;
   }

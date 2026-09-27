@@ -335,6 +335,9 @@ export class BrowserCdpBridge {
       }
     }
     if (isTabActivationCommand(request.method)) {
+      // Agent 把这张切到前台：算它在操作（面板亮「正在操作」，上限收页时不算久没用）。这条命令
+      // 在这里就答完了，走不到 executePageCommand 里的 isAgentTabUse，所以在这儿记。
+      this.host.noteAgentUse(tab);
       this.host.selectTab(tab.id, tab.scopeId);
       return {};
     }
@@ -465,11 +468,17 @@ export class BrowserCdpBridge {
       const activate = params.background !== true;
       const tab = await this.adoptBlankTab(url, activate, client.scopeId)
         ?? await this.host.createTab(url, activate, client.scopeId);
+      // Agent 开了一张页：算它在操作。它多半接着就导航，但只开一张空页、停在那儿也该亮提示。
+      // 桥自己为了答浏览器版本垫的空白页不走这里（ensureActiveTab），不亮。
+      this.host.noteAgentUse(tab);
       return { targetId: tab.pageTargetId };
     }
     if (method === "Target.activateTarget") {
       const tab = this.findTabByTarget(String(params.targetId ?? ""), client.scopeId);
-      if (tab) this.host.selectTab(tab.id, client.scopeId);
+      if (tab) {
+        this.host.noteAgentUse(tab);
+        this.host.selectTab(tab.id, client.scopeId);
+      }
       return {};
     }
     if (method === "Target.closeTarget") {

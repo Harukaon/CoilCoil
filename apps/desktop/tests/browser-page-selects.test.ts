@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import test from "node:test";
 import type { WebContents } from "electron";
-import { PageSelects, parseReadResult } from "../src/main/browser-page-selects.ts";
+import { PageSelects, parseFrameSlot, parseReadResult } from "../src/main/browser-page-selects.ts";
 import type { BrowserPageEvent } from "../src/shared/desktop-api.ts";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -375,7 +375,15 @@ test("网页读回来的控件信息逐项核对：正常的照收，被篡改�
 });
 
 /** 跨站内嵌页里一个下拉框：可以在「读到控件」那一刻插一手（切走、拖慢）。 */
-async function crossSiteFixture(options: { budgetMs?: number; onRead?: () => Promise<void> | void; current?: () => boolean } = {}) {
+async function crossSiteFixture(options: {
+  budgetMs?: number;
+  onRead?: () => Promise<void> | void;
+  current?: () => boolean;
+  /** 改掉网页算出来的内嵌页位置（FRAME_SLOT 的结果）。 */
+  tamperSlot?: (slot: unknown) => unknown;
+  /** 改掉内嵌页里读回来的结果（READ_IN_FRAME 的结果）。 */
+  tamperRead?: (result: unknown) => unknown;
+} = {}) {
   const vm = await import("node:vm");
   const events: BrowserPageEvent[] = [];
   const select: Record<string, any> = {
@@ -391,8 +399,9 @@ async function crossSiteFixture(options: { budgetMs?: number; onRead?: () => Pro
     detached: false, isDestroyed: () => false, frames: [],
     executeJavaScript: async (code: string) => {
       const reading = code.includes("elementFromPoint");
-      const result: unknown = vm.runInContext(code, sandbox);
+      let result: unknown = vm.runInContext(code, sandbox);
       if (reading) await options.onRead?.();
+      if (reading && options.tamperRead) result = options.tamperRead(result === undefined ? result : JSON.parse(JSON.stringify(result)));
       return result === undefined ? result : JSON.parse(JSON.stringify(result));
     },
   };
@@ -409,7 +418,9 @@ async function crossSiteFixture(options: { budgetMs?: number; onRead?: () => Pro
         if (method === "DOM.resolveNode") return { object: { objectId: "iframe" } };
         if (method === "Runtime.callFunctionOn") {
           const fn = new Function(`return (${params.functionDeclaration});`)();
-          return { result: { value: fn.apply(iframe, (params.arguments ?? []).map((a: { value: unknown }) => a.value)) } };
+          const value = fn.apply(iframe, (params.arguments ?? []).map((a: { value: unknown }) => a.value));
+          const isSlot = String(params.functionDeclaration).includes("path.unshift");
+          return { result: { value: isSlot && options.tamperSlot ? options.tamperSlot(value) : value } };
         }
         return {};
       },
@@ -435,4 +446,37 @@ test("跨站内嵌页：读得太慢超时了，晚到的结果不弹列表，�
   await wait(120);
   assert.equal(f.events.length, 0);
   assert.equal(f.leftovers(), 0);
+});
+
+test("内嵌页位置逐项核对：层数、每层的序号、坐标", () => {
+  assert.deepEqual(parseFrameSlot({ path: [0, 2], x: 10, y: 20 }), { path: [0, 2], x: 10, y: 20 });
+  assert.equal(parseFrameSlot({ path: [], x: 0, y: 0 }), undefined);
+  assert.equal(parseFrameSlot({ path: Array.from({ length: 9 }, () => 0), x: 0, y: 0 }), undefined, "超过 8 层");
+  assert.equal(parseFrameSlot({ path: ["__proto__"], x: 0, y: 0 }), undefined);
+  assert.equal(parseFrameSlot({ path: [1.5], x: 0, y: 0 }), undefined);
+  assert.equal(parseFrameSlot({ path: [-1], x: 0, y: 0 }), undefined);
+  assert.equal(parseFrameSlot({ path: [0], x: 1e15, y: 0 }), undefined);
+  assert.equal(parseFrameSlot({ path: [0], x: 0, y: Number.NaN }), undefined);
+  assert.equal(parseFrameSlot("0"), undefined);
+});
+
+test("网页改掉了内嵌页的位置、或者内嵌页里交回离谱的坐标：当没点到，不弹列表，也不留引用", async () => {
+  for (const tamperSlot of [
+    (slot: any) => ({ ...slot, path: ["__proto__"] }),
+    (slot: any) => ({ ...slot, path: Array.from({ length: 50 }, () => 0) }),
+    (slot: any) => ({ ...slot, x: 1e15 }),
+  ]) {
+    const f = await crossSiteFixture({ tamperSlot });
+    assert.equal(await f.manager.intercept("tab", f.contents, { x: 20, y: 20 }), false);
+    assert.equal(f.events.length, 0);
+    assert.equal(f.leftovers(), 0, "没进到内嵌页里读，自然没留引用");
+  }
+  const hop = await crossSiteFixture({ tamperRead: () => ({ kind: "frame", index: 0, x: 1e15, y: 0 }) });
+  assert.equal(await hop.manager.intercept("tab", hop.contents, { x: 20, y: 20 }), false);
+  assert.equal(hop.events.length, 0);
+  const far = await crossSiteFixture({ tamperRead: (result: any) => ({ ...result, rect: { ...result.rect, x: 99_999 } }) });
+  assert.equal(await far.manager.intercept("tab", far.contents, { x: 20, y: 20 }), false, "加上内嵌页的偏移以后出了范围");
+  assert.equal(far.events.length, 0);
+  await wait(20);
+  assert.equal(far.leftovers(), 0, "读到了控件、存了引用，没用上就清掉");
 });

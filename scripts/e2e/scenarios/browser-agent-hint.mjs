@@ -1,4 +1,4 @@
-export const description = "「Agent 正在操作」提示：Agent 一动手（不管网页是谁开的）面板上就亮出提示，停手几秒后自动收起；用户和 Agent 同时操作不排队；标签条上「Agent 开的」标记照旧";
+export const description = "「Agent 正在操作」提示：Agent 一动手（导航、开新页、切到某页，不管网页是谁开的）面板上就亮出提示，停手几秒后自动收起；用户和 Agent 同时操作不排队；标签条上「Agent 开的」标记照旧";
 
 export async function run({ page, ui, site, check, shot }) {
   await ui.newConversation("projA");
@@ -25,4 +25,14 @@ export async function run({ page, ui, site, check, shot }) {
   check("Agent 开的这张停手以后也收起", await ui.waitFor(async () => (await bar.count()) === 0, 15_000));
   const tabs = await ui.browserTabs();
   check("标签条上 Agent 开的那张照样带「Agent 开的」标记", tabs.some((tab) => tab.label.startsWith("p2") && tab.agent), JSON.stringify(tabs));
+
+  // Agent 用官方工具把用户那张（现在显示 p1）切到前台（select_page + bringToFront）：面板切过去，
+  // 也算它在操作，亮提示（评审抓到过：切页这条路以前不亮）。
+  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "list_pages" } }, { echo: true }], "提示");
+  const pageId = Number(/(\d+): p1 \(/.exec(await ui.lastEcho())?.[1]);
+  check("Agent 在页面列表里找到用户那张", Number.isInteger(pageId), (await ui.lastEcho()).slice(0, 240));
+  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "select_page", args: { pageId, bringToFront: true } } }, { echo: true }], "提示");
+  const activeLabel = async () => (await page.locator(".inspector-tab.active .inspector-tab-select").innerText().catch(() => "")).trim();
+  check("Agent 切到用户那张：面板切过去了", await ui.waitFor(async () => (await activeLabel()).startsWith("p1"), 5000), await activeLabel());
+  check("Agent 切到用户那张：亮出「Agent 正在操作这个页面」", await ui.waitFor(async () => (await hint()) === "Agent 正在操作这个页面", 3000), String(await hint()));
 }
