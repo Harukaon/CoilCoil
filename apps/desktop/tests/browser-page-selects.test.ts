@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import test from "node:test";
 import type { WebContents } from "electron";
-import { PageSelects } from "../src/main/browser-page-selects.ts";
+import { PageSelects, parseReadResult } from "../src/main/browser-page-selects.ts";
 import type { BrowserPageEvent } from "../src/shared/desktop-api.ts";
 
 function fixture(budgetMs = 150) {
@@ -346,4 +346,28 @@ test("跨站内嵌页里的下拉框：按排第几个找到那个框架，在�
   assert.deepEqual(fired, ["input", "change"]);
   await nextTurn();
   assert.equal(Object.getOwnPropertyNames(frameWindow).length, 0, "收起后引用拿掉了");
+});
+
+test("网页读回来的控件信息逐项核对：正常的照收，被篡改的（太多、类型不对、太长、数字不正常）一律不弹", () => {
+  const rect = { x: 10, y: 20, width: 100, height: 30 };
+  const option = (label: string) => ({ label, value: label, disabled: false, group: "" });
+  const select = { kind: "select", positioned: true, rect, selectedIndex: 1, options: [option("a"), option("b")] };
+  assert.deepEqual(parseReadResult(select), select);
+  assert.equal(parseReadResult({ ...select, selectedIndex: 9 })?.kind === "select" && (parseReadResult({ ...select, selectedIndex: 9 }) as { selectedIndex: number }).selectedIndex, -1);
+  assert.equal(parseReadResult({ ...select, options: Array.from({ length: 2001 }, (_, i) => option(String(i))) }), undefined, "超过 2000 项");
+  assert.equal(parseReadResult({ ...select, options: [] }), undefined);
+  assert.equal(parseReadResult({ ...select, options: [{ ...option("a"), label: 42 }] }), undefined, "类型不对");
+  assert.equal(parseReadResult({ ...select, options: [option("x".repeat(501))] }), undefined, "字太长");
+  assert.equal(parseReadResult({ ...select, options: [{ ...option("a"), disabled: "no" }] }), undefined);
+  assert.equal(parseReadResult({ ...select, rect: { ...rect, x: Number.NaN } }), undefined, "数字不正常");
+  assert.equal(parseReadResult({ ...select, rect: { ...rect, width: -1 } }), undefined);
+  assert.equal(parseReadResult({ ...select, rect: { ...rect, y: 1e9 } }), undefined);
+  const value = { kind: "value", positioned: false, rect, type: "date", value: "2026-09-26", min: "", max: "", step: "" };
+  assert.deepEqual(parseReadResult(value), value);
+  assert.equal(parseReadResult({ ...value, type: "text" }), undefined, "不认识的类型");
+  assert.equal(parseReadResult({ ...value, value: "x".repeat(65) }), undefined);
+  assert.equal(parseReadResult({ ...value, min: 3 }), undefined);
+  assert.equal(parseReadResult({ kind: "other", rect }), undefined);
+  assert.equal(parseReadResult(null), undefined);
+  assert.equal(parseReadResult("select"), undefined);
 });

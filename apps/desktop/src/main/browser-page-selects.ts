@@ -193,6 +193,46 @@ type FrameHop = { kind: "frame"; index: number; x: number; y: number };
 type OpeningKey = { key: string; alt: boolean };
 type DomNode = { backendNodeId?: number; attributes?: string[]; children?: DomNode[]; shadowRoots?: DomNode[] };
 
+/**
+ * 网页里读回来的控件信息逐项核对。读的脚本跑在网页自己的环境里（调试通道的 callFunctionOn、
+ * 内嵌页的 executeJavaScript 都是），网页改得了内置函数，脚本里的长度上限可能失效：类型不对、
+ * 数字不正常、选项超过 2000 项、字太长的，一律当没点到，不弹列表。正常网页读回来的本来就在
+ * 这些限制之内。
+ */
+export function parseReadResult(raw: unknown): ReadResult | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const found = raw as Record<string, unknown>;
+  const text = (value: unknown, max: number): string | undefined => (typeof value === "string" && value.length <= max ? value : undefined);
+  const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 100_000;
+  const box = found.rect as Record<string, unknown> | null | undefined;
+  if (!box || typeof box !== "object" || !number(box.x) || !number(box.y) || !number(box.width) || !number(box.height)
+    || box.width < 0 || box.height < 0) return undefined;
+  const rect = { x: box.x, y: box.y, width: box.width, height: box.height };
+  const positioned = found.positioned === true;
+  if (found.kind === "select") {
+    if (!Array.isArray(found.options) || found.options.length === 0 || found.options.length > 2000) return undefined;
+    const options: SelectData["options"] = [];
+    for (const item of found.options as unknown[]) {
+      const option = item as Record<string, unknown> | null;
+      const label = text(option?.label, 500);
+      const value = text(option?.value, 2000);
+      const group = text(option?.group, 500);
+      if (label === undefined || value === undefined || group === undefined || typeof option?.disabled !== "boolean") return undefined;
+      options.push({ label, value, disabled: option.disabled, group });
+    }
+    const index = found.selectedIndex;
+    const selectedIndex = Number.isInteger(index) && (index as number) >= -1 && (index as number) < options.length ? index as number : -1;
+    return { kind: "select", positioned, rect, options, selectedIndex };
+  }
+  if (found.kind !== "value" || !(VALUE_TYPES as readonly string[]).includes(found.type as string)) return undefined;
+  const value = text(found.value, 64);
+  const min = text(found.min, 64);
+  const max = text(found.max, 64);
+  const step = text(found.step, 64);
+  if (value === undefined || min === undefined || max === undefined || step === undefined) return undefined;
+  return { kind: "value", positioned, rect, type: found.type as ValueData["type"], value, min, max, step };
+}
+
 /** 浏览器内部结构里带某个 pseudo 标记的节点（日期框的小日历图标是 -webkit-calendar-picker-indicator）。 */
 function findPseudo(node: DomNode | undefined, pseudo: string, depth = 0): DomNode | undefined {
   if (!node || depth > 12) return undefined;
@@ -328,7 +368,7 @@ export class PageSelects {
     }
     if (typeof backendNodeId !== "number") return undefined;
     let target: Target = { node: backendNodeId };
-    let found = await this.callOnNode(contents, backendNodeId, READ_TARGET) as ReadResult | null | undefined;
+    let found = parseReadResult(await this.callOnNode(contents, backendNodeId, READ_TARGET));
     // 点到的是跨站内嵌页：到它自己的进程里去找。
     if (!found && at) {
       const inFrame = await this.readInFrames(contents, backendNodeId, at);
@@ -336,12 +376,10 @@ export class PageSelects {
     }
     if (!found) return undefined;
     if (found.kind === "select") {
-      if (!Array.isArray(found.options) || found.options.length === 0) return undefined;
       if (key && !(key.key === " " || key.key === "Enter" || (key.key === "ArrowDown" && key.alt))) return undefined;
       const { kind: _kind, positioned, ...picker } = found;
       return { kind: "select", target, picker: { ...picker, rect: this.windowRect(picker.rect, positioned, at, zoom) } };
     }
-    if (!(VALUE_TYPES as readonly string[]).includes(found.type)) return undefined;
     const calendar = CALENDAR_TYPES.has(found.type);
     // 键盘：颜色框按空格、回车打开；日期类按 Alt+↓（和 Chrome 一样，空格、回车是改年月日那一格）。
     if (key && !(calendar ? key.key === "ArrowDown" && key.alt : key.key === " " || key.key === "Enter")) return undefined;
@@ -400,12 +438,18 @@ export class PageSelects {
     const key = `__coilcoilPicker_${randomUUID().replaceAll("-", "")}`;
     for (let depth = 0; frame && !frame.detached && depth < 4; depth += 1) {
       const point = { x: at.x - origin.x, y: at.y - origin.y };
-      const result = await frame.executeJavaScript(`${READ_IN_FRAME}(${JSON.stringify(point)}, ${JSON.stringify(key)})`) as ReadResult | FrameHop | null;
-      if (!result) return undefined;
-      if (result.kind === "frame") {
-        frame = frame.frames[result.index];
-        origin = { x: origin.x + result.x, y: origin.y + result.y };
+      const raw = await frame.executeJavaScript(`${READ_IN_FRAME}(${JSON.stringify(point)}, ${JSON.stringify(key)})`) as unknown;
+      const hop = raw as FrameHop | null;
+      if (hop?.kind === "frame") {
+        if (!Number.isInteger(hop.index) || hop.index < 0 || !Number.isFinite(hop.x) || !Number.isFinite(hop.y)) return undefined;
+        frame = frame.frames[hop.index];
+        origin = { x: origin.x + hop.x, y: origin.y + hop.y };
         continue;
+      }
+      const result = parseReadResult(raw);
+      if (!result) {
+        await this.release({ frame, key });
+        return undefined;
       }
       return { target: { frame, key }, found: { ...result, rect: { ...result.rect, x: result.rect.x + origin.x, y: result.rect.y + origin.y }, positioned: true } };
     }
