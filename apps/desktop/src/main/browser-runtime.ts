@@ -692,13 +692,12 @@ export class BrowserRuntimeManager {
       void this.setFocusEmulation(tab, "user", input.focused);
       return;
     }
-    const visible = scopeId === this.uiScopeId && this.panelVisible && this.activeTabIds.get(scopeId) === tabId;
-    if (!visible) return;
+    if (!this.shownTab(scopeId, tabId)) return;
     let forwarder = this.inputForwarders.get(contents);
     if (!forwarder) {
       forwarder = new PageInputForwarder(contents, process.platform,
         (point) => this.selects.intercept(tab.id, contents, point),
-        () => !this.disposed && this.panelVisible && this.uiScopeId === tab.scopeId && this.activeTabIds.get(tab.scopeId) === tab.id && tab.guest === contents,
+        () => !this.disposed && this.shownTab(tab.scopeId, tab.id)?.guest === contents,
         (key) => this.selects.intercept(tab.id, contents, undefined, key),
         { userMouse: (event) => this.drags.userMouse(contents, event), userEscape: () => this.drags.userEscape(contents) });
       this.inputForwarders.set(contents, forwarder);
@@ -776,18 +775,27 @@ export class BrowserRuntimeManager {
 
   /** 面板的选择器回话只认这个会话的标签页；真选了的还得是用户正看着的那张，这一下也算用户用过。 */
   private pickerAnswer(scopeId: string, tabId: string, chose: boolean): boolean {
-    const tab = this.tabs.get(tabId);
-    const shown = scopeId === this.uiScopeId && this.panelVisible && this.activeTabIds.get(scopeId) === tabId;
-    if (!tab || tab.scopeId !== scopeId || (chose && !shown)) return false;
+    const tab = chose ? this.shownTab(scopeId, tabId) : this.tabs.get(tabId);
+    if (!tab || tab.scopeId !== scopeId) return false;
     if (chose) tab.userInputAt = Date.now();
     return true;
   }
 
+  /**
+   * 桌面窗口正显示的就是这张（会话对、面板开着、是这个会话当前的标签页、页面还在）。面板来的
+   * 查找、光标、悬停提示、拖文件、选择器回话只认这张，后台的、别的会话的一律不收。
+   */
+  private shownTab(scopeId: string, tabId: string): BrowserTab | undefined {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || !this.panelVisible || this.activeTabIds.get(scopeId) !== tabId) return undefined;
+    return tab.guest && !tab.guest.isDestroyed() ? tab : undefined;
+  }
+
   /** 用户从访达拖文件到面板的页面上：放进松手的位置（见 browser-page-drags.ts）。只收正显示的那张。 */
   dropFiles(scopeId: string, tabId: string, rawPoint: unknown, rawPaths: unknown): void {
-    const tab = this.tabs.get(tabId);
+    const tab = this.shownTab(scopeId, tabId);
     const contents = tab?.guest;
-    if (!tab?.offscreen || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || !this.panelVisible || this.activeTabIds.get(scopeId) !== tabId || !contents || contents.isDestroyed()) return;
+    if (!tab?.offscreen || !contents) return;
     const [width, height] = tab.offscreen.getContentSize();
     const drop = parseFileDrop(rawPoint, rawPaths, { width, height });
     if (!drop) return;
@@ -800,33 +808,31 @@ export class BrowserRuntimeManager {
   /** 用户在面板的查找栏里搜：只在桌面窗口正显示的那张页面里找，结果推回面板。 */
   findInPage(scopeId: string, tabId: string, raw: unknown): void {
     const request = parseFindRequest(raw);
-    const tab = this.tabs.get(tabId);
-    const contents = tab?.guest;
-    if (!request || !tab || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || !contents || contents.isDestroyed()) return;
+    if (!request) return;
+    // 收起查找、清高亮不限于正显示的那张：切走标签页时，面板正是在给刚才那张收尾。
     if ("stop" in request || !request.text) {
-      contents.stopFindInPage("keepSelection");
+      const tab = this.tabs.get(tabId);
+      if (tab?.scopeId !== scopeId || scopeId !== this.uiScopeId || !tab.guest || tab.guest.isDestroyed()) return;
+      tab.guest.stopFindInPage("keepSelection");
       this.publishPageEvent({ tabId, kind: "find", matches: 0, active: 0 });
       return;
     }
     // Electron 的 findNext 意思是「开始一次新的查找」：换了字时为 true，找下一处时为 false。
-    contents.findInPage(request.text, { forward: request.forward, findNext: request.newSearch });
+    this.shownTab(scopeId, tabId)?.guest?.findInPage(request.text, { forward: request.forward, findNext: request.newSearch });
   }
 
   /** 用户在面板里打字的位置，输入法候选框跟着它。只问桌面窗口正显示的页面；停在网页对话框上时不问。 */
   caretOf(scopeId: string, tabId: string): Promise<BrowserCaret | null> {
-    const tab = this.tabs.get(tabId);
-    const contents = tab?.guest;
-    if (!tab || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || this.dialogs.snapshot(tabId) || !contents || contents.isDestroyed()) return Promise.resolve(null);
-    return readPageCaret(contents);
+    const contents = this.shownTab(scopeId, tabId)?.guest;
+    return contents && !this.dialogs.snapshot(tabId) ? readPageCaret(contents) : Promise.resolve(null);
   }
 
   /** 鼠标停在面板画面上这一点（页面窗口的像素）：这里的悬停提示。只问桌面窗口正显示的那张。 */
   tooltipAt(scopeId: string, tabId: string, raw: unknown): Promise<string | null> {
-    const tab = this.tabs.get(tabId);
-    const contents = tab?.guest;
+    const contents = this.shownTab(scopeId, tabId)?.guest;
     const { x, y } = (raw && typeof raw === "object" ? raw : {}) as { x?: unknown; y?: unknown };
-    if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) return Promise.resolve(null);
-    if (!tab || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || this.dialogs.snapshot(tabId) || !contents || contents.isDestroyed()) return Promise.resolve(null);
+    const inPage = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 100_000;
+    if (!contents || this.dialogs.snapshot(tabId) || !inPage(x) || !inPage(y)) return Promise.resolve(null);
     return readPageTooltip(contents, { x, y });
   }
 

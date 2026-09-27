@@ -166,3 +166,25 @@ test("拖文件进页面：进入、经过、放下，带着文件和允许的�
   assert.deepEqual(calls.map((call) => call.type), ["dragEnter", "dragOver", "drop"]);
   assert.deepEqual(calls[2], { type: "drop", x: 12, y: 34, data: { items: [], files: ["/tmp/a.txt"], dragOperationsMask: 19 }, modifiers: 8 });
 });
+
+test("Agent 拖着东西时按 Esc：取消这次拖拽，这一下不送进页面；别的时候的 Esc、别的键照常送", async () => {
+  const page = fakePage();
+  const drags = new PageDrags();
+  await drags.install(page.contents);
+  const escape = { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 };
+  assert.equal(await drags.agentKey(page.contents, escape), false, "没在拖：照常送");
+  await drags.agentMouse(page.contents, { type: "mousePressed", x: 10, y: 10, button: "left", buttons: 1 });
+  await drags.agentMouse(page.contents, { type: "mouseMoved", x: 90, y: 10, button: "left", buttons: 1 });
+  page.startDrag();
+  assert.equal(await drags.agentKey(page.contents, { type: "keyDown", key: "a", code: "KeyA" }), false, "别的键照常送");
+  assert.equal(await drags.agentKey(page.contents, { ...escape, type: "keyUp" }), false, "抬起不算");
+  assert.equal(await drags.agentKey(page.contents, escape), true);
+  assert.equal(page.sent.at(-1)?.type, "dragCancel");
+  assert.equal(await drags.agentMouse(page.contents, { type: "mouseReleased", x: 90, y: 10, button: "left", buttons: 0 }), false, "取消以后松手照常送");
+  // 用户在拖时 Agent 按 Esc：不动用户的拖拽。
+  await drags.userMouse(page.contents, mouse("down", 10, 10, 1));
+  await drags.userMouse(page.contents, mouse("move", 40, 10, 1));
+  page.startDrag();
+  assert.equal(await drags.agentKey(page.contents, escape), false);
+  assert.equal(await drags.userMouse(page.contents, mouse("up", 44, 12, 0)), true, "用户的拖拽照常放下");
+});

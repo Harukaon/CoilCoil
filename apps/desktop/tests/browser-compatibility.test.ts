@@ -19,8 +19,11 @@ const read = (path: string) => readFile(resolve(repositoryRoot, path), "utf8");
  *
  * 1100：离屏页面补上浏览器自带的那些——页内查找、输入法候选框跟光标、页面里拖拽和从访达
  * 拖文件进来、日期和颜色选择器——每样在运行时里只有一个入口，逻辑各在自己的文件里。
+ *
+ * 1150：「Agent 正在操作」提示（Agent 动手时亮、停手后收），以及面板来的请求统一只认「桌面
+ * 窗口正显示的那张」的检查。
  */
-const MAX_LINES = 1100;
+const MAX_LINES = 1150;
 
 test(`browser runtime source files stay within the ${MAX_LINES}-line architecture limit`, async () => {
   for (const path of [

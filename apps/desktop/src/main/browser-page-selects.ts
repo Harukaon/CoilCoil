@@ -269,9 +269,11 @@ export class PageSelects {
     this.requests.set(tabId, request);
     const live = (): boolean => this.requests.get(tabId) === request && this.isCurrent(tabId, contents);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let kept = false;
+    const reading = this.read(contents, point, key);
     try {
       const found = await Promise.race([
-        this.read(contents, point, key),
+        reading,
         new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), this.budgetMs); }),
       ]);
       if (!live()) return true;
@@ -281,6 +283,7 @@ export class PageSelects {
       if (!live()) return true;
       const id = randomUUID();
       this.open.set(tabId, { id, contents, ...found });
+      kept = true;
       if (found.kind === "select") this.publish({ tabId, kind: "select", picker: { id, ...found.picker } });
       else this.publish({ tabId, kind: "value-picker", picker: { id, ...found.picker } });
       return true;
@@ -289,6 +292,8 @@ export class PageSelects {
     } finally {
       if (timer) clearTimeout(timer);
       if (this.requests.get(tabId) === request) this.requests.delete(tabId);
+      // 没用上的（中途切走、超时以后才读到、出错），存在跨站内嵌页里的控件引用也要清掉。
+      if (!kept) void reading.then((late) => { if (late && "frame" in late.target) return this.release(late.target); }, () => undefined);
     }
   }
 

@@ -193,6 +193,16 @@ export class PageDrags {
     return params.type === "mousePressed" || params.type === "mouseReleased";
   }
 
+  /** Agent 按了 Esc（CDP 按键）：它正拖着东西的话取消这次拖拽，返回 true（这一下不再送进页面）。 */
+  async agentKey(contents: WebContents, params: Record<string, unknown>): Promise<boolean> {
+    const escape = (params.type === "keyDown" || params.type === "rawKeyDown")
+      && (params.key === "Escape" || params.code === "Escape" || params.windowsVirtualKeyCode === 27);
+    const state = this.pages.get(contents);
+    if (!escape || state?.active?.by !== "agent") return false;
+    await this.finish(contents, state, undefined, 0);
+    return true;
+  }
+
   /** Agent 要自己接拖拽（或者不要了）：拦截开关一直开着，只记下来。 */
   setAgentIntercepts(contents: WebContents, enabled: boolean): void {
     this.state(contents).agentIntercepts = enabled;

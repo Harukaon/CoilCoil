@@ -6,6 +6,8 @@ import type { WebContents } from "electron";
 import { PageSelects, parseReadResult } from "../src/main/browser-page-selects.ts";
 import type { BrowserPageEvent } from "../src/shared/desktop-api.ts";
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function fixture(budgetMs = 150) {
   const events: BrowserPageEvent[] = [];
   const calls: Array<{ method: string; params: Record<string, any> }> = [];
@@ -370,4 +372,67 @@ test("网页读回来的控件信息逐项核对：正常的照收，被篡改�
   assert.equal(parseReadResult({ kind: "other", rect }), undefined);
   assert.equal(parseReadResult(null), undefined);
   assert.equal(parseReadResult("select"), undefined);
+});
+
+/** 跨站内嵌页里一个下拉框：可以在「读到控件」那一刻插一手（切走、拖慢）。 */
+async function crossSiteFixture(options: { budgetMs?: number; onRead?: () => Promise<void> | void; current?: () => boolean } = {}) {
+  const vm = await import("node:vm");
+  const events: BrowserPageEvent[] = [];
+  const select: Record<string, any> = {
+    nodeType: 1, tagName: "SELECT", multiple: false, size: 0, disabled: false, isConnected: true, selectedIndex: 0,
+    options: ["a", "b"].map((label) => ({ label, value: label, disabled: false, parentElement: null })),
+    getBoundingClientRect: () => ({ x: 1, y: 1, width: 50, height: 20 }),
+    dispatchEvent: () => undefined, focus: () => undefined,
+  };
+  select.closest = () => select;
+  const frameWindow: Record<string, unknown> = {};
+  const sandbox = vm.createContext({ document: { elementFromPoint: () => select }, frames: { length: 0 }, window: frameWindow, getComputedStyle: () => ({}), Event: class {} });
+  const frame = {
+    detached: false, isDestroyed: () => false, frames: [],
+    executeJavaScript: async (code: string) => {
+      const reading = code.includes("elementFromPoint");
+      const result: unknown = vm.runInContext(code, sandbox);
+      if (reading) await options.onRead?.();
+      return result === undefined ? result : JSON.parse(JSON.stringify(result));
+    },
+  };
+  const childWindow = {};
+  const topWindow: Record<string, any> = { frames: { length: 1, 0: childWindow }, getComputedStyle: () => ({ paddingLeft: "0px", paddingTop: "0px" }) };
+  topWindow.top = topWindow;
+  const iframe = { nodeType: 1, tagName: "IFRAME", contentWindow: childWindow, ownerDocument: { defaultView: topWindow }, clientLeft: 0, clientTop: 0, closest: () => null, getBoundingClientRect: () => ({ x: 10, y: 10, width: 200, height: 100 }) };
+  const contents = Object.assign(new EventEmitter(), {
+    isDestroyed: () => false, getZoomFactor: () => 1, mainFrame: { frames: [frame] },
+    debugger: {
+      isAttached: () => true,
+      sendCommand: async (method: string, params: Record<string, any>) => {
+        if (method === "DOM.getNodeForLocation") return { backendNodeId: 5 };
+        if (method === "DOM.resolveNode") return { object: { objectId: "iframe" } };
+        if (method === "Runtime.callFunctionOn") {
+          const fn = new Function(`return (${params.functionDeclaration});`)();
+          return { result: { value: fn.apply(iframe, (params.arguments ?? []).map((a: { value: unknown }) => a.value)) } };
+        }
+        return {};
+      },
+    },
+  }) as unknown as WebContents;
+  const manager = new PageSelects((event) => events.push(event), options.current ?? (() => true), options.budgetMs ?? 150);
+  const leftovers = () => Object.getOwnPropertyNames(frameWindow).length;
+  return { manager, contents, events, leftovers };
+}
+
+test("跨站内嵌页：刚读到控件就被打断（用户切走了），存在内嵌页里的引用照样清掉", async () => {
+  let current = true;
+  const f = await crossSiteFixture({ onRead: () => { current = false; }, current: () => current });
+  assert.equal(await f.manager.intercept("tab", f.contents, { x: 20, y: 20 }), true, "这一下已经过期，不再送进页面");
+  assert.equal(f.events.length, 0, "不弹列表");
+  await wait(20);
+  assert.equal(f.leftovers(), 0);
+});
+
+test("跨站内嵌页：读得太慢超时了，晚到的结果不弹列表，引用也清掉", async () => {
+  const f = await crossSiteFixture({ budgetMs: 10, onRead: () => wait(60) });
+  assert.equal(await f.manager.intercept("tab", f.contents, { x: 20, y: 20 }), false);
+  await wait(120);
+  assert.equal(f.events.length, 0);
+  assert.equal(f.leftovers(), 0);
 });

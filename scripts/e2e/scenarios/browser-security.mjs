@@ -1,4 +1,4 @@
-export const description = "内置浏览器的安全底线：App 界面里塞 <webview> 也造不出网页；每张网页都是沙箱、隔离、没有 Node、没有预加载的离屏页面，网页里摸不到系统能力；登录数据落在这个工作区自己那份里；Agent 看到的页面里没有 App 自己的界面";
+export const description = "内置浏览器的安全底线：App 界面里塞 <webview> 也造不出网页；每张网页都是沙箱、隔离、没有 Node、没有预加载的离屏页面，网页里摸不到系统能力；登录数据落在这个工作区自己那份里；Agent 看到的页面里没有 App 自己的界面；面板来的查找、光标、悬停提示只对正显示的那张生效";
 
 /** 在内置浏览器的那张网页里跑一段脚本。 */
 const inPage = (app, code) => app.evaluate(({ webContents }, code) => {
@@ -62,4 +62,41 @@ export async function run({ app, page, ui, site, check }) {
   const appUrl = page.url().split("#")[0];
   check("Agent 列出的页面里有这张网页", listed.includes("form.html"), listed.slice(0, 300));
   check("Agent 列出的页面里没有 App 自己的界面", !listed.includes(appUrl) && !/renderer\/index\.html/.test(listed), `${appUrl} / ${listed.slice(0, 300)}`);
+
+  // 6. 面板来的查找、光标、悬停提示只对「桌面窗口正显示的那张」生效：后台那张不理。两张都开
+  //    同一个带提示文字的页面，后台那张要是被问到，也答得出来——这样才看得出区别。
+  await ui.send([{ tool: "browser_open", args: { url: `${site.url("tooltip.html")}?behind` } }, { echo: true }], "安全");
+  await ui.send([{ tool: "browser_open", args: { url: site.url("tooltip.html") } }, { echo: true }], "安全");
+  await page.waitForTimeout(800);
+  await app.evaluate(({ ipcMain }) => {
+    globalThis.__browserIds = undefined;
+    ipcMain.once("browser:input", (_event, scopeId, tabId) => { globalThis.__browserIds = { scopeId, tabId }; });
+  });
+  const box = await page.locator(".browser-live-page").boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height - 20);
+  await page.mouse.move(box.x + box.width / 2 + 10, box.y + box.height - 25);
+  await ui.waitFor(async () => Boolean(await app.evaluate(() => globalThis.__browserIds)), 3000);
+  const { scopeId, tabId: shownId } = await app.evaluate(() => globalThis.__browserIds);
+  const hiddenId = await page.evaluate(async ({ scopeId, shownId }) => (await window.coilcoil.getBrowserState(scopeId)).tabs
+    .find((tab) => tab.id !== shownId && tab.url.includes("tooltip.html?behind"))?.id, { scopeId, shownId });
+  check("两张网页：一张正显示、一张在后台", Boolean(shownId && hiddenId));
+  const tooltips = await page.evaluate(async ({ scopeId, shownId, hiddenId }) => ({
+    shown: await window.coilcoil.readBrowserTooltip(scopeId, shownId, { x: 90, y: 40 }),
+    hidden: await window.coilcoil.readBrowserTooltip(scopeId, hiddenId, { x: 90, y: 40 }),
+    caret: await window.coilcoil.readBrowserCaret(scopeId, hiddenId),
+  }), { scopeId, shownId, hiddenId });
+  check("悬停提示：正显示的那张照常问得到", tooltips.shown === "保存文件", JSON.stringify(tooltips));
+  check("悬停提示、光标：后台那张不理", tooltips.hidden === null && tooltips.caret === null, JSON.stringify(tooltips));
+  const finds = await page.evaluate(async ({ scopeId, shownId, hiddenId }) => {
+    const events = [];
+    const stop = window.coilcoil.onBrowserPageEvent((event) => { if (event.kind === "find") events.push(event); });
+    window.coilcoil.findInBrowserPage(scopeId, hiddenId, { text: "保存", forward: true, newSearch: true });
+    window.coilcoil.findInBrowserPage(scopeId, shownId, { text: "保存", forward: true, newSearch: true });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    window.coilcoil.findInBrowserPage(scopeId, shownId, { stop: true });
+    stop();
+    return events.map((event) => ({ tab: event.tabId === shownId ? "shown" : event.tabId === hiddenId ? "hidden" : "other", matches: event.matches }));
+  }, { scopeId, shownId, hiddenId });
+  check("页内查找：正显示的那张照常找", finds.some((item) => item.tab === "shown" && item.matches >= 1), JSON.stringify(finds));
+  check("页内查找：后台那张不理", !finds.some((item) => item.tab === "hidden"), JSON.stringify(finds));
 }

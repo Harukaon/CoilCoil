@@ -377,6 +377,7 @@ export class BrowserCdpBridge {
       return {};
     }
     if (method === "Input.dispatchMouseEvent" && !childSession && await this.host.pageDrags.agentMouse(guest, params)) return {};
+    if (method === "Input.dispatchKeyEvent" && !childSession && await this.host.pageDrags.agentKey(guest, params)) return {};
     const normalizedParams = method === "Page.navigate" && typeof params.url === "string"
       ? { ...params, url: normalizeBrowserUrl(params.url) }
       : params;
