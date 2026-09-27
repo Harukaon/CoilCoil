@@ -34,6 +34,8 @@ export interface BrowserTab {
   guest?: WebContents;
   /** 离屏页面正在建 → 在打开第一个网址 → 能用了 → 在关。 */
   phase: "creating" | "loading" | "ready" | "closing";
+  /** Agent 最近一次在这张页面上动手的时间（导航、点击、打字、截图、读快照）：面板据此提示「正在操作」。 */
+  agentActiveAt?: number;
   announced: boolean;
   /**
    * 这张空白页是桥自己开出来的，agent 并没有要过。

@@ -39,6 +39,8 @@ const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 
 
 /** 同时记住几个网页版/手机正看着的会话；多出来的按最早打开的先忘。 */
 const REMOTE_SCOPE_LIMIT = 8;
+/** Agent 停手多久以后，面板上「正在操作」的提示收起：盖住它两步之间思考的空当，不一闪一闪。 */
+const AGENT_ACTIVE_MS = 8000;
 
 /**
  * 内置浏览器的全部标签页：每一张都是一个离屏页面（见 browser-offscreen.ts），用户在
@@ -86,6 +88,8 @@ export class BrowserRuntimeManager {
   /** 网页弹的 alert/confirm/prompt 挂在标签页上，面板里回答，不弹系统对话框。 */
   private readonly dialogs = new PageDialogs(() => this.publish());
   private readonly drags = new PageDrags();
+  /** 每张页面「正在操作」提示的收起计时。 */
+  private readonly agentIdle = new Map<string, ReturnType<typeof setTimeout>>();
   /** 网页下拉框的选项由面板画（离屏页面里原生弹层出不来）。 */
   private readonly selects = new PageSelects((event) => this.publishPageEvent(event), (id, contents) =>
     !this.disposed && this.panelVisible && this.activeTabIds.get(this.uiScopeId) === id && this.tabs.get(id)?.guest === contents);
@@ -143,7 +147,7 @@ export class BrowserRuntimeManager {
       anyReadyTab: (scopeId) => this.tabsForScope(scopeId).find((tab) => tab.phase === "ready" && tab.guest && !tab.guest.isDestroyed()),
       blankPlaceholder: (scopeId) => this.tabsForScope(scopeId).find((tab) =>
         tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab(tab, tab.guest.getURL())),
-      noteAgentUse: (tab) => { tab.lastUsedAt = Date.now(); },
+      noteAgentUse: (tab) => this.noteAgentUse(tab),
       takeRecycledTabs: (scopeId) => this.recycledTabs.take(scopeId),
       selectTab: (id, scopeId) => { this.selectTab(id, scopeId); },
       closeTab: (id, scopeId) => { this.closeTab(id, scopeId); },
@@ -940,8 +944,23 @@ export class BrowserRuntimeManager {
     return tab.guest;
   }
 
+  /** Agent 在这张页面上动了手：记下（上限收页看这个），面板亮出「正在操作」，停手一会儿后收起。 */
+  private noteAgentUse(tab: BrowserTab): void {
+    const now = Date.now();
+    const wasActive = now - (tab.agentActiveAt ?? 0) < AGENT_ACTIVE_MS;
+    tab.lastUsedAt = tab.agentActiveAt = now;
+    if (!wasActive) this.publish();
+    clearTimeout(this.agentIdle.get(tab.id));
+    this.agentIdle.set(tab.id, setTimeout(() => {
+      this.agentIdle.delete(tab.id);
+      if (!this.disposed && this.tabs.get(tab.id) === tab) this.publish();
+    }, AGENT_ACTIVE_MS + 50));
+  }
+
   private closeTabRecord(tab: BrowserTab): void {
     tab.phase = "closing";
+    clearTimeout(this.agentIdle.get(tab.id));
+    this.agentIdle.delete(tab.id);
     if (!this.tabs.delete(tab.id)) return;
     if (this.activeTabIds.get(tab.scopeId) === tab.id) {
       const replacement = this.tabsForScope(tab.scopeId)[0];
@@ -960,11 +979,15 @@ export class BrowserRuntimeManager {
     this.refreshFrames();
   }
 
+  private agentActive(tab: BrowserTab): boolean {
+    return Date.now() - (tab.agentActiveAt ?? 0) < AGENT_ACTIVE_MS;
+  }
+
   private tabSnapshot(tab: BrowserTab): BrowserTabSnapshot {
     const contents = tab.guest;
     // A tab exists in the strip while its guest is still being created.
     if (!contents || contents.isDestroyed()) {
-      return { id: tab.id, title: "新标签页", url: DEFAULT_URL, loading: true, canGoBack: false, canGoForward: false, agent: tab.owner === "agent" };
+      return { id: tab.id, title: "新标签页", url: DEFAULT_URL, loading: true, canGoBack: false, canGoForward: false, agent: tab.owner === "agent", agentActive: this.agentActive(tab) };
     }
     return {
       id: tab.id,
@@ -974,6 +997,7 @@ export class BrowserRuntimeManager {
       canGoBack: contents.navigationHistory.canGoBack(),
       canGoForward: contents.navigationHistory.canGoForward(),
       agent: tab.owner === "agent",
+      agentActive: this.agentActive(tab),
       ...this.dialogs.snapshot(tab.id) ? { dialog: this.dialogs.snapshot(tab.id) } : {},
     };
   }

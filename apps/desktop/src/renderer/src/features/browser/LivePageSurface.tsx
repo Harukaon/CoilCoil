@@ -455,9 +455,10 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
           onReply={(accept, text) => void window.coilcoil.replyBrowserDialog(scopeId, tab.id, dialog.id, accept, text)}
         />
       ) : null}
-      {tab.agent ? (
-        // 这页 Agent 在用：四周一圈流动的渐变描边，底部一团呼吸的光晕。都不挡操作；用户
-        // 把鼠标移上来、或者正在页面里打字时，底部那团光和提示条淡出，不挡他看页面。
+      {tab.agentActive ? (
+        // Agent 这会儿正在操作这张页面（不管是谁开的；停手几秒后收起）：四周一圈流动的渐变描边，
+        // 底部一团呼吸的光晕和一句提示。都不挡操作——用户和 Agent 可以同时操作，不排队；用户把
+        // 鼠标移上来、或者正在页面里打字时，底部那团光和提示条淡出，不挡他看页面。
         <>
           <div className="browser-agent-presence" aria-hidden="true">
             <div className="browser-agent-ring" />
@@ -467,7 +468,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
           <div className="browser-agent-bar" role="status">
             <span className="browser-agent-pulse" aria-hidden="true" />
             <Bot className="browser-agent-label" size={14} />
-            <span className="browser-agent-label">Agent 也在使用这个页面</span>
+            <span className="browser-agent-label">Agent 正在操作这个页面</span>
           </div>
         </>
       ) : null}

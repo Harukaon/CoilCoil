@@ -125,6 +125,11 @@ export interface BrowserTabSnapshot {
    */
   agent?: boolean;
   /**
+   * Agent 这会儿正在操作这张页面（不管是谁开的）：面板上亮出提示。停手几秒后变回 false。
+   * 用户和 Agent 可以同时操作，不排队。
+   */
+  agentActive?: boolean;
+  /**
    * 旧版本快照可能带有这个标记；当前界面会过滤其他工作区的标签页，不再展示它们。
    */
   foreign?: boolean;
