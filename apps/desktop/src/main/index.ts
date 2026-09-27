@@ -166,6 +166,7 @@ const BROWSER_SELECT_CHOOSE_CHANNEL = "browser:select-choose";
 const BROWSER_VALUE_CHOOSE_CHANNEL = "browser:value-choose";
 const BROWSER_FIND_CHANNEL = "browser:find";
 const BROWSER_CARET_CHANNEL = "browser:caret";
+const BROWSER_TOOLTIP_CHANNEL = "browser:tooltip";
 const BROWSER_DROP_FILES_CHANNEL = "browser:drop-files";
 const TERMINAL_STATE_CHANNEL = "terminal:state";
 const TERMINAL_DATA_CHANNEL = "terminal:data";
@@ -1277,6 +1278,8 @@ app.whenReady().then(async () => {
   ipcMain.on(BROWSER_DROP_FILES_CHANNEL, (event, scopeId: unknown, tabId: unknown, drop: unknown, paths: unknown) => {
     browserRuntimes.get(event.sender.id)?.dropFiles(String(scopeId), String(tabId), drop, paths);
   });
+  ipcMain.handle(BROWSER_TOOLTIP_CHANNEL, (event, scopeId: unknown, tabId: unknown, point: unknown) =>
+    browserRuntimes.get(event.sender.id)?.tooltipAt(String(scopeId), String(tabId), point) ?? null);
   ipcMain.handle(BROWSER_CARET_CHANNEL, (event, scopeId: unknown, tabId: unknown) =>
     browserRuntimes.get(event.sender.id)?.caretOf(String(scopeId), String(tabId)) ?? null);
   ipcMain.handle(BROWSER_VALUE_CHOOSE_CHANNEL, (event, scopeId: unknown, tabId: unknown, pickerId: unknown, value: unknown, final: unknown): Promise<void> =>

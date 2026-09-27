@@ -10,6 +10,7 @@ import { BrowserElementPicker } from "./browser-element-picker";
 import { fillSavedCredentials } from "./browser-import";
 import { cssCursor, PageInputForwarder, parseFindRequest, parsePageInput } from "./browser-input";
 import { readPageCaret } from "./browser-page-caret";
+import { readPageTooltip } from "./browser-page-tooltip";
 import { PageDialogs } from "./browser-page-dialogs";
 import { PageDrags, parseFileDrop } from "./browser-page-drags";
 import { isPrintRequest, PageRequests } from "./browser-page-requests";
@@ -813,6 +814,16 @@ export class BrowserRuntimeManager {
     const contents = tab?.guest;
     if (!tab || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || this.dialogs.snapshot(tabId) || !contents || contents.isDestroyed()) return Promise.resolve(null);
     return readPageCaret(contents);
+  }
+
+  /** 鼠标停在面板画面上这一点（页面窗口的像素）：这里的悬停提示。只问桌面窗口正显示的那张。 */
+  tooltipAt(scopeId: string, tabId: string, raw: unknown): Promise<string | null> {
+    const tab = this.tabs.get(tabId);
+    const contents = tab?.guest;
+    const { x, y } = (raw && typeof raw === "object" ? raw : {}) as { x?: unknown; y?: unknown };
+    if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) return Promise.resolve(null);
+    if (!tab || tab.scopeId !== scopeId || scopeId !== this.uiScopeId || this.dialogs.snapshot(tabId) || !contents || contents.isDestroyed()) return Promise.resolve(null);
+    return readPageTooltip(contents, { x, y });
   }
 
   /** 用户在面板里回答网页弹的对话框。只认桌面窗口或网页版正看着的那个会话里的标签页。 */

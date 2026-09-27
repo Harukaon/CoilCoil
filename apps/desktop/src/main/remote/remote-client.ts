@@ -289,6 +289,7 @@ export function bridgeScript(platform: DesktopPlatform): string {
     chooseBrowserValue: resolves(undefined),
     findInBrowserPage: function () {},
     readBrowserCaret: resolves(null),
+    readBrowserTooltip: resolves(null),
     dropFilesIntoBrowserPage: function () {},
     replyBrowserDialog: function (scopeId, tabId, dialogId, accept, text) { return invoke("browser:dialog-reply", [scopeId, tabId, dialogId, accept, text || ""]); },
     onBrowserPageEvent: ignore,

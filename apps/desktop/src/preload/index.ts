@@ -96,6 +96,7 @@ const BROWSER_SELECT_CHOOSE_CHANNEL = "browser:select-choose";
 const BROWSER_VALUE_CHOOSE_CHANNEL = "browser:value-choose";
 const BROWSER_FIND_CHANNEL = "browser:find";
 const BROWSER_CARET_CHANNEL = "browser:caret";
+const BROWSER_TOOLTIP_CHANNEL = "browser:tooltip";
 const BROWSER_DROP_FILES_CHANNEL = "browser:drop-files";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_ZOOM_CHANNEL = "browser:zoom";
@@ -252,6 +253,8 @@ const api: CoilCoilDesktopApi = {
     }).filter(Boolean);
     if (paths.length) ipcRenderer.send(BROWSER_DROP_FILES_CHANNEL, scopeId, tabId, drop, paths);
   },
+  readBrowserTooltip: (scopeId: string, tabId: string, point: { x: number; y: number }) =>
+    ipcRenderer.invoke(BROWSER_TOOLTIP_CHANNEL, scopeId, tabId, point) as Promise<string | null>,
   readBrowserCaret: (scopeId: string, tabId: string) =>
     ipcRenderer.invoke(BROWSER_CARET_CHANNEL, scopeId, tabId) as Promise<BrowserCaret | null>,
   onBrowserPageEvent: (listener: (event: BrowserPageEvent) => void) => {

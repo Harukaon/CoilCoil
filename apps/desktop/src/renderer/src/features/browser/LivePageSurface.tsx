@@ -1,5 +1,5 @@
 import { Bot, LoaderCircle } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BrowserInputModifiers, BrowserPageInput, BrowserSelectPicker, BrowserSurfaceInfo, BrowserTabSnapshot, BrowserValuePicker } from "../../../../shared/desktop-api";
 import { rendererPlatform } from "../../platform";
 import { PageDialog } from "./PageDialog";
@@ -191,6 +191,53 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     return { x: Math.max(0, Math.min(viewport.width - 1, x)), y: Math.max(0, Math.min(viewport.height - 1, y)) };
   }, []);
 
+  // 网页的悬停提示（元素的 title）：离屏页面里浏览器不画，鼠标停住 0.6 秒后问一下网页，有就
+  // 画在鼠标下面；一动、一按、一滚、一打字就收起（见 browser-page-tooltip.ts）。
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number }>();
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const hover = useRef({ timer: 0, ask: 0, x: 0, y: 0, showing: false });
+  const hideTooltip = useCallback((): void => {
+    const state = hover.current;
+    window.clearTimeout(state.timer);
+    state.timer = 0;
+    state.ask += 1;
+    state.showing = false;
+    setTooltip(undefined);
+  }, []);
+  const hoverAt = useCallback((clientX: number, clientY: number): void => {
+    const state = hover.current;
+    // 停着不动时 pointermove 也可能再来一下、手也会抖：没挪出 4 像素就不算动（在等的接着等，显示着的接着显示）。
+    if (Math.abs(clientX - state.x) < 4 && Math.abs(clientY - state.y) < 4 && (state.timer || state.showing)) return;
+    hideTooltip();
+    state.x = clientX;
+    state.y = clientY;
+    const ask = state.ask;
+    state.timer = window.setTimeout(() => {
+      state.timer = 0;
+      const point = pagePoint(clientX, clientY);
+      const root = rootRef.current;
+      if (!point || !root) return;
+      void window.coilcoil.readBrowserTooltip(scopeId, tab.id, point).then((text) => {
+        if (!text || ask !== hover.current.ask) return;
+        const box = root.getBoundingClientRect();
+        hover.current.showing = true;
+        setTooltip({ text, x: clientX - box.left, y: clientY - box.top });
+      }).catch(() => undefined);
+    }, 600);
+  }, [hideTooltip, pagePoint, scopeId, tab.id]);
+  useEffect(() => () => window.clearTimeout(hover.current.timer), []);
+  // 提示贴在鼠标下面；放不下时往左挪、翻到鼠标上面，不出画面。
+  useLayoutEffect(() => {
+    const element = tooltipRef.current;
+    const root = rootRef.current;
+    if (!tooltip || !element || !root) return;
+    const left = Math.min(tooltip.x + 2, root.clientWidth - element.offsetWidth - 6);
+    const below = tooltip.y + 20;
+    const top = below + element.offsetHeight > root.clientHeight - 6 ? tooltip.y - element.offsetHeight - 8 : below;
+    element.style.left = `${Math.max(6, left)}px`;
+    element.style.top = `${Math.max(6, top)}px`;
+  }, [tooltip]);
+
   // 鼠标移动一帧只送一次最新的位置；按下、抬起、滚轮之前先把攒着的那次送掉，顺序不能乱。
   const pendingMove = useRef<{ clientX: number; clientY: number; buttons: number; modifiers: BrowserInputModifiers } | undefined>(undefined);
   const moveFrame = useRef(0);
@@ -253,6 +300,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   const onMouseDown = (event: React.MouseEvent<HTMLDivElement>): void => {
     // 不让 App 自己处理这次按下（选中文字、把焦点给别的元素）；焦点交给焦点代理。
     event.preventDefault();
+    hideTooltip();
     // 下拉框的列表开着时，点别处只是把它收起来，和系统下拉菜单一样，这一下不送进页面。
     if (pickerRef.current) { dismissedButton.current = event.button; choose(null); return; }
     // 鼠标侧键：后退、前进，和浏览器一样。
@@ -274,11 +322,14 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (event.buttons) hideTooltip();
+    else hoverAt(event.clientX, event.clientY);
     pendingMove.current = { clientX: event.clientX, clientY: event.clientY, buttons: event.buttons, modifiers: modifiersOf(event) };
     if (!moveFrame.current) moveFrame.current = requestAnimationFrame(flushMove);
   };
 
   const onPointerLeave = (event: React.PointerEvent<HTMLDivElement>): void => {
+    hideTooltip();
     if (event.buttons) return;
     flushMove();
     send({ kind: "mouse", type: "leave", x: 0, y: 0, button: "none", clickCount: 0, buttons: 0, modifiers: modifiersOf(event) });
@@ -291,6 +342,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     const onWheel = (event: WheelEvent): void => {
       if ((event.target as Element | null)?.closest(".browser-select-picker")) return;
       event.preventDefault();
+      hideTooltip();
       if (pickerRef.current) { choose(null); return; }
       const point = pagePoint(event.clientX, event.clientY);
       if (!point) return;
@@ -303,7 +355,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
     };
     root.addEventListener("wheel", onWheel, { passive: false });
     return () => root.removeEventListener("wheel", onWheel);
-  }, [choose, flushMove, followCaret, interactive, pagePoint, send]);
+  }, [choose, flushMove, followCaret, hideTooltip, interactive, pagePoint, send]);
 
   const keyboard = useSurfaceKeyboard({
     send,
@@ -341,7 +393,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
   const scale = box && viewport ? Math.min(box.width / viewport.width, box.height / viewport.height) : 1;
   const loading = interactive ? !info : !remoteFrame;
   return (
-    <div className={`browser-live-page ${interactive ? "interactive" : ""} ${dialog ? "has-dialog" : ""}`} ref={rootRef}>
+    <div className={`browser-live-page ${interactive ? "interactive" : ""} ${dialog ? "has-dialog" : ""}`} ref={rootRef} onKeyDownCapture={hideTooltip}>
       {interactive
         // 第一帧到之前藏着：切标签时画布里还是上一张页面的画面。
         ? <canvas ref={canvasRef} className={`browser-live-frame ${info ? "" : "waiting"}`} data-mode={info?.mode} role="img" aria-label={tab.title} />
@@ -365,6 +417,7 @@ export function LivePageSurface({ tab, scopeId, remoteFrame, onReload, onBack, o
         />
       ) : null}
       {fileOver ? <div className="browser-drop-hint" aria-hidden="true"><span>松手，把文件放进网页</span></div> : null}
+      {tooltip ? <div ref={tooltipRef} className="coil-tooltip browser-page-tooltip" role="tooltip">{tooltip.text}</div> : null}
       {interactive ? (
         <textarea
           ref={proxyRef}

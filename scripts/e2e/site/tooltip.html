@@ -1,0 +1,19 @@
+<html><head><meta charset="utf-8"><title>tooltip</title>
+<style>
+/* 都摆在 340 像素宽以内（测试窗口里面板窄）。 */
+body { margin: 0; font: 14px Arial, sans-serif; }
+div, svg { position: absolute; left: 20px; }
+#save { top: 20px; width: 140px; height: 40px; background: #cde; }
+#outer { top: 80px; width: 280px; height: 70px; background: #eed; }
+#inner { position: absolute; left: 10px; top: 10px; width: 100px; height: 40px; background: #dfd; }
+#blank { position: absolute; left: 150px; top: 10px; width: 100px; height: 40px; background: #fdd; }
+#icon { top: 170px; }
+#lines { top: 230px; width: 140px; height: 40px; background: #ddf; }
+#none { top: 290px; width: 140px; height: 40px; background: #eee; }
+</style></head><body>
+<div id="save" title="保存文件">保存</div>
+<div id="outer" title="外层提示"><span id="inner">没写 title</span><span id="blank" title="">title 是空的</span></div>
+<svg id="icon" width="40" height="40"><rect width="40" height="40" fill="#e88"><title>红色方块</title></rect></svg>
+<div id="lines" title="第一行&#10;第二行">两行</div>
+<div id="none">没有提示</div>
+</body></html>

@@ -1189,6 +1189,9 @@ body.resizing-panels .app-shell > .inspector-pane { transition: none; }
 .browser-select-option.active { background: hsl(var(--th) var(--ts) var(--l-925)); }
 .browser-select-option.disabled { opacity: .45; }
 .browser-select-check { display: inline-grid; place-items: center; width: 14px; flex: none; }
+/* 网页元素的悬停提示（title）：长相和 App 自己的提示一样（.coil-tooltip），贴在鼠标下面；保留网页写的换行。
+   .coil-tooltip 写在样式表后面、会把换行压掉，这里多带一层父级压回来。 */
+.browser-live-page .browser-page-tooltip { position: absolute; z-index: 5; left: 0; top: 0; white-space: pre-line; overflow-wrap: anywhere; }
 /* 网页日期、时间、颜色框的选择器：隐形的同类输入框，只用来打开 App 窗口里 Chromium 自己的选择器。 */
 .browser-value-picker { position: absolute; z-index: 1; margin: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 /* 从访达拖文件到页面上：画面四周一圈虚线，上方一句提示；不铺底色，用户还看得清网页的上传区在哪儿。 */

@@ -612,6 +612,8 @@ export interface CoilCoilDesktopApi {
    * 路径由预加载从这些文件上取，网页脚本自己造的文件取不到路径。网页版没有。
    */
   dropFilesIntoBrowserPage(scopeId: string, tabId: string, drop: { x: number; y: number; modifiers: BrowserInputModifiers }, files: File[]): void;
+  /** 鼠标停在页面这一点（页面坐标）：这里的悬停提示（元素的 title）；没有是 null。网页版没有。 */
+  readBrowserTooltip(scopeId: string, tabId: string, point: { x: number; y: number }): Promise<string | null>;
   /** 问页面光标在哪儿（输入法候选框跟着它走）；没在能打字的地方时是 null。网页版没有。 */
   readBrowserCaret(scopeId: string, tabId: string): Promise<BrowserCaret | null>;
   onBrowserPageEvent(listener: (event: BrowserPageEvent) => void): () => void;
