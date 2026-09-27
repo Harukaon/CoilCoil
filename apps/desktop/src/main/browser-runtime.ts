@@ -409,7 +409,7 @@ export class BrowserRuntimeManager {
       lastUsedAt: Date.now(),
       tabTargetId: `tab-${id}`,
       pageTargetId: `pending-page-${id}`,
-      phase: "awaiting-guest",
+      phase: "creating",
       announced: false,
       ...implicit ? { implicit: true } : {},
     };

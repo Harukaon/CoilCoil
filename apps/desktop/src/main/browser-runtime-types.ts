@@ -32,7 +32,8 @@ export interface BrowserTab {
   pageTargetId: string;
   /** 页面本身（离屏窗口的 webContents）。 */
   guest?: WebContents;
-  phase: "awaiting-guest" | "loading" | "ready" | "closing";
+  /** 离屏页面正在建 → 在打开第一个网址 → 能用了 → 在关。 */
+  phase: "creating" | "loading" | "ready" | "closing";
   announced: boolean;
   /**
    * 这张空白页是桥自己开出来的，agent 并没有要过。

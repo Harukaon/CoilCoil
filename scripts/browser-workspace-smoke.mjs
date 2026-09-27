@@ -40,8 +40,8 @@ async function freePort() {
 /**
  * 一个只做两件事的站点：种 cookie，和把收到的 cookie 记下来。
  *
- * 判断隔离有没有生效，看的是「服务端这次收到了谁的 cookie」——在渲染层里读
- * document.cookie 是读不到 guest 页面的，而这一条恰恰是整件事的关键。
+ * 判断隔离有没有生效，看的是「服务端这次收到了谁的 cookie」——网页是主进程里的离屏页面，
+ * 在 App 界面里读 document.cookie 读不到它，而这一条恰恰是整件事的关键。
  */
 function cookieSite() {
   const seen = [];

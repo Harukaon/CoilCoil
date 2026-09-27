@@ -213,7 +213,8 @@ async function dismissFirstRunSettings(client, required) {
 }
 
 async function finishOnboarding(client) {
-  for (let step = 0; step < 5; step += 1) {
+  // 引导的步数会变（macOS 上现在是 7 步），多给几次，走完为止。
+  for (let step = 0; step < 12; step += 1) {
     const active = await client.evaluate(`Boolean(document.querySelector(".onboarding-screen"))`);
     if (!active) return;
     const advanced = await client.evaluate(`(() => {
@@ -1262,11 +1263,10 @@ async function main() {
         "The inspector tab strip did not render the browser tab and the add action.",
       );
     } catch (error) {
-      // 标签条没出来时，光说「没出来」查不动。把主进程那边的状态一起打出来。
+      // 标签条没出来时，光说「没出来」查不动。把面板那边的状态一起打出来。
       const diagnosis = await client.evaluate(`(async () => ({
         tabs: [...document.querySelectorAll(".inspector-tab-select")].map((tab) => tab.getAttribute("aria-label")),
-        guests: document.querySelectorAll(".browser-guest-layer webview").length,
-        partitions: [...document.querySelectorAll(".browser-guest-layer webview")].map((guest) => guest.getAttribute("partition")),
+        livePage: Boolean(document.querySelector(".browser-live-page")),
         panel: Boolean(document.querySelector(".browser-panel")),
         toast: [...document.querySelectorAll(".toast")].map((item) => item.textContent).join(" | "),
       }))()`);
@@ -1274,49 +1274,22 @@ async function main() {
       throw error;
     }
 
-    // 每个工作区一份 cookie：guest 必须建在这个工作区自己那份 jar 里，而不是那个
-    // 谁都能读的默认 jar。
-    await client.waitFor(
-      `document.querySelectorAll(".browser-guest-layer webview").length >= 1`,
-      "浏览器面板打开了，却没有任何 guest。",
-    );
-    const guestJars = await client.evaluate(`[...document.querySelectorAll(".browser-guest-layer webview")].map((guest) => guest.getAttribute("partition"))`);
-    for (const jar of guestJars) {
-      assert.match(String(jar), /^persist:coilcoil-browser-[0-9a-f]{12}$/, `guest 落在了共用的 jar 里：${jar}`);
-    }
+    // 网页是主进程里的离屏页面，画面画在面板的画布上（见 browser-offscreen.ts）。每张网页的
+    // 沙箱设置、用所在工作区自己那份登录数据、Agent 看不到 App 界面，界面这边看不到，由 e2e 的
+    // browser-security 场景在主进程里查；画面铺满不留白由 agent-tab-resize 查。这里查界面上
+    // 看得到、也最容易坏的三件事：画面出来了、App 的浮层盖得住网页、切走再切回网页还在。
+    const livePageFrame = `Boolean(document.querySelector(".browser-live-page canvas.browser-live-frame:not(.waiting)"))`;
+    await client.waitFor(livePageFrame, "浏览器面板打开了，画面却一直没出来。");
 
-    // The browser renders as a <webview> guest specifically so DOM overlays can
-    // paint over it. A native view would composite above the renderer and there
-    // is no per-view click-through, so a regression here is unfixable in CSS.
-    await client.waitFor(
-      `Boolean(document.querySelector(".browser-guest-layer > webview.visible"))`,
-      "The browser guest never became visible in the guest layer.",
-    );
-    const guestPlacement = await client.evaluate(`(() => {
-      const host = document.querySelector(".browser-native-host")?.getBoundingClientRect();
-      const guest = document.querySelector(".browser-guest-layer > webview.visible")?.getBoundingClientRect();
-      if (!host || !guest) return { matched: false };
-      return {
-        matched: true,
-        dx: Math.abs(host.left - guest.left),
-        dy: Math.abs(host.top - guest.top),
-        dw: Math.abs(host.width - guest.width),
-        dh: Math.abs(host.height - guest.height),
-      };
-    })()`);
-    assert.equal(guestPlacement.matched, true, "The visible browser guest is not aligned to its panel host.");
-    assert.ok(
-      guestPlacement.dx <= 1 && guestPlacement.dy <= 1 && guestPlacement.dw <= 1 && guestPlacement.dh <= 1,
-      `The visible browser guest does not fill its panel host: ${JSON.stringify(guestPlacement)}`,
-    );
-
+    // 以前网页是原生视图，永远盖在界面上面，App 的弹出菜单、提示全被挡住；现在画面是界面里
+    // 的一块画布，浮层自然盖得住。
     const overlayOcclusion = await client.evaluate(`(() => {
-      const guest = document.querySelector(".browser-guest-layer > webview.visible");
-      const rect = guest?.getBoundingClientRect();
+      const page = document.querySelector(".browser-live-page");
+      const rect = page?.getBoundingClientRect();
       if (!rect || rect.width < 20 || rect.height < 20) return { ran: false };
       const x = Math.round(rect.left + rect.width / 2);
       const y = Math.round(rect.top + rect.height / 2);
-      const beneath = document.elementFromPoint(x, y)?.tagName ?? "";
+      const beneath = document.elementFromPoint(x, y);
       const overlay = document.createElement("div");
       overlay.className = "inspector-add-popover";
       overlay.style.cssText = "position:fixed;left:" + (x - 40) + "px;top:" + (y - 30) + "px;width:80px;height:60px;";
@@ -1324,20 +1297,25 @@ async function main() {
       const hit = document.elementFromPoint(x, y);
       const above = hit === overlay || overlay.contains(hit);
       overlay.remove();
-      return { ran: true, beneath, above };
+      return { ran: true, onPage: Boolean(beneath && page.contains(beneath)), above };
     })()`);
-    assert.equal(overlayOcclusion.ran, true, "The overlay occlusion probe could not find a visible browser guest.");
-    assert.equal(overlayOcclusion.beneath, "WEBVIEW", "The browser guest is not the element under the panel centre.");
-    assert.equal(overlayOcclusion.above, true, "A DOM overlay is occluded by the browser guest.");
+    assert.equal(overlayOcclusion.ran, true, "The overlay occlusion probe could not find the browser page.");
+    assert.equal(overlayOcclusion.onPage, true, "The browser page is not the element under the panel centre.");
+    assert.equal(overlayOcclusion.above, true, "A DOM overlay is occluded by the browser page.");
 
-    await client.evaluate(`document.querySelector('.inspector-nav button[aria-label="运行时"]')?.click()`);
-    // Switching away must not destroy guests: agents keep driving them in the background.
-    const guestsAfterSwitch = await client.evaluate(`(() => ({
-      count: document.querySelectorAll(".browser-guest-layer > webview").length,
-      layerDisplay: getComputedStyle(document.querySelector(".browser-guest-layer")).display,
-    }))()`);
-    assert.ok(guestsAfterSwitch.count >= 1, "Switching inspector tabs destroyed the browser guests.");
-    assert.notEqual(guestsAfterSwitch.layerDisplay, "none", "The browser guest layer was hidden with display:none.");
+    // 切到别的标签（运行时）再点回原来那张网页：网页不能被关掉（Agent 还在后台用它），画面马上
+    // 回来。点回去要按位置点标签条上原来那一张——用「+」再开「浏览器」是新开一张空白页；标签名
+    // 会随网页加载从「新标签页」变成网址，按名字找不稳。
+    const pageTabIndex = await client.evaluate(`[...document.querySelectorAll(".inspector-tab-select")].findIndex((tab) => tab.closest(".inspector-tab")?.classList.contains("active"))`);
+    const pageTabCount = `[...document.querySelectorAll(".inspector-tab-select")].filter((tab) => tab.getAttribute("aria-label") !== "运行时").length`;
+    const pagesBeforeSwitch = await client.evaluate(pageTabCount);
+    assert.ok(pageTabIndex >= 0, "标签条上找不到正显示着的那张网页。");
+    assert.equal(await clickInspector(client, "运行时"), true);
+    await delay(400);
+    await client.evaluate(`document.querySelectorAll(".inspector-tab-select")[${pageTabIndex}]?.click()`);
+    await client.waitFor(livePageFrame, "点回原来那张网页，画面没有回来。");
+    assert.equal(await client.evaluate(pageTabCount), pagesBeforeSwitch, "切走再点回来，网页标签少了（网页被关掉了）。");
+    await clickInspector(client, "运行时");
     const preferredPanelWidths = await client.evaluate(`({
       left: document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0,
       right: document.querySelector(".inspector-pane")?.getBoundingClientRect().width ?? 0
@@ -1350,7 +1328,7 @@ async function main() {
       `document.querySelector(".app-shell")?.classList.contains("right-collapsed")`,
       "The inspector did not collapse before the panel priority checks.",
     );
-    // 带着 webview guest 收窄窗口偶尔会漏掉一次（第一次调用落在一次布局中间），
+    // 收窄窗口偶尔会漏掉一次（第一次调用落在一次布局中间），
     // 所以重试几轮，失败时把真实宽度说出来，而不是只说「没收窄」。
     let shrank = false;
     for (let attempt = 0; attempt < 5 && !shrank; attempt += 1) {
