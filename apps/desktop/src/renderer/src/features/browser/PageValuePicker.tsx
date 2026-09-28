@@ -28,6 +28,10 @@ export function PageValuePicker({ picker, scale, onValue, onClose }: {
     const changed = (): void => handlers.current.onValue(input.value, true);
     input.addEventListener("change", changed);
     try {
+      // 先让浏览器把这个刚放进来的输入框排好版再打开：Chromium 按它当前的位置摆日历，刚插进页面
+      // 还没排版时读到的是 (0,0)，日历就弹到了 App 窗口左上角（2026-09-28 用户发现，实测等一帧都不够，
+      // 读一次位置就对了）。不能改成等几帧再开：浏览器只在用户刚按过鼠标键盘时才让打开。
+      input.getBoundingClientRect();
       input.showPicker();
     } catch {
       handlers.current.onClose();
