@@ -39,6 +39,27 @@ export function browserElementSnapshot(selection: BrowserElementSelection): Brow
   return snapshot;
 }
 
+const CHINESE_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+
+/** 第几个元素叫什么：元素一 … 元素十，之后是 元素11、元素12。 */
+export function browserElementLabel(ordinal: number): string {
+  return `元素${ordinal >= 1 && ordinal <= 10 ? CHINESE_NUMERALS[ordinal - 1] : ordinal}`;
+}
+
+/** 从名字读回第几个；不是这种名字就是 0。 */
+export function browserElementOrdinal(label: string): number {
+  const name = /^元素(.+)$/.exec(label)?.[1];
+  if (!name) return 0;
+  const chinese = CHINESE_NUMERALS.indexOf(name);
+  if (chinese >= 0) return chinese + 1;
+  return /^\d+$/.test(name) ? Number(name) : 0;
+}
+
+/** 文档里编号最大的元素是第几个。 */
+export function highestBrowserElementOrdinal(document: PromptDocument): number {
+  return document.parts.reduce((highest, part) => part.type === "browser-element" ? Math.max(highest, browserElementOrdinal(part.label)) : highest, 0);
+}
+
 export function browserElementPart(
   selection: BrowserElementSelection,
   screenshotId?: string,
@@ -47,7 +68,7 @@ export function browserElementPart(
   return {
     type: "browser-element",
     id: globalThis.crypto?.randomUUID?.() ?? `browser-element-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    label: `元素${ordinal <= 10 ? ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"][ordinal - 1] : ordinal}`,
+    label: browserElementLabel(ordinal),
     element: browserElementSnapshot(selection),
     ...(screenshotId ? { screenshotId } : {}),
   };

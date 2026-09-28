@@ -3,11 +3,13 @@ import type { ClipboardEvent, KeyboardEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import type { PromptDocument } from "@coilcoil/runtime-protocol";
-import { promptDocumentText } from "@coilcoil/runtime-protocol";
+import type { PromptBrowserElementPart, PromptDocument } from "@coilcoil/runtime-protocol";
 import { BrowserElementNode } from "./tiptapPromptExtensions";
 import {
   BROWSER_ELEMENT_NODE,
+  caretOffsetAtPosition,
+  positionAtCaretOffset,
+  promptDocumentSignature,
   promptDocumentToTiptap,
   tiptapToPromptDocument,
   type TiptapPromptEditorHandle,
@@ -30,7 +32,8 @@ interface TiptapPromptEditorProps {
  * 主输入框和历史消息编辑态共用的 Tiptap 实现。
  *
  * 与旧 PromptEditor 同一 handle 接口：focus/getCaretOffset/setCaretOffset，
- * caret offset 仍按纯文本长度（pill 算 label 长度），斜杠菜单可直接复用。
+ * caret offset 仍按纯文本长度（pill 算 label 长度），斜杠菜单可直接复用；和编辑器位置的换算见
+ * tiptapPromptDocument.ts（pill 在编辑器里只占 1 格）。
  * 组字保护由 ProseMirror 内置 IME 集成接管，不再手写整树重渲染。
  */
 export const TiptapPromptEditor = forwardRef<TiptapPromptEditorHandle, TiptapPromptEditorProps>(function TiptapPromptEditor({
@@ -50,6 +53,11 @@ export const TiptapPromptEditor = forwardRef<TiptapPromptEditorHandle, TiptapPro
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const composingRef = useRef(false);
+  // 这个输入框见过的全部元素（按编号）。剪切后粘贴、删掉后撤销，元素回到编辑器里时靠它找回截图和网页信息。
+  const knownPartsRef = useRef(new Map<string, PromptBrowserElementPart>());
+  for (const part of documentValue.parts) if (part.type === "browser-element") knownPartsRef.current.set(part.id, part);
+  const toDocument = (content: Parameters<typeof tiptapToPromptDocument>[0]): PromptDocument =>
+    tiptapToPromptDocument(content, documentRef.current, knownPartsRef.current).document;
 
   const editor = useEditor({
     extensions: [
@@ -98,8 +106,7 @@ export const TiptapPromptEditor = forwardRef<TiptapPromptEditorHandle, TiptapPro
     },
     onUpdate: ({ editor: current }) => {
       if (composingRef.current) return;
-      const { document: next } = tiptapToPromptDocument(current.getJSON(), documentRef.current);
-      onChangeRef.current(next);
+      onChangeRef.current(toDocument(current.getJSON()));
     },
   });
 
@@ -109,8 +116,9 @@ export const TiptapPromptEditor = forwardRef<TiptapPromptEditorHandle, TiptapPro
     if (!editor || editor.isDestroyed) return;
     if (composingRef.current) return;
     const next = promptDocumentToTiptap(documentValue);
-    const currentText = promptDocumentText(tiptapToPromptDocument(editor.getJSON(), documentValue).document);
-    if (currentText === promptDocumentText(documentValue)) return;
+    // 连元素一起比：只比文字的话，元素变成同名文字这种变化会被当成「没变」。
+    const current = tiptapToPromptDocument(editor.getJSON(), documentValue, knownPartsRef.current).document;
+    if (promptDocumentSignature(current) === promptDocumentSignature(documentValue)) return;
     const { from, to } = editor.state.selection;
     editor.commands.setContent(next);
     try {
@@ -139,8 +147,7 @@ export const TiptapPromptEditor = forwardRef<TiptapPromptEditorHandle, TiptapPro
       // 组字结束后对一次账：把提交后的最终文本同步给外部。
       const current = editor;
       if (!current || current.isDestroyed) return;
-      const { document: next } = tiptapToPromptDocument(current.getJSON(), documentRef.current);
-      onChangeRef.current(next);
+      onChangeRef.current(toDocument(current.getJSON()));
     };
     dom.addEventListener("compositionstart", start);
     dom.addEventListener("compositionend", end);
@@ -154,52 +161,28 @@ export const TiptapPromptEditor = forwardRef<TiptapPromptEditorHandle, TiptapPro
     get element() { return editor?.view.dom ?? null; },
     focus: () => editor?.commands.focus(),
     getCaretOffset: () => {
-      if (!editor || editor.isDestroyed) return promptDocumentText(documentRef.current).length;
-      // ProseMirror pos 含 paragraph 开头 1 位；减掉后按“文本+hardBreak+atom label”折成纯文本 offset。
-      const pos = editor.state.selection.from;
-      let offset = 0;
-      let remaining = Math.max(0, pos - 1);
-      const walk = (node: { type: { name: string }; attrs?: Record<string, unknown>; text?: string; textContent: string; nodeSize: number; content?: { forEach: (fn: (child: never) => void) => void } }): boolean => {
-        if (remaining <= 0) return true;
-        if (node.type.name === "text") {
-          const length = node.text?.length ?? 0;
-          offset += Math.min(length, remaining);
-          remaining -= length;
-          return remaining <= 0;
-        }
-        if (node.type.name === "hardBreak") {
-          offset += 1;
-          remaining -= 1;
-          return remaining <= 0;
-        }
-        if (node.type.name === BROWSER_ELEMENT_NODE) {
-          const label = typeof node.attrs?.label === "string" ? node.attrs.label : node.textContent ?? "";
-          const length = label.length;
-          offset += Math.min(length, remaining);
-          remaining -= length;
-          return remaining <= 0;
-        }
-        node.content?.forEach((child) => {
-          if (remaining > 0) {
-            if (walk(child as never)) return;
-          }
-        });
-        return remaining <= 0;
-      };
-      editor.state.doc.content.forEach((child) => {
-        if (remaining > 0) walk(child as never);
-      });
-      return offset;
+      if (!editor || editor.isDestroyed) return documentRef.current.parts.reduce((length, part) => length + (part.type === "text" ? part.text.length : part.label.length), 0);
+      return caretOffsetAtPosition(editor.state.doc, editor.state.selection.from);
     },
     setCaretOffset: (offset) => {
       if (!editor || editor.isDestroyed) return;
       editor.commands.focus();
       try {
-        const end = editor.state.doc.content.size - 1;
-        editor.commands.setTextSelection(Math.max(1, Math.min(offset + 1, end)));
+        editor.commands.setTextSelection(positionAtCaretOffset(editor.state.doc, offset));
       } catch {
         editor.commands.focus("end");
       }
+    },
+    insertBrowserElement: (part) => {
+      if (!editor || editor.isDestroyed) return false;
+      knownPartsRef.current.set(part.id, part);
+      // 直接在编辑器里插：不再「按纯文本位置重建整段内容、等下一帧再摆光标」，那样位置会算错、
+      // 光标也会被随后的整段替换放回原处。插在选区末尾，用户选中的字不删；插完光标就在它后面。
+      const at = editor.state.selection.to;
+      return editor.chain()
+        .focus()
+        .insertContentAt(at, { type: BROWSER_ELEMENT_NODE, attrs: { id: part.id, label: part.label } })
+        .run();
     },
   }), [editor]);
 

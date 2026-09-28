@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import type { ClipboardEvent, FormEvent, KeyboardEvent } from "react";
-import type { PromptDocument, PromptPart } from "@coilcoil/runtime-protocol";
+import type { PromptBrowserElementPart, PromptDocument, PromptPart } from "@coilcoil/runtime-protocol";
 import {
   mergeTextParts,
   promptDocumentText,
@@ -13,6 +13,8 @@ export interface PromptEditorHandle {
   focus(): void;
   getCaretOffset(): number;
   setCaretOffset(offset: number): void;
+  /** 在光标处插入一个网页元素，光标落在它后面；插入成功返回 true（见 TiptapPromptEditor）。 */
+  insertBrowserElement?(part: PromptBrowserElementPart): boolean;
 }
 
 interface PromptEditorProps {

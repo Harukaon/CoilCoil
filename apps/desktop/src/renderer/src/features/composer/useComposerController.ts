@@ -19,6 +19,7 @@ import {
   browserElementPart,
   clonePromptDocument,
   emptyPromptDocument,
+  highestBrowserElementOrdinal,
   insertPartAtOffset,
   promptDocumentFromText,
   promptDocumentHasContent,
@@ -93,6 +94,9 @@ export function useComposerController({
   emptyEnterRef.current = onEmptyEnter;
   const cacheRef = useRef(new Map<string, CachedComposerDraft>());
   const activeSessionKeyRef = useRef(sessionKey);
+  // 每个会话的草稿里已经发到第几号元素。编号只往上加：删掉、剪切走的元素再撤销或粘贴回来时，
+  // 不会和新插的撞名。消息发出去（reset）后，下一条从元素一重来。
+  const elementOrdinalsRef = useRef(new Map<string, number>());
 
   const cacheCurrent = useCallback((key: string): void => {
     cacheRef.current.set(key, {
@@ -118,6 +122,7 @@ export function useComposerController({
   const reset = useCallback((): void => {
     setDocumentState(emptyPromptDocument());
     cacheRef.current.delete(activeSessionKeyRef.current);
+    elementOrdinalsRef.current.delete(activeSessionKeyRef.current);
     setImages([]);
   }, []);
 
@@ -173,10 +178,17 @@ export function useComposerController({
       return;
     }
     const current = documentRef.current;
-    const ordinal = current.parts.filter((part): part is PromptBrowserElementPart => part.type === "browser-element").length + 1;
-    const part = browserElementPart(selection, image?.id, ordinal);
-    const offset = inputRef.current?.getCaretOffset() ?? promptDocumentText(current).length;
-    setDocumentState(insertPartAtOffset(current, part, offset));
+    // 以前按「现在有几个元素」编号：删掉一个或者元素被弄丢时，新元素会和旧的重名，甚至从元素一重来。
+    const key = activeSessionKeyRef.current;
+    const ordinal = Math.max(elementOrdinalsRef.current.get(key) ?? 0, highestBrowserElementOrdinal(current)) + 1;
+    elementOrdinalsRef.current.set(key, ordinal);
+    const part: PromptBrowserElementPart = browserElementPart(selection, image?.id, ordinal);
+    // 输入框自己在光标处插入，光标跟在元素后面。拿不到输入框时才退回按纯文本位置插。
+    if (!inputRef.current?.insertBrowserElement?.(part)) {
+      const offset = inputRef.current?.getCaretOffset() ?? promptDocumentText(current).length;
+      setDocumentState(insertPartAtOffset(current, part, offset));
+      requestAnimationFrame(() => inputRef.current?.setCaretOffset(offset + part.label.length));
+    }
     if (image) {
       setImages((existing) => {
         try {
@@ -187,7 +199,6 @@ export function useComposerController({
         }
       });
     }
-    requestAnimationFrame(() => inputRef.current?.setCaretOffset(offset + part.label.length));
   }, [onError]);
 
   const handlePaste = useCallback((event: ReactClipboardEvent<HTMLDivElement>): void => {
