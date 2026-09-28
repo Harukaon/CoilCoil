@@ -16,6 +16,7 @@
       "./extensions/audit-policy.ts",
       "./extensions/compact-tool-render.ts",
       "./extensions/context-transcript.ts",
+      "./extensions/compaction.ts",
       "./extensions/default-tools.ts",
       "./extensions/file-diff.ts",
       "./extensions/fast.ts",

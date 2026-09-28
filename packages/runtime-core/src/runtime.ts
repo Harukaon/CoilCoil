@@ -330,9 +330,18 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
     void active.session.compact(instructions)
       .catch((error: unknown) => {
         const raw = errorMessage(error);
-        const cancelled = raw.includes("Compaction cancelled") || (error instanceof Error && error.name === "AbortError");
-        this.log.log(cancelled ? "info" : "error", "compaction", "manual_compaction_failed", { error: raw, cancelled });
-        this.emitEvent({ type: "runtime_notice", level: cancelled ? "info" : "error", message: manualCompactionErrorMessage(raw) });
+        // 我们的压缩扩展失败时也是交回「取消」；那不是用户取消的，要说出真实原因。
+        const failure = active.compactionFailure && Date.now() - active.compactionFailure.at < 30_000
+          ? active.compactionFailure.message
+          : undefined;
+        active.compactionFailure = undefined;
+        const cancelled = !failure && (raw.includes("Compaction cancelled") || (error instanceof Error && error.name === "AbortError"));
+        this.log.log(cancelled ? "info" : "error", "compaction", "manual_compaction_failed", { error: failure ?? raw, cancelled });
+        this.emitEvent({
+          type: "runtime_notice",
+          level: cancelled ? "info" : "error",
+          message: failure ? `上下文压缩失败，会话保持原样：${failure}` : manualCompactionErrorMessage(raw),
+        });
       })
       .finally(() => {
         active.compacting = false;

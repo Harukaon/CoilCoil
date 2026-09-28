@@ -41,6 +41,7 @@ import {
   GOAL_STATE_CHANNEL,
   HIDDEN_AGENT_TOOLS,
   PLAN_STATE_CHANNEL,
+  COMPACTION_EVENT,
   CONTEXT_CLEARING_EVENT,
   CONTEXT_CLEARING_SKIPPED_EVENT,
   CONTEXT_SUMMARY_TRIM_EVENT,
@@ -443,6 +444,18 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
         // 瘦完还超窗口，那这一发注定被上游顶回来——这一条是 error，别埋在 info 里。
         fitsWindow: window <= 0 ? undefined : after <= window,
       }, compactionLogContext());
+    });
+    // CoilCoil 压缩扩展的每一步都进日志：走了哪一层、压完估计多大、分了几块、每次请求多久、
+    // 卡住断开和重试、失败原因。以前压缩一跑几十分钟，日志里只有开始和结束，看不出卡在哪。
+    eventBus.on(COMPACTION_EVENT, (value) => {
+      if (!isRecord(value) || typeof value.phase !== "string") return;
+      const phase = value.phase;
+      const { phase: _phase, sessionFile: _sessionFile, ...data } = value;
+      const level = phase === "failed" ? "error" : phase === "request_stalled" || phase === "request_retry" || phase === "skipped" ? "warn" : "info";
+      this.log.log(level, "compaction", `coilcoil_${phase}`, data, compactionLogContext());
+      if (phase === "failed" && installedActive && typeof value.error === "string") {
+        installedActive.compactionFailure = { message: value.error, at: Date.now() };
+      }
     });
     eventBus.on(CONTEXT_CLEARING_SKIPPED_EVENT, (value) => {
       if (!isRecord(value)) return;

@@ -34,6 +34,8 @@ export const PROMPT_DOCUMENT_ENTRY_TYPE = "coilcoil-prompt-document-v1";
 export const PROJECT_MEMORY_STATUS_EVENT = "coilcoil:project-memory:status:v1";
 /** Where context-clearing announces each batch of tool results it drops. */
 export const CONTEXT_CLEARING_EVENT = "coilcoil:context-clearing:v1";
+/** CoilCoil 压缩扩展（workflow/extensions/compaction.ts）的进度与结果：哪一层、几块、耗时、失败原因。 */
+export const COMPACTION_EVENT = "coilcoil:compaction:v1";
 /** Clearings kept per session. Old ones scroll out of the transcript anyway. */
 export const MAX_CONTEXT_CLEARINGS = 40;
 

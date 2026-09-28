@@ -67,6 +67,11 @@ export interface CoilCoilRuntimeOptions {
 }
 
 export interface ActiveSession {
+  /**
+   * CoilCoil 压缩扩展最近一次失败的原因。扩展失败时交回「取消」（不让 Pi 拿原始历史再压），
+   * Pi 那边只会说「被取消了」；界面提示用这里的真实原因。
+   */
+  compactionFailure?: { message: string; at: number };
   cwd: string;
   session: AgentSession;
   unsubscribe: () => void;

@@ -173,13 +173,20 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             estimatedTokensAfter: event.result?.estimatedTokensAfter,
             error: event.errorMessage,
           });
+          // 我们的压缩扩展失败时交回「取消」，Pi 这边看到的是 aborted；真实原因在扩展报上来的记录里。
+          const failure = active.compactionFailure && Date.now() - active.compactionFailure.at < 30_000
+            ? active.compactionFailure.message
+            : undefined;
+          if (!event.result) active.compactionFailure = undefined;
           if (missed && !event.willRetry) {
             this.emitEvent({
               type: "runtime_notice",
               level: "error",
-              message: event.aborted
-                ? "上下文压缩被中断，这轮没压成。会话会继续变长，必要时手动 /compact。"
-                : `上下文压缩失败，会话会继续变长：${event.errorMessage ?? "未知原因"}`,
+              message: failure
+                ? `上下文压缩失败，会话保持原样：${failure}`
+                : event.aborted
+                  ? "上下文压缩被中断，这轮没压成。会话会继续变长，必要时手动 /compact。"
+                  : `上下文压缩失败，会话会继续变长：${event.errorMessage ?? "未知原因"}`,
             });
           }
           this.publishRuntimeInspection(active);
