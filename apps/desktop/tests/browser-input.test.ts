@@ -10,6 +10,7 @@ import {
   keyEventParams,
   keyText,
   macEditingCommands,
+  modifierKeyInputEvent,
   mouseInputEvent,
   parseFindRequest,
   parsePageInput,
@@ -69,6 +70,34 @@ test("Mac 上的编辑快捷键带上编辑命令：⌘A 全选、⌥← 按词�
   // 回车本身打出换行，插入类命令不带，免得换两次行。
   assert.deepEqual(macEditingCommands("Enter", none), []);
   assert.deepEqual(keyEventParams(key({ modifiers: meta }), "darwin").commands, ["selectAll"]);
+});
+
+test("Mac 上 ⌘/Ctrl 组合键带上字符，网页没处理时菜单按真快捷键匹配，不会错配成「关于」", () => {
+  const meta = { ...none, meta: true };
+  const k = keyEventParams(key({ key: "k", code: "KeyK", keyCode: 75, modifiers: meta }), "darwin");
+  assert.equal(k.type, "rawKeyDown", "还是 rawKeyDown：不会把 k 打进网页");
+  assert.equal(k.text, "k");
+  assert.equal(k.unmodifiedText, "k");
+  const control = keyEventParams(key({ key: "f", code: "KeyF", keyCode: 70, modifiers: { ...none, control: true, meta: true } }), "darwin");
+  assert.equal(control.unmodifiedText, "f");
+  const arrow = keyEventParams(key({ key: "ArrowUp", code: "ArrowUp", keyCode: 38, modifiers: meta }), "darwin");
+  assert.equal(arrow.unmodifiedText, "\uF700");
+  // 普通打字不变；不带 ⌘/Ctrl 的功能键不加；Windows、Linux 不加（那边菜单按键码匹配）。
+  assert.equal(keyEventParams(key(), "darwin").text, "a");
+  assert.equal(keyEventParams(key({ key: "ArrowUp", code: "ArrowUp", keyCode: 38 }), "darwin").text, undefined);
+  assert.equal(keyEventParams(key({ key: "k", code: "KeyK", keyCode: 75, modifiers: { ...none, control: true } }), "win32").text, undefined);
+  // 抬起不带字符。
+  assert.equal(keyEventParams(key({ type: "up", key: "k", code: "KeyK", keyCode: 75, modifiers: meta }), "darwin").text, undefined);
+});
+
+test("Mac 上单独按下的修饰键改用 sendInputEvent 送（网页照样收到），别的键和别的系统不变", () => {
+  assert.deepEqual(modifierKeyInputEvent(key({ key: "Meta", code: "MetaLeft", keyCode: 91, modifiers: { ...none, meta: true } }), "darwin"),
+    { type: "keyDown", keyCode: "Meta", modifiers: ["meta"] });
+  assert.deepEqual(modifierKeyInputEvent(key({ type: "up", key: "Shift", code: "ShiftLeft", keyCode: 16 }), "darwin"),
+    { type: "keyUp", keyCode: "Shift", modifiers: [] });
+  for (const name of ["Alt", "Control", "CapsLock"]) assert.ok(modifierKeyInputEvent(key({ key: name, code: name }), "darwin"), name);
+  assert.equal(modifierKeyInputEvent(key(), "darwin"), undefined);
+  assert.equal(modifierKeyInputEvent(key({ key: "Meta", code: "MetaLeft", keyCode: 91 }), "win32"), undefined);
 });
 
 test("Windows、Linux 上不带编辑命令：Ctrl+C 这些由网页内核自己处理", () => {

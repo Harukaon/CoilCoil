@@ -1,4 +1,4 @@
-import type { InputEvent, MouseInputEvent, MouseWheelInputEvent, NativeImage, WebContents } from "electron";
+import type { InputEvent, KeyboardInputEvent, MouseInputEvent, MouseWheelInputEvent, NativeImage, WebContents } from "electron";
 import type { BrowserFindRequest, BrowserInputModifiers, BrowserPageInput } from "../shared/desktop-api";
 
 /**
@@ -221,6 +221,59 @@ export function keyText(input: Extract<BrowserPageInput, { kind: "key" }>): stri
   return [...input.key].length === 1 ? input.key : undefined;
 }
 
+/*
+ * Mac 上网页没处理的按键，Electron 会按这次按键拼一个系统按键事件交给菜单栏去匹配快捷键。
+ * 拼的时候字符取自 CDP 的 text / unmodifiedText：不带字符，拼出来的就是「⌘ + 空字符」，
+ * 会匹配上菜单里第一个没设快捷键的项——「关于 CoilCoil」。于是焦点在网页里时，单独按一下 ⌘
+ * （或者按网页不认的 ⌘K 之类）就弹出「关于」窗口，还把焦点抢走，接着按的 C 送不到网页，复制失败。
+ * 实测（2026-09-28）：
+ * - 组合键带上字符（text 和 unmodifiedText 都要），菜单按真实快捷键匹配：⌘W 关闭、⌘M 最小化，
+ *   菜单里没有的 ⌘K 什么都不触发；rawKeyDown 带字符不会往网页里打字。
+ * - 单独的修饰键没有字符可带，改用 sendInputEvent 送：网页照样收到 keydown「Meta」，不走菜单。
+ */
+const MODIFIER_KEY_CODES: Record<string, string> = {
+  Shift: "Shift",
+  Control: "Control",
+  Alt: "Alt",
+  Meta: "Meta",
+  CapsLock: "CapsLock",
+};
+
+/** 单独按下的修饰键，Mac 上改用 sendInputEvent 送的样子；不是修饰键、或不是 Mac 时返回 undefined。 */
+export function modifierKeyInputEvent(
+  input: Extract<BrowserPageInput, { kind: "key" }>,
+  platform: NodeJS.Platform,
+): KeyboardInputEvent | undefined {
+  if (platform !== "darwin") return undefined;
+  const keyCode = MODIFIER_KEY_CODES[input.key];
+  if (!keyCode) return undefined;
+  return { type: input.type === "down" ? "keyDown" : "keyUp", keyCode, modifiers: electronModifiers(input.modifiers) };
+}
+
+/** Mac 的系统按键里，这些键的「字符」是固定的功能键码（NSUpArrowFunctionKey 等）。 */
+const MAC_KEY_CHARACTERS: Record<string, string> = {
+  ArrowUp: "\uF700",
+  ArrowDown: "\uF701",
+  ArrowLeft: "\uF702",
+  ArrowRight: "\uF703",
+  Delete: "\uF728",
+  Home: "\uF729",
+  End: "\uF72B",
+  PageUp: "\uF72C",
+  PageDown: "\uF72D",
+  Backspace: "\u007F",
+  Tab: "\t",
+  Escape: "\u001B",
+  ...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`F${index + 1}`, String.fromCharCode(0xF704 + index)])),
+};
+
+/** Mac 上带 ⌘ 或 Ctrl、又不打字的按键，给菜单匹配用的字符。 */
+function macShortcutCharacters(input: Extract<BrowserPageInput, { kind: "key" }>): string | undefined {
+  if (!input.modifiers.meta && !input.modifiers.control) return undefined;
+  if ([...input.key].length === 1) return input.key.toLowerCase();
+  return MAC_KEY_CHARACTERS[input.key];
+}
+
 export function keyEventParams(
   input: Extract<BrowserPageInput, { kind: "key" }>,
   platform: NodeJS.Platform,
@@ -238,11 +291,14 @@ export function keyEventParams(
   if (input.type === "up") return { type: "keyUp", ...base };
   const text = keyText(input);
   const commands = platform === "darwin" ? macEditingCommands(input.code, input.modifiers) : [];
+  // 不打字的键在 Mac 上也带上字符：只给菜单匹配快捷键用，rawKeyDown 不会把它打进网页（见上）。
+  const characters = text === undefined && platform === "darwin" ? macShortcutCharacters(input) : undefined;
   return {
     type: text === undefined ? "rawKeyDown" : "keyDown",
     ...base,
     autoRepeat: input.repeat,
     ...text === undefined ? {} : { text, unmodifiedText: text },
+    ...characters === undefined ? {} : { text: characters, unmodifiedText: characters },
     ...commands.length ? { commands } : {},
   };
 }
@@ -449,9 +505,12 @@ export class PageInputForwarder {
     const debug = contents.debugger;
     if (!debug.isAttached()) return;
     switch (input.kind) {
-      case "key":
-        await debug.sendCommand("Input.dispatchKeyEvent", keyEventParams(input, this.platform));
+      case "key": {
+        const modifier = modifierKeyInputEvent(input, this.platform);
+        if (modifier) contents.sendInputEvent(modifier);
+        else await debug.sendCommand("Input.dispatchKeyEvent", keyEventParams(input, this.platform));
         return;
+      }
       case "ime":
         if (input.type === "update") {
           await debug.sendCommand("Input.imeSetComposition", { text: input.text, selectionStart: input.selectionStart, selectionEnd: input.selectionEnd });
