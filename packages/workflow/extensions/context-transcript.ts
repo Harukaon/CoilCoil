@@ -25,12 +25,10 @@ type AgentMessage = ContextEvent["messages"][number];
  * been a third way to do the same thing. What the model gets is a path and an
  * index; it decides whether any of it is worth reading.
  *
- * **这个扩展必须排在 `context-clearing` 前面**（`package.json` 里的 `pi.extensions`
- * 就是执行顺序）。两个扩展挂的是同一个 `session_before_compact`，拿到的是同一个
- * `preparation.messagesToSummarize` 数组，而清理那一层是就地改写它的。排在后面，这
- * 里写进存档的就是清理后的那一份——存档的全部意义正是「压缩丢掉的东西还能翻回
- * 来」，写成占位符等于这个功能整个没了。2026-09-11 那条会话的存档里，12 万行有
- * 9,815 行是占位符，模型回头去读存档，读回来的是满屏「[上下文已清理]」。
+ * `context-clearing` 目前没有注册。以后如果重新启用，这个扩展必须排在它前面
+ * （`package.json` 里的 `pi.extensions` 就是执行顺序）。两个扩展挂的是同一个
+ * `session_before_compact`，拿到的是同一个 `preparation.messagesToSummarize` 数组，而
+ * 清理层会就地改写它。排在后面，存档里留下的就是占位符而不是原文。
  *
  * The transcript is plain text rather than a pointer into the raw session file
  * on purpose. That file is JSONL — every line a JSON object wrapped around

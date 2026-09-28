@@ -106,7 +106,14 @@ function truncateForSummary(text: string, maxChars: number): string {
  * Tool results are truncated to keep the summarization request within
  * reasonable token budgets. Full content is not needed for summarization.
  */
-export function serializeConversation(messages: Message[]): string {
+export interface ConversationSerializationOptions {
+	/** Thinking is useful for a bug report, but can dominate a compaction request. */
+	includeThinking?: boolean;
+	/** Bound serialized tool arguments without changing the stored session. */
+	maxToolCallChars?: number;
+}
+
+export function serializeConversation(messages: Message[], options: ConversationSerializationOptions = {}): string {
 	const parts: string[] = [];
 
 	for (const msg of messages) {
@@ -118,14 +125,15 @@ export function serializeConversation(messages: Message[]): string {
 			const toolCalls: string[] = [];
 
 			for (const block of msg.content) {
-				if (block.type === "thinking") {
+				if (block.type === "thinking" && options.includeThinking !== false) {
 					thinkingParts.push(block.thinking);
 				} else if (block.type === "toolCall") {
 					const args = block.arguments as Record<string, unknown>;
 					const argsStr = Object.entries(args)
 						.map(([k, v]) => `${k}=${JSON.stringify(v)}`)
 						.join(", ");
-					toolCalls.push(`${block.name}(${argsStr})`);
+					const call = `${block.name}(${argsStr})`;
+					toolCalls.push(options.maxToolCallChars ? truncateForSummary(call, options.maxToolCallChars) : call);
 				}
 			}
 

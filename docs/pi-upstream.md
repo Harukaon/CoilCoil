@@ -105,6 +105,45 @@ These are Pi defects, not CoilCoil behavior. Each one is carried until upstream
 fixes it, so **check the upstream status of every entry before accepting a
 subtree pull** and drop the patch once the fix lands there.
 
+### Oversized compaction summary input
+
+- Added 2026-09-28. Patch:
+  `packages/coding-agent/src/core/compaction/{compaction,utils}.ts`.
+  Regression tests: `packages/coding-agent/test/compaction-summary-reasoning.test.ts`.
+- Symptom: summarization receives more text than the model's context window and
+  returns HTTP 400, leaving the original oversized context in place.
+- Cause: Pi serialized assistant thinking and unbounded tool arguments into one
+  summary request. The affected session had about 4.5 million thinking
+  characters in a 5.4 million character summary input.
+- The patch omits thinking and caps tool arguments only in summary requests,
+  limits each request's input, and summarizes oversized history in chronological
+  chunks. A provider context-overflow response halves the chunk and retries. If
+  even a minimal chunk cannot be accepted, a bounded mechanical checkpoint
+  retains recent user requests and the previous summary. Session history stays
+  unchanged; no agent tools or standing instructions are added.
+- On the next pull: check whether upstream bounds compaction input and recovers
+  from provider input overflow before removing this patch.
+
+### Length-limited history compaction summaries do not retry
+
+- Added 2026-09-27. Patch:
+  `packages/coding-agent/src/core/compaction/compaction.ts`
+  (`generateSummaryWithUsage` retries a length-limited history checkpoint with
+  the full compaction reserve). Regression test:
+  `packages/coding-agent/test/compaction-summary-reasoning.test.ts`.
+- Symptom: manual and automatic compaction fail with
+  `Summarization failed: generation hit the token cap and the summary is
+  incomplete`, leaving an oversized session unusable.
+- Cause: Pi initially gives a history summary 80% of `reserveTokens`. A
+  length-limited result was rejected immediately, while the separate split-turn
+  summary path already retried from its smaller initial budget with the full
+  reserve.
+- Upstream status when written: v0.87.1 has the split-turn retry but no matching
+  history-summary retry.
+- On the next pull: if `generateSummaryWithUsage` retries an incomplete history
+  summary with a larger budget, drop this patch and keep the regression test if
+  it still compiles.
+
 ### Duplicate `call_id` when replaying a chat-completions history to Responses
 
 - Added 2026-08-20. Patch: `packages/ai/src/api/openai-responses-shared.ts`

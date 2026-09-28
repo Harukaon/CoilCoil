@@ -131,15 +131,10 @@ test("这段话进系统提示，不是每轮塞到消息末尾", () => {
   assert.doesNotMatch(source, /pi\.on\("context"/);
 });
 
-test("两个扩展一起跑，存档里留下的必须是原文", () => {
-  // 光断言清单顺序不够——真正会出事的是「跑完之后存档里写了什么」。这一条按
-  // package.json 的顺序把两个扩展都装上，先准备，再确认压缩成功，最后去
-  // 磁盘上读那份存档。2026-09-11 那条会话就是这里塌的：存档 12 万行里 9,815 行是
-  // 占位符，模型回头去读，读回来满屏「[上下文已清理]」。
-  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
-    pi: { extensions: string[] };
-  };
-  const order = manifest.pi.extensions.filter((path) => /context-(clearing|transcript)/.test(path));
+test("以后重新启用清理扩展时，存档在它之前运行就会留下原文", () => {
+  // 清理扩展目前不在 package.json 里。这里保留两者的组合回归，确保以后恢复时只要按
+  // 这个顺序注册，存档仍然是原文。
+  const order = ["./extensions/context-transcript.ts", "./extensions/context-clearing.ts"];
   const factories: Record<string, (pi: unknown) => void> = {
     "./extensions/context-transcript.ts": contextTranscriptExtension as (pi: unknown) => void,
     "./extensions/context-clearing.ts": contextClearingExtension as (pi: unknown) => void,
@@ -208,20 +203,15 @@ test("自动压缩取消或失败时不留下假存档", () => {
   assert.equal(existsSync(transcriptPathFor(sessionFile)), false, "取消后不能把暂存内容写进去");
 });
 
-test("存档扩展必须排在清理扩展前面", () => {
-  // 两个扩展挂的是同一个 session_before_compact，拿到的是同一个
-  // preparation.messagesToSummarize 数组，而清理那一层是就地改写它的。排在后面，
-  // 这里暂存的就是清理后的那一份——而存档的全部意义正是「压缩丢掉的东西还能翻
-  // 回来」。2026-09-11 那条会话的存档 12 万行里有 9,815 行是占位符，模型回头去读存
-  // 档，读回来满屏「[上下文已清理]」。package.json 里的顺序就是执行顺序。
+test("自定义上下文清理暂时不随 workflow 加载", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
     pi: { extensions: string[] };
   };
   const order = manifest.pi.extensions;
   const transcript = order.indexOf("./extensions/context-transcript.ts");
   const clearing = order.indexOf("./extensions/context-clearing.ts");
-  assert.ok(transcript >= 0 && clearing >= 0, "两个扩展都得在清单里");
-  assert.ok(transcript < clearing, "存档要先暂存没被清理过的原文");
+  assert.ok(transcript >= 0, "Pi 压缩原文存档仍应启用");
+  assert.equal(clearing, -1, "自定义清理会取消 Pi 压缩，修复前不能加载");
 });
 
 test("还没压缩过就什么也不说", () => {

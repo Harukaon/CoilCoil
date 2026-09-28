@@ -714,6 +714,180 @@ function buildSummarizationContext(promptText: string): TranscriptContext {
 	});
 }
 
+const SUMMARY_REQUEST_MAX_CHARS = 160_000;
+const SUMMARY_REQUEST_MIN_CHARS = 16_000;
+const SUMMARY_MAX_CALLS = 24;
+
+function isInputOverflow(error: string): boolean {
+	return /context.{0,40}(length|window|limit|overflow|exceed)|input.{0,40}(too long|limit|tokens|exceed)|prompt.{0,40}(too long|limit|tokens|exceed)|too many tokens|maximum context|longer than.{0,40}context/i.test(
+		error,
+	);
+}
+
+/** Split at a conversation boundary when possible; a single oversized message can still be halved. */
+function splitSummaryInput(text: string): [string, string] {
+	const middle = Math.floor(text.length / 2);
+	let cut = text.lastIndexOf("\n\n[", middle);
+	if (cut < text.length / 4) cut = text.indexOf("\n\n[", middle);
+	if (cut < text.length / 4 || cut > (text.length * 3) / 4) cut = middle;
+	return [text.slice(0, cut), text.slice(cut)];
+}
+
+/** Keep compaction requests bounded without changing the stored conversation or active tool set. */
+async function summarizeBoundedInput(options: {
+	conversationText: string;
+	previousSummary?: string;
+	llmMessages: ReturnType<typeof convertToLlm>;
+	model: Model<any>;
+	maxTokens: number;
+	retryMaxTokens: number;
+	apiKey: string | undefined;
+	headers?: Record<string, string>;
+	env?: Record<string, string>;
+	signal?: AbortSignal;
+	thinkingLevel?: ThinkingLevel;
+	streamFn?: StreamFn;
+	retry?: RetryPolicy;
+	callbacks?: RetryCallbacks;
+	sessionId?: string;
+	label: string;
+	promptFor: (conversation: string, previous?: string) => string;
+}): Promise<{ text: string; usage: Usage }> {
+	const inputLimit = Math.max(
+		SUMMARY_REQUEST_MIN_CHARS,
+		Math.min(SUMMARY_REQUEST_MAX_CHARS, Math.floor(options.model.contextWindow * 0.5)),
+	);
+	const exhausted = new Error("Compaction summary input exceeded the bounded recovery budget");
+	let calls = 0;
+	let usage: Usage | undefined;
+	const addUsage = (next: Usage): void => {
+		usage = usage ? combineUsage(usage, next) : next;
+	};
+	const run = async (conversation: string, previous?: string): Promise<string> => {
+		if (options.signal?.aborted) throw options.signal.reason ?? new Error("Compaction cancelled");
+		const prompt = options.promptFor(conversation, previous);
+		if (prompt.length > inputLimit) {
+			if (conversation.length <= 2048) throw exhausted;
+			const [first, second] = splitSummaryInput(conversation);
+			const firstSummary = await run(first, previous);
+			return run(second, firstSummary);
+		}
+		if (++calls > SUMMARY_MAX_CALLS) throw exhausted;
+		let response: AssistantMessage;
+		try {
+			response = await completeSummarization(
+				options.model,
+				buildSummarizationContext(prompt),
+				createSummarizationOptions(
+					options.model,
+					options.maxTokens,
+					options.apiKey,
+					options.headers,
+					options.env,
+					options.signal,
+					options.thinkingLevel,
+					options.sessionId,
+				),
+				options.streamFn,
+				options.retry,
+				options.callbacks,
+			);
+			addUsage(response.usage);
+			if (response.stopReason === "length" && options.retryMaxTokens > options.maxTokens) {
+				response = await completeSummarization(
+					options.model,
+					buildSummarizationContext(prompt),
+					createSummarizationOptions(
+						options.model,
+						options.retryMaxTokens,
+						options.apiKey,
+						options.headers,
+						options.env,
+						options.signal,
+						options.thinkingLevel,
+						options.sessionId,
+					),
+					options.streamFn,
+					options.retry,
+					options.callbacks,
+				);
+				addUsage(response.usage);
+			}
+		} catch (error) {
+			if (!options.signal?.aborted && isInputOverflow(String(error))) {
+				if (conversation.length <= 2048) throw exhausted;
+				const [first, second] = splitSummaryInput(conversation);
+				const firstSummary = await run(first, previous);
+				return run(second, firstSummary);
+			}
+			throw error;
+		}
+		if (response.stopReason === "error" && isInputOverflow(response.errorMessage ?? "")) {
+			if (conversation.length <= 2048) throw exhausted;
+			const [first, second] = splitSummaryInput(conversation);
+			const firstSummary = await run(first, previous);
+			return run(second, firstSummary);
+		}
+		const failure = getSummarizationFailure(response, options.label);
+		if (failure) throw new Error(failure);
+		if (response.content.some((block) => block.type === "toolCall")) {
+			throw new Error(`${options.label} attempted to call a tool`);
+		}
+		const text = contentText(response.content);
+		if (!text.trim()) throw new Error(`${options.label} returned an empty summary`);
+		return text;
+	};
+
+	try {
+		const text = await run(options.conversationText, options.previousSummary);
+		if (!usage) throw new Error("Summarization returned no usage");
+		return { text, usage };
+	} catch (error) {
+		if (error !== exhausted || options.signal?.aborted) throw error;
+		// The provider still cannot accept a bounded input. Preserve the recent user
+		// requests and prior checkpoint as a clearly marked, non-model fallback.
+		const recentUsers = options.llmMessages
+			.filter((message) => message.role === "user")
+			.slice(-6)
+			.map((message) => contentText(message.content, "").slice(0, 1000));
+		const recentAssistants = options.llmMessages
+			.filter((message) => message.role === "assistant")
+			.slice(-3)
+			.map((message) => contentText(message.content, "").slice(0, 500))
+			.filter(Boolean);
+		const text = [
+			"## Goal",
+			"Continue the most recent user request below.",
+			"## Constraints & Preferences",
+			"The original session remains on disk; this mechanical checkpoint may omit earlier details.",
+			"## Progress",
+			"### Done",
+			...(recentAssistants.length ? recentAssistants.map((item) => `- ${item}`) : ["- (unknown)"]),
+			"### In Progress",
+			...(recentUsers.length ? recentUsers.map((item) => `- ${item}`) : ["- (unknown)"]),
+			"### Blocked",
+			"- The model could not accept the full summary input.",
+			"## Key Decisions",
+			"- Consult the previous checkpoint and original session before relying on omitted history.",
+			"## Next Steps",
+			"1. Continue the latest user request.",
+			"## Critical Context",
+			...(options.previousSummary ? [options.previousSummary.slice(-6000)] : []),
+		].join("\n");
+		return {
+			text,
+			usage: usage ?? {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		};
+	}
+}
+
 /** Generate or update a conversation summary and return its provider usage. */
 export async function generateSummaryWithUsage(
 	currentMessages: AgentMessage[],
@@ -736,55 +910,32 @@ export async function generateSummaryWithUsage(
 		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
 	);
 
-	// Use update prompt if we have a previous summary, otherwise initial prompt
-	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
-	if (customInstructions) {
-		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
-	}
-
 	// Serialize conversation to text so model doesn't try to continue it
 	// Convert to LLM messages first (handles custom types like bashExecution, custom, etc.)
 	const llmMessages = convertToLlm(currentMessages);
-	const conversationText = serializeConversation(llmMessages);
-
-	// Build the prompt with conversation wrapped in tags
-	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
-	if (previousSummary) {
-		promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
-	}
-	promptText += basePrompt;
-
-	const completionOptions = createSummarizationOptions(
+	const retryMaxTokens = Math.min(reserveTokens, model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY);
+	return summarizeBoundedInput({
+		conversationText: serializeConversation(llmMessages, { includeThinking: false, maxToolCallChars: 2000 }),
+		previousSummary,
+		llmMessages,
 		model,
 		maxTokens,
+		retryMaxTokens,
 		apiKey,
 		headers,
 		env,
 		signal,
 		thinkingLevel,
-		sessionId,
-	);
-
-	const response = await completeSummarization(
-		model,
-		buildSummarizationContext(promptText),
-		completionOptions,
 		streamFn,
 		retry,
 		callbacks,
-	);
-
-	const failure = getSummarizationFailure(response, "Summarization");
-	if (failure) {
-		throw new Error(failure);
-	}
-	if (response.content.some((block) => block.type === "toolCall")) {
-		throw new Error("Summarization attempted to call a tool");
-	}
-
-	const textContent = contentText(response.content);
-
-	return { text: textContent, usage: response.usage };
+		sessionId,
+		label: "Summarization",
+		promptFor: (conversation, previous) => {
+			const instructions = previous ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+			return `<conversation>\n${conversation}\n</conversation>\n\n${previous ? `<previous-summary>\n${previous}\n</previous-summary>\n\n` : ""}${instructions}${customInstructions ? `\n\nAdditional focus: ${customInstructions}` : ""}`;
+		},
+	});
 }
 
 // ============================================================================
@@ -1114,44 +1265,24 @@ async function generateTurnPrefixSummary(
 		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
 	); // Smaller budget for turn prefix
 	const llmMessages = convertToLlm(messages);
-	const conversationText = serializeConversation(llmMessages);
-	const promptText = `# Conversation\n${conversationText}\n\n# Instructions\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
-
-	let response = await completeSummarization(
+	const retryMaxTokens = Math.min(reserveTokens, model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY);
+	return summarizeBoundedInput({
+		conversationText: serializeConversation(llmMessages, { includeThinking: false, maxToolCallChars: 2000 }),
+		llmMessages,
 		model,
-		buildSummarizationContext(promptText),
-		createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel, sessionId),
+		maxTokens,
+		retryMaxTokens,
+		apiKey,
+		headers,
+		env,
+		signal,
+		thinkingLevel,
 		streamFn,
 		retry,
 		callbacks,
-	);
-	let usage = response.usage;
-	// A split turn may contain far more context than the initial half-reserve
-	// budget can summarize. A length stop is incomplete and must never become a
-	// checkpoint; retry once with the full reserve before giving up.
-	const retryMaxTokens = Math.min(reserveTokens, model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY);
-	if (response.stopReason === "length" && retryMaxTokens > maxTokens) {
-		response = await completeSummarization(
-			model,
-			buildSummarizationContext(promptText),
-			createSummarizationOptions(model, retryMaxTokens, apiKey, headers, env, signal, thinkingLevel, sessionId),
-			streamFn,
-			retry,
-			callbacks,
-		);
-		usage = combineUsage(usage, response.usage);
-	}
-
-	const failure = getSummarizationFailure(response, "Turn prefix summarization");
-	if (failure) {
-		throw new Error(failure);
-	}
-	if (response.content.some((block) => block.type === "toolCall")) {
-		throw new Error("Turn prefix summarization attempted to call a tool");
-	}
-
-	return {
-		text: contentText(response.content),
-		usage,
-	};
+		sessionId,
+		label: "Turn prefix summarization",
+		promptFor: (conversation, previous) =>
+			`# Conversation\n${conversation}\n\n${previous ? `<previous-summary>\n${previous}\n</previous-summary>\n\n# Instructions\n${UPDATE_SUMMARIZATION_INSTRUCTIONS}` : `# Instructions\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`}`,
+	});
 }

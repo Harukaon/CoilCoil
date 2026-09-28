@@ -177,7 +177,7 @@ describe("generateSummary reasoning options", () => {
 	});
 
 	it("rejects a length-limited history summary", async () => {
-		completeSimpleMock.mockResolvedValueOnce({
+		completeSimpleMock.mockResolvedValue({
 			...mockSummaryResponse,
 			stopReason: "length",
 			content: [{ type: "text", text: "partial" }],
@@ -186,6 +186,159 @@ describe("generateSummary reasoning options", () => {
 		await expect(generateSummaryWithUsage(messages, createModel(false), 2000, "test-key")).rejects.toThrow(
 			"generation hit the token cap",
 		);
+		expect(completeSimpleMock).toHaveBeenCalledTimes(2);
+		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([1600, 2000]);
+	});
+
+	it("retries an incomplete history checkpoint with the full reserve", async () => {
+		completeSimpleMock
+			.mockResolvedValueOnce({
+				...mockSummaryResponse,
+				stopReason: "length",
+				content: [{ type: "text", text: "partial" }],
+			})
+			.mockResolvedValueOnce(mockSummaryResponse);
+
+		const result = await generateSummaryWithUsage(messages, createModel(false, 384000), 16384, "test-key");
+
+		expect(result.text).toBe("## Goal\nTest summary");
+		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([13107, 16384]);
+		expect(result.usage.output).toBe(mockSummaryResponse.usage.output * 2);
+	});
+
+	it("keeps thinking and long tool arguments out of the summary request", async () => {
+		const conversation: AgentMessage[] = [
+			{ role: "user", content: "请修复压缩失败", timestamp: Date.now() },
+			{
+				...mockSummaryResponse,
+				content: [
+					{ type: "thinking", thinking: "hidden reasoning ".repeat(100_000) },
+					{ type: "text", text: "已找到问题：摘要输入过长。" },
+					{
+						type: "toolCall",
+						id: "call-1",
+						name: "read",
+						arguments: { path: "session.jsonl", payload: "argument noise ".repeat(10_000) },
+					},
+				],
+			},
+		];
+
+		await generateSummaryWithUsage(conversation, createModel(false), 2000, "test-key");
+
+		const prompt = JSON.stringify((completeSimpleMock.mock.calls[0][1] as TranscriptContext).messages);
+		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+		expect(prompt).toContain("请修复压缩失败");
+		expect(prompt).toContain("已找到问题");
+		expect(prompt).not.toContain("hidden reasoning");
+		expect(prompt.length).toBeLessThan(10_000);
+	});
+
+	it("splits a long Chinese conversation into bounded summary requests", async () => {
+		const conversation: AgentMessage[] = [
+			{
+				role: "user",
+				content: `第一部分：${"中文项目需求。".repeat(20_000)}最后部分：保留当前决定。`,
+				timestamp: Date.now(),
+			},
+		];
+
+		const result = await generateSummaryWithUsage(conversation, createModel(false), 2000, "test-key");
+		const prompts = completeSimpleMock.mock.calls.map((call) =>
+			JSON.stringify((call[1] as TranscriptContext).messages),
+		);
+
+		expect(result.text).toContain("Test summary");
+		expect(prompts.length).toBeGreaterThan(1);
+		expect(prompts[0]).toContain("第一部分");
+		expect(prompts.at(-1)).toContain("最后部分");
+		expect(prompts.every((prompt) => prompt.length < 110_000)).toBe(true);
+	});
+
+	it("halves a request when the provider reports input context overflow", async () => {
+		completeSimpleMock.mockImplementation((_model, context: TranscriptContext) => {
+			const prompt = JSON.stringify(context.messages);
+			return prompt.length > 15_000
+				? {
+						...mockSummaryResponse,
+						stopReason: "error",
+						errorMessage: "The input is longer than the model's context length",
+					}
+				: mockSummaryResponse;
+		});
+		const conversation: AgentMessage[] = [
+			{ role: "user", content: "请保留需求。".repeat(4000), timestamp: Date.now() },
+		];
+
+		const result = await generateSummaryWithUsage(conversation, createModel(false), 2000, "test-key");
+
+		expect(result.text).toContain("Test summary");
+		expect(completeSimpleMock.mock.calls.length).toBeGreaterThan(2);
+		expect(
+			completeSimpleMock.mock.calls.some(
+				(call) => JSON.stringify((call[1] as TranscriptContext).messages).length < 15_000,
+			),
+		).toBe(true);
+	});
+
+	it("halves a request when the provider throws an input context error", async () => {
+		completeSimpleMock.mockImplementation((_model, context: TranscriptContext) => {
+			if (JSON.stringify(context.messages).length > 15_000) {
+				throw new Error("400 invalid_request_error: The input is longer than the model's context length");
+			}
+			return mockSummaryResponse;
+		});
+
+		const result = await generateSummaryWithUsage(
+			[{ role: "user", content: "保留任务进度。".repeat(4000), timestamp: Date.now() }],
+			createModel(false),
+			2000,
+			"test-key",
+		);
+
+		expect(result.text).toContain("Test summary");
+		expect(completeSimpleMock.mock.calls.length).toBeGreaterThan(2);
+	});
+
+	it("uses a bounded mechanical checkpoint if even a minimal request overflows", async () => {
+		completeSimpleMock.mockResolvedValue({
+			...mockSummaryResponse,
+			stopReason: "error",
+			errorMessage: "Context overflow recovery failed: input is longer than the model's context length",
+		});
+		const conversation: AgentMessage[] = [
+			{ role: "user", content: "最新中文要求：继续修复压缩。", timestamp: Date.now() },
+		];
+
+		const result = await generateSummaryWithUsage(conversation, createModel(false), 2000, "test-key");
+
+		expect(result.text).toContain("最新中文要求：继续修复压缩。");
+		expect(result.text).toContain("mechanical checkpoint");
+		expect(result.text.length).toBeLessThan(16_000);
+		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("bounds a split-turn prefix without changing its persisted messages", async () => {
+		const longRequest = "继续处理当前中文任务。".repeat(20_000);
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: [],
+			turnPrefixMessages: [{ role: "user", content: longRequest, timestamp: Date.now() }],
+			isSplitTurn: true,
+			tokensBefore: 200_000,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 2000, keepRecentTokens: 20 },
+		};
+
+		const result = await compact(preparation, createModel(false), "test-key");
+		const prompts = completeSimpleMock.mock.calls.map((call) =>
+			JSON.stringify((call[1] as TranscriptContext).messages),
+		);
+
+		expect(result.summary).toContain("Turn Context (split turn)");
+		expect(prompts.length).toBeGreaterThan(1);
+		expect(prompts.every((prompt) => prompt.length < 110_000)).toBe(true);
+		expect(preparation.turnPrefixMessages[0]).toMatchObject({ content: longRequest });
 	});
 
 	it("rejects a length-limited split-turn summary", async () => {
@@ -213,7 +366,11 @@ describe("generateSummary reasoning options", () => {
 
 	it("retries an incomplete split-turn checkpoint with the full reserve", async () => {
 		completeSimpleMock
-			.mockResolvedValueOnce({ ...mockSummaryResponse, stopReason: "length", content: [{ type: "text", text: "partial" }] })
+			.mockResolvedValueOnce({
+				...mockSummaryResponse,
+				stopReason: "length",
+				content: [{ type: "text", text: "partial" }],
+			})
 			.mockResolvedValueOnce(mockSummaryResponse);
 		const preparation: CompactionPreparation = {
 			firstKeptEntryId: "entry-keep",

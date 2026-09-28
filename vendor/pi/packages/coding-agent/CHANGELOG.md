@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed large history compactions failing when the initial summary exhausted its output budget by retrying once with the full compaction reserve.
+- Fixed input-overflow compactions by omitting thinking and oversized tool arguments from summary requests, splitting bounded requests when needed, and using a small mechanical checkpoint if the provider still rejects the input.
+
 ## [0.87.1] - 2026-09-22
 
 ### New Features
