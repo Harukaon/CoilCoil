@@ -12,9 +12,11 @@ function installHeadlessNodeExecutable(): void {
   if (!source || !agentDir || !existsSync(source)) return;
   const binDir = join(agentDir, "runtime-bin");
   const target = join(binDir, process.platform === "win32" ? "node.exe" : "node");
-  mkdirSync(binDir, { recursive: true });
-  rmSync(target, { force: true });
   try {
+    mkdirSync(binDir, { recursive: true });
+    // On Windows the previous link stays locked while an orphaned child process
+    // still runs it; a failed removal must not take the whole runtime down.
+    rmSync(target, { force: true });
     if (process.platform === "win32") linkSync(source, target);
     else {
       // Launching an Electron Helper through a symlink named `node` makes macOS
