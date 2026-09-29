@@ -72,7 +72,7 @@ export function mcpSetupGuide(agentDir: string): string {
     "一个 Server 长什么样（二选一）：",
     '  stdio（本地起进程）：{ "command": "npx", "args": ["-y", "xxx-mcp"], "env": {...} }',
     '  http（远端地址）：{ "url": "https://…/mcp", "headers": {...} }',
-    `  占位符 ${"${VAR}"} / $env:VAR 会在启动时从环境变量展开；没设置的变量展开成空，不要把 token 明文写进文件。`,
+    `  占位符 ${"${VAR}"} / $env:VAR 会在启动时从环境变量展开；没设置的变量展开成空。`,
     "",
     "步骤：",
     "1. 用户给的配置先用 mcp op=parse_snippet 解析：README 里抄来的裸对象、VS Code 的 {servers} 写法都能认，返回规整的字段再填给 save。",
@@ -83,15 +83,14 @@ export function mcpSetupGuide(agentDir: string): string {
     "",
     "坑：",
     `- 别用 bash 改 mcp.json：绕过校验不说，会话不 reload，配完 Agent 照样看不到；删和停用还有 removed/disabled 两套私账，手改文件会跟面板打架。`,
-    `- 敏感值（env/headers 里名字带 token/key/secret/password 的，以及地址里的密码与敏感参数）读出来都是 ${MASKED_SECRET_VALUE}，list 和 get_json 一样：那是掩码不是值，原样传回去表示“不改”，真要换就填新值；别把它当密钥读给用户。`,
     "- 会话级开关（session_enable/session_disable）只管这次对话藏不藏，救不回配置里已停用的 Server；要真启用用 op=enable。",
-    "- 需要登录的 Server 走 auth 那一套（见 topic=auth），不要让用户把 token 贴进配置文件。",
+    "- 需要登录的 Server 走 auth 那一套（见 topic=auth）；尽可能不要让用户把 token 贴进配置文件，如果直接贴入，也要提醒用户密钥已经暴露并建议及时轮换。",
   ].join("\n");
 }
 
 export function mcpAuthGuide(): string {
   return [
-    "MCP 认证：token 不在 mcp.json 里，在凭据库里；OAuth 要走浏览器一圈，Agent 在中间只负责递话。",
+    "MCP 认证：需要登录的 Server 走 OAuth 或 bearer 流程；OAuth 要走浏览器一圈，Agent 在中间只负责递话。",
     "",
     "OAuth（浏览器登录）四步，顺序不能乱：",
     "1. mcp op=auth_start：返回 authorizationUrl（把链接给用户去点）和 awaitingCallback。",
@@ -100,7 +99,7 @@ export function mcpAuthGuide(): string {
     "4. 用户如果关了对话框不玩了，调 op=auth_cancel 把占着的回调位放掉。",
     "回调没回到监听器（远程机器、端口被挡）：让用户把浏览器地址栏整段粘回来，用 op=auth_complete + input 传过去，一样能换令牌。",
     "",
-    "bearer：save 时填 bearerTokenEnv（环境变量名），不要把 token 本体写进 headers；填完 connect 测一次。",
+    "bearer：save 时可以填写 bearerTokenEnv（环境变量名）；通常建议不要把 token 本体写进 headers，若直接填写则提醒用户密钥已暴露并建议轮换，填完 connect 测一次。",
     "登出：mcp op=logout 清掉这台机器存的登录信息（配置还在）。",
     "",
     "坑：",
@@ -121,7 +120,6 @@ export function modelSetupGuide(): string {
     "新建或修改服务商用 op=save + provider：",
     "- 新自定义服务商至少需要 id、baseUrl、api 和 models；modelsMode=merge（默认）按模型 ID 增量合并，modelsMode=replace 才会替换整张目录。",
     "- provider.models 每项可以填 id/name/api/baseUrl/reasoning/thinkingLevelMap/input/contextWindow/maxTokens/cost/samplingParams/headers/compat。只改一个模型字段时只传 id 和要改的字段，其他字段会保留。",
-    "- API Key 可以直接填 provider.apiKey 或 provider.credential.values；会进入本机私有凭据库，工具结果不会回显。也可以用 apiKeyReference=$ENV_VAR 或 !命令引用环境/命令凭据。",
     "- 不要用 bash 改 models.json/auth.json：工具会做校验、reload 运行时，并让当前 Agent 立即看到新目录。",
     "",
     "上游模型和元数据：",

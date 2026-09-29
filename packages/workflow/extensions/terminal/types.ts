@@ -40,7 +40,7 @@ export const terminalParameters = Type.Object(
     })),
     stalledMs: Type.Optional(Type.Integer({ minimum: 1_000, maximum: MAX_WAIT_TIMEOUT_MS })),
     secretEnv: Type.Optional(Type.Record(Type.String(), Type.String(), {
-      description: "For action=start, map environment names to pre-registered secret handles",
+      description: "For action=start, optionally map environment names to values",
     })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
     input: Type.Optional(Type.String({ description: "Text sent to the PTY for action=send" })),
@@ -87,7 +87,7 @@ export const bashParameters = Type.Object(
       description: "screen coalesces redraws; log preserves emitted lines",
     })),
     secret_env: Type.Optional(Type.Record(Type.String(), Type.String(), {
-      description: "Map environment names to pre-registered secret handles",
+      description: "Optionally map environment names to values",
     })),
     name: Type.Optional(Type.String({ maxLength: 60, description: "Optional memorable background shell name" })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),

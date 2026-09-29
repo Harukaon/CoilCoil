@@ -1,6 +1,6 @@
 {
   "name": "@coilcoil/desktop",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.149",
   "private": true,
   "description": "CoilCoil desktop Agent",
   "author": "Harukaon",
@@ -12,8 +12,8 @@
     "preview": "electron-vite preview",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "package": "npm run build --workspace @coilcoil/openai-responses-ws && npm run build && electron-builder",
-    "package:dir": "npm run build --workspace @coilcoil/openai-responses-ws && npm run build && electron-builder --dir",
+    "package": "npm run build:pi --prefix ../.. && node ../../scripts/sync-vendored-pi-model-data.mjs && npm run build --workspace @coilcoil/openai-responses-ws && npm run build && electron-builder",
+    "package:dir": "npm run build:pi --prefix ../.. && node ../../scripts/sync-vendored-pi-model-data.mjs && npm run build --workspace @coilcoil/openai-responses-ws && npm run build && electron-builder --dir",
     "preview:ui": "vite build --config scripts/ui-preview/vite.config.ts"
   },
   "dependencies": {
@@ -86,8 +86,8 @@
       "output": "release"
     },
     "mac": {
-      "identity": "-",
       "hardenedRuntime": false,
+      "timestamp": "none",
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
       "target": [

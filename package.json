@@ -1,6 +1,6 @@
 {
   "name": "coilcoil",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.149",
   "private": true,
   "description": "CoilCoil coding agent product",
   "author": "Harukaon",
@@ -31,7 +31,7 @@
     "build": "npm run build:pi && npm run build --workspace @coilcoil/openai-responses-ws && npm run build --workspace @coilcoil/cli && npm run build --workspace @coilcoil/desktop",
     "dev": "npm run dev --workspace @coilcoil/desktop",
     "cli": "npm run dev --workspace @coilcoil/cli --",
-    "package:desktop": "npm run build:pi && npm run package --workspace @coilcoil/desktop",
+    "package:desktop": "npm run package --workspace @coilcoil/desktop",
     "smoke": "npm run build && node scripts/runtime-smoke.mjs",
     "smoke:live": "npm run build && node scripts/runtime-smoke.mjs --live",
     "smoke:concurrency": "npm run build --workspace @coilcoil/desktop && node scripts/runtime-concurrency-smoke.mjs",

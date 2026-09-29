@@ -65,7 +65,7 @@ const ModelDefinitionParams = Type.Object({
 
 const ModelCredentialParams = Type.Object({
   method: Type.String({ description: "credential.methods 中的方式 ID" }),
-  values: Type.Record(Type.String(), Type.String(), { description: "凭据字段；明文 key 也可以填，会保存到本机凭据库" }),
+  values: Type.Record(Type.String(), Type.String(), { description: "凭据字段；按用户要求填写" }),
   preserveFields: Type.Optional(Type.Array(Type.String(), { description: "留空但仍保留的已配置凭据字段" })),
 });
 
@@ -78,7 +78,7 @@ const ModelProviderParams = Type.Object({
   headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "服务商请求头；敏感值可用 •••••• 原样保留" })),
   compat: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "服务商兼容性 JSON" })),
   authHeader: Type.Optional(Type.Boolean({ description: "是否由 Pi 自动写入 Authorization 请求头" })),
-  apiKeyReference: Type.Optional(Type.String({ description: "$环境变量或 !命令形式的 API Key 引用；普通明文 key 用 apiKey/credential；传空字符串可清除" })),
+  apiKeyReference: Type.Optional(Type.String({ description: "可选的 API Key 来源；传空字符串可清除" })),
   preserveApiKeyReference: Type.Optional(Type.Boolean({ description: "未提供新引用时是否保留 models.json 中已有的密钥引用" })),
   disabled: Type.Optional(Type.Boolean({ description: "保留配置但从模型列表隐藏" })),
   replaceModels: Type.Optional(Type.Boolean({ description: "是否用 models 替换 Pi 内置模型目录" })),
@@ -86,22 +86,22 @@ const ModelProviderParams = Type.Object({
   modelsMode: Type.Optional(StringEnum(["merge", "replace"], { description: "models 的处理方式，默认 merge" })),
   removeModels: Type.Optional(Type.Array(Type.String(), { description: "按模型 ID 移除现有模型" })),
   modelOverrides: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "按模型 ID 的运行时覆盖" })),
-  apiKey: Type.Optional(Type.String({ description: "明文 API Key；会写入本机私有凭据库，不会返回到工具结果" })),
+  apiKey: Type.Optional(Type.String({ description: "API Key；按用户要求用于服务商配置" })),
   credential: Type.Optional(ModelCredentialParams),
 }, { additionalProperties: false, description: "model op=save 的服务商增量配置；未提供的字段保持不变" });
 
 const ModelRequestParams = Type.Object({
   baseUrl: Type.Optional(Type.String()),
   api: Type.Optional(Type.String()),
-  apiKey: Type.Optional(Type.String({ description: "明文 API Key；只用于本次拉取/测试，不会由运行时返回" })),
+  apiKey: Type.Optional(Type.String({ description: "API Key；按用户要求用于本次拉取或测试" })),
   headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-  provider: Type.Optional(Type.String({ description: "已有服务商 ID；省略 apiKey 时使用其本机凭据" })),
+  provider: Type.Optional(Type.String({ description: "已有服务商 ID；省略 apiKey 时使用该服务商已配置的凭据" })),
   modelId: Type.Optional(Type.String({ description: "测试连接时使用的模型 ID" })),
 });
 
 const WsConfigurationParams = Type.Object({
   baseUrl: Type.String({ description: "OpenAI Responses WS 地址" }),
-  apiKey: Type.Optional(Type.String({ description: "明文 API Key；会写入本机私有配置，不会回显" })),
+  apiKey: Type.Optional(Type.String({ description: "API Key；按用户要求用于 WS 配置" })),
   preserveApiKey: Type.Optional(Type.Boolean()),
   fast: Type.Optional(Type.Boolean()),
 });
@@ -143,7 +143,7 @@ export const CoilcoilParams = Type.Object({
     url: Type.Optional(Type.String({ description: "http 的服务器地址" })),
     headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "http 的请求头；敏感值用 ${VAR} 占位符" })),
     auth: Type.Optional(Type.Union([StringEnum(["oauth", "bearer"]), Type.Literal(false)], { description: "oauth 走浏览器认证；false 是明确不认证" })),
-    bearerTokenEnv: Type.Optional(Type.String({ description: "放令牌的环境变量名（别把令牌本体写进配置）" })),
+    bearerTokenEnv: Type.Optional(Type.String({ description: "放令牌的环境变量名；如果直接填写令牌，提醒用户已暴露并建议轮换" })),
     lifecycle: Type.Optional(StringEnum(["lazy", "eager", "keep-alive"], { description: "默认 lazy：用到才连、闲置放手" })),
     idleTimeout: Type.Optional(Type.Number({ description: "闲置多少分钟后断开" })),
     requestTimeoutMs: Type.Optional(Type.Number({ description: "单次调用超时（毫秒）" })),
@@ -817,7 +817,6 @@ export default function coilcoilSetupTool(pi: ExtensionAPI): void {
       "自带文档（架构、需求、路线图）用 area=guide + op=read_doc 按名读，不要整目录扫。",
       "mcp op=connect 报 needs-auth 不是失败，是去走 auth_start → 拿链接给用户点 → auth_await_each → auth_finish 那四步；Agent 永远不要自己 curl 授权地址。",
       "订阅模型用 model op=auth_start → 把 authUrl 给用户 → op=auth_await / auth_respond，和 MCP 一样走运行时 OAuth，不要自己 curl 授权地址。",
-      "敏感值读出来是 ••••••（掩码，不是值）：原样传回去就是不改，真要换再填新值；模型 API Key 可以按用户要求明文写入本机私有凭据库，但不要在回复里复述它。",
     ],
     parameters: CoilcoilParams,
     executionMode: "sequential",

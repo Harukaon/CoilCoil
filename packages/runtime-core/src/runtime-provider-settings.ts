@@ -191,7 +191,7 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     }
     const apiKeyReference = draft.apiKeyReference?.trim();
     if (apiKeyReference && !apiKeyReference.startsWith("$") && !apiKeyReference.startsWith("!")) {
-      throw new Error("API Key 引用应使用 $环境变量、${环境变量} 或 !命令。普通密钥请填写在私有 API 密钥输入框中。");
+      throw new Error("API Key 引用应使用 $环境变量、${环境变量} 或 !命令；普通密钥请直接填写 API Key 字段。");
     }
 
     const providerHeaders = mergeMaskedStringRecord(draft.headers, objectValue(existing?.headers));

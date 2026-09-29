@@ -98,10 +98,7 @@ Installers and archives are written to `apps/desktop/release/`. The macOS build 
 Windows builds NSIS installers for x64 and arm64 plus an x64 ZIP:
 
 ```bash
-npm run build:pi
-npm run build --workspace @coilcoil/openai-responses-ws
-npm run build --workspace @coilcoil/desktop
-npm --prefix apps/desktop exec electron-builder -- --win
+npm run package --workspace @coilcoil/desktop -- --win
 ```
 
 `node-pty` is the only native dependency and is built with Node-API, so its

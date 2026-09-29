@@ -8,6 +8,11 @@ CoilCoil carries a thin fork of Pi under `vendor/pi`.
 - Import method: Git subtree with squashed upstream history
 - Current sync point: upstream `f07218c4d` (`v0.87.1`, 2026-09-22).
   The previous sync point was `16787ad5b` (`v0.87.0`).
+- Selected Claude updates from upstream main after `v0.87.1` are carried in
+  `packages/ai/scripts/generate-models.ts`: Claude Sonnet 5.5 support
+  (`c90d9ea58`) and complete Copilot Claude Opus 5.5 effort metadata
+  (`fde38ed7c`). This is a narrow backport; the rest of upstream main remains
+  unsynced.
 - `v0.87.1` reports `claude-cli/2.1.280` on Anthropic OAuth requests,
   allowing models such as Opus 5.5 that reject the `2.1.251` identifier in
   `v0.87.0`.

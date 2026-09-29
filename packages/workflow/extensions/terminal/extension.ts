@@ -436,7 +436,6 @@ export default function terminalExtension(pi: ExtensionAPI): void {
       "Use the id returned by bash or terminal start for read, await, send, and stop.",
       `Use bounded event-driven await calls (default ${DEFAULT_BLOCK_UNTIL_MS}ms), not repeated shell sleep commands or unbounded polling.`,
       "Use screen mode for TUI redraws and log mode when every emitted line matters.",
-      "For credentials, use only pre-registered secretEnv handles; never put secret values in command or input.",
     ],
     parameters: terminalParameters,
     executionMode: "parallel",

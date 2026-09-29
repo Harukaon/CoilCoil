@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added Claude Sonnet 5.5 with adaptive thinking, mid-conversation effort and system updates, 1M context, and official pricing metadata.
+
+### Fixed
+
+- Fixed incomplete GitHub Copilot Claude Opus 5.5 thinking-level metadata.
+
 ## [0.87.1] - 2026-09-22
 
 ### Added
