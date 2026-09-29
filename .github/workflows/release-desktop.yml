@@ -21,8 +21,8 @@ jobs:
     name: Open the draft release
     runs-on: ubuntu-latest
     steps:
-      # Created up front and left as a draft so the Windows build has somewhere
-      # to upload to. Nobody sees it until the build succeeds.
+      # Created up front and left as a draft so both platform builds have
+      # somewhere to upload to. Nobody sees it until both builds succeed.
       - name: Create the draft prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,6 +57,7 @@ jobs:
       - name: Prepare dependencies and native modules
         run: |
           npm ci --prefix vendor/pi --ignore-scripts
+          npm run hydrate:model-data --prefix vendor/pi
           npm ci --ignore-scripts
           npm run patch:chrome-devtools-mcp
           npm rebuild node-pty esbuild
@@ -109,6 +110,7 @@ jobs:
       - name: Prepare dependencies and native modules
         run: |
           npm ci --prefix vendor/pi --ignore-scripts
+          npm run hydrate:model-data --prefix vendor/pi
           npm ci --ignore-scripts
           npm run patch:chrome-devtools-mcp
           npm rebuild node-pty esbuild
