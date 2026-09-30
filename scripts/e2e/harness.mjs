@@ -1,8 +1,9 @@
 // Launches the real CoilCoil desktop app against the mock gateway, and drives it
 // the way a person would. See README.md.
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { randomInt } from "node:crypto";
 import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import { _electron as electron } from "playwright-core";
@@ -55,7 +56,18 @@ function freePort() {
  * 场景开着 GPU，浏览器面板走共享纹理画面，和真实用户的 Mac 一样。
  */
 export async function launch({ projects = ["projA", "projB"], remote = false, gpu = false } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "coilcoil-e2e-"));
+  // The data root shows up in the UI (workspace paths, the settings footer), and a proportional
+  // font draws letters at different widths, which once flipped a wrap between two runs of the same
+  // build. Digits share one width, so the layout of two runs is identical.
+  let root = "";
+  for (let attempt = 0; attempt < 10 && !root; attempt += 1) {
+    const candidate = join(tmpdir(), `coilcoil-e2e-${String(randomInt(0, 1_000_000)).padStart(6, "0")}`);
+    if (existsSync(candidate)) continue;
+    mkdirSync(candidate, { recursive: true });
+    root = candidate;
+  }
+  if (!root) root = mkdtempSync(join(tmpdir(), "coilcoil-e2e-"));
+  else process.once("exit", () => rmSync(root, { recursive: true, force: true }));
   const data = join(root, "data");
   const home = join(root, "home");
   const log = join(root, "gateway.jsonl");
