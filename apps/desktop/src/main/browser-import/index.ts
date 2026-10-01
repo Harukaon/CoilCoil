@@ -14,7 +14,7 @@ import type { CookieHarvest } from "./cookie-record";
 import { browserPartitions, browserSession, writeCookies } from "./cookie-store";
 import { clearSavedLogins, listSavedLogins, saveLogins, vaultAvailable } from "./password-vault";
 import { SafariAccessDeniedError, readSafariCookies } from "./safari-cookies";
-import { clearWindowsChromiumKeys, readWindowsChromiumKeys, type WindowsChromiumKeys } from "./windows-chromium-crypto";
+import { clearWindowsChromiumKeys, directWindowsImportAvailable, readWindowsChromiumKeys, type WindowsChromiumKeys } from "./windows-chromium-crypto";
 
 export { fillSavedCredentials } from "./password-autofill";
 
@@ -72,6 +72,11 @@ export function listImportableProfiles(): ImportableProfile[] {
       const path = profileDirectory(browser, profile.id);
       profiles.push({
         ...profile,
+        // Chrome 154 adds a third browser-owned key layer. Admin approval is
+        // insufficient: do not offer an action that would import zero cookies.
+        ...(process.platform === "win32" && !directWindowsImportAvailable(browser)
+          ? { available: false, problem: "Chrome 新版 Cookie 加密暂无法直接导入" }
+          : {}),
         cookieCount: countChromiumCookies(path),
         passwordCount: countChromiumLogins(path),
       });
@@ -124,6 +129,9 @@ export async function importBrowserCookies(
     if (input.browser !== "safari") {
       const browser = browserDescriptor(input.browser);
       if (!browser) throw new Error("不认识这个浏览器。");
+      if (process.platform === "win32" && !directWindowsImportAvailable(browser)) {
+        throw new Error("Chrome 新版 Cookie 需要浏览器自身解锁，管理员授权不足以安全导入；没有导入任何数据。");
+      }
       const path = profileDirectory(browser, input.profile);
       if (!existsSync(path)) throw new Error("这个浏览器配置文件已经不在了，请刷新列表。");
       // Windows refuses to copy a live browser's locked Cookie database. Check

@@ -12,9 +12,14 @@ export interface WindowsChromiumKeys {
   appBound?: Buffer;
 }
 
-/** Only Chrome and Edge have an approved Windows source and a matching helper path. */
+/** Chrome 154 has a third browser-only layer; do not pretend UAC alone can read it. */
+export function directWindowsImportAvailable(browser: ChromiumBrowserDescriptor): boolean {
+  return browser.id === "edge";
+}
+
+/** Never request UAC for a source whose encrypted key we cannot really use. */
 export async function readWindowsChromiumKeys(browser: ChromiumBrowserDescriptor): Promise<WindowsChromiumKeys> {
-  if (process.platform !== "win32" || (browser.id !== "chrome" && browser.id !== "edge")) {
+  if (process.platform !== "win32" || !directWindowsImportAvailable(browser)) {
     throw new Error("这个浏览器不支持 Windows 登录状态导入。");
   }
   const { app } = await import("electron");
@@ -33,6 +38,9 @@ export async function readWindowsChromiumKeys(browser: ChromiumBrowserDescriptor
       throw new Error("已取消管理员授权，浏览器数据没有导入。");
     }
     if (failure.code === "ENOENT") throw new Error("导入组件未安装完整，请重新安装 CoilCoil。");
+    if (failure.stderr?.includes("additional browser processing is required")) {
+      throw new Error(`${browser.name} 的新版加密需要由浏览器自身解锁，管理员授权仍不够；没有导入任何登录数据。`);
+    }
     throw new Error("Windows 没能读取浏览器的加密密钥。请确认已完全退出浏览器，再重试管理员授权。");
   }
   try {

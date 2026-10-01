@@ -150,10 +150,12 @@ internal static class BrowserImportKeyHelper
                     byte[] payload = ProtectedData.Unprotect(protectedKey, null, DataProtectionScope.CurrentUser);
                     try
                     {
-                        // Chromium stores versioned metadata before the AES-256 key.
-                        // Only the trailing 32 bytes are the cookie key; reject any
-                        // unexpected short payload rather than guessing a value.
-                        if (payload.Length < 33) throw new InvalidOperationException("Unsupported App-Bound key format.");
+                        // Edge's verified format has 41 bytes of metadata followed
+                        // by a 32-byte key. New Chrome adds another protected layer
+                        // (133 bytes on Chrome 154); using its last 32 bytes would
+                        // silently import zero cookies, so refuse unverified layouts.
+                        if (payload.Length != 73)
+                            throw new InvalidOperationException("Unsupported App-Bound key format: additional browser processing is required.");
                         appBound = new byte[32];
                         Buffer.BlockCopy(payload, payload.Length - 32, appBound, 0, 32);
                     }

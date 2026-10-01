@@ -14,7 +14,7 @@ import {
   isPermissionDenied, listChromiumProfiles, profileDirectory,
 } from "../src/main/browser-import/browser-catalog.ts";
 import { chromiumTimeToUnixSeconds } from "../src/main/browser-import/sqlite-snapshot.ts";
-import { clearWindowsChromiumKeys, decryptWindowsChromiumValue } from "../src/main/browser-import/windows-chromium-crypto.ts";
+import { clearWindowsChromiumKeys, decryptWindowsChromiumValue, directWindowsImportAvailable } from "../src/main/browser-import/windows-chromium-crypto.ts";
 
 const KEY = pbkdf2Sync("peanuts", "saltysalt", 1003, 16, "sha1");
 
@@ -296,9 +296,11 @@ test("目录真的不在才算没装", () => {
   assert.equal(listChromiumProfiles(CHROMIUM_BROWSERS[0], join(tmpdir(), "coilcoil-no-such-browser-xyz")).kind, "absent");
 });
 
-test("Windows 的导入来源同时包含 Chrome 和 Edge，不误列 Mac 专属浏览器", () => {
+test("Windows 同时识别 Chrome 和 Edge，但不能把识别到误当作 Chrome 已可导入", () => {
   assert.deepEqual(chromiumBrowsersForPlatform("win32").map((browser) => browser.id), ["chrome", "edge"]);
   assert.equal(browserDescriptor("edge", "win32")?.name, "Microsoft Edge");
+  assert.equal(directWindowsImportAvailable(browserDescriptor("edge", "win32")!), true);
+  assert.equal(directWindowsImportAvailable(browserDescriptor("chrome", "win32")!), false, "Chrome 154 不能仅凭 UAC 真导入 v20");
   assert.equal(browserDescriptor("safari", "win32"), undefined);
   assert.equal(browserDescriptor("brave", "win32"), undefined);
   assert.deepEqual(chromiumBrowsersForPlatform("linux"), []);

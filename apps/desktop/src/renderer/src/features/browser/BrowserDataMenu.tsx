@@ -168,7 +168,10 @@ export function BrowserDataMenu(): React.JSX.Element | null {
                       onClick={() => {
                         // 缺权限的那一行不是死路：点它就去开权限，回来再导入。
                         if (profile.fix) void window.coilcoil.openPermissionSettings("full-disk");
-                        else if (platform === "win32") setPendingImport(profile);
+                        else if (platform === "win32") {
+                          setOpen(false);
+                          setPendingImport(profile);
+                        }
                         else void importFrom(profile);
                       }}
                     >
