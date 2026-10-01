@@ -9,7 +9,10 @@ import { cookiesFromDatabase } from "../src/main/browser-import/chromium-cookies
 import { toElectronCookie } from "../src/main/browser-import/cookie-record.ts";
 import { decryptChromiumValue } from "../src/main/browser-import/chromium-crypto.ts";
 import { parseBinaryCookies } from "../src/main/browser-import/safari-cookies.ts";
-import { CHROMIUM_BROWSERS, isPermissionDenied, listChromiumProfiles } from "../src/main/browser-import/browser-catalog.ts";
+import {
+  browserDescriptor, browserUserDataRoot, CHROMIUM_BROWSERS, chromiumBrowsersForPlatform,
+  isPermissionDenied, listChromiumProfiles, profileDirectory,
+} from "../src/main/browser-import/browser-catalog.ts";
 import { chromiumTimeToUnixSeconds } from "../src/main/browser-import/sqlite-snapshot.ts";
 
 const KEY = pbkdf2Sync("peanuts", "saltysalt", 1003, 16, "sha1");
@@ -257,6 +260,35 @@ test("没权限和没装要分得开，不能都当成没装", { skip: process.g
 
 test("目录真的不在才算没装", () => {
   assert.equal(listChromiumProfiles(CHROMIUM_BROWSERS[0], join(tmpdir(), "coilcoil-no-such-browser-xyz")).kind, "absent");
+});
+
+test("Windows 的导入来源同时包含 Chrome 和 Edge，不误列 Mac 专属浏览器", () => {
+  assert.deepEqual(chromiumBrowsersForPlatform("win32").map((browser) => browser.id), ["chrome", "edge"]);
+  assert.equal(browserDescriptor("edge", "win32")?.name, "Microsoft Edge");
+  assert.equal(browserDescriptor("safari", "win32"), undefined);
+  assert.equal(browserDescriptor("brave", "win32"), undefined);
+  assert.deepEqual(chromiumBrowsersForPlatform("linux"), []);
+  assert.deepEqual(chromiumBrowsersForPlatform("darwin").map((browser) => browser.id), CHROMIUM_BROWSERS.map((browser) => browser.id));
+});
+
+test("Windows 的 Chrome、Edge 各自读取 %LOCALAPPDATA% 下的 User Data", () => {
+  const chrome = browserDescriptor("chrome", "win32")!;
+  const edge = browserDescriptor("edge", "win32")!;
+  const home = "C:\\Users\\tester";
+  const local = "D:\\BrowserData";
+  assert.equal(browserUserDataRoot(chrome, "win32", home, local), "D:\\BrowserData\\Google\\Chrome\\User Data");
+  assert.equal(browserUserDataRoot(edge, "win32", home, local), "D:\\BrowserData\\Microsoft\\Edge\\User Data");
+  assert.equal(profileDirectory(edge, "Profile 1", "win32", home, local), "D:\\BrowserData\\Microsoft\\Edge\\User Data\\Profile 1");
+  assert.equal(browserUserDataRoot(chrome, "win32", home, ""), "C:\\Users\\tester\\AppData\\Local\\Google\\Chrome\\User Data");
+  assert.equal(browserUserDataRoot(chrome, "darwin", "/Users/tester"), "/Users/tester/Library/Application Support/Google/Chrome");
+});
+
+test("配置文件只能是源浏览器根目录里的单层目录，不能用 IPC 参数访问别处", () => {
+  const chrome = browserDescriptor("chrome", "win32")!;
+  for (const id of ["", ".", "..", "../other", "..\\other", "Default/Network", "C:\\Users\\other", "bad\0name"]) {
+    assert.throws(() => profileDirectory(chrome, id, "win32", "C:\\Users\\tester", "C:\\Users\\tester\\AppData\\Local"), /配置目录无效/);
+  }
+  assert.equal(profileDirectory(chrome, "Default", "win32", "C:\\Users\\tester", "C:\\Users\\tester\\AppData\\Local"), "C:\\Users\\tester\\AppData\\Local\\Google\\Chrome\\User Data\\Default");
 });
 
 test("只有系统拒绝才算拒绝，找不到不算", () => {

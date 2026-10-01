@@ -1,51 +1,81 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import type { ImportableBrowserId, ImportableProfile } from "../../shared/desktop-api";
 
 /**
  * Where the browsers a user might already be signed in to keep their profiles.
  *
- * Every Chromium fork keeps the same layout under a different application
- * directory, and each one encrypts its cookies with a key stored in the login
- * keychain under its own service name. Those two strings are the whole
- * difference between them, so a table is enough — no per-browser code.
+ * Chromium forks share a profile layout but not the same OS directory or
+ * encryption key. Windows paths are explicitly listed only for browsers whose
+ * Windows import we intend to support; other macOS sources must not leak into
+ * the Windows picker.
  *
- * Safari is not Chromium and shares nothing but the intent, so it is described
- * here only to keep one list of what the user can import from.
+ * Safari is not Chromium and has its own reader.
  */
 export interface ChromiumBrowserDescriptor {
   id: ImportableBrowserId;
   name: string;
-  /** Relative to ~/Library/Application Support. */
+  /** Relative to ~/Library/Application Support on macOS. */
   userDataDirectory: string;
-  /** `security find-generic-password -s <service> -a <account>`. */
+  /** Relative to %LOCALAPPDATA% on Windows. Only set for supported sources. */
+  windowsUserDataDirectory?: string;
+  /** `security find-generic-password -s <service> -a <account>` on macOS. */
   keychainService: string;
   keychainAccount: string;
 }
 
 export const CHROMIUM_BROWSERS: readonly ChromiumBrowserDescriptor[] = [
-  { id: "chrome", name: "Google Chrome", userDataDirectory: "Google/Chrome", keychainService: "Chrome Safe Storage", keychainAccount: "Chrome" },
+  { id: "chrome", name: "Google Chrome", userDataDirectory: "Google/Chrome", windowsUserDataDirectory: "Google/Chrome/User Data", keychainService: "Chrome Safe Storage", keychainAccount: "Chrome" },
   { id: "chrome-beta", name: "Chrome Beta", userDataDirectory: "Google/Chrome Beta", keychainService: "Chrome Safe Storage", keychainAccount: "Chrome" },
   { id: "chrome-canary", name: "Chrome Canary", userDataDirectory: "Google/Chrome Canary", keychainService: "Chromium Safe Storage", keychainAccount: "Chromium" },
   { id: "chromium", name: "Chromium", userDataDirectory: "Chromium", keychainService: "Chromium Safe Storage", keychainAccount: "Chromium" },
-  { id: "edge", name: "Microsoft Edge", userDataDirectory: "Microsoft Edge", keychainService: "Microsoft Edge Safe Storage", keychainAccount: "Microsoft Edge" },
+  { id: "edge", name: "Microsoft Edge", userDataDirectory: "Microsoft Edge", windowsUserDataDirectory: "Microsoft/Edge/User Data", keychainService: "Microsoft Edge Safe Storage", keychainAccount: "Microsoft Edge" },
   { id: "brave", name: "Brave", userDataDirectory: "BraveSoftware/Brave-Browser", keychainService: "Brave Safe Storage", keychainAccount: "Brave" },
   { id: "vivaldi", name: "Vivaldi", userDataDirectory: "Vivaldi", keychainService: "Vivaldi Safe Storage", keychainAccount: "Vivaldi" },
   { id: "arc", name: "Arc", userDataDirectory: "Arc/User Data", keychainService: "Arc Safe Storage", keychainAccount: "Arc" },
 ];
 
-export function applicationSupport(): string {
-  return join(homedir(), "Library", "Application Support");
+export function applicationSupport(home: string = homedir()): string {
+  return join(home, "Library", "Application Support");
 }
 
-export function browserDescriptor(id: ImportableBrowserId): ChromiumBrowserDescriptor | undefined {
-  return CHROMIUM_BROWSERS.find((browser) => browser.id === id);
+export function chromiumBrowsersForPlatform(platform: NodeJS.Platform = process.platform): readonly ChromiumBrowserDescriptor[] {
+  if (platform === "darwin") return CHROMIUM_BROWSERS;
+  if (platform === "win32") return CHROMIUM_BROWSERS.filter((browser) => browser.windowsUserDataDirectory !== undefined);
+  return [];
 }
 
-/** Absolute path of one profile directory inside a Chromium install. */
-export function profileDirectory(browser: ChromiumBrowserDescriptor, profileId: string): string {
-  return join(applicationSupport(), browser.userDataDirectory, profileId);
+export function browserDescriptor(id: ImportableBrowserId, platform: NodeJS.Platform = process.platform): ChromiumBrowserDescriptor | undefined {
+  return chromiumBrowsersForPlatform(platform).find((browser) => browser.id === id);
+}
+
+/** The source browser's root, not CoilCoil's Electron userData directory. */
+export function browserUserDataRoot(
+  browser: ChromiumBrowserDescriptor,
+  platform: NodeJS.Platform = process.platform,
+  home: string = homedir(),
+  localAppData: string | undefined = process.env.LOCALAPPDATA,
+): string | undefined {
+  if (platform === "darwin") return join(applicationSupport(home), browser.userDataDirectory);
+  if (platform !== "win32" || !browser.windowsUserDataDirectory) return undefined;
+  return win32.join(localAppData || win32.join(home, "AppData", "Local"), browser.windowsUserDataDirectory);
+}
+
+/** A profile ID comes from a browser's directory list, never an arbitrary path. */
+export function profileDirectory(
+  browser: ChromiumBrowserDescriptor,
+  profileId: string,
+  platform: NodeJS.Platform = process.platform,
+  home: string = homedir(),
+  localAppData: string | undefined = process.env.LOCALAPPDATA,
+): string {
+  if (!profileId || profileId === "." || profileId === ".." || /[/\\\0]/.test(profileId)) {
+    throw new Error("浏览器配置目录无效，请重新选择。");
+  }
+  const root = browserUserDataRoot(browser, platform, home, localAppData);
+  if (!root) throw new Error("这个浏览器在当前系统上不支持导入。");
+  return platform === "win32" ? win32.join(root, profileId) : join(root, profileId);
 }
 
 /**
@@ -125,8 +155,9 @@ export function isPermissionDenied(error: unknown): boolean {
 
 export function listChromiumProfiles(
   browser: ChromiumBrowserDescriptor,
-  root: string = join(applicationSupport(), browser.userDataDirectory),
+  root: string | undefined = browserUserDataRoot(browser),
 ): ChromiumListing {
+  if (!root) return { kind: "absent" };
   let entries: string[] = [];
   try {
     entries = readdirSync(root);
