@@ -7,8 +7,8 @@
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "node scripts/build-browser-import-helper.cjs && electron-vite dev",
+    "build": "node scripts/build-browser-import-helper.cjs && electron-vite build",
     "preview": "electron-vite preview",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
@@ -104,6 +104,12 @@
     },
     "win": {
       "icon": "build/icon.png",
+      "extraResources": [
+        {
+          "from": "build/browser-import-helper/BrowserImportKeyHelper.exe",
+          "to": "browser-import-helper/BrowserImportKeyHelper.exe"
+        }
+      ],
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "target": [
         {

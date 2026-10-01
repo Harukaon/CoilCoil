@@ -76,6 +76,12 @@ jobs:
             if (-not (Test-Path $file)) { throw "Missing node-pty prebuild: $file" }
           }
 
+      - name: Verify Windows browser import
+        run: |
+          node apps/desktop/scripts/build-browser-import-helper.cjs
+          npm run check --workspace @coilcoil/desktop
+          node --import tsx --test apps/desktop/tests/browser-import.test.ts
+
       - name: Stamp beta version
         run: npm run release:version -- "${{ github.run_number }}"
 

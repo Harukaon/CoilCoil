@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, win32 } from "node:path";
+import { join, posix, win32 } from "node:path";
 import type { ImportableBrowserId, ImportableProfile } from "../../shared/desktop-api";
 
 /**
@@ -37,7 +37,7 @@ export const CHROMIUM_BROWSERS: readonly ChromiumBrowserDescriptor[] = [
 ];
 
 export function applicationSupport(home: string = homedir()): string {
-  return join(home, "Library", "Application Support");
+  return posix.join(home, "Library", "Application Support");
 }
 
 export function chromiumBrowsersForPlatform(platform: NodeJS.Platform = process.platform): readonly ChromiumBrowserDescriptor[] {
@@ -57,7 +57,7 @@ export function browserUserDataRoot(
   home: string = homedir(),
   localAppData: string | undefined = process.env.LOCALAPPDATA,
 ): string | undefined {
-  if (platform === "darwin") return join(applicationSupport(home), browser.userDataDirectory);
+  if (platform === "darwin") return posix.join(applicationSupport(home), browser.userDataDirectory);
   if (platform !== "win32" || !browser.windowsUserDataDirectory) return undefined;
   return win32.join(localAppData || win32.join(home, "AppData", "Local"), browser.windowsUserDataDirectory);
 }
@@ -75,7 +75,7 @@ export function profileDirectory(
   }
   const root = browserUserDataRoot(browser, platform, home, localAppData);
   if (!root) throw new Error("这个浏览器在当前系统上不支持导入。");
-  return platform === "win32" ? win32.join(root, profileId) : join(root, profileId);
+  return platform === "win32" ? win32.join(root, profileId) : posix.join(root, profileId);
 }
 
 /**

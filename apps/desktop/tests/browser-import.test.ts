@@ -14,6 +14,7 @@ import {
   isPermissionDenied, listChromiumProfiles, profileDirectory,
 } from "../src/main/browser-import/browser-catalog.ts";
 import { chromiumTimeToUnixSeconds } from "../src/main/browser-import/sqlite-snapshot.ts";
+import { clearWindowsChromiumKeys, decryptWindowsChromiumValue } from "../src/main/browser-import/windows-chromium-crypto.ts";
 
 const KEY = pbkdf2Sync("peanuts", "saltysalt", 1003, 16, "sha1");
 
@@ -49,6 +50,39 @@ test("a record encrypted for another host stays unreadable rather than being tru
 test("an unknown version tag is reported instead of guessed at", () => {
   const record = Buffer.concat([Buffer.from("v20", "latin1"), Buffer.alloc(16)]);
   assert.equal(decryptChromiumValue(record, ".example.com", KEY), undefined);
+});
+
+const WINDOWS_LEGACY = Buffer.alloc(32, 0x1a);
+const WINDOWS_APP_BOUND = Buffer.alloc(32, 0x8b);
+
+function encryptWindows(value: string, version: "v10" | "v20", host?: string): Buffer {
+  const key = version === "v20" ? WINDOWS_APP_BOUND : WINDOWS_LEGACY;
+  const nonce = Buffer.alloc(12, 0x4a);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const body = host ? Buffer.concat([createHash("sha256").update(host).digest(), Buffer.from(value)]) : Buffer.from(value);
+  return Buffer.concat([Buffer.from(version), nonce, cipher.update(body), cipher.final(), cipher.getAuthTag()]);
+}
+
+test("Windows 同一配置里的 v10 与 v20 用不同密钥解密，不能混用", () => {
+  const keys = { kind: "windows" as const, legacy: Buffer.from(WINDOWS_LEGACY), appBound: Buffer.from(WINDOWS_APP_BOUND) };
+  assert.equal(decryptWindowsChromiumValue(encryptWindows("old", "v10", ".example.com"), ".example.com", keys), "old");
+  assert.equal(decryptWindowsChromiumValue(encryptWindows("new", "v20", ".example.com"), ".example.com", keys), "new");
+  assert.equal(decryptWindowsChromiumValue(encryptWindows("saved-password", "v10"), "", keys), "saved-password");
+  assert.equal(decryptWindowsChromiumValue(encryptWindows("secret", "v20"), "", keys), "secret");
+  assert.equal(decryptWindowsChromiumValue(encryptWindows("new", "v20", ".example.com"), ".example.com", { kind: "windows", legacy: keys.legacy }), undefined);
+  clearWindowsChromiumKeys(keys);
+  assert.equal(keys.legacy.every((byte) => byte === 0), true);
+  assert.equal(keys.appBound.every((byte) => byte === 0), true);
+});
+
+test("Windows v20 错误站点、篡改过的记录和未知加密版均不导入", () => {
+  const keys = { kind: "windows" as const, legacy: WINDOWS_LEGACY, appBound: WINDOWS_APP_BOUND };
+  const encrypted = encryptWindows("value", "v20", ".example.com");
+  assert.equal(decryptWindowsChromiumValue(encrypted, ".wrong.com", keys), undefined);
+  const tampered = Buffer.from(encrypted);
+  tampered[tampered.length - 1] ^= 0x01;
+  assert.equal(decryptWindowsChromiumValue(tampered, ".example.com", keys), undefined);
+  assert.equal(decryptWindowsChromiumValue(Buffer.concat([Buffer.from("v30"), encrypted.subarray(3)]), ".example.com", keys), undefined);
 });
 
 test("Chromium's 1601 epoch becomes Unix seconds", () => {
@@ -238,7 +272,7 @@ test("a cookie whose expiry overflows a JavaScript number is still imported", ()
  * `stat` 照样成功，但列目录抛 EPERM。以前这里的异常被吞掉、返回空数组，于是
  * 「没权限」和「没装」长得一模一样，Chrome 整个从导入列表里消失，只剩 Safari。
  */
-test("没权限和没装要分得开，不能都当成没装", { skip: process.getuid?.() === 0 ? "root 不受 chmod 限制" : false }, () => {
+test("没权限和没装要分得开，不能都当成没装", { skip: process.platform === "win32" || process.getuid?.() === 0 ? "Windows / root 不受 chmod 限制" : false }, () => {
   const chrome = CHROMIUM_BROWSERS[0];
   const root = mkdtempSync(join(tmpdir(), "coilcoil-chromium-"));
   try {
