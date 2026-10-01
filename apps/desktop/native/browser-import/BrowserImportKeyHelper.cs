@@ -55,7 +55,12 @@ internal static class BrowserImportKeyHelper
         {
             string output = process.StandardOutput.ReadToEnd();
             string error = process.StandardError.ReadToEnd();
-            if (!process.WaitForExit(10000) || process.ExitCode != 0)
+            if (!process.WaitForExit(15000))
+            {
+                try { process.Kill(); } catch { /* best effort */ }
+                throw new TimeoutException("Windows did not finish scheduling the temporary import task.");
+            }
+            if (process.ExitCode != 0)
                 throw new InvalidOperationException("Windows could not run the temporary import task (" + process.ExitCode + "). " + (error.Length > 0 ? error : output));
         }
     }
@@ -246,7 +251,7 @@ internal static class BrowserImportKeyHelper
                 elevated.Verb = "runas";
                 using (Process process = Process.Start(elevated))
                 {
-                    if (!process.WaitForExit(45000)) { try { process.Kill(); } catch {} throw new TimeoutException("Administrator approval timed out."); }
+                    if (!process.WaitForExit(120000)) { try { process.Kill(); } catch {} throw new TimeoutException("Administrator approval timed out."); }
                     if (process.ExitCode != 0) throw new InvalidOperationException("Administrator approval or browser key access failed.");
                 }
                 byte[] protectedKey = File.ReadAllBytes(output);

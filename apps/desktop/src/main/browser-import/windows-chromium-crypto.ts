@@ -67,6 +67,9 @@ export async function readWindowsChromiumKeys(browser: ChromiumBrowserDescriptor
       throw new Error("已取消管理员授权，浏览器数据没有导入。");
     }
     if (failure.code === "ENOENT") throw new Error("导入组件未安装完整，请重新安装 CoilCoil。");
+    if (browser.id === "chrome") {
+      throw new Error("Chrome 的登录数据无法在这台 Windows 电脑上解锁，未导入任何数据。请确认 Chrome 已退出；如果仍失败，可能是 Chrome 更新了加密方式。");
+    }
     throw new Error("Windows 没能读取浏览器的加密密钥。请确认已完全退出浏览器，再重试管理员授权。");
   }
   try {
