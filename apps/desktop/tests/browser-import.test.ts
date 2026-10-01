@@ -14,7 +14,7 @@ import {
   isPermissionDenied, listChromiumProfiles, profileDirectory,
 } from "../src/main/browser-import/browser-catalog.ts";
 import { chromiumTimeToUnixSeconds } from "../src/main/browser-import/sqlite-snapshot.ts";
-import { clearWindowsChromiumKeys, decryptWindowsChromiumValue, directWindowsImportAvailable } from "../src/main/browser-import/windows-chromium-crypto.ts";
+import { clearWindowsChromiumKeys, decryptWindowsChromiumValue, deriveChromeAppBoundKey, directWindowsImportAvailable } from "../src/main/browser-import/windows-chromium-crypto.ts";
 
 const KEY = pbkdf2Sync("peanuts", "saltysalt", 1003, 16, "sha1");
 
@@ -296,11 +296,47 @@ test("目录真的不在才算没装", () => {
   assert.equal(listChromiumProfiles(CHROMIUM_BROWSERS[0], join(tmpdir(), "coilcoil-no-such-browser-xyz")).kind, "absent");
 });
 
-test("Windows 同时识别 Chrome 和 Edge，但不能把识别到误当作 Chrome 已可导入", () => {
+test("Chrome 的第三层 CNG/GCM 经过认证后才能作为 v20 Cookie 密钥", () => {
+  const mask = Buffer.from("ccf8a1cec56605b8517552ba1a2d061c03a29e90274fb2fcf59ba4b75c392390", "hex");
+  const cngKey = Buffer.alloc(32, 0x48);
+  const aesKey = Buffer.from(cngKey.map((byte, index) => byte ^ mask[index]));
+  const master = Buffer.alloc(32, 0x29);
+  const iv = Buffer.alloc(12, 0x72);
+  const encryptor = createCipheriv("aes-256-gcm", aesKey, iv);
+  const encrypted = Buffer.concat([encryptor.update(master), encryptor.final()]);
+  const tag = encryptor.getAuthTag();
+  const header = Buffer.from("Chrome protected path", "utf8");
+  const payload = Buffer.alloc(8 + header.length + 93);
+  payload.writeUInt32LE(header.length, 0);
+  header.copy(payload, 4);
+  payload.writeUInt32LE(93, 4 + header.length);
+  const offset = 8 + header.length;
+  payload[offset] = 3;
+  Buffer.alloc(32, 0xaa).copy(payload, offset + 1); // CNG-wrapped key, not directly usable.
+  iv.copy(payload, offset + 33);
+  encrypted.copy(payload, offset + 45);
+  tag.copy(payload, offset + 77);
+  const derived = deriveChromeAppBoundKey(payload, cngKey);
+  assert.deepEqual(derived, master);
+  const host = ".example.com";
+  const cookie = createCipheriv("aes-256-gcm", master, iv);
+  const body = Buffer.concat([cookie.update(Buffer.concat([createHash("sha256").update(host).digest(), Buffer.from("session")])), cookie.final()]);
+  assert.equal(decryptWindowsChromiumValue(Buffer.concat([Buffer.from("v20"), iv, body, cookie.getAuthTag()]), host, { kind: "windows", appBound: derived }), "session");
+  const tampered = Buffer.from(payload);
+  tampered[tampered.length - 1] ^= 1;
+  assert.throws(() => deriveChromeAppBoundKey(tampered, cngKey), /完整性校验/);
+  const unsupported = Buffer.from(payload);
+  unsupported[offset] = 4;
+  assert.throws(() => deriveChromeAppBoundKey(unsupported, cngKey), /加密格式/);
+  derived.fill(0);
+  aesKey.fill(0);
+});
+
+test("Windows Chrome 和 Edge 都可导入，Mac 专属来源不误列", () => {
   assert.deepEqual(chromiumBrowsersForPlatform("win32").map((browser) => browser.id), ["chrome", "edge"]);
   assert.equal(browserDescriptor("edge", "win32")?.name, "Microsoft Edge");
   assert.equal(directWindowsImportAvailable(browserDescriptor("edge", "win32")!), true);
-  assert.equal(directWindowsImportAvailable(browserDescriptor("chrome", "win32")!), false, "Chrome 154 不能仅凭 UAC 真导入 v20");
+  assert.equal(directWindowsImportAvailable(browserDescriptor("chrome", "win32")!), true, "Chrome 154 的第三层 CNG 已在 VM 实测通过");
   assert.equal(browserDescriptor("safari", "win32"), undefined);
   assert.equal(browserDescriptor("brave", "win32"), undefined);
   assert.deepEqual(chromiumBrowsersForPlatform("linux"), []);
