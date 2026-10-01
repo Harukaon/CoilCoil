@@ -6,13 +6,15 @@ import type {
   ImportableProfile,
   SavedLoginSummary,
 } from "../../shared/desktop-api";
-import { CHROMIUM_BROWSERS, browserDescriptor, listChromiumProfiles, profileDirectory, safariCookiePath } from "./browser-catalog";
+import { browserDescriptor, chromiumBrowsersForPlatform, cookieDatabasePath, listChromiumProfiles, profileDirectory, safariCookiePath } from "./browser-catalog";
 import { countChromiumCookies, readChromiumCookies } from "./chromium-cookies";
 import { countChromiumLogins, readChromiumLogins } from "./chromium-passwords";
+import { readSafeStorageKey } from "./chromium-crypto";
 import type { CookieHarvest } from "./cookie-record";
 import { browserPartitions, browserSession, writeCookies } from "./cookie-store";
 import { clearSavedLogins, listSavedLogins, saveLogins, vaultAvailable } from "./password-vault";
 import { SafariAccessDeniedError, readSafariCookies } from "./safari-cookies";
+import { clearWindowsChromiumKeys, readWindowsChromiumKeys, type WindowsChromiumKeys } from "./windows-chromium-crypto";
 
 export { fillSavedCredentials } from "./password-autofill";
 
@@ -25,12 +27,11 @@ export { fillSavedCredentials } from "./password-autofill";
  * counterpart matters just as much: what was imported must be droppable in one
  * click, because the user is handing an agent their sessions and needs a way back.
  *
- * macOS only for now. Chrome 127 moved Windows to app-bound encryption, which
- * another application cannot read at all, so the UI says so there rather than
- * offering a button that fails.
+ * On Windows a user-approved, short-lived helper opens the SYSTEM wrapper of
+ * Chrome/Edge's App-Bound key. The user-scoped key stays in this process.
  */
 export function importSupported(): boolean {
-  return process.platform === "darwin";
+  return process.platform === "darwin" || process.platform === "win32";
 }
 
 function safariProfile(): ImportableProfile | undefined {
@@ -50,7 +51,7 @@ function safariProfile(): ImportableProfile | undefined {
 export function listImportableProfiles(): ImportableProfile[] {
   if (!importSupported()) return [];
   const profiles: ImportableProfile[] = [];
-  for (const browser of CHROMIUM_BROWSERS) {
+  for (const browser of chromiumBrowsersForPlatform()) {
     const listing = listChromiumProfiles(browser);
     if (listing.kind === "absent") continue;
     // 没权限的时候照样把它列出来，并且说清楚为什么。以前这里和「没装」走同一条路，
@@ -62,8 +63,8 @@ export function listImportableProfiles(): ImportableProfile[] {
         id: "default",
         name: "全部配置",
         available: false,
-        problem: "没有读取权限，点这里去开",
-        fix: "full-disk-access",
+        problem: process.platform === "win32" ? "Windows 拒绝读取此浏览器的数据，请检查文件权限" : "没有读取权限，点这里去开",
+        ...(process.platform === "darwin" ? { fix: "full-disk-access" as const } : {}),
       });
       continue;
     }
@@ -76,18 +77,18 @@ export function listImportableProfiles(): ImportableProfile[] {
       });
     }
   }
-  const safari = safariProfile();
+  const safari = process.platform === "darwin" ? safariProfile() : undefined;
   if (safari) profiles.push(safari);
   return profiles;
 }
 
-async function harvestCookies(input: ImportBrowserCookiesInput): Promise<CookieHarvest> {
+async function harvestCookies(input: ImportBrowserCookiesInput, keys?: Buffer | WindowsChromiumKeys): Promise<CookieHarvest> {
   if (input.browser === "safari") return readSafariCookies(safariCookiePath());
   const browser = browserDescriptor(input.browser);
   if (!browser) throw new Error("不认识这个浏览器。");
   const path = profileDirectory(browser, input.profile);
   if (!existsSync(path)) throw new Error("这个浏览器配置文件已经不在了，请刷新列表。");
-  return readChromiumCookies(browser, path);
+  return readChromiumCookies(browser, path, keys);
 }
 
 /**
@@ -98,6 +99,7 @@ async function harvestCookies(input: ImportBrowserCookiesInput): Promise<CookieH
 async function harvestLogins(
   input: ImportBrowserCookiesInput,
   partition?: string,
+  keys?: Buffer | WindowsChromiumKeys,
 ): Promise<{ saved: number; unreadable: number; note?: string }> {
   if (input.browser === "safari") {
     return { saved: 0, unreadable: 0, note: "Safari 的密码存在钥匙串里，macOS 不允许整批导出，已跳过。" };
@@ -107,7 +109,7 @@ async function harvestLogins(
   }
   const browser = browserDescriptor(input.browser);
   if (!browser) return { saved: 0, unreadable: 0 };
-  const { logins, unreadable } = await readChromiumLogins(browser, profileDirectory(browser, input.profile));
+  const { logins, unreadable } = await readChromiumLogins(browser, profileDirectory(browser, input.profile), keys);
   return { saved: saveLogins(logins, partition), unreadable };
 }
 
@@ -116,14 +118,29 @@ export async function importBrowserCookies(
   partition?: string,
 ): Promise<BrowserImportSummary> {
   const empty = { imported: 0, skipped: 0, failed: 0, unreadable: 0, hosts: 0, passwords: 0, problemHosts: [] };
-  if (!importSupported()) return { ...empty, error: "目前只支持在 macOS 上导入。" };
+  if (!importSupported()) return { ...empty, error: "目前只支持在 macOS 或 Windows 上导入。" };
+  let keys: Buffer | WindowsChromiumKeys | undefined;
   try {
-    const { cookies, unreadable, unreadableHosts } = await harvestCookies(input);
+    if (input.browser !== "safari") {
+      const browser = browserDescriptor(input.browser);
+      if (!browser) throw new Error("不认识这个浏览器。");
+      const path = profileDirectory(browser, input.profile);
+      if (!existsSync(path)) throw new Error("这个浏览器配置文件已经不在了，请刷新列表。");
+      // Windows refuses to copy a live browser's locked Cookie database. Check
+      // before asking for UAC, not after the user has already approved it.
+      if (process.platform === "win32" && cookieDatabasePath(path) && countChromiumCookies(path) === undefined) {
+        throw new Error(`请先完全退出 ${browser.name}（包括后台进程），再重新导入登录状态。`);
+      }
+      keys = process.platform === "win32" ? await readWindowsChromiumKeys(browser) : await readSafeStorageKey(browser);
+    } else if (process.platform !== "darwin") {
+      throw new Error("Windows 上不支持 Safari 导入。");
+    }
+    const { cookies, unreadable, unreadableHosts } = await harvestCookies(input, keys);
     const written = await writeCookies(cookies, partition);
     // The keychain has already been unlocked for the cookies by this point, so
     // the passwords cost the user no second prompt.
     const logins = input.includePasswords
-      ? await harvestLogins(input, partition)
+      ? await harvestLogins(input, partition, keys)
       : { saved: 0, unreadable: 0, note: undefined };
     // Naming the sites is the difference between "19 条读不出来" and knowing
     // whether the one site that mattered came over.
@@ -140,6 +157,8 @@ export async function importBrowserCookies(
   } catch (error) {
     const message = error instanceof SafariAccessDeniedError || error instanceof Error ? error.message : String(error);
     return { ...empty, error: message };
+  } finally {
+    if (keys) Buffer.isBuffer(keys) ? keys.fill(0) : clearWindowsChromiumKeys(keys);
   }
 }
 

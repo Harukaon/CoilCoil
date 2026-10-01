@@ -124,17 +124,22 @@ Agent 因此在每个网站都是未登录状态。「设置 → 浏览器」提
   需要「完全磁盘访问权限」，被系统拒绝时给出明确指引而不是报错。
 - **配置文件选择**：Chrome 按角色分目录（`Default`、`Profile 1`…），显示名和登录邮箱
   来自 `Local State` 的 `profile.info_cache`——不显示这两项的话，用户无从分辨要导入哪一个。
-- **密码导入（可选）**：来自同一把钥匙串密钥下的 `Login Data`，但密码在 Electron 里
+- **密码导入（可选）**：来自同一浏览器的 `Login Data`，但密码在 Electron 里
   没有归宿，因此存进 CoilCoil 自己的库：`safeStorage` 加密后写在 userData 下的
-  `browser-credentials.bin`。**密码不进入模型、不进入工具、不随远程控制离开这台 Mac**，
+  `browser-credentials.bin`。**密码不进入模型、不进入工具、不随远程控制离开这台电脑**，
   唯一的消费者是内置浏览器页面里的自动填充：同源、且只匹配到一条凭据、且密码框为空时
   才填，且永不自动提交。Safari 的密码是逐条受控的钥匙串项，系统不允许整批导出。
 - **一键清空**：`clearStorageData` + `clearCache` + `clearAuthCache` 三者缺一不可
   （只清前者会留下 HTTP 缓存和代理凭据，网站仍可能认出用户），并同时删除密码库。
   把登录态交给一个 Agent 是可以接受的，前提是收回它只要一次点击。
 
-目前仅 macOS。Chrome 127 起 Windows 改用 App-Bound Encryption，其他应用无法读取，
-因此在 Windows 上界面直接说明不支持，而不是给一个必然失败的按钮。
+- **Windows Chrome / Edge**：支持二者各自的配置目录、v10 用户密钥和 v20 App-Bound
+  Cookie。用户选择配置并确认后，Windows 弹一次管理员批准；仅将 App-Bound 的外层
+  交给 Windows 的临时 SYSTEM 任务打开，内层在当前登录用户下解密，明文密钥不落盘。
+  临时任务和受限目录完成即删除，不往浏览器进程注入代码，也不改原浏览器的数据。
+  导入前必须完全退出来源浏览器（包含后台进程），否则 Windows 会锁住 Cookie 库；
+  读不到库时不请求管理员批准，直接提示先退出。Windows 原生助手由本机 / CI
+  构建时编译，随 Windows 安装包分发，不提交可执行文件到仓库。
 
 ## 上游复用方式
 

@@ -2,6 +2,7 @@ import type { ChromiumBrowserDescriptor } from "./browser-catalog";
 import { passwordDatabasePath } from "./browser-catalog";
 import { decryptChromiumValue, readSafeStorageKey } from "./chromium-crypto";
 import { withDatabaseCopy } from "./sqlite-snapshot";
+import { decryptWindowsChromiumValue, type WindowsChromiumKeys } from "./windows-chromium-crypto";
 
 /** A saved login, as the source browser stored it. */
 export interface ImportedLogin {
@@ -59,10 +60,11 @@ export function countChromiumLogins(profilePath: string): number | undefined {
 export async function readChromiumLogins(
   browser: ChromiumBrowserDescriptor,
   profilePath: string,
+  providedKeys?: Buffer | WindowsChromiumKeys,
 ): Promise<LoginHarvest> {
   const database = passwordDatabasePath(profilePath);
   if (!database) return { logins: [], unreadable: 0 };
-  const key = await readSafeStorageKey(browser);
+  const keys = providedKeys ?? await readSafeStorageKey(browser);
   return withDatabaseCopy(database, (connection) => {
     const rows = connection
       .prepare(
@@ -78,7 +80,10 @@ export async function readChromiumLogins(
       const origin = originOf(row);
       if (!origin || !row.password_value || row.password_value.length === 0) continue;
       // Passwords carry no host binding, so the empty host key disables that step.
-      const password = decryptChromiumValue(Buffer.from(row.password_value), "", key);
+      const encrypted = Buffer.from(row.password_value);
+      const password = Buffer.isBuffer(keys)
+        ? decryptChromiumValue(encrypted, "", keys)
+        : decryptWindowsChromiumValue(encrypted, "", keys);
       if (password === undefined) {
         unreadable += 1;
         continue;

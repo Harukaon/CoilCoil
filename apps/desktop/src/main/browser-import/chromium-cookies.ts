@@ -3,6 +3,7 @@ import { cookieDatabasePath } from "./browser-catalog";
 import { decryptChromiumValue, readSafeStorageKey } from "./chromium-crypto";
 import type { CookieHarvest, ImportedCookie } from "./cookie-record";
 import { chromiumTimeToUnixSeconds, withDatabaseCopy } from "./sqlite-snapshot";
+import { decryptWindowsChromiumValue, type WindowsChromiumKeys } from "./windows-chromium-crypto";
 
 /**
  * Every integer arrives as a BigInt.
@@ -50,14 +51,15 @@ export function countChromiumCookies(profilePath: string): number | undefined {
 export async function readChromiumCookies(
   browser: ChromiumBrowserDescriptor,
   profilePath: string,
+  providedKeys?: Buffer | WindowsChromiumKeys,
 ): Promise<CookieHarvest> {
   const database = cookieDatabasePath(profilePath);
   if (!database) return { cookies: [], unreadable: 0 };
-  return cookiesFromDatabase(database, await readSafeStorageKey(browser));
+  return cookiesFromDatabase(database, providedKeys ?? await readSafeStorageKey(browser));
 }
 
 /** Split from the reader above so the row handling can be tested without a keychain. */
-export function cookiesFromDatabase(database: string, key: Buffer): CookieHarvest {
+export function cookiesFromDatabase(database: string, keys: Buffer | WindowsChromiumKeys): CookieHarvest {
   return withDatabaseCopy(database, (connection) => {
     const statement = connection.prepare(
       "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, is_persistent, samesite FROM cookies",
@@ -71,7 +73,11 @@ export function cookiesFromDatabase(database: string, key: Buffer): CookieHarves
       const encrypted = Buffer.from(row.encrypted_value ?? new Uint8Array());
       // Very old records were written before encryption and keep the plaintext
       // in `value`; anything else has to go through the safe-storage key.
-      const value = encrypted.length > 0 ? decryptChromiumValue(encrypted, row.host_key, key) : row.value;
+      const value = encrypted.length > 0
+        ? Buffer.isBuffer(keys)
+          ? decryptChromiumValue(encrypted, row.host_key, keys)
+          : decryptWindowsChromiumValue(encrypted, row.host_key, keys)
+        : row.value;
       if (value === undefined) {
         unreadable += 1;
         unreadableHosts.add(row.host_key);

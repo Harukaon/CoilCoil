@@ -40,13 +40,15 @@ function describeProfile(profile: ImportableProfile): string {
  * them back is just as easy.
  */
 export function BrowserDataMenu(): React.JSX.Element | null {
-  const supported = rendererPlatform() === "darwin";
+  const platform = rendererPlatform();
+  const supported = platform === "darwin" || platform === "win32";
   const [open, setOpen] = useState(false);
   const [profiles, setProfiles] = useState<ImportableProfile[]>();
   const [stats, setStats] = useState<BrowserDataStats>();
   const [withPasswords, setWithPasswords] = useState(false);
   const [busy, setBusy] = useState<string>();
   const [confirmClear, setConfirmClear] = useState(false);
+  const [pendingImport, setPendingImport] = useState<ImportableProfile>();
   const [problemHosts, setProblemHosts] = useState<string[]>([]);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -166,6 +168,7 @@ export function BrowserDataMenu(): React.JSX.Element | null {
                       onClick={() => {
                         // 缺权限的那一行不是死路：点它就去开权限，回来再导入。
                         if (profile.fix) void window.coilcoil.openPermissionSettings("full-disk");
+                        else if (platform === "win32") setPendingImport(profile);
                         else void importFrom(profile);
                       }}
                     >
@@ -206,9 +209,24 @@ export function BrowserDataMenu(): React.JSX.Element | null {
       </Popover.Root>
 
       <ConfirmDialog
+        open={Boolean(pendingImport)}
+        title={`从 ${pendingImport?.browserName ?? "浏览器"} 导入登录状态？`}
+        description={`请先完全退出 ${pendingImport?.browserName ?? "浏览器"}（包括后台进程）。Windows 会请求一次管理员批准，用于读取加密的 Cookie${withPasswords ? "和已保存的密码" : ""}；数据只会复制到当前工作区，原浏览器不受影响。`}
+        actions={[
+          { label: "取消", onClick: () => setPendingImport(undefined) },
+          { label: "同意并导入", onClick: () => {
+            const profile = pendingImport;
+            setPendingImport(undefined);
+            if (profile) void importFrom(profile);
+          } },
+        ]}
+        onClose={() => setPendingImport(undefined)}
+      />
+
+      <ConfirmDialog
         open={confirmClear}
         title="清空内置浏览器的数据？"
-        description="所有 Cookie、本地存储、缓存和已保存的密码都会删除，内置浏览器会退出全部登录。你自己的 Chrome、Safari 不受影响。"
+        description="所有 Cookie、本地存储、缓存和已保存的密码都会删除，内置浏览器会退出全部登录。你自己的 Chrome、Edge、Safari 不受影响。"
         actions={[
           { label: "取消", onClick: () => setConfirmClear(false) },
           { label: "清空", variant: "danger", onClick: () => void clearAll() },
