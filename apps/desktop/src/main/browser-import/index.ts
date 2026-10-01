@@ -72,11 +72,6 @@ export function listImportableProfiles(): ImportableProfile[] {
       const path = profileDirectory(browser, profile.id);
       profiles.push({
         ...profile,
-        // Chrome 154 adds a third browser-owned key layer. Admin approval is
-        // insufficient: do not offer an action that would import zero cookies.
-        ...(process.platform === "win32" && !directWindowsImportAvailable(browser)
-          ? { available: false, problem: "Chrome 新版 Cookie 加密暂无法直接导入" }
-          : {}),
         cookieCount: countChromiumCookies(path),
         passwordCount: countChromiumLogins(path),
       });
@@ -130,7 +125,7 @@ export async function importBrowserCookies(
       const browser = browserDescriptor(input.browser);
       if (!browser) throw new Error("不认识这个浏览器。");
       if (process.platform === "win32" && !directWindowsImportAvailable(browser)) {
-        throw new Error("Chrome 新版 Cookie 需要浏览器自身解锁，管理员授权不足以安全导入；没有导入任何数据。");
+        throw new Error("这个浏览器目前不支持 Windows 登录状态导入。");
       }
       const path = profileDirectory(browser, input.profile);
       if (!existsSync(path)) throw new Error("这个浏览器配置文件已经不在了，请刷新列表。");

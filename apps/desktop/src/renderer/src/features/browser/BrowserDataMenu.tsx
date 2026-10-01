@@ -214,7 +214,7 @@ export function BrowserDataMenu(): React.JSX.Element | null {
       <ConfirmDialog
         open={Boolean(pendingImport)}
         title={`从 ${pendingImport?.browserName ?? "浏览器"} 导入登录状态？`}
-        description={`请先完全退出 ${pendingImport?.browserName ?? "浏览器"}（包括后台进程）。Windows 会请求一次管理员批准，用于读取加密的 Cookie${withPasswords ? "和已保存的密码" : ""}；数据只会复制到当前工作区，原浏览器不受影响。`}
+        description={`请先完全退出 ${pendingImport?.browserName ?? "浏览器"}（包括后台进程）。Windows 会请求一次管理员批准，用于读取加密的 Cookie${withPasswords ? "和已保存的密码" : ""}；原浏览器不受影响。当前构建未签名，系统可能显示「未知发布者」；只在信任当前 CoilCoil 安装包时同意。`}
         actions={[
           { label: "取消", onClick: () => setPendingImport(undefined) },
           { label: "同意并导入", onClick: () => {
