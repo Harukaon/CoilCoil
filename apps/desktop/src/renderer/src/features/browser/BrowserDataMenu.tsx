@@ -81,7 +81,11 @@ export function BrowserDataMenu(): React.JSX.Element | null {
       if (summary.error) {
         toastError(summary.error);
       } else if (summary.imported === 0 && summary.passwords === 0) {
-        toastError("没有可导入的登录状态，可能这个配置文件本来就是空的。");
+        toastError(summary.skipped > 0
+          ? `这个配置里的 ${summary.skipped} 条 Cookie 已过期或无效，没有能恢复的登录状态。请选其他配置，或先在原浏览器重新登录。`
+          : summary.unreadable + summary.failed > 0
+            ? `${summary.unreadable + summary.failed} 条 Cookie 没能解密或被内置浏览器拒绝，未导入登录状态。`
+            : "这个配置没有可导入的 Cookie 或密码。请选实际登录过网站的浏览器配置。");
       } else {
         // The unreadable count is worth surfacing: it is the difference between
         // "everything came over" and "your one important site did not".

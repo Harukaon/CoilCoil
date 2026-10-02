@@ -292,6 +292,30 @@ test("没权限和没装要分得开，不能都当成没装", { skip: process.p
   }
 });
 
+test("同一个 Chrome 安装里的多个用户配置分别列出并保留名称", () => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-multi-profile-"));
+  try {
+    for (const id of ["Default", "Profile 2", "Guest Profile"]) {
+      mkdirSync(join(root, id, "Network"), { recursive: true });
+      writeFileSync(join(root, id, "Network", "Cookies"), "");
+    }
+    writeFileSync(join(root, "Local State"), JSON.stringify({ profile: { info_cache: {
+      Default: { name: "个人", user_name: "personal@example.test" },
+      "Profile 2": { name: "工作", user_name: "work@example.test" },
+      "Guest Profile": { name: "访客" },
+    } } }));
+    const listing = listChromiumProfiles(CHROMIUM_BROWSERS[0], root);
+    assert.equal(listing.kind, "profiles");
+    assert.deepEqual(listing.kind === "profiles" ? listing.profiles.map(({ id, name, email }) => ({ id, name, email })) : [], [
+      { id: "Default", name: "个人", email: "personal@example.test" },
+      { id: "Guest Profile", name: "访客", email: undefined },
+      { id: "Profile 2", name: "工作", email: "work@example.test" },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("目录真的不在才算没装", () => {
   assert.equal(listChromiumProfiles(CHROMIUM_BROWSERS[0], join(tmpdir(), "coilcoil-no-such-browser-xyz")).kind, "absent");
 });
