@@ -5,6 +5,7 @@ import {
   candidateKeys,
   catalogSourceLabel,
   lookupModelMetaInIndex,
+  listBuiltinProviderModels,
   mergeCatalogEntries,
   mergeSelectedUpstreamModels,
   thinkingLevelMapFromLevels,
@@ -101,6 +102,23 @@ test("LiteLLM-only source still enriches when models.dev is unavailable", () => 
   assert.deepEqual(meta.input, ["text"]);
   assert.equal(meta.reasoning, true);
   assert.deepEqual(meta.sources, ["LiteLLM"]);
+});
+
+test("内置服务商只列自己的公开模型，订阅服务商可对应官方模型目录", () => {
+  const catalog = {
+    anthropic: { models: {
+      "claude-sonnet-5-5": { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+      "claude-opus-4-7": { name: "Claude Opus 4.7" },
+    } },
+    openai: { models: { "gpt-new": { id: "gpt-new", name: "GPT New" } } },
+    openrouter: { models: { "other/model": { id: "other/model" } } },
+  };
+  assert.deepEqual(listBuiltinProviderModels(catalog, "anthropic"), [
+    { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+    { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
+  ]);
+  assert.deepEqual(listBuiltinProviderModels(catalog, "openai-codex"), [{ id: "gpt-new", name: "GPT New" }]);
+  assert.deepEqual(listBuiltinProviderModels(catalog, "not-in-catalog"), []);
 });
 
 test("mergeSelectedUpstreamModels keeps existing fields and only adds new ids", () => {
