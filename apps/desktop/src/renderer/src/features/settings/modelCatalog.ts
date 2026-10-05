@@ -40,6 +40,7 @@ const OPENROUTER_CACHE_KEY = "coilcoil.catalog.openrouter.v1";
 
 let memoryIndex: Map<string, CatalogIndexEntry[]> | undefined;
 let loadPromise: Promise<Map<string, CatalogIndexEntry[]>> | undefined;
+let catalogRevision = 0;
 
 function readCache(key: string): unknown | undefined {
   try {
@@ -127,12 +128,61 @@ async function buildCatalogIndex(): Promise<Map<string, CatalogIndexEntry[]>> {
   return buildCatalogIndexFromSources(modelsDev, liteLlm, openRouter);
 }
 
+/* Built-in Pi providers mostly share models.dev's ids. Only map the few whose
+ * Pi name denotes a different protocol rather than a different vendor. */
+const BUILTIN_CATALOG_IDS: Record<string, string> = {
+  "openai-codex": "openai",
+  "azure-openai-responses": "azure",
+  fireworks: "fireworks-ai",
+  together: "togetherai",
+};
+
+export function listBuiltinProviderModels(payload: unknown, providerId: string): Array<{ id: string; name?: string }> {
+  if (!payload || typeof payload !== "object") return [];
+  const provider = (payload as Record<string, unknown>)[BUILTIN_CATALOG_IDS[providerId] ?? providerId];
+  if (!provider || typeof provider !== "object") return [];
+  const models = (provider as { models?: unknown }).models;
+  if (!models || typeof models !== "object" || Array.isArray(models)) return [];
+  const seen = new Set<string>();
+  return Object.entries(models).flatMap(([key, value]) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const row = value as { id?: unknown; name?: unknown };
+    const id = (typeof row.id === "string" ? row.id : key).trim();
+    if (!id || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, name: typeof row.name === "string" && row.name.trim() ? row.name : undefined }];
+  });
+}
+
+/** A button press must really check the live directory, not yesterday's cache. */
+export async function fetchBuiltinProviderModels(providerId: string): Promise<Array<{ id: string; name?: string }>> {
+  let payload: unknown;
+  try {
+    const response = await fetch(MODELS_DEV_CATALOG_URL, { signal: AbortSignal.timeout(20_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    payload = await response.json();
+  } catch {
+    throw new Error("暂时无法获取最新模型目录；现有模型没有改变，可稍后重试或手动添加。");
+  }
+  const models = listBuiltinProviderModels(payload, providerId);
+  if (!models.length) throw new Error("公开目录暂未收录此服务商的模型；现有模型没有改变，可手动添加。");
+  writeCache(MODELS_DEV_CACHE_KEY, payload);
+  catalogRevision++;
+  const liteLlm = readCache(LITELLM_CACHE_KEY);
+  const openRouter = readCache(OPENROUTER_CACHE_KEY);
+  memoryIndex = buildCatalogIndexFromSources(payload,
+    Array.isArray(liteLlm) ? liteLlm : undefined,
+    Array.isArray(openRouter) ? openRouter : undefined);
+  return models;
+}
+
 export async function loadModelCatalog(): Promise<void> {
   if (memoryIndex) return;
   if (!loadPromise) {
+    const revision = catalogRevision;
     loadPromise = buildCatalogIndex().then((index) => {
-      memoryIndex = index;
-      return index;
+      if (revision === catalogRevision) memoryIndex = index;
+      return memoryIndex ?? index;
     }).finally(() => {
       loadPromise = undefined;
     });
@@ -142,6 +192,7 @@ export async function loadModelCatalog(): Promise<void> {
 
 /** Test helper: replace in-memory index without network. */
 export function setCatalogIndexForTests(index: Map<string, CatalogIndexEntry[]> | undefined): void {
+  catalogRevision++;
   memoryIndex = index;
   loadPromise = undefined;
 }

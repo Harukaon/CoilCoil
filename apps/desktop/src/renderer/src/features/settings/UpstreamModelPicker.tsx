@@ -11,11 +11,13 @@ export interface UpstreamModelOption {
 
 export function UpstreamModelPicker({
   models,
+  builtinCatalog = false,
   configuredIds,
   onCancel,
   onConfirm,
 }: {
   models: UpstreamModelOption[];
+  builtinCatalog?: boolean;
   configuredIds: Set<string>;
   onCancel: () => void;
   onConfirm: (selected: Array<UpstreamModelOption & { meta: ModelCatalogMeta }>) => void;
@@ -75,7 +77,7 @@ export function UpstreamModelPicker({
       <div className="upstream-model-picker" role="dialog" aria-modal="true" aria-labelledby="upstream-model-picker-title">
         <header>
           <div>
-            <strong id="upstream-model-picker-title">选择要同步的上游模型</strong>
+            <strong id="upstream-model-picker-title">{builtinCatalog ? "选择要添加的模型" : "选择要同步的上游模型"}</strong>
             <small>共 {models.length} 个上游模型 · 已选 {selected.size}{catalogReady ? "" : " · 参数目录加载中…"}</small>
           </div>
           <button type="button" aria-label="关闭" onClick={onCancel}><X size={14} /></button>
@@ -105,7 +107,7 @@ export function UpstreamModelPicker({
           }) : <p className="upstream-model-picker-empty">没有匹配的上游模型。</p>}
         </div>
         <footer>
-          <span>仅会把勾选的模型写入本地目录；已配置项保留你现有字段。</span>
+          <span>{builtinCatalog ? "来自公开目录，账号能否使用以服务商为准。新增后转为自定义目录，保留现有模型；保存后生效。" : "仅会把勾选的模型写入本地目录；已配置项保留你现有字段。"}</span>
           <div>
             <button type="button" onClick={onCancel}>取消</button>
             <button className="primary-button" type="button" disabled={!selected.size} onClick={confirm}>添加所选（{selected.size}）</button>

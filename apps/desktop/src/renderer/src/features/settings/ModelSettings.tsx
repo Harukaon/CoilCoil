@@ -17,6 +17,7 @@ import type {
 } from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 import {
+  fetchBuiltinProviderModels,
   loadModelCatalog,
   mergeSelectedUpstreamModels,
   THINKING_LEVELS,
@@ -800,29 +801,37 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   };
 
   const fetchUpstreamModels = async (): Promise<void> => {
-    if (!draft?.baseUrl?.trim()) {
+    if (!draft) return;
+    if (!isBuiltinProvider && !draft.baseUrl?.trim()) {
       toastError("请先填写 Base URL，再拉取上游模型。");
       return;
     }
     setFetchingModels(true);
     try {
-      void loadModelCatalog();
-      const headers = parseStringMap(providerHeadersText, "服务商请求头");
-      const result = await window.coilcoil.request<FetchProviderModelsResult>({
-        type: "fetch_provider_models",
-        input: {
-          baseUrl: draft.baseUrl,
-          api: draft.api,
-          apiKey: draftApiKey(),
-          headers,
-          provider: selectedId,
-        },
-      }, runtimeId);
-      if (!result.models.length) {
-        toastError("上游未返回可用模型。");
+      let models: UpstreamModelOption[];
+      if (isBuiltinProvider) {
+        // Subscription credentials cannot call a provider's API-key /models endpoint.
+        models = await fetchBuiltinProviderModels(draft.id);
+      } else {
+        void loadModelCatalog();
+        const headers = parseStringMap(providerHeadersText, "服务商请求头");
+        const result = await window.coilcoil.request<FetchProviderModelsResult>({
+          type: "fetch_provider_models",
+          input: {
+            baseUrl: draft.baseUrl ?? "",
+            api: draft.api,
+            apiKey: draftApiKey(),
+            headers,
+            provider: selectedId,
+          },
+        }, runtimeId);
+        models = result.models;
+      }
+      if (!models.length) {
+        toastError("未找到可添加的模型。");
         return;
       }
-      setUpstreamPickerModels(result.models);
+      setUpstreamPickerModels(models);
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -841,6 +850,11 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
         return modelFromUpstream(item, item.meta);
       },
     );
+    if (!added.length) {
+      setUpstreamPickerModels(undefined);
+      toastSuccess("所选模型都已在当前目录中，无需更改。");
+      return;
+    }
     setDraft((current) => current ? { ...current, replaceModels: true, models: compact.length ? compact : [blankModel()] } : current);
     setModelAdvanced((current) => ({ ...current, ...initialAdvancedText(added.filter((model) => !current[model.uid])) }));
     if (!testModelId || !compact.some((model) => model.id === testModelId)) {
@@ -889,6 +903,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
       {oauthFlow ? <ProviderOAuthDialog key={oauthFlow.flowId} state={oauthFlow} onRespond={respondOAuthLogin} onClose={closeOAuthLogin} /> : null}
       {upstreamPickerModels && draft ? <UpstreamModelPicker
         models={upstreamPickerModels}
+        builtinCatalog={isBuiltinProvider}
         configuredIds={new Set(draft.models.map((model) => model.id).filter(Boolean))}
         onCancel={() => setUpstreamPickerModels(undefined)}
         onConfirm={applyUpstreamSelection}
@@ -960,14 +975,14 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
               if (!current) return current;
               return { ...current, replaceModels: true, models: current.models.length ? current.models : [blankModel()] };
             })}>自定义目录</button></div></header>
-            {!isBuiltinProvider || draft.replaceModels ? <div className="provider-model-toolbar provider-model-toolbar-top">
-              {!isBuiltinProvider ? <button className="secondary-button" type="button" disabled={fetchingModels || saving} onClick={() => void fetchUpstreamModels()}>{fetchingModels ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{fetchingModels ? "正在拉取…" : "拉取上游模型列表"}</button> : null}
+            <div className="provider-model-toolbar provider-model-toolbar-top">
+              <button className="secondary-button" type="button" disabled={fetchingModels || saving} onClick={() => void fetchUpstreamModels()}>{fetchingModels ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{fetchingModels ? "正在拉取…" : isBuiltinProvider ? "获取最新模型" : "拉取上游模型列表"}</button>
               {draft.replaceModels && draft.models.length > 1 ? <Field className="provider-model-search">
                 <Search size={14} />
                 <TextField className="provider-model-search-input" value={modelQuery} placeholder={`在 ${draft.models.length} 个模型里搜索`} aria-label="搜索模型" onChange={(event) => setModelQuery(event.target.value)} />
                 {modelQuery ? <button type="button" aria-label="清除搜索" onClick={() => setModelQuery("")}><X size={13} /></button> : null}
               </Field> : null}
-            </div> : null}
+            </div>
             {draft.replaceModels ? <>
               <div className="provider-model-list">{visibleModels.map(({ model, index }) => <ProviderModelCard key={model.uid} model={model} index={index} apiOptions={protocolOptions} advanced={modelAdvanced[model.uid] ?? { thinkingLevelMap: "{}", samplingParams: "{}", headers: "{}", compat: "{}", costTiers: "[]" }} expanded={expandedModels.has(model.uid)} onToggle={() => setExpandedModels((current) => { const next = new Set(current); if (next.has(model.uid)) next.delete(model.uid); else next.add(model.uid); return next; })} onChange={(next) => updateModel(model.uid, next)} onAdvancedChange={(next) => setModelAdvanced((current) => ({ ...current, [model.uid]: next }))} onRemove={() => { setDraft((current) => current ? { ...current, models: current.models.filter((item) => item.uid !== model.uid) } : current); setModelAdvanced((current) => { const { [model.uid]: _removed, ...rest } = current; return rest; }); }} />)}</div>
               {draft.models.length && !visibleModels.length ? <p className="provider-model-empty">没有匹配「{modelQuery}」的模型。</p> : null}
