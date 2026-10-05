@@ -49,4 +49,20 @@ export async function run({ page, check, shot }) {
   await editor.locator(".provider-model-summary").filter({ hasText: firstId }).waitFor();
   assert.ok(await editor.locator(".provider-model-summary").count() > 1, "保存后原有模型不能丢");
   check("保存后新模型还在", await editor.locator(".provider-model-summary").filter({ hasText: firstId }).count() === 1);
+
+  // A user may already have trimmed a built-in provider to just a few models.
+  // Fetching again must add what they choose without resurrecting exclusions.
+  const removedId = await editor.locator(".provider-model-card").first().locator(".provider-model-summary small").innerText();
+  const hasRemoved = async () => (await editor.locator(".provider-model-summary small").allTextContents()).some((id) => id.trim() === removedId.trim());
+  await editor.locator(".provider-model-card").first().getByRole("button", { name: /移除模型/ }).click();
+  await editor.getByRole("button", { name: "保存设置" }).click();
+  await editor.locator(".provider-unsaved-tag").waitFor({ state: "hidden", timeout: 15_000 });
+  await refresh.click();
+  await picker.locator(".upstream-model-picker-list label").filter({ hasText: secondId }).click();
+  await picker.getByRole("button", { name: /添加所选/ }).click();
+  check("已有自定义目录再拉取，不恢复以前移除的模型", !(await hasRemoved()));
+  check("已有自定义目录再拉取，只补选中的新模型", await editor.locator(".provider-model-summary").filter({ hasText: firstId }).count() === 1 && await editor.locator(".provider-model-summary").filter({ hasText: secondId }).count() === 1);
+  await editor.getByRole("button", { name: "保存设置" }).click();
+  await editor.locator(".provider-unsaved-tag").waitFor({ state: "hidden", timeout: 15_000 });
+  check("再次保存后没有恢复已删除模型", !(await hasRemoved()));
 }
