@@ -24,13 +24,13 @@ export const MCP_MANAGER_CHANNEL = "coilcoil:mcp:manager:v1";
 
 const McpParams = Type.Object({
   action: StringEnum(["list", "tools", "call"], {
-    description: "list：列出有哪些 MCP Server（不联网，很快）；tools：连上某一个并列出它的工具；call：调用某个工具",
+    description: "list: list the MCP servers (no network, fast); tools: connect to one server and list its tools; call: call one tool",
   }),
-  server: Type.Optional(Type.String({ description: "tools 和 call 时必填：MCP Server 名称" })),
-  tool: Type.Optional(Type.String({ description: "call 时必填：工具名称" })),
+  server: Type.Optional(Type.String({ description: "Required for tools and call: the MCP server name" })),
+  tool: Type.Optional(Type.String({ description: "Required for call: the tool name" })),
   args: Type.Optional(Type.Object({}, {
     additionalProperties: true,
-    description: "call 时传给工具的参数对象；工具没有参数就省略",
+    description: "Argument object passed to the tool on call; omit it when the tool takes no arguments",
   })),
 });
 
@@ -143,7 +143,7 @@ async function registerDirectTools(pi: ExtensionAPI, manager: McpManager): Promi
     pi.registerTool({
       name,
       label: `${server} · ${tool.name}`,
-      description: tool.description ?? `${server} 提供的 ${tool.name} 工具。`,
+      description: tool.description ?? `The ${tool.name} tool provided by ${server}.`,
       parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as never,
       // signal 是 pi 给工具的中断信号。不接它，界面上的停止按钮就按不停一次 MCP
       // 调用：pi 那边早就放手了，这条请求还在跑，人只能干等它自己结束。
@@ -168,12 +168,10 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: TOOL_NAME,
     label: "MCP",
-    description:
-      "访问已配置的 MCP Server。三步：action=\"list\" 看有哪些 Server（不联网，很快）→ action=\"tools\" 加 server 名字看它有哪些工具（这一步才会连接，可能要几秒）→ action=\"call\" 加 server、tool、args 调用。",
-    promptSnippet: "mcp: 列出并调用 MCP Server 提供的工具",
-    promptGuidelines: [
-      "需要外部系统的能力时先 mcp list 看有哪些 Server；list 不联网所以很快，挑中一个之后再用 tools 去看它的工具，不要一上来就把所有 Server 都问一遍。",
-    ],
+    description: [
+      "Access the configured MCP servers in three steps: action=\"list\" shows which servers exist (no network, fast); action=\"tools\" with a server name shows that server's tools (this connects, which can take a few seconds); action=\"call\" with server, tool and args runs a tool.",
+      "When you need a capability from an external system, start with list; once you have picked a server, use tools on it. Do not query every server up front.",
+    ].join(" "),
     parameters: McpParams,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {

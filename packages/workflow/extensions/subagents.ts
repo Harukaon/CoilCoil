@@ -64,13 +64,13 @@ const SUBAGENT_ACTIONS = ["run", "status", "stop", "resume"] as const;
 
 const SubagentParams = Type.Object({
   action: Type.Optional(
-    StringEnum(SUBAGENT_ACTIONS, { description: "run 派发；status 查询；stop 停止；resume 复用已完成的子 Agent。默认 run。" }),
+    StringEnum(SUBAGENT_ACTIONS, { description: "run dispatches; status queries; stop stops; resume continues a finished subagent. Default run." }),
   ),
-  agent: Type.Optional(Type.String({ description: "子 Agent profile 名称（如 explore、reviewer、worker），会套用预设的提示词、用户配置模型和工具范围；省略则用默认配置派发。" })),
-  task: Type.Optional(Type.String({ description: "action=run 时必填；action=resume 时作为追加指示，省略则继续原任务。" })),
-  background: Type.Optional(Type.Boolean({ description: "默认 false：派发后阻塞等待子 Agent 跑完再返回结果。true 时立即返回 runId，子 Agent 在后台运行，完成后会自动汇报。" })),
-  worktree: Type.Optional(Type.Boolean({ description: "true 时子 Agent 在独立的 git worktree 分支上工作，适合并行写入；省略则跟随 profile 设置（worker 默认开启）。" })),
-  runId: Type.Optional(Type.String({ description: "action=status/stop/resume 时指定目标运行；status 省略则列出全部。" })),
+  agent: Type.Optional(Type.String({ description: "Subagent profile name (such as explore, reviewer, worker); it applies the preset prompt, the user-configured model and the tool scope. Omit it to dispatch with the default configuration." })),
+  task: Type.Optional(Type.String({ description: "Required for action=run; with action=resume it is an extra instruction, and omitting it continues the original task." })),
+  background: Type.Optional(Type.Boolean({ description: "Default false: after dispatch, block until the subagent finishes and return its result. When true, return a runId immediately; the subagent runs in the background and reports back automatically when it is done." })),
+  worktree: Type.Optional(Type.Boolean({ description: "When true the subagent works on its own git worktree branch, which suits parallel writes; when omitted it follows the profile setting (on by default for worker)." })),
+  runId: Type.Optional(Type.String({ description: "Target run for action=status/stop/resume; with status, omit it to list all runs." })),
 });
 
 interface ResolvedModel {
@@ -944,17 +944,15 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
-    description:
-      "派发并管理子 Agent。子 Agent 在独立会话中运行，适合委派需要大量上下文的任务（搜索、阅读、代码修改），结果汇总后返回，不占用主会话上下文。",
-    promptSnippet: "subagent: 派发子 Agent 在独立会话中执行任务",
-    promptGuidelines: [
-      "需要大量文件读取、搜索或独立成块的子任务优先委派给子 Agent；多个相互独立的子任务应在同一条消息中发起多个 subagent 调用以并行执行。",
-      "传给子 Agent 的 task 必须自包含：交代背景、关键路径和期望的产出格式，不要假设它能看到主会话的上下文。",
-      "按角色选择 profile：只读侦察用 explore，代码评审用 reviewer，需要写代码用 worker；用 action=status（不带 runId）可查看可用的 profile 列表。",
-      "不急于拿到结果、或想同时推进其他工作时用 background:true 派发；子 Agent 完成后会自动汇报，无需轮询，需要进度时用 action=status 查询。",
-      "已完成的子 Agent 可以用 action=resume 复用其会话上下文继续相关工作，比重新派发更省上下文。",
-      "多个子 Agent 并行写同一个仓库时务必用 worktree:true（worker profile 默认开启），各自在独立 git worktree 分支上工作避免互相覆盖；完成后改动留在 worktree，由你审阅并合并。",
-    ],
+    description: [
+      "Dispatch and manage subagents. A subagent runs in its own session and suits tasks that need a lot of context (searching, reading, code changes); only its summarized result comes back, so the main session's context is not used up.",
+      "Delegate work that needs heavy file reading or searching, or any self-contained chunk, to a subagent; send several independent subtasks as multiple subagent calls in the same message so they run in parallel.",
+      "The task you pass must be self-contained: give the background, the key paths and the expected output format, and do not assume the subagent can see the main session's context.",
+      "Pick the profile by role: explore for read-only reconnaissance, reviewer for code review, worker when code must be written; call action=status without a runId to list the available profiles.",
+      "When you are not in a hurry for the result, or want to keep working meanwhile, dispatch with background:true; the subagent reports back by itself when it finishes, so there is no need to poll, and action=status shows progress when you want it.",
+      "A finished subagent can continue in the same session with action=resume, which saves context compared with dispatching a new one.",
+      "When several subagents write to the same repository in parallel, always use worktree:true (on by default for the worker profile) so each works on its own git worktree branch and they do not overwrite each other; the changes stay in the worktree for you to review and merge.",
+    ].join(" "),
     parameters: SubagentParams,
 
     async execute(toolCallId, params, signal, onUpdate, ctx) {
