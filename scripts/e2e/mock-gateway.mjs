@@ -97,11 +97,14 @@ export async function startMockGateway({ port = 0, log } = {}) {
     const body = JSON.parse(raw);
     const turn = planTurn(body);
     if (log) {
+      const system = textOf(body.messages?.find((message) => message.role === "system")?.content);
       appendFileSync(log, `${JSON.stringify({
         at: new Date().toISOString(),
         tools: (body.tools ?? []).map((tool) => tool.function?.name),
-        system: textOf(body.messages?.find((message) => message.role === "system")?.content).slice(0, 200),
-        systemTail: textOf(body.messages?.find((message) => message.role === "system")?.content).slice(-400),
+        system: system.slice(0, 200),
+        systemTail: system.slice(-400),
+        // The whole system prompt, for scenarios that check what the model really receives.
+        systemFull: system,
         last: (() => { const message = body.messages?.at(-1); return { role: message?.role, text: textOf(message?.content).slice(0, 300) }; })(),
         turn,
       })}\n`);
