@@ -379,15 +379,14 @@ export default function terminalExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "bash",
     label: "Shell",
-    description: "Run a shell command. Commands get a bounded foreground window and automatically continue as managed background terminals instead of being killed.",
-    promptSnippet: "Run shell commands with automatic background handoff",
-    promptGuidelines: [
+    description: [
+      "Run a shell command. Commands get a bounded foreground window and automatically continue as managed background terminals instead of being killed.",
       `Ordinary commands wait up to ${DEFAULT_BLOCK_UNTIL_MS}ms; if still running, they move to the background and return background_shell_id.`,
       "For known servers, watchers, monitors, or other persistent commands, set is_background=true; do not append &.",
       "block_until_ms only bounds this tool call. timeout_ms is an optional hard process lifetime that stops the process.",
       "Use terminal read/await/send/stop with background_shell_id. Never poll with shell sleep; await is event-driven and bounded.",
       "A healthy long-running service may remain in the background. Stop temporary processes before finishing unless the user asks to keep them.",
-    ],
+    ].join(" "),
     parameters: bashParameters,
     executionMode: "parallel",
     async execute(toolCallId, params: BashParameters, signal, onUpdate, ctx) {
@@ -423,13 +422,12 @@ export default function terminalExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "terminal",
     label: "Terminal",
-    description: "Control managed shell sessions: start, read, await, send input, stop, or list them.",
-    promptSnippet: "Control managed background and interactive shell sessions",
-    promptGuidelines: [
+    description: [
+      "Control managed shell sessions: start, read, await, send input, stop, or list them.",
       "Use the id returned by bash or terminal start for read, await, send, and stop.",
       `Use bounded event-driven await calls (default ${DEFAULT_BLOCK_UNTIL_MS}ms), not repeated shell sleep commands or unbounded polling.`,
       "Use screen mode for TUI redraws and log mode when every emitted line matters.",
-    ],
+    ].join(" "),
     parameters: terminalParameters,
     executionMode: "parallel",
     async execute(toolCallId, params: TerminalParameters, signal, onUpdate, ctx) {
