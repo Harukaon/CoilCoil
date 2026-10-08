@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import defaultToolsExtension, {
-  coreGuidelines,
+  engineeringStandardsBlock,
   extraToolsForPlatform,
-  removePiDocumentationGuide,
-  removeRedundantToolCatalog,
-  removeToolPromptGuidelines,
-  trimNativeSystemPrompt,
+  withEngineeringStandards,
 } from "../extensions/default-tools.ts";
+import { createChildSession } from "../extensions/subagents/child.ts";
 import {
   COILCOIL_ENGINEERING_STANDARDS,
   COILCOIL_WINDOWS_SHELL_STANDARDS,
 } from "../extensions/system/engineering-standards.ts";
+
+const CJK = /[\u3000-\u9fff\uff00-\uffef]/;
 
 function createHarness() {
   const handlers = new Map<string, Array<(...args: any[]) => any>>();
@@ -33,106 +36,10 @@ function createHarness() {
   return { handlers, activeTools: () => activeTools };
 }
 
-test("native tool catalog is removed while behavioral guidelines remain", () => {
-  const prompt = `You are a coding assistant.
-
-Available tools:
-- read: Read file contents
-- bash: Execute commands
-
-In addition to the tools above, custom tools may be available.
-
-Guidelines:
-- Be concise
-
-Current working directory: /project`;
-
-  assert.equal(
-    removeRedundantToolCatalog(prompt),
-    `You are a coding assistant.
-
-Guidelines:
-- Be concise
-
-Current working directory: /project`,
-  );
-});
-
-test("custom prompts without the native catalog are left unchanged", () => {
-  const prompt = "Custom system prompt\n\nRules:\n- Keep changes focused";
-  assert.equal(trimNativeSystemPrompt(prompt), prompt);
-});
-
-test("native Pi documentation guide is removed without removing skills", () => {
-  const prompt = `Guidelines:
-- Be concise
-
-Pi documentation (read only when asked about pi):
-- Main documentation: /pi/README.md
-- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)
-
-The following skills provide specialized instructions.
-<available_skills />`;
-
-  assert.equal(
-    removePiDocumentationGuide(prompt),
-    `Guidelines:
-- Be concise
-
-The following skills provide specialized instructions.
-<available_skills />`,
-  );
-});
-
-test("tool prompt guidelines are replaced by the CoilCoil engineering standards", () => {
-  const prompt = `Base
-
-Guidelines:
-- Use read instead of cat
-- Tool-specific duplicate
-- Be concise in your responses
-- Show file paths clearly when working with files
-
-Pi documentation (read only when asked about pi):
-- docs`;
-
-  assert.equal(removeToolPromptGuidelines(prompt), `Base
-
-${COILCOIL_ENGINEERING_STANDARDS}
-
-Pi documentation (read only when asked about pi):
-- docs`);
-});
-
-test("extension keeps extra tools active and strips the catalog per turn", async () => {
+test("extension keeps the extra tools active", async () => {
   const harness = createHarness();
   await harness.handlers.get("session_start")?.[0]({}, {});
   assert.deepEqual(harness.activeTools(), ["read", "bash", "grep", "ls"]);
-
-  const result = await harness.handlers.get("before_agent_start")?.[0]({
-    systemPrompt: `Base
-
-Available tools:
-- read: Read
-
-Guidelines:
-- Tool-specific duplicate
-- Be concise in your responses
-- Show file paths clearly when working with files
-
-Pi documentation (read only when asked about pi):
-- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)
-
-Current working directory: /project`,
-  }, {});
-
-  assert.deepEqual(result, {
-    systemPrompt: `Base
-
-${COILCOIL_ENGINEERING_STANDARDS}
-
-Current working directory: /project`,
-  });
 });
 
 test("the PowerShell tool is activated on Windows only", () => {
@@ -141,24 +48,82 @@ test("the PowerShell tool is activated on Windows only", () => {
   assert.deepEqual(extraToolsForPlatform("win32"), ["grep", "ls", "powershell"]);
 });
 
-test("Windows adds the PowerShell preference to the engineering standards", () => {
-  assert.equal(coreGuidelines("darwin"), `\n\n${COILCOIL_ENGINEERING_STANDARDS}`);
+test("the standards are appended to the prompt as one tagged block", () => {
+  const prompt = "Base\n\n<rules>\n- Be concise\n</rules>\n\n<cwd>\n/project\n</cwd>";
   assert.equal(
-    coreGuidelines("win32"),
-    `\n\n${COILCOIL_ENGINEERING_STANDARDS}\n\n${COILCOIL_WINDOWS_SHELL_STANDARDS}`,
+    withEngineeringStandards(prompt, "darwin"),
+    `${prompt}\n\n<engineering_standards>\n${COILCOIL_ENGINEERING_STANDARDS}\n</engineering_standards>`,
   );
+});
+
+test("a prompt that already carries the standards is left alone", () => {
+  const once = withEngineeringStandards("Base", "linux");
+  assert.equal(withEngineeringStandards(once, "linux"), once);
+});
+
+test("a prompt with none of Pi's sections still gets the standards", () => {
+  // A custom system prompt gives the standards nothing to anchor on. They must arrive anyway:
+  // this is the case the old heading-matching splice dropped without a word.
+  const result = withEngineeringStandards("Custom system prompt", "linux");
+  assert.ok(result.startsWith("Custom system prompt\n\n<engineering_standards>\n"));
+  assert.ok(result.includes(COILCOIL_ENGINEERING_STANDARDS));
+});
+
+test("every turn gets the standards through before_agent_start, once", async () => {
+  const harness = createHarness();
+  const handler = harness.handlers.get("before_agent_start")?.[0];
+  assert.ok(handler, "the extension must listen to before_agent_start");
+
+  const first = await handler({ systemPrompt: "Base" }, {});
+  assert.deepEqual(first, { systemPrompt: withEngineeringStandards("Base") });
+  assert.equal(await handler({ systemPrompt: first.systemPrompt }, {}), undefined, "nothing to add the second time");
+});
+
+test("Windows adds the PowerShell guidance to the standards, other platforms do not", () => {
+  assert.ok(engineeringStandardsBlock("win32").includes(COILCOIL_WINDOWS_SHELL_STANDARDS));
+  assert.ok(!engineeringStandardsBlock("darwin").includes(COILCOIL_WINDOWS_SHELL_STANDARDS));
+  assert.ok(!engineeringStandardsBlock("linux").includes(COILCOIL_WINDOWS_SHELL_STANDARDS));
   assert.match(COILCOIL_WINDOWS_SHELL_STANDARDS, /Prefer it for shell work/);
 });
 
-test("the Windows system prompt carries the PowerShell guidance", () => {
-  const prompt = `Base
+test("the standards are English, and leave testing and committing out", () => {
+  for (const [name, text] of [
+    ["engineering standards", COILCOIL_ENGINEERING_STANDARDS],
+    ["Windows shell standards", COILCOIL_WINDOWS_SHELL_STANDARDS],
+  ] as const) {
+    assert.doesNotMatch(text, CJK, `${name} must stay English: it costs fewer tokens and sits next to Pi's English prompt`);
+  }
+  assert.doesNotMatch(
+    COILCOIL_ENGINEERING_STANDARDS,
+    /Testing and verification/,
+    "testing is meant for a dedicated test agent; the main agent's prompt should not ask it to run and write tests",
+  );
+  assert.doesNotMatch(
+    COILCOIL_ENGINEERING_STANDARDS,
+    /create commits/,
+    "whether to commit follows the user's own preferences, not a default rule",
+  );
+});
 
-Guidelines:
-- Be concise in your responses
+test("the standards reach the prompt Pi really builds, and Pi's own text stays as it was", async (context) => {
+  // The earlier tests fed hand-written prompts into the splice and all passed while the real
+  // prompt never received the standards. This one starts from a prompt Pi built itself.
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-standards-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const handle = await createChildSession({
+    cwd: root,
+    agentDir: join(root, "agent"),
+    parentSessionDir: join(root, "sessions"),
+    parentSessionId: "standards",
+    onEvent: () => undefined,
+  });
+  context.after(() => handle.dispose());
 
-Pi documentation (read only when asked about pi):
-- docs`;
+  const piPrompt = handle.session.systemPrompt;
+  assert.ok(piPrompt.length > 500, "expected the prompt Pi built for the session, not an empty stand-in");
 
-  assert.match(removeToolPromptGuidelines(prompt, "win32"), /powershell tool is available/);
-  assert.doesNotMatch(removeToolPromptGuidelines(prompt, "darwin"), /powershell tool is available/);
+  const result = await createHarness().handlers.get("before_agent_start")?.[0]({ systemPrompt: piPrompt }, {});
+  assert.ok(result, "the standards must be added to a real Pi prompt");
+  assert.ok(result.systemPrompt.startsWith(piPrompt), "Pi's own sections must not be cut or reordered");
+  assert.ok(result.systemPrompt.includes(`<engineering_standards>\n${COILCOIL_ENGINEERING_STANDARDS}`));
 });

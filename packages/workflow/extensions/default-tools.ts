@@ -14,65 +14,40 @@ const DEFAULT_EXTRA_TOOLS = ["grep", "ls"];
  */
 const WINDOWS_ONLY_TOOLS = ["powershell"];
 
-const AVAILABLE_TOOLS_HEADING = "\n\nAvailable tools:\n";
-const GUIDELINES_HEADING = "\n\nGuidelines:\n";
-const PI_DOCUMENTATION_HEADING = "\n\nPi documentation (";
-const PI_DOCUMENTATION_FOOTER =
-  "- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)";
+const STANDARDS_TAG = "engineering_standards";
 
 export function extraToolsForPlatform(platform: NodeJS.Platform = process.platform): string[] {
   return platform === "win32" ? [...DEFAULT_EXTRA_TOOLS, ...WINDOWS_ONLY_TOOLS] : [...DEFAULT_EXTRA_TOOLS];
 }
 
-export function coreGuidelines(platform: NodeJS.Platform = process.platform): string {
+/**
+ * The engineering standards as one tagged block, shaped like the other blocks
+ * CoilCoil adds to the system prompt (`<tool_audit_policy>`, the memory blocks).
+ */
+export function engineeringStandardsBlock(platform: NodeJS.Platform = process.platform): string {
   const standards = platform === "win32"
     ? `${COILCOIL_ENGINEERING_STANDARDS}\n\n${COILCOIL_WINDOWS_SHELL_STANDARDS}`
     : COILCOIL_ENGINEERING_STANDARDS;
-  return `\n\n${standards}`;
+  return `<${STANDARDS_TAG}>\n${standards}\n</${STANDARDS_TAG}>`;
 }
 
-export function removeRedundantToolCatalog(systemPrompt: string): string {
-  const start = systemPrompt.indexOf(AVAILABLE_TOOLS_HEADING);
-  if (start < 0) return systemPrompt;
-
-  const end = systemPrompt.indexOf(
-    GUIDELINES_HEADING,
-    start + AVAILABLE_TOOLS_HEADING.length,
-  );
-  if (end < 0) return systemPrompt;
-
-  return `${systemPrompt.slice(0, start)}${systemPrompt.slice(end)}`;
-}
-
-export function removePiDocumentationGuide(systemPrompt: string): string {
-  const start = systemPrompt.indexOf(PI_DOCUMENTATION_HEADING);
-  if (start < 0) return systemPrompt;
-
-  const footer = systemPrompt.indexOf(PI_DOCUMENTATION_FOOTER, start);
-  if (footer < 0) return systemPrompt;
-
-  const end = footer + PI_DOCUMENTATION_FOOTER.length;
-  return `${systemPrompt.slice(0, start)}${systemPrompt.slice(end)}`;
-}
-
-export function removeToolPromptGuidelines(
+/**
+ * Adds the engineering standards after whatever the prompt already holds, once.
+ *
+ * The standards used to be spliced in by looking for Pi's own headings
+ * ("Guidelines:", "Available tools:") and replacing what lay between them. When
+ * Pi moved to tagged sections those headings were gone, the search found nothing
+ * and quietly did nothing, so the standards stopped reaching the model while
+ * every test, which fed in a hand-written prompt with the old headings, kept
+ * passing. Appending needs no anchor in Pi's text that could go missing, and it
+ * leaves Pi's own sections exactly as Pi wrote them.
+ */
+export function withEngineeringStandards(
   systemPrompt: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
-  const start = systemPrompt.indexOf(GUIDELINES_HEADING);
-  if (start < 0) return systemPrompt;
-  const end = systemPrompt.indexOf(PI_DOCUMENTATION_HEADING, start);
-  if (end < 0) return systemPrompt;
-  return `${systemPrompt.slice(0, start)}${coreGuidelines(platform)}${systemPrompt.slice(end)}`;
-}
-
-export function trimNativeSystemPrompt(
-  systemPrompt: string,
-  platform: NodeJS.Platform = process.platform,
-): string {
-  return removePiDocumentationGuide(
-    removeToolPromptGuidelines(removeRedundantToolCatalog(systemPrompt), platform),
-  );
+  if (systemPrompt.includes(`<${STANDARDS_TAG}>`)) return systemPrompt;
+  return `${systemPrompt}\n\n${engineeringStandardsBlock(platform)}`;
 }
 
 export default function defaultToolsExtension(pi: ExtensionAPI): void {
@@ -87,7 +62,7 @@ export default function defaultToolsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", (event) => {
-    const systemPrompt = trimNativeSystemPrompt(event.systemPrompt);
+    const systemPrompt = withEngineeringStandards(event.systemPrompt);
     return systemPrompt === event.systemPrompt ? undefined : { systemPrompt };
   });
 }

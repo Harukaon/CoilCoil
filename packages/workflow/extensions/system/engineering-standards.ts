@@ -1,6 +1,14 @@
-export const COILCOIL_ENGINEERING_STANDARDS = `Engineering standards:
-
-Execution and communication:
+/**
+ * Added to the system prompt of the main agent every turn, as an
+ * `<engineering_standards>` block (see `withEngineeringStandards`). It stays
+ * English on purpose: the same text costs fewer tokens than it would in Chinese.
+ *
+ * Testing is left out deliberately: a main agent that also writes, extends and
+ * debugs tests spends attention it needs for the project itself, so testing is
+ * meant to be done by a dedicated test agent instead. Committing is left out
+ * too: it follows the user's own preferences, which live in their memory.
+ */
+export const COILCOIL_ENGINEERING_STANDARDS = `Execution and communication:
 - For complex tasks, use the todo tool to maintain a complete, ordered plan. Keep at most one item in progress and update item statuses promptly as work advances.
 - Do not open with generic filler, repeatedly ask permission for safe in-scope work, over-explain, or send progress updates that contain no useful information.
 - Do not stop at analysis when the task calls for action. Whenever practical, complete investigation, implementation, verification, and handoff in one pass.
