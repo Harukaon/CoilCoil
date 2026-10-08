@@ -76,6 +76,8 @@ function answersFromWorkspaceConfiguration(command: RuntimeCommand): boolean {
     || command.type === "get_memory_configuration"
     || command.type === "get_subagent_configuration"
     || command.type === "list_subagent_profiles"
+    || command.type === "save_subagent_profile"
+    || command.type === "delete_subagent_profile"
     || command.type === "save_subagent_configuration"
     || command.type === "get_session_naming_configuration"
     || command.type === "save_session_naming_configuration"
@@ -528,6 +530,10 @@ export class RuntimeServer {
         return runtime.getSubagentConfiguration();
       case "list_subagent_profiles":
         return runtime.listSubagentProfiles(command.cwd);
+      case "save_subagent_profile":
+        return runtime.saveSubagentProfile(command.input, command.cwd);
+      case "delete_subagent_profile":
+        return runtime.deleteSubagentProfile(command.name, command.scope, command.cwd);
       case "get_session_naming_configuration":
         return runtime.getSessionNamingConfiguration();
       case "get_summarization_model_configuration":

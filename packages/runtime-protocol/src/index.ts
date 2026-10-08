@@ -1269,6 +1269,23 @@ export interface SubagentProfilesSnapshot {
   availableTools: string[];
 }
 
+/** Where a profile the user writes is kept: their own folder (every project) or the open project's. */
+export type SubagentProfileScope = Exclude<SubagentProfileSource, "builtin">;
+
+/** What the settings form sends to create a subagent profile, or to change one the user wrote. */
+export interface SaveSubagentProfileInput {
+  /** Lowercase letters, digits, `-` and `_`, up to 48; it becomes the file name. */
+  name: string;
+  scope: SubagentProfileScope;
+  /** What it is for, in one line: the main agent reads this to decide when to dispatch it. */
+  description: string;
+  systemPrompt: string;
+  /** At least one, each among the snapshot's `availableTools`. */
+  tools: string[];
+  /** Work on its own git worktree branch instead of the working tree. */
+  worktree: boolean;
+}
+
 /**
  * 会话自动命名用哪个模型。
  *
@@ -1585,6 +1602,8 @@ export type RuntimeCommand =
   | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
   | { type: "get_subagent_configuration" }
   | { type: "list_subagent_profiles"; cwd?: string }
+  | { type: "save_subagent_profile"; input: SaveSubagentProfileInput; cwd?: string }
+  | { type: "delete_subagent_profile"; name: string; scope: SubagentProfileScope; cwd?: string }
   | { type: "get_session_naming_configuration" }
   | { type: "get_summarization_model_configuration" }
   | { type: "save_summarization_model_configuration"; input: SummarizationModelConfigurationInput }

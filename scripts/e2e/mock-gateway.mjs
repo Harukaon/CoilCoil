@@ -105,6 +105,8 @@ export async function startMockGateway({ port = 0, log } = {}) {
         systemTail: system.slice(-400),
         // The whole system prompt, for scenarios that check what the model really receives.
         systemFull: system,
+        // What each tool says about itself, for scenarios that check what the model is told a tool does.
+        toolDescriptions: Object.fromEntries((body.tools ?? []).map((tool) => [tool.function?.name, tool.function?.description ?? ""])),
         last: (() => { const message = body.messages?.at(-1); return { role: message?.role, text: textOf(message?.content).slice(0, 300) }; })(),
         turn,
       })}\n`);

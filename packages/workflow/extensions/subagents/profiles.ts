@@ -12,8 +12,11 @@ export const DEFAULT_CHILD_TOOLS: readonly string[] = ["read", "bash", "terminal
  */
 export const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,47}$/;
 
+/** Windows will not create a file with one of these names, whatever its extension. */
+const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/;
+
 export function isValidProfileName(name: string): boolean {
-  return PROFILE_NAME_PATTERN.test(name);
+  return PROFILE_NAME_PATTERN.test(name) && !WINDOWS_RESERVED_NAMES.test(name);
 }
 
 export type SubagentProfileSource = "builtin" | "user" | "project";
@@ -125,7 +128,8 @@ export function serializeProfile(fields: ProfileFileFields): string {
   return `${lines.join("\n")}\n${body ? `\n${body}\n` : ""}`;
 }
 
-function loadProfilesFromDir(dir: string, source: SubagentProfileSource): SubagentProfile[] {
+/** The profiles in one folder, in file-name order. A file that does not parse is skipped. */
+export function loadProfilesFromDir(dir: string, source: SubagentProfileSource): SubagentProfile[] {
   if (!existsSync(dir)) return [];
   const profiles: SubagentProfile[] = [];
   for (const name of readdirSync(dir).sort()) {
@@ -158,6 +162,37 @@ export function loadProfiles(dirs: ProfileDirs): Map<string, SubagentProfile> {
     for (const profile of loadProfilesFromDir(dirs.projectDir, "project")) merged.set(profile.name, profile);
   }
   return merged;
+}
+
+const CUSTOM_CATALOG_LIMIT = 20;
+const CUSTOM_CATALOG_DESCRIPTION_LIMIT = 200;
+
+/**
+ * The sentence of the subagent tool's description that names the profiles the user added.
+ *
+ * The built-in profiles are described there in prose already. A profile someone wrote is
+ * something the main agent could not otherwise know exists, so it is named with its own
+ * description, which is what the author wrote it for. Only profiles that can be dispatched
+ * are named: one with no model chosen would be refused, so naming it invites a failed call.
+ * Descriptions are cut to one short line (a project's files are not necessarily the user's
+ * own). Returns "" when there is nothing to say, so a session without custom profiles keeps
+ * exactly the description it had.
+ */
+export function formatCustomProfiles(
+  profiles: Map<string, SubagentProfile>,
+  usable: (profile: SubagentProfile) => boolean,
+): string {
+  const custom = [...profiles.values()]
+    .filter((profile) => profile.source !== "builtin" && usable(profile))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  if (custom.length === 0) return "";
+  const entries = custom.slice(0, CUSTOM_CATALOG_LIMIT).map((profile) => {
+    const text = (profile.description ?? "").replace(/\s+/g, " ").trim();
+    const shown = text.length > CUSTOM_CATALOG_DESCRIPTION_LIMIT ? `${text.slice(0, CUSTOM_CATALOG_DESCRIPTION_LIMIT - 1)}…` : text;
+    return `${profile.name}${profile.source === "project" ? " (from this project)" : ""}: ${shown || "no description"}`;
+  });
+  const rest = custom.length - entries.length;
+  return `Subagents the user added, dispatch them by name: ${entries.join("; ")}${rest > 0 ? `; and ${rest} more, listed by action=status` : ""}.`;
 }
 
 /**

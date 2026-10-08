@@ -1,6 +1,8 @@
 import {
+  type SaveSubagentProfileInput,
   type SubagentConfiguration,
   type SubagentConfigurationInput,
+  type SubagentProfileScope,
   type SubagentProfilesSnapshot,
 } from "@coilcoil/runtime-protocol";
 import {
@@ -18,8 +20,10 @@ import { RuntimeResourcesController } from "./runtime-resources.js";
 import {
   LEGACY_SINGLE_MODEL_PROFILES,
   cleanSubagentModels,
+  deleteSubagentProfile as deleteProfileFromDisk,
   isSubagentModelKey,
   listSubagentProfiles as listProfilesFromDisk,
+  saveSubagentProfile as saveProfileToDisk,
 } from "./subagent-profiles.js";
 import { isRecord } from "./runtime-utils.js";
 
@@ -62,9 +66,28 @@ export abstract class RuntimeSubagents extends RuntimeResourcesController {
     return this.readSubagentConfiguration();
   }
 
+  private subagentProfileLocation(cwd?: string): { workflowDir: string; agentDir: string; cwd?: string } {
+    return { workflowDir: this.workflowDir, agentDir: this.agentDir, cwd };
+  }
+
   /** Every subagent profile the open project can use, for the settings page. */
   async listSubagentProfiles(cwd?: string): Promise<SubagentProfilesSnapshot> {
-    return listProfilesFromDisk({ workflowDir: this.workflowDir, agentDir: this.agentDir, cwd });
+    return listProfilesFromDisk(this.subagentProfileLocation(cwd));
+  }
+
+  /** Create a profile, or change one the user wrote; returns the list as it now is. */
+  async saveSubagentProfile(input: SaveSubagentProfileInput, cwd?: string): Promise<SubagentProfilesSnapshot> {
+    return saveProfileToDisk(this.subagentProfileLocation(cwd), input);
+  }
+
+  async deleteSubagentProfile(name: string, scope: SubagentProfileScope, cwd?: string): Promise<SubagentProfilesSnapshot> {
+    const snapshot = await deleteProfileFromDisk(this.subagentProfileLocation(cwd), name, scope);
+    // The model chosen for a profile that is gone would only linger in the settings file, and
+    // would be picked up again by whatever is later created under the same name.
+    if (!snapshot.profiles.some((profile) => profile.name === name)) {
+      await this.saveSubagentConfiguration({ models: { [name]: "" } });
+    }
+    return snapshot;
   }
 
   async saveSubagentConfiguration(input: SubagentConfigurationInput): Promise<SubagentConfiguration> {

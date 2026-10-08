@@ -20,6 +20,7 @@ import {
   scanResumableChildren,
 } from "./subagents/child.ts";
 import {
+  formatCustomProfiles,
   formatProfileCatalog,
   loadProfiles,
   type SubagentProfile,
@@ -294,6 +295,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   let sessionId: string | undefined;
   let sessionContext: ExtensionContext | undefined;
   let profiles = new Map<string, SubagentProfile>();
+  /** What the tool description says about the profiles the user added; empty when there are none. */
+  let customProfileCatalog = "";
 
   const reloadProfiles = (cwd: string): void => {
     profiles = loadProfiles({
@@ -301,6 +304,12 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       userDir: join(getAgentDir(), "agents"),
       projectDir: join(cwd, ".coilcoil", "agents"),
     });
+  };
+
+  // A profile can be added or edited in settings while a session is open. The few small
+  // files are read again at each use, so one written a moment ago is there without a restart.
+  const refreshProfiles = (): void => {
+    if (sessionCwd) reloadProfiles(sessionCwd);
   };
 
   const flushNow = (): void => {
@@ -590,6 +599,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     }
     const resolvedCwd = resumeCwdForRun(run, sessionCwd ?? process.cwd());
     if (!resolvedCwd.cwd) return { error: resolvedCwd.error ?? "无法确定子 Agent 恢复目录。" };
+    refreshProfiles();
     const profile = profiles.get(run.agent);
     const tools = resumeToolsForRun(run, profile);
     if (!tools) return { error: `子 Agent profile ${run.agent} 已不存在，且会话未保存原工具权限，拒绝以更宽权限恢复。` };
@@ -628,6 +638,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       throw new Error(`并发子 Agent 已达上限（${MAX_CONCURRENT_CHILDREN}），请等待已有运行结束。`);
     }
     const profileName = params.agent?.trim();
+    refreshProfiles();
     const profile = profileName ? profiles.get(profileName) : undefined;
     if (profileName && !profile) {
       throw new Error(`未找到子 Agent profile：${profileName}。\n${formatProfileCatalog(profiles, (item) => readConfiguredSubagentModel(item.name) || item.model)}`);
@@ -770,6 +781,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   const executeStatus = (params: { runId?: string }): SubagentToolOutcome => {
     const query = params.runId?.trim();
     if (!query) {
+      refreshProfiles();
       const runs = registry.list();
       const catalog = formatProfileCatalog(profiles, (item) => readConfiguredSubagentModel(item.name) || item.model);
       if (runs.length === 0) return { content: [{ type: "text", text: `当前会话还没有派发过子 Agent。\n${catalog}` }], details: { error: "no-runs" } };
@@ -850,6 +862,13 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     sessionDir = ctx.sessionManager.getSessionDir();
     sessionId = ctx.sessionManager.getSessionId();
     reloadProfiles(ctx.cwd);
+    // The tool is registered before the profiles are known. If the user has added some, say so in
+    // its description now, or the main agent would have no way to know they exist.
+    const catalog = formatCustomProfiles(profiles, (item) => Boolean(readConfiguredSubagentModel(item.name) || item.model));
+    if (catalog !== customProfileCatalog) {
+      customProfileCatalog = catalog;
+      registerSubagentTool();
+    }
   });
 
   pi.events.on(SUBAGENT_RPC_REQUEST_CHANNEL, async (raw: unknown) => {
@@ -947,30 +966,35 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     sessionContext = undefined;
   });
 
-  pi.registerTool({
-    name: "subagent",
-    label: "Subagent",
-    description: [
-      "Dispatch and manage subagents. A subagent runs in its own session and suits tasks that need a lot of context (searching, reading, code changes); only its summarized result comes back, so the main session's context is not used up.",
-      "Delegate work that needs heavy file reading or searching, or any self-contained chunk, to a subagent; send several independent subtasks as multiple subagent calls in the same message so they run in parallel.",
-      "The task you pass must be self-contained: give the background, the key paths and the expected output format, and do not assume the subagent can see the main session's context. Write the task in the user's language, because the report comes back in the language of the task.",
-      "Pick the profile by role: explore for read-only reconnaissance, reviewer for code review, worker when code must be written, hacker to look for problems in code that is said to be finished; call action=status without a runId to list the available profiles, including any the user added.",
-      "When you dispatch hacker, give it only the requirement and where the code is; do not tell it you think the code is right, because that biases it. It has no browser or other MCP tools, so whatever its report says it could not run, such as clicking through a page or launching an app, is yours to run.",
-      "When you are not in a hurry for the result, or want to keep working meanwhile, dispatch with background:true; the subagent reports back by itself when it finishes, so there is no need to poll, and action=status shows progress when you want it.",
-      "A finished subagent can continue in the same session with action=resume, which saves context compared with dispatching a new one.",
-      "When several subagents write to the same repository in parallel, always use worktree:true (on by default for the worker profile) so each works on its own git worktree branch and they do not overwrite each other; the changes stay in the worktree for you to review and merge.",
-    ].join(" "),
-    parameters: SubagentParams,
+  const registerSubagentTool = (): void => {
+    pi.registerTool({
+      name: "subagent",
+      label: "Subagent",
+      description: [
+        "Dispatch and manage subagents. A subagent runs in its own session and suits tasks that need a lot of context (searching, reading, code changes); only its summarized result comes back, so the main session's context is not used up.",
+        "Delegate work that needs heavy file reading or searching, or any self-contained chunk, to a subagent; send several independent subtasks as multiple subagent calls in the same message so they run in parallel.",
+        "The task you pass must be self-contained: give the background, the key paths and the expected output format, and do not assume the subagent can see the main session's context. Write the task in the user's language, because the report comes back in the language of the task.",
+        "Pick the profile by role: explore for read-only reconnaissance, reviewer for code review, worker when code must be written, hacker to look for problems in code that is said to be finished; call action=status without a runId to list the available profiles, including any the user added.",
+        "When you dispatch hacker, give it only the requirement and where the code is; do not tell it you think the code is right, because that biases it. It has no browser or other MCP tools, so whatever its report says it could not run, such as clicking through a page or launching an app, is yours to run.",
+        "When you are not in a hurry for the result, or want to keep working meanwhile, dispatch with background:true; the subagent reports back by itself when it finishes, so there is no need to poll, and action=status shows progress when you want it.",
+        "A finished subagent can continue in the same session with action=resume, which saves context compared with dispatching a new one.",
+        "When several subagents write to the same repository in parallel, always use worktree:true (on by default for the worker profile) so each works on its own git worktree branch and they do not overwrite each other; the changes stay in the worktree for you to review and merge.",
+        customProfileCatalog,
+      ].filter(Boolean).join(" "),
+      parameters: SubagentParams,
 
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const action = params.action ?? "run";
-      const forwardUpdate = onUpdate
-        ? (update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => onUpdate(update)
-        : undefined;
-      if (action === "status") return executeStatus(params);
-      if (action === "stop") return executeStop(params);
-      if (action === "resume") return executeResume(toolCallId, params, signal, forwardUpdate);
-      return executeRun(toolCallId, params, signal, forwardUpdate, ctx);
-    },
-  });
+      async execute(toolCallId, params, signal, onUpdate, ctx) {
+        const action = params.action ?? "run";
+        const forwardUpdate = onUpdate
+          ? (update: { content: Array<{ type: "text"; text: string }>; details: SubagentToolDetails }) => onUpdate(update)
+          : undefined;
+        if (action === "status") return executeStatus(params);
+        if (action === "stop") return executeStop(params);
+        if (action === "resume") return executeResume(toolCallId, params, signal, forwardUpdate);
+        return executeRun(toolCallId, params, signal, forwardUpdate, ctx);
+      },
+    });
+  };
+
+  registerSubagentTool();
 }
