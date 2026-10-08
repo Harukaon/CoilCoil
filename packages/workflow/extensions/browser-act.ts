@@ -137,10 +137,10 @@ async function currentState(
 
 const handleFields = {
   handle: Type.Optional(Type.String({
-    description: "browser_open 返回的页面句柄。传了句柄就不用传 pageId；两个都不传则作用于当前选中页。",
+    description: "Page handle returned by browser_open. With a handle you do not need pageId; with neither, the call applies to the currently selected page.",
   })),
   pageId: Type.Optional(Type.Number({
-    description: "兼容旧调用：页面的数字 id。推荐用 handle，新开的页直接拿 handle。",
+    description: "Kept for backward compatibility: the numeric page id. Prefer handle, and use the handle of a newly opened page.",
   })),
 } as const;
 
@@ -183,15 +183,14 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   registerTool({
     name: "browser_open",
     label: "Browser Open",
-    description: "打开一个网页并返回句柄。交互（点击/输入/导航）用 browser_navigate、browser_click、browser_type 拿句柄操作；调试（脚本/控制台/网络/性能）继续用 coilcoil-browser。",
-    promptSnippet: "browser_open: 打开网页拿句柄，后续交互拿句柄操作",
-    promptGuidelines: [
-      "需要像人一样点页面、填表单时用这一组；看 DOM、跑脚本、查控制台网络性能时用 coilcoil-browser。",
-      "返回的 handle 贯穿后续操作，不要自己记 pageId 数字。",
-      "自己的活在自己新开的页面里做；用户说「这个页面」「我开的那个」时，用 browser_tabs 找到用户正看着的那张，拿它的句柄操作。用户开的页面里可能有他正在做的事，没让你动就别去导航、改表单。",
-    ],
+    description: [
+      "Open a web page in the built-in browser and return a handle for it.",
+      "Use the browser_open, browser_navigate, browser_click, browser_type and browser_tabs group to interact with pages like a person (click, fill forms, navigate); for debugging (scripts, console, network, performance) keep using coilcoil-browser.",
+      "Pass the returned handle to the later calls instead of tracking pageId numbers yourself.",
+      "Do your own work in pages you opened yourself. When the user says 'this page' or 'the one I opened', call browser_tabs to find the page the user is looking at and act through its handle. A page the user opened may hold work in progress, so do not navigate or change forms there unless asked.",
+    ].join(" "),
     parameters: Type.Object({
-      url: Type.String({ description: "要打开的地址" }),
+      url: Type.String({ description: "Address to open" }),
     }),
     async execute(_toolCallId, params, signal) {
       try {
@@ -217,11 +216,10 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   registerTool({
     name: "browser_navigate",
     label: "Browser Navigate",
-    description: "让句柄对应的页面导航到新地址，含等待可加载。超时时报错自带当前页面状态，不要盲重试。",
-    promptSnippet: "browser_navigate: 导航含等待，失败看报错里的页面状态",
+    description: "Navigate the page behind a handle to a new address and wait until it has loaded. When it times out, the error carries the current page state; read that state before retrying instead of retrying blindly.",
     parameters: Type.Object({
       ...handleFields,
-      url: Type.String({ description: "目标地址" }),
+      url: Type.String({ description: "Target address" }),
     }),
     async execute(_toolCallId, params, signal) {
       const pageId = resolvePageId(params.handle, params.pageId);
@@ -246,11 +244,10 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   registerTool({
     name: "browser_click",
     label: "Browser Click",
-    description: "点击页面元素。每次点击后自动带回当前页面状态；点不中（比如 uid 过期）时会带回一份新快照，用新快照里的 uid 再点。",
-    promptSnippet: "browser_click: 点完自动带回页面状态，点不中时带回新快照",
+    description: "Click a page element. The current page state comes back automatically after every click; when the click misses (for example the uid has expired), a fresh snapshot comes back instead, and you should click again with the uid from that new snapshot.",
     parameters: Type.Object({
       ...handleFields,
-      uid: Type.String({ description: "take_snapshot 里看到的元素 uid" }),
+      uid: Type.String({ description: "Element uid seen in take_snapshot" }),
     }),
     async execute(_toolCallId, params, signal) {
       const pageId = resolvePageId(params.handle, params.pageId);
@@ -283,13 +280,12 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   registerTool({
     name: "browser_type",
     label: "Browser Type",
-    description: "往输入框填内容，填完回读确认。需要先 take_snapshot 拿到输入框的 uid。",
-    promptSnippet: "browser_type: 填完回读确认",
+    description: "Fill text into an input and read it back to confirm. Take a snapshot with take_snapshot first to get the input's uid.",
     parameters: Type.Object({
       ...handleFields,
-      uid: Type.String({ description: "输入框的 uid" }),
-      value: Type.String({ description: "要填的内容" }),
-      submit: Type.Optional(Type.Boolean({ description: "填完是否回车提交，默认 false" })),
+      uid: Type.String({ description: "Uid of the input" }),
+      value: Type.String({ description: "Text to fill in" }),
+      submit: Type.Optional(Type.Boolean({ description: "Press Enter after filling to submit; default false" })),
     }),
     async execute(_toolCallId, params, signal) {
       const pageId = resolvePageId(params.handle, params.pageId);
@@ -321,8 +317,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   registerTool({
     name: "browser_tabs",
     label: "Browser Tabs",
-    description: "列出这个对话里内置浏览器的全部网页（你开的、用户开的都在），每张给一个句柄，标出用户正看着哪一张。用户和你用的是同一个页面：拿句柄直接用 browser_click、browser_type、browser_navigate 操作，不用接管，页面也不会刷新。",
-    promptSnippet: "browser_tabs: 列出这个对话的全部网页并给句柄，标出用户正看着的那张",
+    description: "List every page of the built-in browser in this conversation (the ones you opened and the ones the user opened), give each a handle, and mark which one the user is looking at. You and the user share the very same pages: act on a page directly with its handle through browser_click, browser_type or browser_navigate; there is nothing to take over and the page is not reloaded.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, signal) {
       try {
