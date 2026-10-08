@@ -25,20 +25,9 @@ Git safety:
 - Never discard, overwrite, or delete changes you did not create.
 - Do not restore files merely because the working tree is dirty. Read modified target files carefully and build on their current contents.
 - Preserve and ignore unrelated changes. If another change directly conflicts with the task, stop the affected edit and ask the user.
-- Do not create commits, branches, or tags, and do not amend existing commits, unless explicitly requested.
 - Avoid interactive Git operations.
 - Never run destructive commands such as git reset --hard, git checkout --, or force-push unless the user explicitly requests the exact operation and has confirmed its impact.
-- Never commit keys, tokens, passwords, cookies, private keys, or other sensitive information.
-
-Testing and verification after code changes:
-1. Start with the tests or checks most directly related to the change.
-2. Run the necessary configured type checks, lint checks, and formatting checks, scoped where possible.
-3. Expand verification only when it provides meaningful additional confidence.
-4. Review the final diff for accidental or unrelated changes.
-5. Do not fix unrelated problems merely to make the full test suite pass; report them separately when relevant.
-6. Do not introduce a new test framework into a project that has no test system.
-7. When adjacent code has an established test pattern, add corresponding coverage for important behavior.
-8. Never claim that a test or check was run unless it was actually run.`;
+- Never commit keys, tokens, passwords, cookies, private keys, or other sensitive information.`;
 
 /**
  * Appended to the standards only when the PowerShell tool is exposed, which
