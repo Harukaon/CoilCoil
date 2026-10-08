@@ -947,7 +947,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     description: [
       "Dispatch and manage subagents. A subagent runs in its own session and suits tasks that need a lot of context (searching, reading, code changes); only its summarized result comes back, so the main session's context is not used up.",
       "Delegate work that needs heavy file reading or searching, or any self-contained chunk, to a subagent; send several independent subtasks as multiple subagent calls in the same message so they run in parallel.",
-      "The task you pass must be self-contained: give the background, the key paths and the expected output format, and do not assume the subagent can see the main session's context.",
+      "The task you pass must be self-contained: give the background, the key paths and the expected output format, and do not assume the subagent can see the main session's context. Write the task in the user's language, because the report comes back in the language of the task.",
       "Pick the profile by role: explore for read-only reconnaissance, reviewer for code review, worker when code must be written; call action=status without a runId to list the available profiles.",
       "When you are not in a hurry for the result, or want to keep working meanwhile, dispatch with background:true; the subagent reports back by itself when it finishes, so there is no need to poll, and action=status shows progress when you want it.",
       "A finished subagent can continue in the same session with action=resume, which saves context compared with dispatching a new one.",

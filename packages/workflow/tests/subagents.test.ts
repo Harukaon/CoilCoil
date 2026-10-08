@@ -368,7 +368,7 @@ test("builtin presets ship explore, reviewer, and worker", () => {
   assert.ok(worker.tools?.includes("edit") && worker.tools?.includes("write"), "worker must be able to write");
   assert.ok(worker.tools?.includes("terminal"), "worker must be able to control a background handoff");
   assert.equal(worker.worktree, true);
-  assert.match(explore.systemPrompt ?? "", /只读/);
+  assert.match(explore.systemPrompt ?? "", /read-only/i);
 });
 
 test("status listing exposes the profile catalog after session_start", async () => {

@@ -10,7 +10,8 @@ export async function run({ ui, check, gatewayLog }) {
   await ui.send([{ tool: "subagent", args: { agent: "explore", task: `子代理任务 MOCK:${JSON.stringify(child)}` } }, { echo: true }], "派子代理");
   const echo = await ui.lastEcho();
   check("子 Agent 点名调用浏览器被拒绝", echo.includes("不能使用内置浏览器"), echo.slice(0, 200));
-  const childRequests = gatewayLog().filter((entry) => /子 Agent/.test(entry.systemTail ?? ""));
+  // A subagent's request is the one whose system prompt carries the explore profile's role line.
+  const childRequests = gatewayLog().filter((entry) => (entry.systemFull ?? "").includes("You are a read-only code reconnaissance subagent."));
   const tools = [...new Set(childRequests.flatMap((entry) => entry.tools))];
   check("子 Agent 拿到 mcp 和 terminal", tools.includes("mcp") && tools.includes("terminal"), tools.join(","));
   check("子 Agent 没有 browser_* 工具", tools.length > 0 && !tools.some((tool) => tool.startsWith("browser_")), tools.join(","));
