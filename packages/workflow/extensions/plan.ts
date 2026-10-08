@@ -55,7 +55,7 @@ interface PlanDetails {
 }
 
 const PlanParams = Type.Object({
-  markdown: Type.String({ minLength: 1, description: "完整的 Markdown 计划文档正文" }),
+  markdown: Type.String({ minLength: 1, description: "The full body of the Markdown plan document" }),
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -459,14 +459,14 @@ export default function planExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "plan",
     label: "Plan",
-    description: "为复杂任务创建一个写入磁盘的、等待用户审批的执行计划。计划文件可用原生 read/write/edit 工具查看和修改；用户批准后才执行。",
-    promptSnippet: "plan: 以完整 Markdown 创建需要用户审批的执行计划",
-    promptGuidelines: [
-      "当任务包含多个明确步骤、需要用户先确认方案时使用 plan；不要把普通的 Todo 进度更新当作 plan。",
-      "plan 只接收一个 markdown 参数；直接提交完整 Markdown 文档，不要把计划拆成额外的标题、目标、步骤或验收字段。",
-      "Markdown 的结构由任务本身决定，不要求固定章节。创建后停止等待用户在界面中选择主 Agent 或指定子 Agent 执行。",
-      "计划文件是纯 Markdown，可由原生 read/write/edit 工具继续修改；不要把计划只写在回复文本里。",
-    ],
+    description: [
+      "Create an execution plan for a complex task. The plan is written to disk and waits for the user's approval; nothing runs until the user approves it.",
+      "Use it when the task has several clear steps and the user should confirm the approach first; do not use it for ordinary Todo progress updates.",
+      "It takes a single markdown parameter: submit the complete Markdown document directly, and do not split the plan into extra title, goal, step or acceptance fields. The structure is up to the task and no fixed sections are required.",
+      "The plan file is plain Markdown that can be viewed and edited with the native read, write and edit tools; do not leave the plan only in your reply text.",
+      "After creating it, stop and wait for the user to choose, in the interface, the main agent or a specific subagent to carry it out.",
+      "Write the plan in the user's language.",
+    ].join(" "),
     parameters: PlanParams,
     executionMode: "sequential",
     async execute(_toolCallId, params: PlanInput, _signal, _onUpdate, ctx) {

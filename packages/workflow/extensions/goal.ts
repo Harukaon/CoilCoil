@@ -59,11 +59,11 @@ const GoalCompleteParams = Type.Object({
   summary: Type.String({
     minLength: 1,
     maxLength: 2_000,
-    description: "目标已经达成的说明：做了什么、最终结果是什么",
+    description: "Why the goal counts as achieved: what was done and what the final result is, in the user's language",
   }),
   verification: Type.Optional(Type.String({
     maxLength: 2_000,
-    description: "自行验证的方式与结果，例如运行了哪些命令、检查了哪些输出",
+    description: "How you verified it and what you saw, for example which commands you ran and which output you checked, in the user's language",
   })),
 });
 
@@ -328,12 +328,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: GOAL_TOOL_NAME,
     label: "完成目标",
-    description:
-      "在目标模式下声明目标已经真正达成并结束循环。只有当目标已经完成、并且你已自行验证过结果时才可以调用；未完成时调用会被拒绝。",
-    promptSnippet: `${GOAL_TOOL_NAME}: 目标达成后结束目标循环`,
-    promptGuidelines: [
-      `目标模式进行中时，只有确认目标真正完成并验证通过，才调用 ${GOAL_TOOL_NAME}；否则继续执行下一步。`,
-    ],
+    description: "Declare, in goal mode, that the goal has truly been achieved, and end the loop. Call it only once the goal is complete and you have verified the result yourself; a call made before that is rejected, so otherwise keep working on the next step.",
     parameters: GoalCompleteParams,
     executionMode: "sequential",
 

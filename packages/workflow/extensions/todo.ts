@@ -52,13 +52,13 @@ const TodoParams = Type.Object({
       text: Type.String({
         minLength: 1,
         maxLength: 160,
-        description: "任务内容",
+        description: "Task content",
       }),
       status: StringEnum(TODO_STATUSES),
     }),
     {
       maxItems: 20,
-      description: "完整计划；每次调用都替换当前列表，传空数组可清空",
+      description: "The complete plan; every call replaces the current list, and an empty array clears it",
     },
   ),
 });
@@ -344,12 +344,11 @@ export default function todoExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: TOOL_NAME,
     label: "Todo",
-    description:
-      "更新并展示当前任务计划。每次必须提交完整有序列表；空数组表示清空。状态只能是 pending、in_progress、completed，最多一项为 in_progress。",
-    promptSnippet: "todo: 更新并展示任务计划",
-    promptGuidelines: [
-      "多步骤任务需要展示进度时使用 todo；每次提交完整计划，并及时更新状态。",
-    ],
+    description: [
+      "Update and display the current task plan. Use it for multi-step work whose progress should be visible.",
+      "Always submit the complete ordered list (an empty array clears it) and update item statuses promptly. Status must be pending, in_progress or completed, with at most one item in_progress.",
+      "Write item text in the user's language.",
+    ].join(" "),
     parameters: TodoParams,
     executionMode: "sequential",
 
