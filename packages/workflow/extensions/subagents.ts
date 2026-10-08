@@ -66,7 +66,7 @@ const SubagentParams = Type.Object({
   action: Type.Optional(
     StringEnum(SUBAGENT_ACTIONS, { description: "run dispatches; status queries; stop stops; resume continues a finished subagent. Default run." }),
   ),
-  agent: Type.Optional(Type.String({ description: "Subagent profile name (such as explore, reviewer, worker); it applies the preset prompt, the user-configured model and the tool scope. Omit it to dispatch with the default configuration." })),
+  agent: Type.Optional(Type.String({ description: "Subagent profile name (such as explore, reviewer, worker, hacker); it applies the preset prompt, the user-configured model and the tool scope. Omit it to dispatch with the default configuration." })),
   task: Type.Optional(Type.String({ description: "Required for action=run; with action=resume it is an extra instruction, and omitting it continues the original task." })),
   background: Type.Optional(Type.Boolean({ description: "Default false: after dispatch, block until the subagent finishes and return its result. When true, return a runId immediately; the subagent runs in the background and reports back automatically when it is done." })),
   worktree: Type.Optional(Type.Boolean({ description: "When true the subagent works on its own git worktree branch, which suits parallel writes; when omitted it follows the profile setting (on by default for worker)." })),
@@ -954,7 +954,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       "Dispatch and manage subagents. A subagent runs in its own session and suits tasks that need a lot of context (searching, reading, code changes); only its summarized result comes back, so the main session's context is not used up.",
       "Delegate work that needs heavy file reading or searching, or any self-contained chunk, to a subagent; send several independent subtasks as multiple subagent calls in the same message so they run in parallel.",
       "The task you pass must be self-contained: give the background, the key paths and the expected output format, and do not assume the subagent can see the main session's context. Write the task in the user's language, because the report comes back in the language of the task.",
-      "Pick the profile by role: explore for read-only reconnaissance, reviewer for code review, worker when code must be written; call action=status without a runId to list the available profiles.",
+      "Pick the profile by role: explore for read-only reconnaissance, reviewer for code review, worker when code must be written, hacker to look for problems in code that is said to be finished; call action=status without a runId to list the available profiles, including any the user added.",
+      "When you dispatch hacker, give it only the requirement and where the code is; do not tell it you think the code is right, because that biases it. It has no browser or other MCP tools, so whatever its report says it could not run, such as clicking through a page or launching an app, is yours to run.",
       "When you are not in a hurry for the result, or want to keep working meanwhile, dispatch with background:true; the subagent reports back by itself when it finishes, so there is no need to poll, and action=status shows progress when you want it.",
       "A finished subagent can continue in the same session with action=resume, which saves context compared with dispatching a new one.",
       "When several subagents write to the same repository in parallel, always use worktree:true (on by default for the worker profile) so each works on its own git worktree branch and they do not overwrite each other; the changes stay in the worktree for you to review and merge.",

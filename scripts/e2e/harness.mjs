@@ -92,7 +92,7 @@ export async function launch({ projects = ["projA", "projB"], remote = false, gp
     },
   });
   agent("settings.json", { defaultProvider: "mock", defaultModel: "mock-1" });
-  agent("subagent-settings.json", { models: { explore: "mock/mock-1", reviewer: "mock/mock-1", worker: "mock/mock-1" } });
+  agent("subagent-settings.json", { models: { explore: "mock/mock-1", hacker: "mock/mock-1", reviewer: "mock/mock-1", worker: "mock/mock-1" } });
   writeFileSync(join(data, "mounted-projects.json"), JSON.stringify(
     Object.entries(paths).map(([name, path]) => ({ name, path, kind: "workspace" })), null, 2));
 

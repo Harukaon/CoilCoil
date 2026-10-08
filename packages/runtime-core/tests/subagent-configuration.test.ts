@@ -138,7 +138,7 @@ test("the profile list merges built-in, user and project profiles the way the su
 
   const withProject = await runtime.listSubagentProfiles(project);
   const names = withProject.profiles.map((profile) => profile.name);
-  for (const builtin of ["explore", "reviewer", "worker"]) assert.ok(names.includes(builtin), builtin);
+  for (const builtin of ["explore", "hacker", "reviewer", "worker"]) assert.ok(names.includes(builtin), builtin);
   const sources = withProject.profiles.map((profile) => profile.source);
   assert.deepEqual(sources, [...sources].sort((left, right) => ["builtin", "user", "project"].indexOf(left) - ["builtin", "user", "project"].indexOf(right)));
   assert.equal(names.at(-1), "release");

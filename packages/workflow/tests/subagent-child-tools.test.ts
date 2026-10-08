@@ -150,7 +150,7 @@ test("on Windows a child with shell access gets PowerShell, a narrow one does no
 test("builtin profiles follow the platform rule for PowerShell", () => {
   const builtinDir = join(import.meta.dirname, "..", "agents");
   const profiles = loadProfiles({ builtinDir, userDir: join(builtinDir, "none"), projectDir: join(builtinDir, "none") });
-  for (const name of ["explore", "reviewer", "worker"]) {
+  for (const name of ["explore", "hacker", "reviewer", "worker"]) {
     const tools = profiles.get(name)?.tools ?? [];
     assert.ok(childToolsForPlatform(tools, "win32").includes("powershell"), `${name} must get PowerShell on Windows`);
     assert.ok(!childToolsForPlatform(tools, "darwin").includes("powershell"), `${name} must not get PowerShell on macOS`);
