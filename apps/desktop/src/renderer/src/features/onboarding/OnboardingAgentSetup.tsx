@@ -1,7 +1,6 @@
 import { LoaderCircle, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
-  ConfigurableSubagentProfile,
   RuntimeConfiguration,
   SessionNamingConfiguration,
   SubagentConfiguration,
@@ -9,14 +8,8 @@ import type {
 } from "@coilcoil/runtime-protocol";
 import { Select, type SelectOption } from "../../ui/Select";
 import { toastError, toastSuccess } from "../../ui/toast";
-
-const PROFILES: Array<{ id: ConfigurableSubagentProfile; name: string; description: string }> = [
-  { id: "explore", name: "Explore", description: "只读搜索与代码梳理" },
-  { id: "worker", name: "Worker", description: "编码实现与文件修改" },
-  { id: "reviewer", name: "Reviewer", description: "独立代码评审" },
-];
-
-const EMPTY_MODELS: SubagentProfileModels = { explore: "", worker: "", reviewer: "" };
+import { chosenSubagentModel, subagentBlurb, subagentModelsToSave, subagentTitle } from "../runtime/subagentProfiles";
+import { useSubagentProfiles } from "../runtime/useSubagentProfiles";
 
 function modelOptions(configuration?: RuntimeConfiguration): SelectOption[] {
   const models = configuration?.models.filter((model) => model.configured) ?? [];
@@ -32,7 +25,8 @@ function modelOptions(configuration?: RuntimeConfiguration): SelectOption[] {
 }
 
 export function OnboardingAgentSetup({ configuration, runtimeId }: { configuration?: RuntimeConfiguration; runtimeId?: string }): React.JSX.Element {
-  const [models, setModels] = useState<SubagentProfileModels>(EMPTY_MODELS);
+  const [models, setModels] = useState<SubagentProfileModels>({});
+  const profileList = useSubagentProfiles(runtimeId, undefined);
   const [namingModel, setNamingModel] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -48,7 +42,7 @@ export function OnboardingAgentSetup({ configuration, runtimeId }: { configurati
       window.coilcoil.request<SessionNamingConfiguration>({ type: "get_session_naming_configuration" }, runtimeId),
     ]).then(([subagent, naming]) => {
       if (cancelled) return;
-      setModels(subagent?.models ?? EMPTY_MODELS);
+      setModels(subagent?.models ?? {});
       setNamingModel(naming?.model ?? "");
     }).catch((caught) => {
       if (!cancelled) toastError(caught instanceof Error ? caught.message : String(caught));
@@ -64,7 +58,7 @@ export function OnboardingAgentSetup({ configuration, runtimeId }: { configurati
     try {
       await window.coilcoil.request<SubagentConfiguration>({
         type: "save_subagent_configuration",
-        input: { models: { explore: models.explore.trim(), worker: models.worker.trim(), reviewer: models.reviewer.trim() } },
+        input: { models: subagentModelsToSave(profileList.profiles, models) },
       }, runtimeId);
       await window.coilcoil.request<SessionNamingConfiguration>({
         type: "save_session_naming_configuration",
@@ -79,21 +73,25 @@ export function OnboardingAgentSetup({ configuration, runtimeId }: { configurati
     }
   };
 
-  if (loading) return <div className="onboarding-setup-loading"><LoaderCircle className="spin" size={15} />读取已有配置…</div>;
+  if (loading || (profileList.loading && profileList.profiles.length === 0)) return <div className="onboarding-setup-loading"><LoaderCircle className="spin" size={15} />读取已有配置…</div>;
 
   return (
     <div className="onboarding-config-grid">
       <section className="onboarding-config-section">
-        <header><strong>子 Agent 模型</strong><small>给不同职责单独指定模型；留空则不启用该 profile。</small></header>
+        <header>
+          <strong>子 Agent 模型</strong>
+          <small>给不同职责单独指定模型；留空则不启用该 profile。</small>
+          {profileList.error ? <small>读取子 Agent 列表失败：{profileList.error}</small> : null}
+        </header>
         <div className="onboarding-agent-list">
-          {PROFILES.map((profile) => (
-            <label className="onboarding-agent-row" key={profile.id}>
-              <span><strong>{profile.name}</strong><small>{profile.description}</small></span>
+          {profileList.profiles.map((profile) => (
+            <label className="onboarding-agent-row" key={`${profile.source}:${profile.name}`}>
+              <span><strong>{subagentTitle(profile)}</strong><small>{subagentBlurb(profile)}</small></span>
               <Select
-                value={models[profile.id]}
+                value={chosenSubagentModel(models, profile.name)}
                 options={options}
-                onChange={(value) => { setModels((current) => ({ ...current, [profile.id]: value })); setSaved(false); }}
-                ariaLabel={`${profile.name} 模型`}
+                onChange={(value) => { setModels((current) => ({ ...current, [profile.name]: value })); setSaved(false); }}
+                ariaLabel={`${subagentTitle(profile)} 模型`}
                 placeholder="选择模型"
                 searchable
                 disabled={!hasConfiguredModel || saving}

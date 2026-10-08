@@ -100,26 +100,32 @@ function modelLabel(model: Model<never> | undefined): string | undefined {
   return model ? `${model.provider}/${model.id}` : undefined;
 }
 
-const CONFIGURABLE_SUBAGENT_PROFILES = ["explore", "worker", "reviewer"] as const;
-type ConfigurableSubagentProfile = (typeof CONFIGURABLE_SUBAGENT_PROFILES)[number];
+/** The profiles the short-lived single-`model` settings file used to cover. */
+const LEGACY_SINGLE_MODEL_PROFILES: readonly string[] = ["explore", "worker", "reviewer"];
 
-function isConfigurableSubagentProfile(value: string): value is ConfigurableSubagentProfile {
-  return (CONFIGURABLE_SUBAGENT_PROFILES as readonly string[]).includes(value);
-}
-
-/** Resolve one profile's configured model from current or legacy settings. */
+/**
+ * Resolve the model the user chose for one profile, from current or legacy settings.
+ *
+ * Any profile can have one, built-in or user-written: the settings file is a map from
+ * profile name to `provider/model-id`, and a name that is not in it has none chosen.
+ */
 export function configuredSubagentModel(value: unknown, profileName: string | undefined): string {
-  if (!profileName || !isConfigurableSubagentProfile(profileName)) return "";
+  if (!profileName) return "";
   const record = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
   const models = record.models && typeof record.models === "object" && !Array.isArray(record.models)
     ? record.models as Record<string, unknown>
     : {};
-  const selected = models[profileName];
-  if (typeof selected === "string") return selected.trim();
-  // Preserve the behavior of the short-lived single-model configuration.
-  return typeof record.model === "string" ? record.model.trim() : "";
+  if (Object.hasOwn(models, profileName)) {
+    const selected = models[profileName];
+    if (typeof selected === "string") return selected.trim();
+  }
+  // Preserve the behavior of the short-lived single-model configuration. It only ever
+  // covered the profiles that existed then, so it does not reach newer or user-written ones.
+  return LEGACY_SINGLE_MODEL_PROFILES.includes(profileName) && typeof record.model === "string"
+    ? record.model.trim()
+    : "";
 }
 
 function readConfiguredSubagentModel(profileName: string | undefined): string {

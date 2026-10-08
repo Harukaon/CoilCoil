@@ -1131,7 +1131,7 @@ export interface RuntimeInspectionSnapshot {
   skills: RuntimeSkillState[];
   mcp?: McpRuntimeStatus;
   memory?: ProjectMemoryRuntimeStatus;
-  /** User-configured default models for the built-in subagent profiles. */
+  /** The models the user chose for the subagent profiles. */
   subagent?: SubagentConfiguration;
   /** 会话自动命名用哪个模型；空表示跟随会话当前模型。 */
   sessionNaming?: SessionNamingConfiguration;
@@ -1238,17 +1238,35 @@ export interface SaveMemoryConfigurationInput {
   projectContents?: Array<{ filePath: string; content: string }>;
 }
 
-/** Built-in subagent profiles whose default models can be configured independently. */
-export type ConfigurableSubagentProfile = "explore" | "worker" | "reviewer";
+/**
+ * The model the user chose for each subagent profile, keyed by profile name
+ * (`provider/model-id`). Every profile can have one, built-in or user-written. A name
+ * that is absent, or empty, has none chosen — and such a profile cannot be dispatched.
+ */
+export type SubagentProfileModels = Record<string, string>;
 
-/** User-configured model for each built-in subagent profile. */
-export interface SubagentProfileModels {
-  /** `provider/model-id`, or empty to inherit the parent session's model. */
-  explore: string;
-  /** `provider/model-id`, or empty to inherit the parent session's model. */
-  worker: string;
-  /** `provider/model-id`, or empty to inherit the parent session's model. */
-  reviewer: string;
+export type SubagentProfileSource = "builtin" | "user" | "project";
+
+/** One subagent profile as the settings page lists it. */
+export interface SubagentProfileInfo {
+  name: string;
+  description: string;
+  source: SubagentProfileSource;
+  /** Absolute path of the `.md` file that defines it. */
+  filePath: string;
+  /** Tools the profile grants; the default set when its file lists none. */
+  tools: string[];
+  worktree: boolean;
+  /** The `model:` written in the profile file itself; a model chosen in settings wins over it. */
+  fileModel?: string;
+  systemPrompt: string;
+}
+
+export interface SubagentProfilesSnapshot {
+  /** Built-in, user and project profiles merged the way the subagent tool merges them. */
+  profiles: SubagentProfileInfo[];
+  /** Tools a profile may be given, in the order the settings form lists them. */
+  availableTools: string[];
 }
 
 /**
@@ -1281,11 +1299,16 @@ export interface SummarizationModelConfigurationInput {
   model: string;
 }
 
-/** User-configured default models for dispatched subagents. */
+/** User-configured models for dispatched subagents. */
 export interface SubagentConfiguration {
   models: SubagentProfileModels;
 }
 
+/**
+ * Models to set. A profile that is not named keeps what it has, and an empty string
+ * clears it — so a panel that only knows some of the profiles (a project's own ones are
+ * only listed while that project is open) cannot wipe the rest.
+ */
 export interface SubagentConfigurationInput {
   models: SubagentProfileModels;
 }
@@ -1561,6 +1584,7 @@ export type RuntimeCommand =
   | { type: "get_memory_configuration"; cwd?: string }
   | { type: "save_memory_configuration"; input: SaveMemoryConfigurationInput; cwd?: string }
   | { type: "get_subagent_configuration" }
+  | { type: "list_subagent_profiles"; cwd?: string }
   | { type: "get_session_naming_configuration" }
   | { type: "get_summarization_model_configuration" }
   | { type: "save_summarization_model_configuration"; input: SummarizationModelConfigurationInput }

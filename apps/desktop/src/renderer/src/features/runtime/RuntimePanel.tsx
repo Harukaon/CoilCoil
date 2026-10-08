@@ -1,7 +1,6 @@
 import { AlertCircle, Bot, BrainCircuit, CheckCircle2, CircleDashed, GitBranch, History, LoaderCircle, PlugZap, RefreshCw, RotateCcw, Save, Sparkles, Wrench, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
-  ConfigurableSubagentProfile,
   ContextUsage,
   McpServerRuntimeStatus,
   RuntimeConfiguration,
@@ -20,6 +19,14 @@ import { Select, type SelectOption } from "../../ui/Select";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { Tooltip } from "../../ui/tooltip";
 import { tokenNumber, toolDisplayName } from "./runtimePresentation";
+import {
+  chosenSubagentModel,
+  subagentBlurb,
+  subagentModelsToSave,
+  subagentTitle,
+  subagentUsable,
+} from "./subagentProfiles";
+import { useSubagentProfiles } from "./useSubagentProfiles";
 import {
   mcpSectionBadge,
   mcpTogglePlan,
@@ -40,14 +47,6 @@ const reasonLabel: Record<NonNullable<RuntimeSummaryEvent["reason"]>, string> = 
   threshold: "达到阈值",
   overflow: "溢出恢复",
 };
-
-const subagentProfiles: Array<{ id: ConfigurableSubagentProfile; label: string; description: string }> = [
-  { id: "explore", label: "Explore", description: "只读搜索与代码梳理" },
-  { id: "worker", label: "Worker", description: "编码实现与文件修改" },
-  { id: "reviewer", label: "Reviewer", description: "独立代码评审" },
-];
-
-const emptySubagentModels = (): SubagentProfileModels => ({ explore: "", worker: "", reviewer: "" });
 
 function percent(value: number): string {
   return new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 1 }).format(value);
@@ -135,7 +134,8 @@ export function RuntimePanel({
   const [promptDraft, setPromptDraft] = useState(inspection?.effectiveSystemPrompt ?? "");
   const [busyAction, setBusyAction] = useState<string>();
   const [mcpOverrides, setMcpOverrides] = useState<McpVisibilityOverrides>({});
-  const [subagentModels, setSubagentModels] = useState<SubagentProfileModels>(inspection?.subagent?.models ?? emptySubagentModels());
+  const [subagentModels, setSubagentModels] = useState<SubagentProfileModels>(inspection?.subagent?.models ?? {});
+  const subagentList = useSubagentProfiles(runtimeId, cwd);
   const [namingModel, setNamingModel] = useState(inspection?.sessionNaming?.model ?? "");
   const [namingSaving, setNamingSaving] = useState(false);
   const [summaryModel, setSummaryModel] = useState(inspection?.summarizationModel?.model ?? "");
@@ -146,7 +146,7 @@ export function RuntimePanel({
   const summaries = inspection?.summaryEvents ?? [];
   const activeTools = useMemo(() => inspection?.tools.filter((tool) => tool.active) ?? [], [inspection?.tools]);
   const availableModels = useMemo(() => configuration?.models.filter((model) => model.configured) ?? [], [configuration?.models]);
-  const configuredSubagentCount = Object.values(subagentModels).filter(Boolean).length;
+  const configuredSubagentCount = subagentList.profiles.filter((profile) => subagentUsable(profile, subagentModels)).length;
   const cumulativeCache = useMemo(
     () => summarizeCacheUsage(tokenUsage?.input, tokenUsage?.cacheRead, tokenUsage?.cacheWrite),
     [tokenUsage?.cacheRead, tokenUsage?.cacheWrite, tokenUsage?.input],
@@ -172,13 +172,12 @@ export function RuntimePanel({
     setSummaryModel(inspection?.summarizationModel?.model ?? "");
   }, [inspection?.summarizationModel?.model]);
 
+  // Chosen somewhere else (another window, the onboarding page): follow that rather than
+  // the copy taken when this panel mounted.
+  const runtimeSubagentModels = JSON.stringify(inspection?.subagent?.models ?? {});
   useEffect(() => {
-    setSubagentModels(inspection?.subagent?.models ?? emptySubagentModels());
-  }, [
-    inspection?.subagent?.models.explore,
-    inspection?.subagent?.models.reviewer,
-    inspection?.subagent?.models.worker,
-  ]);
+    setSubagentModels(JSON.parse(runtimeSubagentModels) as SubagentProfileModels);
+  }, [runtimeSubagentModels]);
 
   // Once the runtime reports a server in the state we optimistically rendered,
   // drop the override so the panel follows the runtime again.
@@ -227,20 +226,16 @@ export function RuntimePanel({
     try {
       const result = await request<SubagentConfiguration>("subagent-models", {
         type: "save_subagent_configuration",
-        input: {
-          models: {
-            explore: subagentModels.explore.trim(),
-            worker: subagentModels.worker.trim(),
-            reviewer: subagentModels.reviewer.trim(),
-          },
-        },
+        // Every profile listed here is named, an empty choice included, so a cleared model
+        // sticks; the ones this panel does not list (other projects') are left as they are.
+        input: { models: subagentModelsToSave(subagentList.profiles, subagentModels) },
       });
       if (!result) return;
       setSubagentModels(result.models);
-      const configuredCount = Object.values(result.models).filter(Boolean).length;
+      const configuredCount = subagentList.profiles.filter((profile) => subagentUsable(profile, result.models)).length;
       toastSuccess(configuredCount > 0
-        ? `已保存子 Agent 模型配置（${configuredCount}/3）`
-        : "已清除子 Agent 模型配置，三个 profile 都将不可用");
+        ? `已保存子 Agent 模型配置（${configuredCount}/${subagentList.profiles.length}）`
+        : "已清除子 Agent 模型配置，它们都将不可用");
     } finally {
       setSubagentSaving(false);
     }
@@ -397,14 +392,22 @@ export function RuntimePanel({
       <RuntimeSection
         title="子 Agent 模型"
         icon={<Bot size={14} />}
-        badge={configuredSubagentCount ? `${configuredSubagentCount}/3 已配置` : "3 个都未配置 · 不可用"}
+        badge={subagentList.profiles.length === 0
+          ? undefined
+          : configuredSubagentCount
+            ? `${configuredSubagentCount}/${subagentList.profiles.length} 已配置`
+            : `${subagentList.profiles.length} 个都未配置 · 不可用`}
       >
         <div className="runtime-subagent-models">
-          {subagentProfiles.map((profile) => {
-            const selected = subagentModels[profile.id];
+          {subagentList.profiles.map((profile) => {
+            const selected = chosenSubagentModel(subagentModels, profile.name);
+            const usable = subagentUsable(profile, subagentModels);
+            const title = subagentTitle(profile);
             const selectedAvailable = availableModels.some((model) => `${model.provider}/${model.id}` === selected);
             const modelOptions: SelectOption[] = [
-              { value: "", label: "未配置（此子 Agent 不可用）", detail: "不配置就不给派发，而不是悄悄用主会话模型" },
+              profile.fileModel
+                ? { value: "", label: `沿用文件里写的模型（${profile.fileModel}）`, detail: "不另选时，用这个子 Agent 文件里写明的模型" }
+                : { value: "", label: "未配置（此子 Agent 不可用）", detail: "不配置就不给派发，而不是悄悄用主会话模型" },
               ...(selected && !selectedAvailable
                 ? [{ value: selected, label: selected, detail: "当前不可用", disabled: true }]
                 : []),
@@ -416,16 +419,16 @@ export function RuntimePanel({
               })),
             ];
             return (
-              <label className={`runtime-subagent-model-row ${selected ? "" : "unconfigured"}`} key={profile.id}>
+              <label className={`runtime-subagent-model-row ${usable ? "" : "unconfigured"}`} key={`${profile.source}:${profile.name}`}>
                 <span>
-                  <strong>{selected ? null : <XCircle className="runtime-subagent-unavailable" size={13} />}{profile.label}</strong>
-                  <small>{selected ? profile.description : "未配置模型，派发会被拒绝"}</small>
+                  <strong>{usable ? null : <XCircle className="runtime-subagent-unavailable" size={13} />}{title}</strong>
+                  <small>{usable ? subagentBlurb(profile) : "未配置模型，派发会被拒绝"}</small>
                 </span>
                 <Select
                   value={selected}
                   options={modelOptions}
-                  onChange={(model) => setSubagentModels((current) => ({ ...current, [profile.id]: model }))}
-                  ariaLabel={`${profile.label} 默认模型`}
+                  onChange={(model) => setSubagentModels((current) => ({ ...current, [profile.name]: model }))}
+                  ariaLabel={`${title} 默认模型`}
                   className="runtime-subagent-select"
                   searchable
                 />
@@ -433,17 +436,24 @@ export function RuntimePanel({
             );
           })}
         </div>
+        {subagentList.loading && subagentList.profiles.length === 0 ? <p className="runtime-section-footnote">正在读取子 Agent 列表…</p> : null}
+        {subagentList.error ? (
+          <p className="runtime-section-footnote">
+            读取子 Agent 列表失败：{subagentList.error}
+            {" "}<button type="button" onClick={() => { void subagentList.reload(); }}>重试</button>
+          </p>
+        ) : null}
         <div className="runtime-actions">
           <button
             className="primary"
             type="button"
-            disabled={subagentSaving || !runtimeId}
+            disabled={subagentSaving || !runtimeId || subagentList.profiles.length === 0}
             onClick={() => { void saveSubagentModels(); }}
           >
-            {subagentSaving ? <LoaderCircle className="spin" size={12} /> : <Save size={12} />}保存三个配置
+            {subagentSaving ? <LoaderCircle className="spin" size={12} /> : <Save size={12} />}保存配置
           </button>
         </div>
-        <p className="runtime-section-footnote">三个 profile 独立配置。没配模型的那一项不可用：Agent 派发它会直接收到「未配置，请改用其他方式」的错误，而不是悄悄改用主会话模型跑一遍。</p>
+        <p className="runtime-section-footnote">每个子 Agent 独立配置。没配模型的那一项不可用：Agent 派发它会直接收到「未配置，请改用其他方式」的错误，而不是悄悄改用主会话模型跑一遍。</p>
       </RuntimeSection>
 
       <RuntimeSection

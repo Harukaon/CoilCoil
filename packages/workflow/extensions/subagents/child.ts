@@ -16,10 +16,12 @@ import fileDiffExtension from "../file-diff.ts";
 import coilcoilMcpTools, { MCP_MANAGER_CHANNEL } from "../mcp-tools.ts";
 import { COILCOIL_SUBAGENT_GIT_SAFETY, COILCOIL_WINDOWS_SHELL_STANDARDS } from "../system/engineering-standards.ts";
 import terminalExtension from "../terminal/extension.ts";
+import { DEFAULT_CHILD_TOOLS } from "./profiles.ts";
 import type { SubagentChildMeta } from "./types.ts";
 import { SUBAGENT_META_ENTRY_TYPE } from "./types.ts";
 
-export const DEFAULT_CHILD_TOOLS = ["read", "bash", "terminal", "edit", "write", "grep", "ls", "mcp"];
+// The table lives in profiles.ts, which the runtime can load without pulling in Pi.
+export { DEFAULT_CHILD_TOOLS };
 export const CHILD_SESSION_SUBDIR = "subagents";
 
 const POWERSHELL_TOOL = "powershell";

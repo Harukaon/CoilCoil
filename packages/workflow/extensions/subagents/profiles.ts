@@ -3,6 +3,19 @@ import { join } from "node:path";
 
 export const ALLOWED_CHILD_TOOL_NAMES = ["read", "bash", "terminal", "edit", "write", "grep", "ls", "find", "mcp", "powershell"] as const;
 
+/** What a profile that does not list its own `tools` gets. */
+export const DEFAULT_CHILD_TOOLS: readonly string[] = ["read", "bash", "terminal", "edit", "write", "grep", "ls", "mcp"];
+
+/**
+ * Names the settings page accepts for a new profile: lowercase, no spaces, safe as a
+ * file name. Profiles written by hand may use any name; this only guards what we write.
+ */
+export const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,47}$/;
+
+export function isValidProfileName(name: string): boolean {
+  return PROFILE_NAME_PATTERN.test(name);
+}
+
 export type SubagentProfileSource = "builtin" | "user" | "project";
 
 export interface SubagentProfile {
@@ -83,6 +96,35 @@ export function parseProfileFile(text: string, source: SubagentProfileSource, fi
   };
 }
 
+export interface ProfileFileFields {
+  name: string;
+  description?: string;
+  model?: string;
+  tools?: readonly string[];
+  worktree?: boolean;
+  systemPrompt?: string;
+}
+
+/**
+ * The inverse of `parseProfileFile`: the text to write so the same profile reads back.
+ *
+ * The frontmatter is one `key: value` per line, so a description is flattened to one
+ * line. It is always quoted, because the parser strips one pair of outer quotes and a
+ * description that happens to start and end with a quote would otherwise lose them.
+ */
+export function serializeProfile(fields: ProfileFileFields): string {
+  const lines = ["---", `name: ${fields.name}`];
+  const description = (fields.description ?? "").replace(/\s+/g, " ").trim();
+  if (description) lines.push(`description: "${description}"`);
+  const model = (fields.model ?? "").trim();
+  if (model) lines.push(`model: ${model}`);
+  if (fields.tools) lines.push(`tools: [${fields.tools.join(", ")}]`);
+  if (fields.worktree) lines.push("worktree: true");
+  lines.push("---");
+  const body = (fields.systemPrompt ?? "").trim();
+  return `${lines.join("\n")}\n${body ? `\n${body}\n` : ""}`;
+}
+
 function loadProfilesFromDir(dir: string, source: SubagentProfileSource): SubagentProfile[] {
   if (!existsSync(dir)) return [];
   const profiles: SubagentProfile[] = [];
@@ -104,14 +146,17 @@ function loadProfilesFromDir(dir: string, source: SubagentProfileSource): Subage
 export interface ProfileDirs {
   builtinDir: string;
   userDir: string;
-  projectDir: string;
+  /** Absent when no project is open, e.g. while the settings page is open on its own. */
+  projectDir?: string;
 }
 
 export function loadProfiles(dirs: ProfileDirs): Map<string, SubagentProfile> {
   const merged = new Map<string, SubagentProfile>();
   for (const profile of loadProfilesFromDir(dirs.builtinDir, "builtin")) merged.set(profile.name, profile);
   for (const profile of loadProfilesFromDir(dirs.userDir, "user")) merged.set(profile.name, profile);
-  for (const profile of loadProfilesFromDir(dirs.projectDir, "project")) merged.set(profile.name, profile);
+  if (dirs.projectDir) {
+    for (const profile of loadProfilesFromDir(dirs.projectDir, "project")) merged.set(profile.name, profile);
+  }
   return merged;
 }
 

@@ -13,7 +13,9 @@ import { MemoryWorkspace } from "../../src/renderer/src/features/memory/MemoryWo
 import { InspectorPane } from "../../src/renderer/src/features/inspector/InspectorPane";
 import { ProviderModelCard, type EditableModel } from "../../src/renderer/src/features/settings/ModelSettings";
 import { RuntimePanel } from "../../src/renderer/src/features/runtime/RuntimePanel";
+import { OnboardingAgentSetup } from "../../src/renderer/src/features/onboarding/OnboardingAgentSetup";
 import "../../src/renderer/src/features/settings/settings.css";
+import "../../src/renderer/src/features/onboarding/onboarding.css";
 import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { Cpu, Files, Globe, TerminalSquare } from "lucide-react";
@@ -23,6 +25,20 @@ import "../../src/renderer/src/styles.css";
 
 const parameters = new URLSearchParams(location.search);
 
+/** What the settings panel lists for subagents: the built-in ones, plus one the user wrote. */
+const subagentProfilesFixture = {
+  availableTools: ["read", "bash", "terminal", "edit", "write", "grep", "ls", "mcp"],
+  profiles: [
+    ["explore", "builtin", "Read-only reconnaissance agent", ["read", "grep", "ls", "bash"], false],
+    ["hacker", "builtin", "Looks for problems in code that is said to be finished", ["read", "grep", "ls", "bash", "edit", "write"], false],
+    ["reviewer", "builtin", "Independent code review agent", ["read", "grep", "ls", "bash"], false],
+    ["worker", "builtin", "Coding agent that carries out concrete code changes", ["read", "bash", "edit", "write"], true],
+    ["db-expert", "user", "Answers questions about the database schema and writes migrations", ["read", "grep", "ls"], false],
+  ].map(([name, source, description, tools, worktree]) => ({
+    name, source, description, tools, worktree, filePath: `/preview/agents/${name}.md`, systemPrompt: "",
+  })),
+};
+
 // The panel and the theme reach for a scattering of bridge methods. A proxy
 // answers all of them with a no-op so the preview cannot die on one it does not
 // know about, while the calls that decide what is drawn are implemented for real.
@@ -30,6 +46,9 @@ const implemented: Record<string, unknown> = {
   platform: "darwin",
   request: async (command: { type: string }) => {
     if (command.type === "get_memory_configuration") return fixture;
+    if (command.type === "list_subagent_profiles") return subagentProfilesFixture;
+    if (command.type === "get_subagent_configuration") return { models: { explore: "pierce/glm-5.3-flash" } };
+    if (command.type === "get_session_naming_configuration") return { model: "" };
     throw new Error(`预览环境没有实现：${command.type}`);
   },
   onRuntimeEvent: () => () => undefined,
@@ -232,11 +251,27 @@ function RuntimePanelPreview(): React.JSX.Element {
           skills: [],
           effectiveSystemPrompt: "",
           estimates: { total: 15400, system: 2000, tools: 1200, messages: 12200 },
+          capabilities: { editSystemPrompt: true, removeOriginalSessionItems: false, removeOriginalSessionItemsReason: "" },
           subagent: { models: configured
-            ? { explore: "pierce/glm-5.3-flash", worker: "pierce/gpt-5.6-luna", reviewer: "pierce/gpt-5.6-sol" }
-            : { explore: "", worker: "", reviewer: "" } },
+            ? { explore: "pierce/glm-5.3-flash", worker: "pierce/gpt-5.6-luna", reviewer: "pierce/gpt-5.6-sol", "db-expert": "pierce/gpt-5.6-luna" }
+            : {} },
         } as never}
       />
+    </div>
+  );
+}
+
+/** The first-run page where models are picked for the subagents. */
+function OnboardingAgentsPreview(): React.JSX.Element {
+  const configuration = {
+    models: [
+      { provider: "pierce", providerName: "Pierce", id: "glm-5.3-flash", name: "GLM 5.3 Flash", configured: true },
+      { provider: "pierce", providerName: "Pierce", id: "gpt-5.6-luna", name: "GPT 5.6 Luna", configured: true },
+    ],
+  } as never;
+  return (
+    <div style={{ width: 640, padding: 24 }}>
+      <OnboardingAgentSetup configuration={configuration} runtimeId="preview" />
     </div>
   );
 }
@@ -245,6 +280,8 @@ const panel = parameters.get("panel");
 const root = createRoot(document.getElementById("root")!);
 if (panel === "runtime") {
   root.render(<RuntimePanelPreview />);
+} else if (panel === "onboarding-agents") {
+  root.render(<OnboardingAgentsPreview />);
 } else if (panel === "models") {
   root.render(<ModelCatalogPreview />);
 } else if (panel === "inspector") {
