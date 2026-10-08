@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { MCP_MANAGER_CHANNEL } from "../extensions/mcp-tools.ts";
-import { COILCOIL_WINDOWS_SHELL_STANDARDS } from "../extensions/system/engineering-standards.ts";
+import { COILCOIL_SUBAGENT_GIT_SAFETY, COILCOIL_WINDOWS_SHELL_STANDARDS } from "../extensions/system/engineering-standards.ts";
 import {
   BROWSER_MCP_SERVER,
   type ChildSessionHandle,
@@ -164,6 +164,33 @@ test("the Windows shell guidance goes to children that have PowerShell, before t
   );
   assert.deepEqual(childPromptAdditions(["bash"], "profile", "darwin"), ["profile"]);
   assert.deepEqual(childPromptAdditions(["read"], undefined, "win32"), []);
+});
+
+test("a child that can change files gets the Git safety rules, a read-only one does not", () => {
+  const additions = childPromptAdditions(["read", "edit", "write", "bash"], "profile", "darwin");
+  assert.equal(additions.length, 2);
+  assert.equal(additions[0], `<git_safety>\n${COILCOIL_SUBAGENT_GIT_SAFETY}\n</git_safety>`);
+  assert.equal(additions[1], "profile", "the profile prompt stays last");
+
+  assert.deepEqual(childPromptAdditions(["read", "grep", "ls", "bash", "terminal", "mcp"], "profile", "darwin"), ["profile"]);
+  assert.equal(childPromptAdditions(["edit"], undefined, "darwin").length, 1, "edit alone is enough");
+  assert.equal(childPromptAdditions(["write"], undefined, "darwin").length, 1, "write alone is enough");
+});
+
+test("on Windows the Git safety comes after the shell guidance and before the profile prompt", () => {
+  const additions = childPromptAdditions(["bash", "powershell", "edit"], "profile", "win32");
+  assert.equal(additions.length, 3);
+  assert.equal(additions[0], COILCOIL_WINDOWS_SHELL_STANDARDS);
+  assert.match(additions[1], /^<git_safety>/);
+  assert.equal(additions[2], "profile");
+});
+
+test("the Git safety a subagent gets never points it at a user it cannot reach", () => {
+  assert.doesNotMatch(COILCOIL_SUBAGENT_GIT_SAFETY, /ask the user|the user explicitly/i);
+  assert.match(COILCOIL_SUBAGENT_GIT_SAFETY, /describe the conflict in your report/);
+  assert.match(COILCOIL_SUBAGENT_GIT_SAFETY, /git reset --hard/);
+  assert.match(COILCOIL_SUBAGENT_GIT_SAFETY, /Never commit keys/);
+  assert.doesNotMatch(COILCOIL_SUBAGENT_GIT_SAFETY, /[\u3000-\u9fff\uff00-\uffef]/, "must stay English");
 });
 
 test("a child session on this platform gets PowerShell exactly when Windows would allow it", async (context) => {

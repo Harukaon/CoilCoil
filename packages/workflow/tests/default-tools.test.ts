@@ -11,6 +11,7 @@ import defaultToolsExtension, {
 import { createChildSession } from "../extensions/subagents/child.ts";
 import {
   COILCOIL_ENGINEERING_STANDARDS,
+  COILCOIL_SUBAGENT_GIT_SAFETY,
   COILCOIL_WINDOWS_SHELL_STANDARDS,
 } from "../extensions/system/engineering-standards.ts";
 
@@ -103,6 +104,16 @@ test("the standards are English, and leave testing and committing out", () => {
     /create commits/,
     "whether to commit follows the user's own preferences, not a default rule",
   );
+});
+
+test("a subagent gets the main agent's Git rules, reworded only where they talk to the user", () => {
+  const mainRules = COILCOIL_ENGINEERING_STANDARDS.split("Git safety:\n")[1]?.split("\n") ?? [];
+  const subagentRules = COILCOIL_SUBAGENT_GIT_SAFETY.split("\n");
+  assert.equal(mainRules.length, 7, "the main agent's Git safety section changed; check the subagent version");
+  assert.equal(subagentRules.length, mainRules.length);
+  const reworded = mainRules.filter((line, index) => line !== subagentRules[index]);
+  assert.equal(reworded.length, 2, `only the conflict rule and the destructive-command rule may differ, got:\n${reworded.join("\n")}`);
+  assert.ok(reworded.every((line) => /the user/.test(line)), "the lines that differ are the ones that name the user");
 });
 
 test("the standards reach the prompt Pi really builds, and Pi's own text stays as it was", async (context) => {

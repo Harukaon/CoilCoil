@@ -14,7 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import fileDiffExtension from "../file-diff.ts";
 import coilcoilMcpTools, { MCP_MANAGER_CHANNEL } from "../mcp-tools.ts";
-import { COILCOIL_WINDOWS_SHELL_STANDARDS } from "../system/engineering-standards.ts";
+import { COILCOIL_SUBAGENT_GIT_SAFETY, COILCOIL_WINDOWS_SHELL_STANDARDS } from "../system/engineering-standards.ts";
 import terminalExtension from "../terminal/extension.ts";
 import type { SubagentChildMeta } from "./types.ts";
 import { SUBAGENT_META_ENTRY_TYPE } from "./types.ts";
@@ -41,11 +41,19 @@ export function childToolsForPlatform(
   return [...tools];
 }
 
+/** 能改文件的工具：有其中任何一个的子 Agent 会拿到 Git 安全规则。 */
+const FILE_CHANGING_TOOLS = ["edit", "write"];
+
 /**
  * 追加到子会话系统提示词末尾的内容。
  *
- * 子会话不加载 default-tools，拿不到主会话那段 Windows shell 规范；给了 powershell
- * 却不说优先用它，模型照样会去用 bash、跟 POSIX 引号较劲。profile 的提示词放最后。
+ * 子会话不加载 default-tools，拿不到主会话那份工程规范，要靠这里补：
+ * - 被授予 powershell 的（只会在 Windows 上）：Windows shell 规范。给了 powershell 却不说
+ *   优先用它，模型照样会去用 bash、跟 POSIX 引号较劲。
+ * - 能改文件的（有 edit 或 write）：Git 安全。整份规范不能原样给——它让模型用子 Agent 没有的
+ *   todo 工具，还教它向用户提问，而子 Agent 没法直接问用户——所以只给 Git 安全，措辞改成
+ *   「在报告里说明」。
+ * profile 的提示词放最后。
  */
 export function childPromptAdditions(
   tools: readonly string[],
@@ -54,6 +62,9 @@ export function childPromptAdditions(
 ): string[] {
   const additions: string[] = [];
   if (platform === "win32" && tools.includes(POWERSHELL_TOOL)) additions.push(COILCOIL_WINDOWS_SHELL_STANDARDS);
+  if (FILE_CHANGING_TOOLS.some((tool) => tools.includes(tool))) {
+    additions.push(`<git_safety>\n${COILCOIL_SUBAGENT_GIT_SAFETY}\n</git_safety>`);
+  }
   const trimmed = profilePrompt?.trim();
   if (trimmed) additions.push(trimmed);
   return additions;

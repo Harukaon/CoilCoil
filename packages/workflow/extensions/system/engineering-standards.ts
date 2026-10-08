@@ -1,4 +1,34 @@
 /**
+ * The Git safety rules, worded for whoever the agent answers to. The main agent asks the user; a
+ * subagent has nobody to ask and describes the problem in its report instead. Everything else is
+ * shared, so the two versions cannot drift apart.
+ */
+function gitSafetyRules(audience: "main" | "subagent"): string {
+  const conflict = audience === "main"
+    ? "stop the affected edit and ask the user"
+    : "stop the affected edit and describe the conflict in your report";
+  const approval = audience === "main"
+    ? "the user explicitly requests the exact operation and has confirmed its impact"
+    : "the task explicitly requests the exact operation";
+  return [
+    "- Assume the working tree may contain uncommitted work from the user or another agent.",
+    "- Never discard, overwrite, or delete changes you did not create.",
+    "- Do not restore files merely because the working tree is dirty. Read modified target files carefully and build on their current contents.",
+    `- Preserve and ignore unrelated changes. If another change directly conflicts with the task, ${conflict}.`,
+    "- Avoid interactive Git operations.",
+    `- Never run destructive commands such as git reset --hard, git checkout --, or force-push unless ${approval}.`,
+    "- Never commit keys, tokens, passwords, cookies, private keys, or other sensitive information.",
+  ].join("\n");
+}
+
+/**
+ * What a subagent that can change files gets for Git (see `childPromptAdditions`). It cannot take
+ * the whole standards block: that block tells the agent to use a todo tool a subagent does not have
+ * and to ask the user, whom a subagent cannot reach.
+ */
+export const COILCOIL_SUBAGENT_GIT_SAFETY = gitSafetyRules("subagent");
+
+/**
  * Added to the system prompt of the main agent every turn, as an
  * `<engineering_standards>` block (see `withEngineeringStandards`). It stays
  * English on purpose: the same text costs fewer tokens than it would in Chinese.
@@ -29,13 +59,7 @@ Ask the user only when at least one of these conditions applies:
 - The available approaches involve a significant product tradeoff and the repository provides no clear basis for choosing.
 
 Git safety:
-- Assume the working tree may contain uncommitted work from the user or another agent.
-- Never discard, overwrite, or delete changes you did not create.
-- Do not restore files merely because the working tree is dirty. Read modified target files carefully and build on their current contents.
-- Preserve and ignore unrelated changes. If another change directly conflicts with the task, stop the affected edit and ask the user.
-- Avoid interactive Git operations.
-- Never run destructive commands such as git reset --hard, git checkout --, or force-push unless the user explicitly requests the exact operation and has confirmed its impact.
-- Never commit keys, tokens, passwords, cookies, private keys, or other sensitive information.`;
+${gitSafetyRules("main")}`;
 
 /**
  * Appended to the standards only when the PowerShell tool is exposed, which
