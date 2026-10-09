@@ -74,6 +74,10 @@
     ],
     "extraResources": [
       {
+        "from": "../../docs/third-party/subscription-quota.md",
+        "to": "licenses/CPA-subscription-quota.txt"
+      },
+      {
         "from": "build/icon-light.png",
         "to": "icons/icon-light.png"
       },

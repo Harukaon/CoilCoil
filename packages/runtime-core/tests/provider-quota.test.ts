@@ -28,6 +28,7 @@ test("Claude uses percentages rather than fractions, preserves genuine zero, and
   assert.equal(result.windows[1]?.usedPercent, 74);
   assert.equal(result.windows[0]?.resetsAt, Date.UTC(2026, 9, 10, 1));
   assert.equal(result.updatedAt, now);
+  assert.equal(parseSubscriptionQuota("anthropic", { five_hour: { utilization: 105 }, seven_day: null }).windows[0]?.usedPercent, 105);
 });
 
 test("Codex windows are classified by duration even when reversed or weekly-only", () => {
@@ -46,12 +47,14 @@ test("Codex monthly limits are never mislabeled as weekly", () => {
   assert.equal(result.windows[2]?.label, "月限制");
 });
 
-test("legacy Codex durationless windows retain ordering, missing/invalid values never become zero", () => {
+test("Codex durationless windows remain unclassified, missing/invalid values never become zero", () => {
   const result = parseSubscriptionQuota("openai-codex", { rate_limit: { primary_window: { used_percent: "", reset_at: null }, secondary_window: { used_percent: "90.5", reset_after_seconds: 300 } } }, now);
   assert.equal(result.windows[0]?.usedPercent, null);
   assert.equal(result.windows[0]?.resetsAt, null);
-  assert.equal(result.windows[1]?.usedPercent, 90.5);
-  assert.equal(result.windows[1]?.resetsAt, now + 300000);
+  assert.equal(result.windows[1]?.usedPercent, null);
+  assert.equal(result.windows[3]?.usedPercent, 90.5);
+  assert.equal(result.windows[3]?.resetsAt, now + 300000);
+  assert.match(result.windows[3]!.label, /周期未提供/);
   const missing = parseSubscriptionQuota("anthropic", { five_hour: null, seven_day: { utilization: "not-a-number", resets_at: "invalid" } }, now);
   assert.deepEqual(missing.windows.map((item) => [item.usedPercent, item.resetsAt]), [[null, null], [null, null]]);
   assert.throws(() => parseSubscriptionQuota("anthropic", { error: "wrong body" }));
@@ -179,7 +182,7 @@ test("missing Codex account claims and failing auth cannot leak credentials or m
   assert.equal(fetch.mock.callCount(), 0);
 });
 
-test("real ModelRuntime refreshes an expired OAuth once, atomically stores it and returns quota without another login", async (context) => {
+test("independent file-backed ModelRuntimes refresh an expired OAuth once without another login", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "coil-quota-auth-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const path = join(root, "auth.json");
@@ -193,11 +196,13 @@ test("real ModelRuntime refreshes an expired OAuth once, atomically stores it an
   } } } as unknown as Provider;
   const runtime = await ModelRuntime.create({ authPath: path, modelsPath: null, refreshOnCreate: false });
   runtime.registerNativeProvider(provider);
+  const otherRuntime = await ModelRuntime.create({ authPath: path, modelsPath: null, refreshOnCreate: false });
+  otherRuntime.registerNativeProvider(provider);
   context.mock.method(globalThis, "fetch", async (_url: string, options: RequestInit) => {
     assert.equal(new Headers(options.headers).get("Authorization"), "Bearer new-test-access");
     return json(claude);
   });
-  const results = await Promise.all([querySubscriptionQuota(runtime, "anthropic"), querySubscriptionQuota(runtime, "anthropic")]);
+  const results = await Promise.all([querySubscriptionQuota(runtime, "anthropic"), querySubscriptionQuota(otherRuntime, "anthropic")]);
   assert.ok(results.every((result) => result.status === "ok"));
   assert.equal(refreshes, 1);
   assert.equal(JSON.parse(readFileSync(path, "utf8")).anthropic.refresh, "new-fake-refresh");

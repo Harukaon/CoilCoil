@@ -31,7 +31,7 @@ function number(value: unknown): number | null {
 
 function percent(value: unknown): number | null {
   const parsed = number(value);
-  return parsed === null || parsed < 0 ? null : Math.min(100, parsed);
+  return parsed === null || parsed < 0 ? null : parsed;
 }
 
 function instant(value: unknown): number | null {
@@ -74,11 +74,12 @@ export function parseSubscriptionQuota(provider: QuotaProvider, payload: unknown
     for (const [index, raw] of [primary, secondary].entries()) {
       if (!raw) continue;
       const seconds = number(raw.limit_window_seconds ?? raw.limitWindowSeconds);
-      if (seconds === 18000 || (seconds === null && index === 0)) fiveHour = raw;
-      else if (seconds === 604800 || (seconds === null && index === 1)) weekly = raw;
-      else if (seconds !== null && seconds > 0) {
-        const monthly = seconds >= 28 * 86400 && seconds <= 31 * 86400;
-        others.push(window(`window_${index}`, monthly ? "月限制" : `${Math.round(seconds / 3600)} 小时限制`, raw, provider, now));
+      if (seconds === 18000) fiveHour = raw;
+      else if (seconds === 604800) weekly = raw;
+      else {
+        const monthly = seconds !== null && seconds >= 28 * 86400 && seconds <= 31 * 86400;
+        const label = monthly ? "月限制" : seconds !== null && seconds > 0 ? `${Math.round(seconds / 3600)} 小时限制` : index === 0 ? "主窗口限制（周期未提供）" : "次窗口限制（周期未提供）";
+        others.push(window(`window_${index}`, label, raw, provider, now));
       }
     }
     windows.push(window("five_hour", "5 小时限制", fiveHour, provider, now));
@@ -148,7 +149,10 @@ export async function querySubscriptionQuota(runtime: AuthRuntime, provider: str
     }
     const auth = await runtime.getAuth(provider, { signal: controller.signal });
     const token = auth?.auth.apiKey;
-    if (!token || auth.source !== "OAuth") return failure(provider, "not_logged_in", "请先完成订阅登录，再查询额度。");
+    if (!token || auth.source !== "OAuth") {
+      caches.get(runtime)?.delete(provider);
+      return failure(provider, "not_logged_in", "请先完成订阅登录，再查询额度。");
+    }
     // Account/token changes cannot reuse the previous account's cached usage.
     const identity = createHash("sha256").update(token).digest("hex");
     const cache = caches.get(runtime) ?? new Map<string, CacheEntry>();
