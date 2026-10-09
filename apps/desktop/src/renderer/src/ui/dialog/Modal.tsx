@@ -32,6 +32,13 @@ export function Modal({
   const titleId = labelledBy ?? (title ? autoTitleId : undefined);
   const descriptionId = describedBy ?? (description ? autoDescriptionId : undefined);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Kept apart from the effect below. Parents hand over a new onClose on every render, and an
+  // effect that depended on it would run again each time: give the focus back to what is behind
+  // the dialog, then take it to the dialog's first control - in the middle of someone typing.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -40,7 +47,7 @@ export function Modal({
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
@@ -53,7 +60,7 @@ export function Modal({
       window.removeEventListener("keydown", onKeyDown, true);
       previous?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
