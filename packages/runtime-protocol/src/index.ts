@@ -295,6 +295,24 @@ export interface TestProviderConnectionResult {
   detail?: string;
 }
 
+/** Official subscription usage only; credentials never cross this boundary. */
+export interface ModelProviderQuotaWindow {
+  id: string;
+  label: string;
+  usedPercent: number | null;
+  /** Absolute reset time in epoch milliseconds, or null when not supplied. */
+  resetsAt: number | null;
+}
+
+export interface ModelProviderQuotaResult {
+  provider: string;
+  status: "ok" | "not_logged_in" | "unsupported" | "error";
+  windows: ModelProviderQuotaWindow[];
+  updatedAt: number;
+  plan?: string;
+  message?: string;
+}
+
 export type McpTransport = "stdio" | "http";
 
 export interface McpServerConfiguration {
@@ -1580,6 +1598,7 @@ export type RuntimeCommand =
   | { type: "cancel_model_provider_oauth"; flowId: string }
   | { type: "fetch_provider_models"; input: FetchProviderModelsInput }
   | { type: "test_provider_connection"; input: TestProviderConnectionInput }
+  | { type: "get_model_provider_quota"; provider: string; refresh?: boolean }
   | { type: "get_mcp_configuration"; cwd?: string }
   | { type: "get_mcp_json" }
   | { type: "save_mcp_json"; content: string; cwd?: string }

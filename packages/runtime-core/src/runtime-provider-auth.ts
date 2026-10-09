@@ -11,6 +11,7 @@ import {
   type ModelProviderAuthPrompt,
   type ModelProviderAuthSnapshot,
   type ModelProviderAuthState,
+  type ModelProviderQuotaResult,
   type RuntimeConfiguration,
   type TestProviderConnectionInput,
   type TestProviderConnectionResult,
@@ -38,6 +39,7 @@ import {
 } from "./runtime-utils.js";
 import type { ModelCatalogLookupResult } from "@coilcoil/runtime-protocol/model-catalog";
 import { lookupModelCatalogMeta } from "./model-catalog-source.js";
+import { querySubscriptionQuota } from "./provider-quota.js";
 
 function redactProviderSecret(value: string, secret: string | undefined): string {
   const trimmed = secret?.trim();
@@ -346,6 +348,10 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
     this.emitEvent({ type: "configuration_updated", configuration });
     this.refreshSessionModelFromRegistry();
     return configuration;
+  }
+
+  async getModelProviderQuota(provider: string, refresh = false): Promise<ModelProviderQuotaResult> {
+    return querySubscriptionQuota(await this.ready(), provider, refresh);
   }
 
   async fetchProviderModels(input: FetchProviderModelsInput): Promise<FetchProviderModelsResult> {

@@ -488,6 +488,8 @@ export class RuntimeServer {
         return runtime.fetchProviderModels(command.input);
       case "test_provider_connection":
         return runtime.testProviderConnection(command.input);
+      case "get_model_provider_quota":
+        return runtime.getModelProviderQuota(command.provider, command.refresh);
       case "get_mcp_configuration":
         return runtime.getMcpConfiguration(command.cwd);
       case "get_mcp_json":
