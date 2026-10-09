@@ -55,7 +55,7 @@ function freePort() {
  * 默认关着 GPU（稳定、和没有显卡的机器一样，浏览器面板走普通画面）；`gpu: true` 的
  * 场景开着 GPU，浏览器面板走共享纹理画面，和真实用户的 Mac 一样。
  */
-export async function launch({ projects = ["projA", "projB"], remote = false, gpu = false } = {}) {
+export async function launch({ projects = ["projA", "projB"], remote = false, gpu = false, env = {}, credentials, runtimeNodeOptions } = {}) {
   // The data root shows up in the UI (workspace paths, the settings footer), and a proportional
   // font draws letters at different widths, which once flipped a wrap between two runs of the same
   // build. Digits share one width, so the layout of two runs is identical.
@@ -91,6 +91,7 @@ export async function launch({ projects = ["projA", "projB"], remote = false, gp
       },
     },
   });
+  if (credentials) agent("auth.json", credentials);
   agent("settings.json", { defaultProvider: "mock", defaultModel: "mock-1" });
   agent("subagent-settings.json", { models: { explore: "mock/mock-1", hacker: "mock/mock-1", reviewer: "mock/mock-1", worker: "mock/mock-1" } });
   writeFileSync(join(data, "mounted-projects.json"), JSON.stringify(
@@ -100,11 +101,23 @@ export async function launch({ projects = ["projA", "projB"], remote = false, gp
   const app = await electron.launch({
     executablePath: require("electron"),
     args: [join(repositoryRoot, "apps/desktop"), `--user-data-dir=${data}`, "--no-sandbox", ...gpu ? [] : ["--disable-gpu"]],
-    env: { ...process.env, HOME: home, USERPROFILE: home, COILCOIL_DISABLE_UPDATE_CHECK: "1", ...remote ? { COILCOIL_REMOTE_PORT: String(remotePort) } : {} },
+    env: { ...process.env, ...env, HOME: home, USERPROFILE: home, COILCOIL_DISABLE_UPDATE_CHECK: "1", ...remote ? { COILCOIL_REMOTE_PORT: String(remotePort) } : {} },
     timeout: 90_000,
   });
   const page = await app.firstWindow();
   await page.waitForFunction(() => Boolean(window.coilcoil), undefined, { timeout: 60_000 });
+  if (runtimeNodeOptions) {
+    // Playwright intentionally strips NODE_OPTIONS from Electron's environment.
+    // Apply it inside this isolated main process, then respawn only its runtime.
+    await app.evaluate(async (_electron, { options, entry }) => {
+      process.env.NODE_OPTIONS = options;
+      const child = process._getActiveHandles().find((handle) => handle.spawnargs?.includes(entry));
+      if (!child) throw new Error("E2E runtime process not found");
+      const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
+      child.kill();
+      await exited;
+    }, { options: runtimeNodeOptions, entry: join(repositoryRoot, "apps/desktop/out/main/runtime.js") });
+  }
   await page.evaluate(() => window.localStorage.setItem("coilcoil.onboarding", JSON.stringify({ completedAt: new Date().toISOString() })));
   await page.reload();
   await page.waitForFunction(() => Boolean(window.coilcoil), undefined, { timeout: 60_000 });

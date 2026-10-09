@@ -28,6 +28,7 @@ import {
 import { Select, type SelectOption } from "../../ui/Select";
 import { UpstreamModelPicker, type UpstreamModelOption } from "./UpstreamModelPicker";
 import { ProviderOAuthDialog } from "./ProviderOAuthDialog";
+import { ProviderQuota } from "./ProviderQuota";
 import { Checkbox, Field, TextArea, TextField } from "../../ui/form";
 
 export type EditableModel = ModelProviderModelConfiguration & { uid: string };
@@ -242,6 +243,8 @@ function NumberInput({ value, onChange, placeholder, className }: { value?: numb
 }
 
 function ProviderCredentialEditor({
+  provider,
+  runtimeId,
   configuration,
   method,
   values,
@@ -253,6 +256,8 @@ function ProviderCredentialEditor({
   onOAuthLogin,
   onOAuthLogout,
 }: {
+  provider?: string;
+  runtimeId?: string;
   configuration: ModelProviderCredentialConfiguration;
   method: string;
   values: Record<string, string>;
@@ -307,6 +312,7 @@ function ProviderCredentialEditor({
           ? <button type="button" disabled={oauthBusy} onClick={onOAuthLogout}><LogOut size={13} />退出登录</button>
           : <button className="primary" type="button" disabled={oauthBusy} onClick={onOAuthLogin}>{oauthBusy ? <LoaderCircle className="spin" size={13} /> : <LogIn size={13} />}订阅登录</button>}
       </div> : null}
+      {provider ? <ProviderQuota key={provider} provider={provider} loggedIn={oauthConfigured} runtimeId={runtimeId} /> : null}
       {configuration.methods.length > 1 ? <Field>API 凭据方式<Select value={active?.id ?? ""} options={configuration.methods.map((item) => ({ value: item.id, label: item.label, detail: item.description }))} ariaLabel="服务商 API 凭据方式" onChange={onMethodChange} /></Field> : null}
       {active ? <>
         {active.description && configuration.methods.length > 1 ? <p className="provider-credential-description">{active.description}</p> : null}
@@ -950,7 +956,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           </header>
           {draft.disabled ? <div className="provider-action-message">已禁用：保存后该服务商不会出现在模型列表中，配置与凭据仍会保留。</div> : null}
           {isBuiltinProvider ? <>
-            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
+            <ProviderCredentialEditor provider={selectedId ?? draft.id} runtimeId={runtimeId} configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
               <p>这些选项直接对应 <code>models.json</code> 的服务商覆盖。普通配置不需要填写；“密钥引用”用于通过环境变量或命令延迟取得密钥，不是另一把 API 密钥。</p>
@@ -961,7 +967,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           </> : <>
             <div className="settings-grid"><Field>服务商 ID<TextField value={draft.id} disabled={Boolean(selectedId)} placeholder="例如 dog-provider" onChange={(event) => setDraft((current) => current ? { ...current, id: event.target.value } : current)} /></Field><Field>显示名称<TextField value={draft.name ?? ""} placeholder="例如 DogProvider" onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></Field></div>
             <div className="settings-grid"><Field>请求协议<Select value={draft.api ?? ""} options={protocolOptions.filter((option) => option.value)} ariaLabel="请求协议" placeholder="选择协议" onChange={(api) => setDraft((current) => current ? { ...current, api } : current)} searchable /></Field><Field>Base URL<TextField value={draft.baseUrl ?? ""} placeholder={draft.api === "anthropic-messages" ? "https://api.anthropic.com" : "https://api.example.com/v1"} onChange={(event) => setDraft((current) => current ? { ...current, baseUrl: event.target.value } : current)} /></Field></div>
-            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
+            <ProviderCredentialEditor configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} provider={selectedId ?? draft.id} runtimeId={runtimeId} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
               <p>密钥引用、Radius OAuth、请求头与兼容性参数都属于高级配置。普通 API 密钥请填写上方输入框。</p>
