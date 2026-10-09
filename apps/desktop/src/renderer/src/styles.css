@@ -1307,6 +1307,12 @@ input.browser-find-input { width: min(180px, 36cqw); min-width: 80px; border: 0;
 .runtime-subagent-model-row strong { color: hsl(var(--th) var(--ts) var(--l-282)); font-size: 9px; }
 .runtime-subagent-model-row small { overflow: hidden; color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-subagent-model-row .runtime-subagent-select { height: 30px; border-radius: var(--radius-lg); font-size: 9px; }
+/* A subagent the user wrote: where it lives, when that is the project, and the two buttons that change it. */
+.runtime-subagent-scope { flex: 0 0 auto; padding: 0 4px; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-457)); background: hsl(var(--th) var(--ts) var(--l-925)); font-size: 7.5px; font-style: normal; font-weight: 500; line-height: 13px; }
+.runtime-subagent-actions { display: inline-flex; flex: 0 0 auto; align-items: center; align-self: center; gap: 1px; }
+.runtime-subagent-icon { display: inline-grid; width: 20px; height: 20px; place-items: center; padding: 0; border: 0; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-527)); background: transparent; cursor: pointer; }
+.runtime-subagent-icon:hover { color: hsl(var(--th) var(--ts) var(--l-282)); background: hsl(var(--th) var(--ts) var(--l-925)); }
+.runtime-subagent-icon:focus-visible { outline: 2px solid hsl(var(--th) var(--ts) var(--l-547)); outline-offset: 1px; }
 .runtime-prompt-view, .runtime-prompt-editor, .runtime-memory-card { display: grid; gap: 8px; }
 .runtime-prompt-view pre { max-height: 260px; margin: 0; overflow: auto; padding: 8px; border-radius: var(--radius-lg); color: hsl(var(--th) var(--ts) var(--l-324)); background: hsl(var(--th) var(--ts) var(--l-955)); font: 8.5px/1.55 var(--font-mono, "SFMono-Regular", Consolas, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
 .runtime-prompt-editor p { margin: 0; color: hsl(var(--th) var(--ts) var(--l-541)); font-size: 8px; line-height: 1.45; }

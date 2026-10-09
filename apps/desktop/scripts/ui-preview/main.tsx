@@ -8,6 +8,8 @@
  *
  * Built by `npm run preview:ui`, screenshotted with headless Chrome.
  */
+// First on purpose, as in the real entry: every other stylesheet must come after the form base.
+import "../../src/renderer/src/ui/form/form.css";
 import { createRoot } from "react-dom/client";
 import { MemoryWorkspace } from "../../src/renderer/src/features/memory/MemoryWorkspace";
 import { InspectorPane } from "../../src/renderer/src/features/inspector/InspectorPane";
@@ -26,18 +28,45 @@ import "../../src/renderer/src/styles.css";
 const parameters = new URLSearchParams(location.search);
 
 /** What the settings panel lists for subagents: the built-in ones, plus one the user wrote. */
-const subagentProfilesFixture = {
-  availableTools: ["read", "bash", "terminal", "edit", "write", "grep", "ls", "mcp"],
-  profiles: [
-    ["explore", "builtin", "Read-only reconnaissance agent", ["read", "grep", "ls", "bash"], false],
-    ["hacker", "builtin", "Looks for problems in code that is said to be finished", ["read", "grep", "ls", "bash", "edit", "write"], false],
-    ["reviewer", "builtin", "Independent code review agent", ["read", "grep", "ls", "bash"], false],
-    ["worker", "builtin", "Coding agent that carries out concrete code changes", ["read", "bash", "edit", "write"], true],
-    ["db-expert", "user", "Answers questions about the database schema and writes migrations", ["read", "grep", "ls"], false],
-  ].map(([name, source, description, tools, worktree]) => ({
-    name, source, description, tools, worktree, filePath: `/preview/agents/${name}.md`, systemPrompt: "",
-  })),
-};
+const PREVIEW_TOOLS = ["read", "bash", "terminal", "edit", "write", "grep", "ls", "mcp"];
+let previewProfiles = [
+  ["explore", "builtin", "Read-only reconnaissance agent", ["read", "grep", "ls", "bash"], false],
+  ["hacker", "builtin", "Looks for problems in code that is said to be finished", ["read", "grep", "ls", "bash", "edit", "write"], false],
+  ["reviewer", "builtin", "Independent code review agent", ["read", "grep", "ls", "bash"], false],
+  ["worker", "builtin", "Coding agent that carries out concrete code changes", ["read", "bash", "edit", "write"], true],
+  ["db-expert", "user", "Answers questions about the database schema and writes migrations", ["read", "grep", "ls"], false],
+].map(([name, source, description, tools, worktree]) => ({
+  name, source, description, tools, worktree, filePath: `/preview/agents/${name}.md`, systemPrompt: name === "db-expert" ? "You answer questions about the database schema.\nCheck every query against it before you reply." : "",
+})) as Array<Record<string, unknown> & { name: string; source: string }>;
+const previewSnapshot = () => ({ availableTools: PREVIEW_TOOLS, profiles: [...previewProfiles].sort((a, b) => (a.source === "builtin" ? 0 : a.source === "user" ? 1 : 2) - (b.source === "builtin" ? 0 : b.source === "user" ? 1 : 2) || a.name.localeCompare(b.name)) });
+let previewModels: Record<string, string> = parameters.get("configured") === "1"
+  ? { explore: "pierce/glm-5.3-flash", worker: "pierce/gpt-5.6-luna", reviewer: "pierce/gpt-5.6-sol", "db-expert": "pierce/gpt-5.6-luna" }
+  : {};
+
+/** The runtime's answers for saving and deleting a subagent, with the same refusals and wording. */
+function previewSaveProfile(input: Record<string, unknown>) {
+  const name = String(input.name ?? "").trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(name)) throw new Error("名字只能用小写字母、数字、- 和 _，以字母或数字开头，最长 48 个字符。");
+  const description = String(input.description ?? "").replace(/\s+/g, " ").trim();
+  if (!description) throw new Error("请写一句说明：主 Agent 靠它判断什么时候该派这个子 Agent。");
+  const systemPrompt = String(input.systemPrompt ?? "").trim();
+  if (!systemPrompt) throw new Error("请写提示词：它是这个子 Agent 全部的工作说明。");
+  const tools = Array.isArray(input.tools) ? input.tools.filter((tool): tool is string => PREVIEW_TOOLS.includes(String(tool))) : [];
+  if (tools.length === 0) throw new Error("请至少选一个工具，并且只能选列表里有的。");
+  const scope = input.scope === "project" ? "project" : "user";
+  const existing = previewProfiles.find((profile) => profile.name === name && profile.source === scope);
+  if (!existing && previewProfiles.some((profile) => profile.name === name && profile.source === "builtin")) throw new Error(`「${name}」是内置子 Agent 的名字，请换一个名字。`);
+  const next = { name, source: scope, description, tools, worktree: input.worktree === true, systemPrompt, filePath: `${scope === "project" ? "/Users/hao/Desktop/feedmob/.coilcoil" : "/preview"}/agents/${name}.md` };
+  previewProfiles = existing ? previewProfiles.map((profile) => (profile === existing ? next : profile)) : [...previewProfiles, next];
+  return previewSnapshot();
+}
+
+function previewDeleteProfile(name: string, scope: string) {
+  if (!previewProfiles.some((profile) => profile.name === name && profile.source === scope)) throw new Error(`没有找到要删除的子 Agent「${name}」。`);
+  previewProfiles = previewProfiles.filter((profile) => !(profile.name === name && profile.source === scope));
+  if (!previewProfiles.some((profile) => profile.name === name)) delete previewModels[name];
+  return previewSnapshot();
+}
 
 // The panel and the theme reach for a scattering of bridge methods. A proxy
 // answers all of them with a no-op so the preview cannot die on one it does not
@@ -46,8 +75,18 @@ const implemented: Record<string, unknown> = {
   platform: "darwin",
   request: async (command: { type: string }) => {
     if (command.type === "get_memory_configuration") return fixture;
-    if (command.type === "list_subagent_profiles") return subagentProfilesFixture;
-    if (command.type === "get_subagent_configuration") return { models: { explore: "pierce/glm-5.3-flash" } };
+    if (command.type === "list_subagent_profiles") return previewSnapshot();
+    if (command.type === "save_subagent_profile") return previewSaveProfile((command as unknown as { input: Record<string, unknown> }).input);
+    if (command.type === "delete_subagent_profile") {
+      const { name, scope } = command as unknown as { name: string; scope: string };
+      return previewDeleteProfile(name, scope);
+    }
+    if (command.type === "get_subagent_configuration") return { models: previewModels };
+    if (command.type === "save_subagent_configuration") {
+      const incoming = (command as unknown as { input: { models: Record<string, string> } }).input.models;
+      previewModels = Object.fromEntries(Object.entries({ ...previewModels, ...incoming }).filter(([, model]) => model));
+      return { models: previewModels };
+    }
     if (command.type === "get_session_naming_configuration") return { model: "" };
     throw new Error(`预览环境没有实现：${command.type}`);
   },
@@ -237,7 +276,6 @@ function RuntimePanelPreview(): React.JSX.Element {
     }, 300);
     return () => clearTimeout(timer);
   }, []);
-  const configured = parameters.get("configured") === "1";
   return (
     <div className="inspector-pane" style={{ width: 420, height: "100vh", overflow: "auto" }}>
       <RuntimePanel
@@ -245,6 +283,13 @@ function RuntimePanelPreview(): React.JSX.Element {
         tokenUsage={{ input: 12000, output: 3400, cacheRead: 0, cacheWrite: 0, total: 15400, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as never}
         contextUsage={{ used: 15400, total: 400000, percent: 3.85 } as never}
         cwd="/Users/hao/Desktop/feedmob"
+        configuration={{
+          models: [
+            { provider: "pierce", providerName: "Pierce", id: "glm-5.3-flash", name: "GLM 5.3 Flash", configured: true },
+            { provider: "pierce", providerName: "Pierce", id: "gpt-5.6-luna", name: "GPT 5.6 Luna", configured: true },
+            { provider: "pierce", providerName: "Pierce", id: "gpt-5.6-sol", name: "GPT 5.6 Sol", configured: true },
+          ],
+        } as never}
         inspection={{
           tools: [],
           mcpServers: [],
@@ -252,9 +297,7 @@ function RuntimePanelPreview(): React.JSX.Element {
           effectiveSystemPrompt: "",
           estimates: { total: 15400, system: 2000, tools: 1200, messages: 12200 },
           capabilities: { editSystemPrompt: true, removeOriginalSessionItems: false, removeOriginalSessionItemsReason: "" },
-          subagent: { models: configured
-            ? { explore: "pierce/glm-5.3-flash", worker: "pierce/gpt-5.6-luna", reviewer: "pierce/gpt-5.6-sol", "db-expert": "pierce/gpt-5.6-luna" }
-            : {} },
+          subagent: { models: previewModels },
         } as never}
       />
     </div>
