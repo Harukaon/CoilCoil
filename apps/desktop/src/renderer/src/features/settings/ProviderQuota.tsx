@@ -1,15 +1,16 @@
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ModelProviderQuotaResult } from "@coilcoil/runtime-protocol";
+import type { ModelProviderQuotaResult, SubscriptionProvider } from "@coilcoil/runtime-protocol";
 import { quotaPercent, quotaPlanLabel, quotaResetLabel } from "./providerQuotaPresentation";
 import "./providerQuota.css";
 
-export function ProviderQuota({ provider, loggedIn, runtimeId }: {
+export function ProviderQuota({ provider, subscriptionProvider, loggedIn, runtimeId }: {
   provider: string;
+  subscriptionProvider?: SubscriptionProvider;
   loggedIn: boolean;
   runtimeId?: string;
 }): React.JSX.Element | null {
-  const supported = provider === "anthropic" || provider === "openai-codex";
+  const supported = subscriptionProvider !== undefined || provider === "anthropic" || provider === "openai-codex";
   const [quota, setQuota] = useState<ModelProviderQuotaResult>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);

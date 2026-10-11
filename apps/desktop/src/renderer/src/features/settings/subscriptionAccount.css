@@ -1,0 +1,5 @@
+.subscription-account-form { display: grid; min-height: 0; gap: 12px; }
+.subscription-account-form small { color: hsl(var(--th) var(--ts) var(--l-525)); font-size: 10px; line-height: 1.5; }
+.subscription-account-error { margin: 8px 0 0; color: var(--c-red-muted); font-size: 11px; line-height: 1.5; }
+.provider-subscription-add { display: inline-flex; align-items: center; justify-content: center; gap: 5px; width: 100%; min-height: 30px; margin-top: 7px; border: 1px solid hsl(var(--th) var(--ts) var(--l-859)); border-radius: var(--radius-xl); color: hsl(var(--th) var(--ts) var(--l-327)); background: hsl(var(--th) var(--ts) var(--l-1000)); font-size: 10px; cursor: pointer; }
+.provider-subscription-add:hover { background: hsl(var(--th) var(--ts) var(--l-951)); }

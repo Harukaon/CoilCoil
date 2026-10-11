@@ -1,6 +1,7 @@
 import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  CreateSubscriptionAccountInput,
   OpenAIResponsesWsConfiguration,
   FetchProviderModelsResult,
   ModelProviderConfiguration,
@@ -13,6 +14,7 @@ import type {
   ModelProviderSaveResult,
   RuntimeConfiguration,
   TestProviderConnectionResult,
+  SubscriptionProvider,
   ThinkingLevel,
 } from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
@@ -29,6 +31,8 @@ import { Select, type SelectOption } from "../../ui/Select";
 import { UpstreamModelPicker, type UpstreamModelOption } from "./UpstreamModelPicker";
 import { ProviderOAuthDialog } from "./ProviderOAuthDialog";
 import { ProviderQuota } from "./ProviderQuota";
+import { SubscriptionAccountDialog } from "./SubscriptionAccountDialog";
+import { ConfirmDialog } from "../../ui/dialog";
 import { Checkbox, Field, TextArea, TextField } from "../../ui/form";
 
 export type EditableModel = ModelProviderModelConfiguration & { uid: string };
@@ -209,7 +213,7 @@ function modelThinkingLevels(model: EditableModel, configuration: RuntimeConfigu
 }
 
 function sourceLabel(source: ModelProviderConfiguration["source"]): string {
-  return source === "custom" ? "自定义" : source === "override" ? "内置覆盖" : "内置";
+  return source === "subscription" ? "订阅账号" : source === "custom" ? "自定义" : source === "override" ? "内置覆盖" : "内置";
 }
 
 function customCredentialConfiguration(): ModelProviderCredentialConfiguration {
@@ -244,6 +248,7 @@ function NumberInput({ value, onChange, placeholder, className }: { value?: numb
 
 function ProviderCredentialEditor({
   provider,
+  subscriptionProvider,
   runtimeId,
   configuration,
   method,
@@ -257,6 +262,7 @@ function ProviderCredentialEditor({
   onOAuthLogout,
 }: {
   provider?: string;
+  subscriptionProvider?: SubscriptionProvider;
   runtimeId?: string;
   configuration: ModelProviderCredentialConfiguration;
   method: string;
@@ -312,7 +318,7 @@ function ProviderCredentialEditor({
           ? <button type="button" disabled={oauthBusy} onClick={onOAuthLogout}><LogOut size={13} />退出登录</button>
           : <button className="primary" type="button" disabled={oauthBusy} onClick={onOAuthLogin}>{oauthBusy ? <LoaderCircle className="spin" size={13} /> : <LogIn size={13} />}订阅登录</button>}
       </div> : null}
-      {provider ? <ProviderQuota key={provider} provider={provider} loggedIn={oauthConfigured} runtimeId={runtimeId} /> : null}
+      {provider ? <ProviderQuota key={provider} provider={provider} subscriptionProvider={subscriptionProvider} loggedIn={oauthConfigured} runtimeId={runtimeId} /> : null}
       {configuration.methods.length > 1 ? <Field>API 凭据方式<Select value={active?.id ?? ""} options={configuration.methods.map((item) => ({ value: item.id, label: item.label, detail: item.description }))} ariaLabel="服务商 API 凭据方式" onChange={onMethodChange} /></Field> : null}
       {active ? <>
         {active.description && configuration.methods.length > 1 ? <p className="provider-credential-description">{active.description}</p> : null}
@@ -517,6 +523,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
   const [testing, setTesting] = useState(false);
   const [removeArmed, setRemoveArmed] = useState(false);
+  const [addingSubscription, setAddingSubscription] = useState(false);
   const [upstreamPickerModels, setUpstreamPickerModels] = useState<UpstreamModelOption[]>();
   const [oauthFlow, setOAuthFlow] = useState<ModelProviderAuthState>();
   const [savedFingerprint, setSavedFingerprint] = useState<string>();
@@ -527,7 +534,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     && oauthFlow.status !== "failed"
     && oauthFlow.status !== "cancelled");
   const canRemove = Boolean(selectedId && (selectedSource !== "built-in" || selectedProvider?.apiKeyConfigured));
-  const removeLabel = selectedSource === "built-in" ? "清除配置" : "移除";
+  const removeLabel = selectedSource === "subscription" ? "移除账号" : selectedSource === "built-in" ? "清除配置" : "移除";
   const currentFingerprint = useMemo(() => draft ? providerFormFingerprint({
     draft,
     providerHeadersText,
@@ -623,6 +630,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const customProviders = providerOptions.filter((provider) => provider.source === "custom");
   const overrideProviders = providerOptions.filter((provider) => provider.source === "override");
   const builtinProviders = providerOptions.filter((provider) => provider.source === "built-in");
+  const subscriptionProviders = providerOptions.filter((provider) => provider.source === "subscription");
   const protocolOptions = apiOptions(snapshot);
   const defaultModels = useMemo(() => {
     if (!draft) return [] as EditableModel[];
@@ -641,6 +649,17 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
     if (!query) return rows;
     return rows.filter(({ model }) => `${model.id} ${model.name ?? ""}`.toLowerCase().includes(query));
   }, [draft?.models, modelQuery]);
+
+  const createSubscription = async (input: CreateSubscriptionAccountInput): Promise<string | undefined> => {
+    try {
+      const result = await window.coilcoil.request<ModelProviderSaveResult>({ type: "create_subscription_account", input }, runtimeId);
+      onSaved(result.configuration);
+      await load(result.provider.id, result.configuration);
+      setAddingSubscription(false);
+      toastSuccess("账号已添加，请单独完成订阅登录。");
+      return undefined;
+    } catch (caught) { return caught instanceof Error ? caught.message : String(caught); }
+  };
 
   const selectProvider = (provider: ModelProviderConfiguration): void => applyProvider(provider);
   const addProvider = (): void => {
@@ -817,7 +836,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
       let models: UpstreamModelOption[];
       if (isBuiltinProvider) {
         // Subscription credentials cannot call a provider's API-key /models endpoint.
-        models = await fetchBuiltinProviderModels(draft.id);
+        models = await fetchBuiltinProviderModels(selectedProvider?.subscriptionProvider ?? draft.id);
       } else {
         void loadModelCatalog();
         const headers = parseStringMap(providerHeadersText, "服务商请求头");
@@ -906,6 +925,8 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
 
   return (
     <div className="model-provider-settings">
+      {addingSubscription ? <SubscriptionAccountDialog existingIds={snapshot?.providers.map((provider) => provider.id) ?? []} onCreate={createSubscription} onClose={() => setAddingSubscription(false)} /> : null}
+      {selectedSource === "subscription" && removeArmed ? <ConfirmDialog open title="移除订阅账号" description={`将退出“${draft?.name || selectedId}”并移除这项的模型，其他账号不受影响。使用这项的对话需要重新选择模型，不会自动切到另一账号。`} onClose={() => { if (!saving) setRemoveArmed(false); }} actions={[{ label: "取消", onClick: () => setRemoveArmed(false) }, { label: "移除账号", variant: "danger", onClick: () => { if (!saving) void remove(); } }]} /> : null}
       {oauthFlow ? <ProviderOAuthDialog key={oauthFlow.flowId} state={oauthFlow} onRespond={respondOAuthLogin} onClose={closeOAuthLogin} /> : null}
       {upstreamPickerModels && draft ? <UpstreamModelPicker
         models={upstreamPickerModels}
@@ -916,9 +937,11 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
       /> : null}
       <aside className="provider-catalog">
         <div className="provider-catalog-toolbar"><strong>服务商</strong><button type="button" aria-label="添加自定义服务商" onClick={addProvider}><Plus size={14} />添加</button></div>
+        <button className="provider-subscription-add" type="button" onClick={() => setAddingSubscription(true)}><Plus size={13} />添加订阅账号</button>
         <div className="provider-catalog-search"><Search size={14} /><TextField className="provider-catalog-search-input" value={query} placeholder="搜索服务商" onChange={(event) => setQuery(event.target.value)} /></div>
         {loading ? <p className="settings-loading"><LoaderCircle className="spin" size={15} />加载服务商目录…</p> : null}
         {([
+          ["订阅账号", subscriptionProviders],
           ["自定义服务商", customProviders],
           ["内置覆盖", overrideProviders],
           ["内置服务商", builtinProviders],
@@ -956,7 +979,8 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           </header>
           {draft.disabled ? <div className="provider-action-message">已禁用：保存后该服务商不会出现在模型列表中，配置与凭据仍会保留。</div> : null}
           {isBuiltinProvider ? <>
-            <ProviderCredentialEditor provider={selectedId ?? draft.id} runtimeId={runtimeId} configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
+            {selectedSource === "subscription" ? <div className="settings-grid"><Field>账号前缀<TextField value={draft.id} disabled /><small>每个模型使用此前缀区分账号；创建后不可修改。</small></Field><Field>显示名称<TextField value={draft.name ?? ""} onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></Field></div> : null}
+            <ProviderCredentialEditor provider={selectedId ?? draft.id} subscriptionProvider={selectedProvider?.subscriptionProvider} runtimeId={runtimeId} configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
               <p>这些选项直接对应 <code>models.json</code> 的服务商覆盖。普通配置不需要填写；“密钥引用”用于通过环境变量或命令延迟取得密钥，不是另一把 API 密钥。</p>
