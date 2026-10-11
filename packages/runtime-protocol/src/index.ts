@@ -176,8 +176,19 @@ export interface ModelProviderModelConfiguration {
  * Credentials are intentionally represented only as availability/reference
  * metadata; the literal key stays in Pi's private auth store.
  */
+export type SubscriptionProvider = "anthropic" | "openai-codex";
+
+export interface CreateSubscriptionAccountInput {
+  /** Stable account prefix, also used as the independent provider ID. */
+  id: string;
+  provider: SubscriptionProvider;
+  name?: string;
+}
+
 export interface ModelProviderConfiguration {
   id: string;
+  /** A separately named account using this built-in subscription implementation. */
+  subscriptionProvider?: SubscriptionProvider;
   name?: string;
   baseUrl?: string;
   api?: string;
@@ -199,12 +210,12 @@ export interface ModelProviderConfiguration {
   replaceModels: boolean;
   models: ModelProviderModelConfiguration[];
   modelOverrides?: Record<string, Omit<ModelProviderModelConfiguration, "id" | "api" | "baseUrl">>;
-  source: "built-in" | "custom" | "override";
+  source: "built-in" | "custom" | "override" | "subscription";
 }
 
 /** Editable provider input. `apiKey` is write-only and never returned. */
 export interface ModelProviderConfigurationInput {
-  provider: Omit<ModelProviderConfiguration, "apiKeyConfigured" | "authType" | "hasPrivateApiKeyReference" | "source" | "credential">;
+  provider: Omit<ModelProviderConfiguration, "apiKeyConfigured" | "authType" | "hasPrivateApiKeyReference" | "source" | "credential" | "subscriptionProvider">;
   credential?: {
     method: string;
     values: Record<string, string>;
@@ -1570,6 +1581,7 @@ export type RuntimeCommand =
   | { type: "get_openai_responses_ws_configuration" }
   | { type: "save_openai_responses_ws_configuration"; input: OpenAIResponsesWsConfigurationInput }
   | { type: "get_model_provider_configuration" }
+  | { type: "create_subscription_account"; input: CreateSubscriptionAccountInput }
   | { type: "save_model_provider_configuration"; input: ModelProviderConfigurationInput }
   | { type: "remove_model_provider_configuration"; provider: string }
   | {

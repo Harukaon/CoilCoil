@@ -1,6 +1,7 @@
 import {
   type ApiKeyCredential,
   clampThinkingLevel,
+  cleanupSessionResources,
 } from "@earendil-works/pi-ai";
 import {
   getBuiltinProviders,
@@ -15,6 +16,7 @@ import {
   OPENAI_RESPONSES_WS_PROVIDER_ID,
 } from "@coilcoil/openai-responses-ws/config";
 import {
+  type CreateSubscriptionAccountInput,
   type ModelProviderConfiguration,
   type ModelProviderConfigurationInput,
   type ModelProviderConfigurationSnapshot,
@@ -39,6 +41,7 @@ import {
   modelConfigurationForStorage,
 } from "./provider-helpers.js";
 import { RuntimeProviderCore } from "./runtime-provider-core.js";
+import { readSubscriptionAccounts, retiredSubscriptionIds, syncSubscriptionAccounts, validateSubscriptionAccount, writeSubscriptionAccounts } from "./subscription-accounts.js";
 import {
   parseModelReference,
   readSummarizationModelConfiguration,
@@ -112,15 +115,43 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
   }
 
   /** 模型表或凭证变了，配置的总结模型也要重新解析一次。 */
-  override refreshSessionModelFromRegistry(): void {
-    super.refreshSessionModelFromRegistry();
+  override refreshSessionModelFromRegistry(provider?: string): void {
+    super.refreshSessionModelFromRegistry(provider);
     void this.applySummarizationModel().catch(() => undefined);
+  }
+
+  async createSubscriptionAccount(input: CreateSubscriptionAccountInput): Promise<ModelProviderSaveResult> {
+    const account = validateSubscriptionAccount(input);
+    const modelRuntime = await this.ready();
+    const stored = await modelRuntime.listCredentials();
+    // Re-read after the last await so parallel additions cannot overwrite each other.
+    const accounts = readSubscriptionAccounts(this.agentDir);
+    const configuration = this.readPrivateModelsConfiguration();
+    if (retiredSubscriptionIds(this.agentDir).has(account.id)) throw new Error("此前缀已经用于移除的账号，请换一个新前缀，避免旧会话误用新的账号。");
+    if (modelRuntime.getProvider(account.id) || accounts.some((item) => item.id === account.id)
+      || Object.hasOwn(configuration.providers, account.id) || stored.some((item) => item.providerId === account.id)) {
+      throw new Error(`账号前缀“${account.id}”已被使用，请换一个前缀；原登录不会被覆盖。`);
+    }
+    writeSubscriptionAccounts(this.agentDir, [...accounts, account]);
+    try {
+      await syncSubscriptionAccounts(modelRuntime, this.agentDir);
+      if (!modelRuntime.getProvider(account.id)) throw new Error("无法加载此订阅的内置模型。");
+    } catch (error) {
+      writeSubscriptionAccounts(this.agentDir, readSubscriptionAccounts(this.agentDir).filter((item) => item.id !== account.id));
+      await syncSubscriptionAccounts(modelRuntime, this.agentDir);
+      throw error;
+    }
+    const next = await this.getConfiguration();
+    this.emitEvent({ type: "configuration_updated", configuration: next });
+    const snapshot = await this.getModelProviderConfiguration();
+    return { provider: snapshot.providers.find((item) => item.id === account.id)!, configuration: next };
   }
 
   async getModelProviderConfiguration(): Promise<ModelProviderConfigurationSnapshot> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
-    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", OPENAI_RESPONSES_WS_PROVIDER_ID]);
+    const accounts = new Map(readSubscriptionAccounts(this.agentDir).map((account) => [account.id, account]));
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", OPENAI_RESPONSES_WS_PROVIDER_ID, ...accounts.keys()]);
     const providers = new Map(modelRuntime.getProviders().map((provider) => [provider.id, provider]));
     const allModels = modelRuntime.getModels();
     const models = new Map<string, Array<(typeof allModels)[number]>>();
@@ -137,8 +168,9 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
       providers.get(id),
       builtinIds,
       modelRuntime,
+      accounts.get(id)?.provider,
     )).sort((left, right) => {
-      const rank = (source: ModelProviderConfiguration["source"]): number => source === "custom" ? 0 : source === "override" ? 1 : 2;
+      const rank = (source: ModelProviderConfiguration["source"]): number => source === "subscription" ? 0 : source === "custom" ? 1 : source === "override" ? 2 : 3;
       return rank(left.source) - rank(right.source) || Number(right.apiKeyConfigured) - Number(left.apiKeyConfigured) || left.name!.localeCompare(right.name!);
     });
     return {
@@ -156,7 +188,9 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     const draft = input.provider;
     const id = assertProviderId(draft.id);
     const isBuiltin = builtinIds.has(id);
-    const baseUrl = assertOptionalUrl(draft.baseUrl, "Base URL");
+    const isSubscription = readSubscriptionAccounts(this.agentDir).some((account) => account.id === id);
+    const baseUrl = assertOptionalUrl(draft.baseUrl, "Base URL")
+      ?? (isSubscription ? this.modelRuntime?.getRegisteredNativeProvider(id)?.baseUrl : undefined);
     const api = draft.api?.trim() || undefined;
     const knownApis = new Set(MODEL_PROVIDER_APIS.map((option) => option.id));
     if (api && !knownApis.has(api)) throw new Error(`“${api}”不是当前支持的请求协议。`);
@@ -199,7 +233,8 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     const modelOverrides = draft.modelOverrides && Object.keys(draft.modelOverrides).length ? draft.modelOverrides : undefined;
     const disabled = draft.disabled === true;
     const hasBuiltinOverride = Boolean(
-      baseUrl
+      (isSubscription && draft.name?.trim())
+      || baseUrl
       || api
       || draft.oauth
       || Object.keys(providerHeaders).length
@@ -227,7 +262,7 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     const set = (key: string, value: unknown): void => {
       if (value !== undefined && value !== "") result[key] = value;
     };
-    if (!isBuiltin || existing?.name !== undefined) set("name", draft.name?.trim());
+    if (!isBuiltin || isSubscription || existing?.name !== undefined) set("name", draft.name?.trim());
     set("baseUrl", baseUrl);
     set("api", api);
     set("oauth", draft.oauth);
@@ -379,9 +414,10 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
   async saveModelProviderConfiguration(input: ModelProviderConfigurationInput): Promise<ModelProviderSaveResult> {
     const modelRuntime = await this.ready();
     const privateConfiguration = this.readPrivateModelsConfiguration();
-    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", OPENAI_RESPONSES_WS_PROVIDER_ID]);
+    const builtinIds = new Set<string>([...getBuiltinProviders(), "radius", OPENAI_RESPONSES_WS_PROVIDER_ID, ...readSubscriptionAccounts(this.agentDir).map((account) => account.id)]);
     const existing = privateConfiguration.providers[input.provider.id.trim()];
     const next = this.validateModelProviderConfiguration(input, existing, builtinIds);
+    if (retiredSubscriptionIds(this.agentDir).has(next.id)) throw new Error("此前缀已经用于移除的账号，请换一个新前缀，避免旧会话误用新的账号。");
     if (next.writeModelsConfig) {
       const previous = cloneJson(privateConfiguration);
       const keys = Object.keys(next.provider).filter((key) => key !== "disabled" || next.provider.disabled === true);
@@ -408,7 +444,7 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
 
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
-    this.refreshSessionModelFromRegistry();
+    this.refreshSessionModelFromRegistry(next.id);
     const saved = await this.getModelProviderConfiguration();
     const provider = saved.providers.find((item) => item.id === next.id);
     if (!provider) throw new Error("配置已刷新，但未能读取刚保存的服务商。");
@@ -420,6 +456,41 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     const privateConfiguration = this.readPrivateModelsConfiguration();
     const existing = privateConfiguration.providers[id];
     const modelRuntime = await this.ready();
+    const accounts = readSubscriptionAccounts(this.agentDir);
+    const account = accounts.find((item) => item.id === id);
+    if (account) {
+      const currentConfig = this.readPrivateModelsConfiguration();
+      const previousOverride = currentConfig.providers[id];
+      let metadataCommitted = false;
+      try {
+        if (previousOverride) {
+          delete currentConfig.providers[id];
+          this.writePrivateModelsConfiguration(currentConfig);
+        }
+        // Commit metadata before deleting credentials; a disk failure must not lose a valid login.
+        writeSubscriptionAccounts(this.agentDir, readSubscriptionAccounts(this.agentDir).filter((item) => item.id !== id), [id]);
+        metadataCommitted = true;
+        await modelRuntime.logout(id);
+        await syncSubscriptionAccounts(modelRuntime, this.agentDir);
+      } catch (error) {
+        if (!metadataCommitted || readStoredCredential(id, join(this.agentDir, "auth.json"))) {
+          const latest = readSubscriptionAccounts(this.agentDir);
+          if (!latest.some((item) => item.id === id)) writeSubscriptionAccounts(this.agentDir, [...latest, account]);
+          const latestConfig = this.readPrivateModelsConfiguration();
+          if (previousOverride && !Object.hasOwn(latestConfig.providers, id)) {
+            latestConfig.providers[id] = previousOverride;
+            this.writePrivateModelsConfiguration(latestConfig);
+          }
+          await syncSubscriptionAccounts(modelRuntime, this.agentDir);
+        }
+        throw new Error(`无法完整移除此订阅账号：${errorMessage(error)}`);
+      } finally {
+        if (metadataCommitted) this.refreshSessionModelFromRegistry(id);
+      }
+      const configuration = await this.getConfiguration();
+      this.emitEvent({ type: "configuration_updated", configuration });
+      return configuration;
+    }
     try {
       await modelRuntime.logout(id);
     } catch {
@@ -436,7 +507,7 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     }
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
-    this.refreshSessionModelFromRegistry();
+    this.refreshSessionModelFromRegistry(id);
     return configuration;
   }
 
@@ -565,6 +636,7 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     }
     const effectiveModel = this.modelWithRuntimeOptions(selected);
     const effectiveThinkingLevel = clampThinkingLevel(effectiveModel, thinkingLevel) as ThinkingLevel;
+    if (active.session.model?.provider !== effectiveModel.provider) cleanupSessionResources(active.session.sessionId);
     await active.session.setModel(effectiveModel);
     active.session.setThinkingLevel(effectiveThinkingLevel);
     await active.session.settingsManager.flush();

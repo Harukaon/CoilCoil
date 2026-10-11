@@ -36,6 +36,8 @@ class FakeRuntime {
   readonly createdWithModes: Array<AgentMode | undefined> = [];
   readonly sessionModelChanges: SessionModelSelection[] = [];
   readonly sessionFastChanges: boolean[] = [];
+  readonly registryRefreshes: Array<string | undefined> = [];
+  readonly removedAccounts: string[] = [];
   disposed = false;
 
   constructor(
@@ -66,7 +68,20 @@ class FakeRuntime {
     return {};
   }
 
-  refreshSessionModelFromRegistry(): void {}
+  refreshSessionModelFromRegistry(provider?: string): void { this.registryRefreshes.push(provider); }
+
+  authenticated(provider: string): void {
+    this.emit({ type: "model_provider_auth_updated", state: { flowId: "test-flow", provider, providerName: provider, loginLabel: provider, status: "succeeded" } });
+  }
+
+  async removeProviderAuth(provider: string): Promise<RuntimeBootstrap["configuration"]> {
+    this.removedAccounts.push(provider);
+    return (await this.initialize()).configuration;
+  }
+
+  async removeModelProviderConfiguration(provider: string): Promise<RuntimeBootstrap["configuration"]> {
+    return this.removeProviderAuth(provider);
+  }
 
   async getSkillConfiguration(cwd: string): Promise<{ cwd: string; ordinal: number }> {
     return { cwd, ordinal: this.ordinal };
@@ -837,4 +852,45 @@ test("workspace configuration reads survive a session runtime retired for idlene
   assert.equal(prompt.ok, false, "session-scoped commands still refuse a runtime that is gone");
 
   await server.dispose();
+});
+
+test("subscription login refreshes only its provider once, never a second global refresh", async () => {
+  const runtimes: FakeRuntime[] = [];
+  const server = new RuntimeServer({ agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" }, () => undefined, {
+    createRuntime: (options) => {
+      const runtime = new FakeRuntime(runtimes.length, options);
+      runtimes.push(runtime);
+      return runtime as unknown as CoilCoilRuntime;
+    },
+    createRuntimeId: () => `runtime-${runtimes.length}`,
+  });
+  try {
+    await server.handle({ id: "a", command: { type: "create_session", cwd: "/project-a" } });
+    await server.handle({ id: "b", command: { type: "create_session", cwd: "/project-b" } });
+    runtimes[0].authenticated("claude-work");
+    for (const runtime of runtimes) assert.deepEqual(runtime.registryRefreshes, ["claude-work"]);
+  } finally { await server.dispose(); }
+});
+
+test("account removal and logout route to the same control runtime as pending OAuth", async () => {
+  const runtimes: FakeRuntime[] = [];
+  const server = new RuntimeServer({ agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" }, () => undefined, {
+    createRuntime: (options) => {
+      const runtime = new FakeRuntime(runtimes.length, options);
+      runtimes.push(runtime);
+      return runtime as unknown as CoilCoilRuntime;
+    },
+    createRuntimeId: () => `runtime-${runtimes.length}`,
+  });
+  try {
+    const opened = await server.handle({ id: "session", command: { type: "create_session", cwd: "/project" } });
+    const snapshot = opened.result as SessionSnapshot;
+    const removed = await server.handle({ id: "remove", runtimeId: snapshot.runtimeId, command: { type: "remove_model_provider_configuration", provider: "claude-work" } });
+    const loggedOut = await server.handle({ id: "logout", runtimeId: snapshot.runtimeId, command: { type: "remove_provider_auth", provider: "codex-work" } });
+    assert.equal(removed.ok, true);
+    assert.equal(loggedOut.ok, true);
+    assert.deepEqual(runtimes[0].removedAccounts, ["claude-work", "codex-work"]);
+    assert.deepEqual(runtimes[1].removedAccounts, []);
+    for (const runtime of runtimes) assert.deepEqual(runtime.registryRefreshes, ["claude-work", "codex-work"]);
+  } finally { await server.dispose(); }
 });

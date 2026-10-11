@@ -21,6 +21,7 @@ import {
   type OpenAIResponsesWsConfiguration,
   type OpenAIResponsesWsConfigurationInput,
   type RuntimeConfiguration,
+  type SubscriptionProvider,
   type ThinkingLevel,
 } from "@coilcoil/runtime-protocol";
 import {
@@ -42,6 +43,7 @@ import {
   thinkingLevelMap,
 } from "./provider-helpers.js";
 import { RuntimeBase } from "./runtime-base.js";
+import { readSubscriptionAccounts, subscriptionModelName } from "./subscription-accounts.js";
 import {
   cloneJson,
   errorMessage,
@@ -74,6 +76,7 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
     const configuredSet = new Set(configuredProviders);
     const runtimeOptions = this.readModelRuntimeOptions();
     const restricted = this.restrictedCatalogs();
+    const subscriptionIds = new Set(readSubscriptionAccounts(this.agentDir).map((account) => account.id));
     const models: ModelOption[] = modelRuntime
       .getModels()
       .filter((model) => !disabledProviders.has(model.provider))
@@ -82,7 +85,7 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
         provider: model.provider,
         providerName: providers.get(model.provider) ?? model.provider,
         id: model.id,
-        name: model.name || model.id,
+        name: subscriptionIds.has(model.provider) ? subscriptionModelName(model.provider, model.name || model.id) : model.name || model.id,
         reasoning: Boolean(model.reasoning),
         supportsImages: model.input.includes("image"),
         supportedThinkingLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],
@@ -316,6 +319,7 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
     runtimeProvider: Provider | undefined,
     builtins: ReadonlySet<string>,
     modelRuntime: ModelRuntime,
+    subscriptionProvider?: SubscriptionProvider,
   ): ModelProviderConfiguration {
     const configuredModels = Array.isArray(provider?.models)
       ? provider.models.map((item) => modelConfiguration(item)).filter((item): item is ModelProviderModelConfiguration => Boolean(item))
@@ -359,6 +363,7 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
     const fallbackName = providerId === OPENAI_RESPONSES_WS_PROVIDER_ID ? OPENAI_RESPONSES_WS_PROVIDER_NAME : providerId;
     return {
       id: providerId,
+      subscriptionProvider,
       name: provider ? optionalString(provider, "name") ?? providerName ?? fallbackName : providerName ?? fallbackName,
       baseUrl: provider ? optionalString(provider, "baseUrl") : undefined,
       api: provider ? optionalString(provider, "api") : undefined,
@@ -375,7 +380,7 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
       replaceModels: Array.isArray(provider?.models),
       models: configuredModels,
       modelOverrides: mappedOverrides && Object.keys(mappedOverrides).length ? mappedOverrides : undefined,
-      source: provider ? builtins.has(providerId) ? "override" : "custom" : "built-in",
+      source: subscriptionProvider ? "subscription" : provider ? builtins.has(providerId) ? "override" : "custom" : "built-in",
     };
   }
 }

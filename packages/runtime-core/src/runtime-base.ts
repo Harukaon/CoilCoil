@@ -8,6 +8,7 @@ import {
   ModelRuntime,
   configureHttpDispatcher,
 } from "@earendil-works/pi-coding-agent";
+import { registerBunOAuthFlows as registerBundledOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import type { McpManager } from "@coilcoil/mcp";
 import {
   type McpConfigurationSnapshot,
@@ -49,6 +50,7 @@ import {
   CoilCoilRuntimeOptions,
 } from "./runtime-state.js";
 import { installModelOverrides } from "./model-overrides.js";
+import { syncSubscriptionAccounts } from "./subscription-accounts.js";
 import {
   DIAGNOSTIC_LEVEL_ENV,
   DIAGNOSTIC_LOG_DIRECTORY,
@@ -109,6 +111,8 @@ export abstract class RuntimeBase {
   protected readonly providerAuthFlows = new Map<string, ProviderAuthFlow>();
 
   constructor(options: CoilCoilRuntimeOptions) {
+    // Electron bundles the runtime too; variable relative OAuth imports would point at out/main.
+    registerBundledOAuthFlows();
     // The Pi CLI configures its Undici dispatcher before provider SDKs run.
     // Embedded SDK consumers must do the same or Node's default dispatcher can
     // negotiate HTTP/2 and surface idle stream errors as uncaught exceptions.
@@ -244,7 +248,10 @@ export abstract class RuntimeBase {
   }
 
   protected async ready(): Promise<ModelRuntime> {
-    if (this.modelRuntime) return this.modelRuntime;
+    if (this.modelRuntime) {
+      await syncSubscriptionAccounts(this.modelRuntime, this.agentDir);
+      return this.modelRuntime;
+    }
     this.modelRuntimePromise ??= ModelRuntime.create({
       authPath: join(this.agentDir, "auth.json"),
       modelsPath: join(this.agentDir, "models.json"),
@@ -256,18 +263,20 @@ export abstract class RuntimeBase {
       this.modelRuntimePromise = undefined;
       throw error;
     });
-    return this.modelRuntimePromise;
+    const runtime = await this.modelRuntimePromise;
+    await syncSubscriptionAccounts(runtime, this.agentDir);
+    return runtime;
   }
 
   async sharedModelRuntime(): Promise<ModelRuntime> {
     return this.ready();
   }
 
-  refreshSessionModelFromRegistry(): void {
+  refreshSessionModelFromRegistry(provider?: string): void {
     const active = this.active;
     if (!active) return;
     const current = active.session.model;
-    if (!current) return;
+    if (!current || (provider && current.provider !== provider)) return;
     // Pooled provider connections are keyed by session id alone — not by URL,
     // key or protocol — so a socket opened against the old configuration would
     // otherwise be reused until it idles out. Drop them before rebinding.

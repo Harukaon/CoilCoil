@@ -105,9 +105,9 @@ function failure(provider: string, status: ModelProviderQuotaResult["status"], m
   return { provider, status, windows: [], updatedAt: Date.now(), message };
 }
 
-async function requestQuota(provider: QuotaProvider, token: string, signal: AbortSignal): Promise<ModelProviderQuotaResult> {
+async function requestQuota(provider: string, kind: QuotaProvider, token: string, signal: AbortSignal): Promise<ModelProviderQuotaResult> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}`, Accept: "application/json" };
-  if (provider === "anthropic") {
+  if (kind === "anthropic") {
     headers["anthropic-beta"] = "oauth-2025-04-20";
     headers["User-Agent"] = "claude-cli/2.1.280 (external, cli)";
   } else {
@@ -118,7 +118,7 @@ async function requestQuota(provider: QuotaProvider, token: string, signal: Abor
   }
   try {
     // A configured model proxy must never receive the subscription token.
-    const response = await fetch(ENDPOINTS[provider], { headers, signal, redirect: "error" });
+    const response = await fetch(ENDPOINTS[kind], { headers, signal, redirect: "error" });
     if (!response.ok) {
       // Do not echo upstream bodies or auth errors: they can contain credentials.
       if (response.status === 401) return failure(provider, "error", "订阅授权已失效，请重新订阅登录。");
@@ -129,7 +129,7 @@ async function requestQuota(provider: QuotaProvider, token: string, signal: Abor
     let payload: unknown;
     try { payload = await response.json(); }
     catch { return failure(provider, "error", "额度服务返回了无法识别的数据，请稍后刷新。"); }
-    try { return parseSubscriptionQuota(provider, payload); }
+    try { return { ...parseSubscriptionQuota(kind, payload), provider }; }
     catch { return failure(provider, "error", "额度服务未返回可识别的限制信息，请稍后刷新。"); }
   } catch {
     return failure(provider, "error", signal.aborted ? "额度查询超时，请稍后刷新。" : "无法连接额度服务，请检查网络后刷新。");
@@ -137,8 +137,9 @@ async function requestQuota(provider: QuotaProvider, token: string, signal: Abor
 }
 
 /** Uses the existing auth resolver/refresh lock; quota failures never log out. */
-export async function querySubscriptionQuota(runtime: AuthRuntime, provider: string, refresh = false): Promise<ModelProviderQuotaResult> {
-  if (provider !== "anthropic" && provider !== "openai-codex") return failure(provider, "unsupported", "此服务商暂不支持订阅额度查询。");
+export async function querySubscriptionQuota(runtime: AuthRuntime, provider: string, refresh = false, subscriptionProvider?: QuotaProvider): Promise<ModelProviderQuotaResult> {
+  const kind = subscriptionProvider ?? (provider === "anthropic" || provider === "openai-codex" ? provider : undefined);
+  if (!kind) return failure(provider, "unsupported", "此服务商暂不支持订阅额度查询。");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   timer.unref?.();
@@ -163,7 +164,7 @@ export async function querySubscriptionQuota(runtime: AuthRuntime, provider: str
       if (!refresh && previous.result && Date.now() - previous.result.updatedAt < CACHE_MS) return previous.result;
     }
     const entry: CacheEntry = { identity };
-    entry.pending = requestQuota(provider, token, controller.signal);
+    entry.pending = requestQuota(provider, kind, token, controller.signal);
     cache.set(provider, entry);
     const result = await entry.pending;
     if (cache.get(provider) === entry) {

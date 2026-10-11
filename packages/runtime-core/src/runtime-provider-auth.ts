@@ -40,6 +40,7 @@ import {
 import type { ModelCatalogLookupResult } from "@coilcoil/runtime-protocol/model-catalog";
 import { lookupModelCatalogMeta } from "./model-catalog-source.js";
 import { querySubscriptionQuota } from "./provider-quota.js";
+import { quotaSubscriptionProvider } from "./subscription-accounts.js";
 
 function redactProviderSecret(value: string, secret: string | undefined): string {
   const trimmed = secret?.trim();
@@ -240,7 +241,7 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
       try {
         const configuration = await this.getConfiguration();
         this.emitEvent({ type: "configuration_updated", configuration });
-        this.refreshSessionModelFromRegistry();
+        this.refreshSessionModelFromRegistry(flow.state.provider);
       } catch (error) {
         this.emitEvent({ type: "runtime_error", message: "订阅登录已保存，但模型目录刷新失败。", detail: errorDetail(error) });
       }
@@ -341,17 +342,29 @@ export abstract class RuntimeProviderAuth extends RuntimeProviderSettings {
     this.providerAuthFlows.delete(flowId);
   }
 
+  private async cancelProviderLogin(provider: string): Promise<void> {
+    for (const flow of [...this.providerAuthFlows.values()]) {
+      if (flow.state.provider === provider) await this.cancelModelProviderOAuth(flow.state.flowId);
+    }
+  }
+
+  override async removeModelProviderConfiguration(provider: string): Promise<RuntimeConfiguration> {
+    await this.cancelProviderLogin(provider);
+    return super.removeModelProviderConfiguration(provider);
+  }
+
   async removeProviderAuth(provider: string): Promise<RuntimeConfiguration> {
+    await this.cancelProviderLogin(provider);
     const modelRuntime = await this.ready();
     await modelRuntime.logout(provider);
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
-    this.refreshSessionModelFromRegistry();
+    this.refreshSessionModelFromRegistry(provider);
     return configuration;
   }
 
   async getModelProviderQuota(provider: string, refresh = false): Promise<ModelProviderQuotaResult> {
-    return querySubscriptionQuota(await this.ready(), provider, refresh);
+    return querySubscriptionQuota(await this.ready(), provider, refresh, quotaSubscriptionProvider(this.agentDir, provider));
   }
 
   async fetchProviderModels(input: FetchProviderModelsInput): Promise<FetchProviderModelsResult> {

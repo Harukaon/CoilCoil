@@ -201,7 +201,7 @@ export class RuntimeServer {
     if (event.type === "model_provider_auth_updated" && event.state.status === "succeeded") {
       // Includes the runtime that just authenticated: it is the one most likely
       // to be holding a connection opened with the credential that just changed.
-      this.refreshAllSessionModels();
+      this.refreshAllSessionModels(event.state.provider);
     }
     const scopedEvent = runtimeId && event.type === "session_snapshot"
       ? { ...event, snapshot: this.decorateSnapshot(runtimeId, event.snapshot) }
@@ -408,6 +408,9 @@ export class RuntimeServer {
       || command.type === "delete_workspace_sessions"
       || command.type === "restore_session"
       || command.type === "configure_model"
+      || command.type === "create_subscription_account"
+      || command.type === "remove_model_provider_configuration"
+      || command.type === "remove_provider_auth"
       || command.type === "start_model_provider_oauth"
       || command.type === "respond_model_provider_oauth"
       || command.type === "cancel_model_provider_oauth";
@@ -431,7 +434,9 @@ export class RuntimeServer {
       // sessions carry on their own Model snapshot.
       || command.type === "configure_model"
     ) {
-      this.refreshAllSessionModels();
+      const provider = command.type === "remove_provider_auth" || command.type === "remove_model_provider_configuration"
+        ? command.provider : command.type === "save_model_provider_configuration" ? command.input.provider.id : undefined;
+      this.refreshAllSessionModels(provider);
     }
     return result;
   }
@@ -444,11 +449,11 @@ export class RuntimeServer {
    * user was editing config from was the only one left on the stale model — the
    * exact opposite of what they were asking for.
    */
-  private refreshAllSessionModels(): void {
-    this.runtime.refreshSessionModelFromRegistry();
+  private refreshAllSessionModels(provider?: string): void {
+    this.runtime.refreshSessionModelFromRegistry(provider);
     for (const sessionRuntime of this.runtimes.values()) {
       if (sessionRuntime === this.runtime) continue;
-      sessionRuntime.refreshSessionModelFromRegistry();
+      sessionRuntime.refreshSessionModelFromRegistry(provider);
     }
   }
 
@@ -464,6 +469,8 @@ export class RuntimeServer {
         return runtime.saveOpenAIResponsesWsConfiguration(command.input);
       case "get_model_provider_configuration":
         return runtime.getModelProviderConfiguration();
+      case "create_subscription_account":
+        return runtime.createSubscriptionAccount(command.input);
       case "save_model_provider_configuration":
         return runtime.saveModelProviderConfiguration(command.input);
       case "remove_model_provider_configuration":
