@@ -17,6 +17,13 @@ const require = createRequire(join(repositoryRoot, "package.json"));
 export async function startSite() {
   const server = createServer((request, response) => {
     const name = (request.url ?? "/").split("?", 1)[0].replace(/^\/+/, "");
+    // A deliberately slow sub-resource: it holds the page's load event, not its content.
+    const slow = /^__slow\/(\d{1,5})$/.exec(name);
+    if (slow) {
+      const timer = setTimeout(() => { response.writeHead(200, { "content-type": "image/gif" }); response.end(Buffer.from("R0lGODlhAQABAAAAACw=", "base64")); }, Number(slow[1]));
+      request.once("close", () => clearTimeout(timer));
+      return;
+    }
     try {
       if (!/^[\w.-]+\.html$/.test(name) || extname(name) !== ".html") throw new Error("not found");
       const body = readFileSync(join(here, "site", name));

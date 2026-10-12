@@ -35,6 +35,38 @@ export function selectedPageId(listing: string): number | undefined {
 }
 
 /**
+ * chrome-devtools-mcp 打开/导航网页时要等整页 load 事件，默认只等 10 秒。慢图片、慢脚本、
+ * 长连接都会拖住 load，可页面早就能看能点了——会话记录里这类「超时」多数时候快照已经有完整页面。
+ */
+export function isLoadTimeout(message: string): boolean {
+  return /Navigation timeout of \d+ ?ms exceeded/i.test(message);
+}
+
+/** 页面列表里某一页（不给编号就取选中页）当前的网址。 */
+export function listedPageUrl(listing: string, pageId?: number): string | undefined {
+  for (const match of listing.matchAll(/^(\d+): (.*)$/gm)) {
+    const line = match[2];
+    if (pageId !== undefined ? Number(match[1]) !== pageId : !/\[selected\]/.test(line)) continue;
+    const urls = [...line.matchAll(/\(([^()\s]+)\)/g)];
+    return urls.at(-1)?.[1];
+  }
+  return undefined;
+}
+
+function sameOrigin(a: string, b: string): boolean {
+  try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
+}
+
+/** load 没等完时，页面是不是已经换到新地址（主文档到了，剩下的是资源还在加载）。 */
+export function navigationCommitted(current: string | undefined, target: string, before?: string): boolean {
+  if (!current || current === "about:blank" || current.startsWith("chrome-error:")) return false;
+  if (current === target) return true;
+  // 还停在旧地址：哪怕同站，也说明新页面没换上来。
+  if (before !== undefined && current === before) return false;
+  return sameOrigin(current, target) || before !== undefined;
+}
+
+/**
  * 把浏览器报的标签页一张张对到 chrome-devtools-mcp 的页面编号上。
  *
  * 两边都按打开的先后排：先按「标题和网址都一样」对，对不上再只按网址对；同样的有好几张
@@ -208,6 +240,18 @@ export default function browserActExtension(pi: ExtensionAPI): void {
         return textResult(`已打开 ${params.url}，句柄 ${handle}。${pageId !== undefined ? `（pageId ${pageId}）` : "后续操作拿句柄即可。"}\n${text.slice(0, 1500)}`, { handle, pageId, server: BROWSER_SERVER });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (isLoadTimeout(message)) {
+          // 新页在等 load 之前就已建好并选中：句柄照发，不然模型拿不到这张页，只会再开一张。
+          let listing = "";
+          try { listing = (await callBrowser(pi.events, "list_pages", {}, signal, sessionId)).text; } catch { /* 下面按未加载处理 */ }
+          const pageId = selectedPageId(listing);
+          const handle = newHandle(pageId);
+          const state = await currentState(pi.events, pageId, signal, sessionId);
+          if (navigationCommitted(listedPageUrl(listing, pageId), params.url)) {
+            return textResult(`已打开 ${params.url}，句柄 ${handle}。页面主体已可用，部分图片或脚本还在加载，可以直接继续操作。\n--- 当前页面 ---\n${state}`, { handle, pageId, server: BROWSER_SERVER, slowLoad: true });
+          }
+          return textResult(`页面已建好（句柄 ${handle}），但 ${params.url} 还没加载出来。不要再开新页，稍后用这个句柄取快照确认。\n--- 当前页面 ---\n${state}`, { error: "open_slow", message, handle, pageId }, true);
+        }
         return textResult(`打开失败：${message}`, { error: "open_failed", message }, true);
       }
     },
@@ -225,6 +269,8 @@ export default function browserActExtension(pi: ExtensionAPI): void {
       const pageId = resolvePageId(params.handle, params.pageId);
       const args: Record<string, unknown> = { url: params.url };
       if (pageId !== undefined) args.pageId = pageId;
+      let before: string | undefined;
+      try { before = listedPageUrl((await callBrowser(pi.events, "list_pages", {}, signal, sessionId)).text, pageId); } catch { /* 拿不到旧地址只是少一个判断依据 */ }
       try {
         const { text } = await callBrowser(pi.events, "navigate_page", args, signal, sessionId);
         const state = await currentState(pi.events, pageId, signal, sessionId);
@@ -232,6 +278,13 @@ export default function browserActExtension(pi: ExtensionAPI): void {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const state = await currentState(pi.events, pageId, signal, sessionId);
+        if (isLoadTimeout(message)) {
+          let current: string | undefined;
+          try { current = listedPageUrl((await callBrowser(pi.events, "list_pages", {}, signal, sessionId)).text, pageId); } catch { /* 按未提交处理 */ }
+          if (navigationCommitted(current, params.url, before)) {
+            return textResult(`导航完成：页面主体已可用（${current}），部分图片或脚本还在加载，可以直接继续操作。\n--- 当前页面 ---\n${state}`, { handle: params.handle, pageId, slowLoad: true });
+          }
+        }
         return textResult(
           `导航失败：${message}\n不要直接重试——先看下面的页面状态确认这一步到底做没做成。\n--- 当前页面 ---\n${state}`,
           { error: "navigate_failed", message, handle: params.handle, pageId },

@@ -266,3 +266,44 @@ test("点击让网页弹出对话框时，如实说「已生效、先处理对�
   assert.ok(notice?.includes("handle_dialog"), notice);
   assert.equal(pendingDialogNotice("Error: element not found"), undefined);
 });
+
+test("只是整页 load 没等完：页面已换到新地址就算打开/导航成功，并给出句柄", async () => {
+  const timeout = (tool: string) => ({ ...text(`Error: ${tool === "navigate_page" ? "NAVIGATION_FAILED: Unable to navigate in the selected page: " : ""}Navigation timeout of 10000 ms exceeded.`), isError: true });
+  let current = "1: old (http://site/a)\n2: slow (http://slow.example/) [selected]";
+  const { run } = realisticTools((tool) => {
+    if (tool === "new_page" || tool === "navigate_page") return timeout(tool);
+    if (tool === "list_pages") return text(current);
+    return text("uid=1_0 RootWebArea \"slow\"\n  uid=1_1 heading \"Hello\"");
+  });
+  const opened = await run("browser_open", { url: "http://slow.example/" });
+  assert.equal(opened.isError, false, opened.content[0]?.text);
+  assert.equal(opened.details.pageId, 2);
+  assert.match(opened.content[0]?.text ?? "", /页面主体已可用/);
+  assert.match(String(opened.details.handle), /^btab-\d+$/);
+
+  current = "1: old (http://site/a)\n2: slow (http://slow.example/next) [selected]";
+  const navigated = await run("browser_navigate", { handle: opened.details.handle, url: "http://slow.example/next" });
+  assert.equal(navigated.isError, false, navigated.content[0]?.text);
+  assert.match(navigated.content[0]?.text ?? "", /导航完成/);
+});
+
+test("load 超时但页面还停在旧地址或空白页：照实报未完成，打开时仍交出句柄避免重复开页", async () => {
+  const { run } = realisticTools((tool) => {
+    if (tool === "new_page") return { ...text("Navigation timeout of 10000 ms exceeded"), isError: true };
+    if (tool === "navigate_page") return { ...text("NAVIGATION_FAILED: Navigation timeout of 10000 ms exceeded"), isError: true };
+    if (tool === "list_pages") return text("1: same site (http://site/a) [selected]");
+    return text("snapshot");
+  });
+  const navigated = await run("browser_navigate", { url: "http://site/b" });
+  assert.equal(navigated.isError, true, "同站但还停在旧地址，不能当成功");
+  assert.match(navigated.content[0]?.text ?? "", /导航失败/);
+  const blank = realisticTools((tool) => {
+    if (tool === "new_page") return { ...text("Navigation timeout of 10000 ms exceeded"), isError: true };
+    if (tool === "list_pages") return text("3:  (about:blank) [selected]");
+    return text("snapshot");
+  });
+  const opened = await blank.run("browser_open", { url: "http://never.example/" });
+  assert.equal(opened.isError, true);
+  assert.equal(opened.details.pageId, 3);
+  assert.match(opened.content[0]?.text ?? "", /不要再开新页/);
+});
