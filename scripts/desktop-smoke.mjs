@@ -605,7 +605,7 @@ async function main() {
       nativeSelectCount: document.querySelectorAll(".model-provider-settings select").length,
       providerCount: document.querySelectorAll(".model-provider-settings .provider-catalog-group button").length,
       headerDrag: document.querySelector(".settings-page-header")?.classList.contains("window-drag") === true,
-      customProviderButton: Boolean(document.querySelector('[aria-label="添加自定义服务商"]')),
+      customProviderButton: Boolean(document.querySelector('[aria-label="添加服务商或订阅账号"]')),
       error: document.querySelector(".model-provider-settings .settings-error")?.textContent || "",
     }))()`);
     assert.equal(modelSettingsUi.nativeSelectCount, 0, "Model settings still uses a native select menu.");
@@ -654,11 +654,18 @@ async function main() {
     assert.equal(azureProviderUi.advancedClosed, true, "Provider advanced options must be collapsed by default.");
     assert.equal(azureProviderUi.referenceExists, true, "The key reference was not placed inside provider advanced options.");
     assert.equal(azureProviderUi.referenceHidden, true, "Key references must stay hidden under advanced options by default.");
-    const openedCustomProvider = await client.evaluate(`(() => {
-      const add = document.querySelector('[aria-label="添加自定义服务商"]');
+    const openedAddMenu = await client.evaluate(`(() => {
+      const add = document.querySelector('[aria-label="添加服务商或订阅账号"]');
       if (!add) return false;
       add.click();
       return true;
+    })()`);
+    assert.equal(openedAddMenu, true, "The provider add menu was unavailable.");
+    await client.waitFor(`[...document.querySelectorAll('[role="menuitem"]')].some((item) => item.textContent === "自定义服务商")`, "The provider add menu did not open.");
+    const openedCustomProvider = await client.evaluate(`(() => {
+      const item = [...document.querySelectorAll('[role="menuitem"]')].find((candidate) => candidate.textContent === "自定义服务商");
+      item?.click();
+      return Boolean(item);
     })()`);
     assert.equal(openedCustomProvider, true, "The custom Pi provider creation action was unavailable.");
     await client.waitFor(`Boolean(document.querySelector('input[placeholder="例如 dog-provider"]'))`, "The custom Pi provider editor did not open.");

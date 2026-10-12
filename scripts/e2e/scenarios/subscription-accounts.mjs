@@ -27,7 +27,8 @@ async function select(page, id) {
   await page.locator(".provider-catalog-group button").filter({ has: page.locator("small", { hasText: new RegExp(`^${id}$`) }) }).click();
 }
 async function create(page, id) {
-  await page.getByRole("button", { name: "添加订阅账号", exact: true }).click();
+  await page.getByRole("button", { name: "添加服务商或订阅账号", exact: true }).click();
+  await page.getByRole("menuitem", { name: "订阅账号", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "添加订阅账号" });
   if (accounts[id].kind === "openai-codex") {
     await dialog.getByRole("button", { name: "订阅类型", exact: true }).click();
@@ -75,7 +76,25 @@ export async function run({ app, page, root, remotePort, ui, check, shot }) {
   const stored = JSON.parse(readFileSync(authPath, "utf8"));
   check("六份独立登录共存，原两账号没有被覆盖", Object.keys(stored).length === 6 && JSON.stringify(stored.anthropic) === JSON.stringify(original.anthropic) && JSON.stringify(stored["openai-codex"]) === JSON.stringify(original["openai-codex"]));
   check("原厂模型编辑器和账号前缀保留", await page.locator(".provider-editor").getByText("模型目录", { exact: true }).count() === 1 && await page.locator(".provider-editor").getByLabel(/账号前缀/).isDisabled());
+  const [prefixBox, nameBox] = await Promise.all([
+    page.locator(".provider-editor").getByLabel(/账号前缀/).boundingBox(),
+    page.locator(".provider-editor").getByLabel(/显示名称/).first().boundingBox(),
+  ]);
+  check("前缀与显示名称输入框同一行对齐、等高", Math.abs(prefixBox.y - nameBox.y) < 1 && Math.abs(prefixBox.height - nameBox.height) < 1);
+  const heading = await page.locator(".provider-editor-heading").boundingBox();
+  const actions = await page.locator(".provider-editor-actions").boundingBox();
+  check("标题区按钮不超出编辑区", actions.x + actions.width <= heading.x + heading.width + 0.5);
+  check("侧栏只有一个添加入口", await page.locator(".provider-catalog").getByRole("button", { name: /添加/ }).count() === 1);
+  for (const close of await page.locator(".toast-dismiss").all()) await close.click().catch(() => undefined);
+  await page.locator(".toast-dismiss").first().waitFor({ state: "detached" }).catch(() => undefined);
   await shot("accounts-light");
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
+  await page.waitForTimeout(300);
+  await shot("accounts-wide");
+  await page.getByRole("button", { name: "添加服务商或订阅账号", exact: true }).click();
+  await page.getByRole("menuitem", { name: "订阅账号", exact: true }).waitFor();
+  await shot("add-menu");
+  await page.keyboard.press("Escape");
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   await shot("accounts-dark");
   await page.evaluate(() => document.documentElement.removeAttribute("data-theme"));

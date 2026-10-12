@@ -284,7 +284,8 @@ export async function run({ app, page, ui, site, check, shot, root, paths }) {
     if (await summary.count()) { await summary.click(); await audit("models-card-open"); }
     for (const details of await page.locator("details.provider-advanced > summary").all()) { await details.click().catch(() => undefined); }
     await audit("models-details-open");
-    await page.getByRole("button", { name: "添加自定义服务商" }).click();
+    await page.getByRole("button", { name: "添加服务商或订阅账号" }).click();
+    await page.getByRole("menuitem", { name: "自定义服务商", exact: true }).click();
     await audit("models-new-custom");
     const pick = async (label) => { await page.locator(".provider-catalog").getByRole("button", { name: new RegExp(label) }).first().click(); await page.waitForTimeout(500); };
     await pick("Amazon Bedrock");

@@ -1,4 +1,5 @@
-import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
+import { Check, ChevronRight, CircleDot, KeyRound, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Search, Server, Trash2, UserRound, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   CreateSubscriptionAccountInput,
@@ -524,6 +525,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
   const [testing, setTesting] = useState(false);
   const [removeArmed, setRemoveArmed] = useState(false);
   const [addingSubscription, setAddingSubscription] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [upstreamPickerModels, setUpstreamPickerModels] = useState<UpstreamModelOption[]>();
   const [oauthFlow, setOAuthFlow] = useState<ModelProviderAuthState>();
   const [savedFingerprint, setSavedFingerprint] = useState<string>();
@@ -936,8 +938,17 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
         onConfirm={applyUpstreamSelection}
       /> : null}
       <aside className="provider-catalog">
-        <div className="provider-catalog-toolbar"><strong>服务商</strong><button type="button" aria-label="添加自定义服务商" onClick={addProvider}><Plus size={14} />添加</button></div>
-        <button className="provider-subscription-add" type="button" onClick={() => setAddingSubscription(true)}><Plus size={13} />添加订阅账号</button>
+        <div className="provider-catalog-toolbar"><strong>服务商</strong>
+          <Popover.Root open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+            <Popover.Trigger asChild><button type="button" aria-label="添加服务商或订阅账号"><Plus size={14} />添加</button></Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content className="inspector-add-popover" role="menu" side="bottom" align="end" sideOffset={5} collisionPadding={8}>
+                <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); addProvider(); }}><Server size={13} /><span>自定义服务商</span></button>
+                <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); setAddingSubscription(true); }}><UserRound size={13} /><span>订阅账号</span></button>
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        </div>
         <div className="provider-catalog-search"><Search size={14} /><TextField className="provider-catalog-search-input" value={query} placeholder="搜索服务商" onChange={(event) => setQuery(event.target.value)} /></div>
         {loading ? <p className="settings-loading"><LoaderCircle className="spin" size={15} />加载服务商目录…</p> : null}
         {([
@@ -963,7 +974,8 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
             <div>
               <div className="provider-heading-tags"><span className="provider-source-tag">{selectedId ? sourceLabel(selectedSource) : "新的自定义服务商"}</span>{hasUnsavedChanges ? <span className="provider-unsaved-tag">未保存</span> : null}</div>
               <strong>{draft.name || draft.id || "未命名服务商"}</strong>
-              {isBuiltinProvider ? <small>请求协议与内置模型由内置服务商决定；认证字段和运行参数按该服务商的真实实现配置。</small> : null}
+              {selectedSource === "subscription" ? <small>账号前缀 <code>{draft.id}</code> 用来区分模型，创建后不可修改；登录、续期和额度只属于这个账号。</small>
+                : isBuiltinProvider ? <small>请求协议与内置模型由内置服务商决定；认证字段和运行参数按该服务商的真实实现配置。</small> : null}
             </div>
             <div className="provider-editor-actions">
               <Field className="provider-enable-toggle">
@@ -979,7 +991,7 @@ export function ModelSettings({ configuration, onSaved, runtimeId }: {
           </header>
           {draft.disabled ? <div className="provider-action-message">已禁用：保存后该服务商不会出现在模型列表中，配置与凭据仍会保留。</div> : null}
           {isBuiltinProvider ? <>
-            {selectedSource === "subscription" ? <div className="settings-grid"><Field>账号前缀<TextField value={draft.id} disabled /><small>每个模型使用此前缀区分账号；创建后不可修改。</small></Field><Field>显示名称<TextField value={draft.name ?? ""} onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></Field></div> : null}
+            {selectedSource === "subscription" ? <div className="settings-grid"><Field>账号前缀<TextField value={draft.id} disabled /></Field><Field>显示名称<TextField value={draft.name ?? ""} onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} /></Field></div> : null}
             <ProviderCredentialEditor provider={selectedId ?? draft.id} subscriptionProvider={selectedProvider?.subscriptionProvider} runtimeId={runtimeId} configuration={credentialConfiguration} method={credentialMethod} values={credentialValues} configured={Boolean(selectedProvider?.apiKeyConfigured && selectedProvider.authType !== "oauth")} oauthConfigured={selectedProvider?.authType === "oauth"} oauthBusy={oauthBusy} onMethodChange={updateCredentialMethod} onValueChange={updateCredentialValue} onOAuthLogin={() => { void startOAuthLogin(); }} onOAuthLogout={() => { void logoutOAuth(); }} />
             <details className="provider-advanced">
               <summary>其他选项 <ChevronRight size={14} /></summary>
