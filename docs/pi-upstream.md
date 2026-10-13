@@ -178,6 +178,37 @@ subtree pull** and drop the patch once the fix lands there.
   result to the renamed call through `toolCallIdMap`.
 - Re-checked against `v0.85.1` (2026-09-17): still unfixed upstream, patch kept.
 
+### `models.json` entries drop what the entry cannot say
+
+- Added 2026-10-13. Patch: `packages/coding-agent/src/core/provider-composer.ts`
+  (`modelFromJson`: `compat`, `promptCache` and `inputLimits` start from the base
+  provider's model with the same id and API, and the entry's own keys are merged over
+  them key by key, the way `modelOverrides` merge). Regression test:
+  `packages/coding-agent/test/models-json-builtin-defaults.test.ts`.
+- Symptom: once a settings page had listed a built-in model in `models.json` (custom
+  model directory, "fetch latest models"), three things were lost without any message.
+  Claude thinking fell back from adaptive thinking to a fixed token budget, so the
+  chosen effort level barely mattered and the thinking text came back empty. Pi's
+  cache warmer stopped with "cache lifetime unavailable", so a step longer than five
+  minutes let the prompt cache expire and the next request paid to re-read the whole
+  conversation at the cache-write price. And the model's own image limits (request
+  size, images per request, resize rules) were replaced by the generic defaults.
+- Cause: `modelFromJson` builds a listed model from its entry alone. The base
+  provider's model with that id is passed in as `defaults` but only supplies `api`
+  and `baseUrl`. The settings pages never write `promptCache` or `inputLimits`, and
+  fetched entries carry no `compat`, so all three were lost the moment a model was
+  listed. Merging key by key (not replacing the whole object) matters too: an entry
+  that states only the `long` cache tier would otherwise drop `short` and stop the
+  cache warmer again.
+- `cost` is deliberately not inherited: the settings pages always write it, and a
+  price of zero is a legitimate choice for an entry.
+- Upstream status when written: `main` on 2026-10-13 still has the same
+  `modelFromJson` without any inheritance, so the patch is shaped to be proposed
+  upstream as-is.
+- On the next pull: if `modelFromJson` (or its replacement) lets an entry for a
+  built-in model keep the base model's `compat`, `promptCache` and `inputLimits`,
+  drop our patch and keep the regression test. Otherwise re-apply.
+
 ## Update from upstream
 
 ```bash

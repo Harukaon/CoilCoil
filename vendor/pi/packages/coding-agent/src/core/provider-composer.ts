@@ -175,6 +175,13 @@ function modelFromJson(
 	if (definition.maxTokens !== undefined && definition.maxTokens <= 0) {
 		throw new Error(`Provider ${providerId}, model ${definition.id}: invalid maxTokens`);
 	}
+	// CoilCoil patch (docs/pi-upstream.md): an entry is the whole definition, but a model the base
+	// provider already ships under the same id and API keeps what an entry cannot say. Settings
+	// pages write catalogue facts only, so a listed Claude model lost its adaptive-thinking flags
+	// (thinking fell back to a fixed token budget), its prompt cache lifetime (cache warming
+	// stopped) and its image limits, and nothing reported any of it. What the entry states itself
+	// still wins, key by key, the same way `modelOverrides` merge.
+	const builtin = defaults && defaults.id === definition.id && defaults.api === api ? defaults : undefined;
 	return {
 		id: definition.id,
 		name: definition.name ?? definition.id,
@@ -184,14 +191,17 @@ function modelFromJson(
 		reasoning: definition.reasoning ?? false,
 		thinkingLevelMap: definition.thinkingLevelMap,
 		input: (definition.input ?? ["text"]) as ("text" | "image")[],
-		inputLimits: definition.inputLimits,
+		inputLimits: mergeInputLimits(builtin?.inputLimits, definition.inputLimits),
 		cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		promptCache: definition.promptCache,
+		promptCache:
+			builtin?.promptCache || definition.promptCache
+				? { ...builtin?.promptCache, ...definition.promptCache }
+				: undefined,
 		contextWindow: definition.contextWindow ?? 128000,
 		maxTokens: definition.maxTokens ?? 16384,
 		samplingParams: definition.samplingParams,
 		headers: undefined,
-		compat: mergeCompat(providerConfig.compat, definition.compat),
+		compat: mergeCompat(mergeCompat(builtin?.compat, providerConfig.compat), definition.compat),
 	};
 }
 
