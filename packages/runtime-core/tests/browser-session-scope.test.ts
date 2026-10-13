@@ -30,9 +30,16 @@ function scopeOf(args: readonly string[] | undefined): string | undefined {
 }
 
 function withBrowserEnvironment(context: test.TestContext): string {
-  const previous = Object.fromEntries(Object.keys(BROWSER_ENV).map((key) => [key, process.env[key]]));
-  Object.assign(process.env, BROWSER_ENV);
   const root = mkdtempSync(join(tmpdir(), "coilcoil-browser-scope-"));
+  // The MCP client also reads the generic global MCP files in the home directory, whatever agentDir
+  // the runtime is given, and creating the manager connects to every server it finds there. On a
+  // machine with a hosted server that needs a login, that opens the process-wide OAuth callback
+  // listener, which McpManager.close() leaves open for the other sessions: both cases pass in
+  // milliseconds and the process then never exits. HOME and USERPROFILE are what os.homedir() reads
+  // on POSIX and on Windows.
+  const environment = { ...BROWSER_ENV, HOME: root, USERPROFILE: root };
+  const previous = Object.fromEntries(Object.keys(environment).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, environment);
   context.after(() => {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
@@ -57,6 +64,10 @@ test("the Agent's browser is scoped to its session, and follows it when the sess
   internals.active = { cwd, session: { sessionId: "session-a" } };
   const manager = internals.mcpManager();
   await manager.listServers();
+  // The manager connects whatever it finds configured. Anything besides the injected browser would
+  // be a server read from the developer's real home directory, and this test would be talking to it.
+  assert.deepEqual([...manager.definitions.keys()], ["coilcoil-browser"],
+    "only the built-in browser may be configured here; servers from the real home directory leaked in");
   assert.equal(scopeOf(manager.definitions.get("coilcoil-browser")?.args), "session-a",
     "one session, one set of tabs: the scope is the session id, not the workspace");
 
