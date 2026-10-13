@@ -5,8 +5,26 @@ import {
   type AssistantMessageEventStream,
   type Model,
   type Api,
+  type Provider,
   type TranscriptContext,
 } from "@earendil-works/pi-ai";
+
+/**
+ * The model as the built-in API sees it: the built-in provider identity, plus any built-in
+ * `compat` the account's own model entry lacks.
+ *
+ * Pi rebuilds every model listed in models.json from that entry alone and does not inherit the
+ * built-in model's `compat`. Entries written by the settings page ("获取最新模型") or kept from an
+ * older custom setup carry catalogue facts only, so for Claude the adaptive-thinking flags vanish:
+ * thinking silently becomes a fixed token budget, the chosen effort stops mattering and the
+ * thinking text comes back empty. Built-in flags fill the gaps here, matched by model ID and the
+ * same API; anything the entry spells out itself wins.
+ */
+export function subscriptionModel(model: Model<Api>, base: Provider): Model<Api> {
+  const builtin = base.getModels().find((entry) => entry.id === model.id && entry.api === model.api);
+  const inherited = builtin?.compat ? { compat: { ...builtin.compat, ...model.compat } } : {};
+  return { ...model, provider: base.id, ...inherited } as Model<Api>;
+}
 
 /** Keep the built-in API's identity local. Other accounts remain foreign: their opaque reasoning is not reusable here. */
 export function subscriptionTranscript(context: TranscriptContext, accountId: string, builtinId: string): TranscriptContext {

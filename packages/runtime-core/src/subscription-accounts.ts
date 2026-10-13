@@ -7,7 +7,7 @@ import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-code
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { CreateSubscriptionAccountInput, SubscriptionProvider } from "@coilcoil/runtime-protocol";
-import { subscriptionStream, subscriptionTranscript } from "./subscription-stream.js";
+import { subscriptionModel, subscriptionStream, subscriptionTranscript } from "./subscription-stream.js";
 
 export const SUBSCRIPTION_ACCOUNTS_FILE = "subscription-accounts.json";
 export interface SubscriptionAccount {
@@ -93,10 +93,10 @@ export function createSubscriptionProvider(account: SubscriptionAccount): Provid
       name: subscriptionModelName(account.id, model.name),
     })),
     stream: (model, context, options) => subscriptionStream(
-      base.stream({ ...model, provider: base.id }, subscriptionTranscript(context, account.id, base.id), options), account.id, model, options?.signal,
+      base.stream(subscriptionModel(model, base), subscriptionTranscript(context, account.id, base.id), options), account.id, model, options?.signal,
     ),
     streamSimple: (model, context, options) => subscriptionStream(
-      base.streamSimple({ ...model, provider: base.id }, subscriptionTranscript(context, account.id, base.id), options), account.id, model, options?.signal,
+      base.streamSimple(subscriptionModel(model, base), subscriptionTranscript(context, account.id, base.id), options), account.id, model, options?.signal,
     ),
   };
 }

@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { zstdDecompressSync } from "node:zlib";
 import test from "node:test";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { syncSubscriptionAccounts, writeSubscriptionAccounts } from "../src/subscription-accounts.js";
+import { subscriptionModel } from "../src/subscription-stream.js";
 
 const ids = ["claude-work", "claude-personal", "codex-work", "codex-personal"];
 const zeroUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -82,4 +84,100 @@ test("real native requests use each account's token, keep original model IDs and
     assert.equal(result.content.find((item) => item.type === "text")?.text, id);
   }
   assert.deepEqual(requests, ids);
+});
+
+/**
+ * What the settings page leaves in models.json after "获取最新模型", or what an older custom
+ * provider entry looks like: catalogue facts only. Pi rebuilds a listed model from this entry
+ * alone, so the built-in model's `compat` (adaptive thinking and friends) is gone.
+ */
+function catalogueOnlyEntry(id: string, extra: Record<string, unknown> = {}) {
+  return {
+    id, name: id, reasoning: true,
+    thinkingLevelMap: { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+    input: ["text", "image"], contextWindow: 413000, maxTokens: 128000,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ...extra,
+  };
+}
+
+/** Real native Anthropic requests for the built-in account and `claude-work`, with the request body kept. */
+async function thinkingRequests(context: import("node:test").TestContext, entries: unknown[], modelId: string, levels: string[]) {
+  const root = mkdtempSync(join(tmpdir(), "coil-account-compat-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const authPath = join(root, "auth.json");
+  const ownToken = (id: string) => `sk-ant-oat01-e2e-${id}`;
+  writeFileSync(authPath, JSON.stringify(Object.fromEntries(["anthropic", "claude-work"].map((id) => [id, { type: "oauth", access: ownToken(id), refresh: `fake-refresh-${id}`, expires: Date.now() + 3600000 }]))));
+  writeSubscriptionAccounts(root, [{ id: "claude-work", name: "claude-work", provider: "anthropic" }]);
+  writeFileSync(join(root, "models.json"), JSON.stringify({ providers: { "claude-work": { name: "Anthropic · claude-work", baseUrl: "https://api.anthropic.com", models: entries } } }));
+  const runtime = await ModelRuntime.create({ authPath, modelsPath: join(root, "models.json"), refreshOnCreate: false });
+  await syncSubscriptionAccounts(runtime, root);
+  const bodies = new Map<string, Record<string, any>>();
+  context.mock.method(globalThis, "fetch", async (_input: string | URL | Request, options: RequestInit) => {
+    const auth = new Headers(options.headers).get("Authorization") ?? "";
+    const id = ["anthropic", "claude-work"].find((candidate) => auth === `Bearer ${ownToken(candidate)}`)!;
+    assert.ok(id, "request must carry one of the two accounts' tokens");
+    const body = JSON.parse(String(options.body));
+    bodies.set(id, body);
+    return new Response(claudeStream(id, body.model), { headers: { "Content-Type": "text/event-stream" } });
+  });
+  const seen: Array<{ level: string; account: string; thinking: unknown; topEffort: unknown; efforts: unknown[] }> = [];
+  for (const level of levels) {
+    for (const account of ["anthropic", "claude-work"]) {
+      const model = runtime.getModels().find((candidate) => candidate.provider === account && candidate.id === modelId)!;
+      assert.ok(model, `${account}/${modelId} must exist`);
+      const stream = runtime.streamSimple(model, { messages: [{ role: "user", content: "Hello", timestamp: 0 }] }, { transport: "sse", reasoning: level as never });
+      for await (const ignored of stream) { void ignored; }
+      const result = await stream.result();
+      assert.equal(result.stopReason, "stop", result.errorMessage ?? "Native subscription request failed");
+      const body = bodies.get(account)!;
+      seen.push({
+        level, account, thinking: body.thinking, topEffort: body.output_config?.effort,
+        efforts: (body.messages as Array<Record<string, any>>).filter((message) => message.role === "system").map((message) => message.output_config?.effort),
+      });
+    }
+  }
+  return seen;
+}
+
+test("an account whose stored models lost the built-in compat still sends the same thinking request as the built-in account", async (context) => {
+  const levels = ["medium", "max"];
+  const seen = await thinkingRequests(context, [catalogueOnlyEntry("claude-sonnet-5-5"), catalogueOnlyEntry("claude-opus-5-5")], "claude-sonnet-5-5", levels);
+  for (const level of levels) {
+    const official = seen.find((entry) => entry.level === level && entry.account === "anthropic")!;
+    const account = seen.find((entry) => entry.level === level && entry.account === "claude-work")!;
+    assert.deepEqual((account.thinking as { type: string }).type, "adaptive", `${level}: the account must think adaptively, not on a fixed token budget`);
+    assert.ok(!("budget_tokens" in (account.thinking as object)), `${level}: no fixed thinking budget`);
+    assert.deepEqual(account.efforts, [level], `${level}: the chosen effort must reach the service`);
+    assert.deepEqual({ ...account, account: "" }, { ...official, account: "" }, `${level}: identical to the built-in account's request`);
+  }
+});
+
+test("compat written explicitly in an account's model entry is not overwritten by the built-in one", async (context) => {
+  const seen = await thinkingRequests(context, [catalogueOnlyEntry("claude-sonnet-5-5", { compat: { forceAdaptiveThinking: false, supportsMidConvoEffort: false } })], "claude-sonnet-5-5", ["max"]);
+  const account = seen.find((entry) => entry.account === "claude-work")!;
+  const official = seen.find((entry) => entry.account === "anthropic")!;
+  assert.equal((official.thinking as { type: string }).type, "adaptive");
+  assert.equal((account.thinking as { type: string }).type, "enabled", "an explicit opt-out must still be honoured");
+  assert.ok((account.thinking as { budget_tokens?: number }).budget_tokens, "budget thinking carries its token budget");
+});
+
+test("subscriptionModel only fills gaps for the same built-in model and API", () => {
+  const base = anthropicProvider();
+  const builtin = base.getModels().find((model) => model.compat && (model.compat as Record<string, unknown>).forceAdaptiveThinking === true)!;
+  assert.ok(builtin, "the built-in catalogue must contain an adaptive-thinking model");
+  const stored = (compat?: Record<string, unknown>): Model<Api> => ({ ...builtin, provider: "claude-work", ...(compat ? { compat } : { compat: undefined }) } as Model<Api>);
+
+  const filled = subscriptionModel(stored(), base);
+  assert.equal(filled.provider, base.id, "request boundary uses the built-in provider identity");
+  assert.deepEqual(filled.compat, builtin.compat);
+
+  const mixed = subscriptionModel(stored({ forceAdaptiveThinking: false, extra: 1 }), base);
+  assert.deepEqual(mixed.compat, { ...builtin.compat, forceAdaptiveThinking: false, extra: 1 }, "explicit keys win, the rest comes from the built-in model");
+
+  const unknown = subscriptionModel({ ...stored({ custom: true }), id: "not-a-builtin-model" } as Model<Api>, base);
+  assert.deepEqual(unknown.compat, { custom: true }, "models the built-in catalogue does not know are left alone");
+
+  const otherApi = subscriptionModel({ ...stored({ custom: true }), api: "openai-completions" } as Model<Api>, base);
+  assert.deepEqual(otherApi.compat, { custom: true }, "a different API never inherits Anthropic's flags");
 });
