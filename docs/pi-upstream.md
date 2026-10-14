@@ -5,7 +5,8 @@ CoilCoil carries a thin fork of Pi under `vendor/pi`.
 - Upstream: `https://github.com/earendil-works/pi.git`
 - Upstream branch: `main`
 - Local remote name: `pi-upstream`
-- Import method: Git subtree with squashed upstream history
+- Historical import: Git subtree with squashed upstream history; current syncs use
+  a three-way patch while the recorded subtree metadata is stale.
 - Current sync point: upstream `b45e0ebcc5ae2fc42a6f2f23104d10e656e6bedb`
   (`main`, 2026-10-14). The previous sync point was `f07218c4d` (`v0.87.1`).
 - This full main sync includes the upstream Claude 5.5 catalog and Haiku 5.5
@@ -112,21 +113,28 @@ embedded runtime requires a capability that cannot be implemented outside Pi.
 ## Upstream bugs we patch ourselves
 
 These are Pi defects, not CoilCoil behavior. Each one is carried until upstream
-fixes it, so **check the upstream status of every entry before accepting a
-subtree pull** and drop the patch once the fix lands there.
+fixes it, so **check the upstream status of every entry before accepting an
+upstream sync** and drop the patch once the fix lands there.
 
-### Compaction summaries: not patched here any more
+### Compaction summaries: active CoilCoil path and native fallback
 
-- 2026-09-28: the two compaction patches (bounded/chunked summary input, retry of
-  length-limited history summaries) were removed. Pi's compaction code is
-  upstream again.
-- CoilCoil writes the compaction content itself through Pi's
-  `session_before_compact` hook: `packages/workflow/extensions/compaction.ts`
-  (design: `docs/compaction.md`). Pi still decides when to compact, where to cut
-  (`keepRecentTokens`) and persists the result.
-- Upstream issues for the same failure: earendil-works/pi#8196 and #8371 (both
-  closed as not planned). If upstream ever bounds summary input, nothing here
-  needs to change; our extension answers the hook before Pi's own summarizer runs.
+- 2026-09-28: the two larger compaction patches (bounded/chunked summary input
+  and retry of length-limited history summaries) were removed.
+- 2026-10-14 audit found one older difference still in
+  `packages/coding-agent/src/core/compaction/compaction.ts`: Pi's native
+  split-turn prefix summarizer retries once at the full reserve after a length
+  stop. It came through `bcf15deff`; it is not part of the bounded/chunked
+  compaction implementation.
+- The active CoilCoil workflow registers `./extensions/compaction.ts`. Its
+  `session_before_compact` handler supplies a custom compaction result, so
+  `AgentSession` skips Pi's native summary generator; on failure it cancels
+  instead of falling back. Normal CoilCoil compaction therefore uses the
+  extension's own two-layer algorithm. Pi still provides triggering, cut-point
+  preparation, persistence, and retrying the interrupted turn.
+- Do not change the native fallback as a way of changing active CoilCoil
+  summaries; work in `packages/workflow/extensions/compaction.ts` for that.
+- Upstream issues for the old summary failures: earendil-works/pi#8196 and #8371
+  (both closed as not planned).
 
 ### Duplicate `call_id` when replaying a chat-completions history to Responses
 
@@ -218,14 +226,20 @@ subtree pull** and drop the patch once the fix lands there.
 
 ## Update from upstream
 
+The recorded subtree metadata is stale. Do not use `git subtree pull` until its
+split point is verified against the sync point above; the 2026-10-14 update used
+a three-way patch.
+
 ```bash
 git fetch pi-upstream main
-git subtree pull --prefix=vendor/pi pi-upstream main --squash
+git diff --binary <last-upstream-sync-commit> pi-upstream/main \
+  | git apply --3way --directory=vendor/pi
 ```
 
-Before accepting an update, walk the "Upstream bugs we patch ourselves" list
-above and re-check each entry against the incoming tree, then run Pi's own
-checks as well as the CoilCoil runtime and workflow test suites.
+Resolve conflicts by preserving upstream changes and every still-needed
+CoilCoil patch listed above. Before accepting an update, re-check each patch
+against the incoming tree, then run Pi's own checks and the CoilCoil runtime and
+workflow tests.
 
 If the tree is ever refreshed by copying upstream files over `vendor/pi` instead
 of by a real subtree merge, **the files upstream deleted stay behind**. The
