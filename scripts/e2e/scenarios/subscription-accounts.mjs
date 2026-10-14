@@ -48,6 +48,8 @@ async function login(page, id) {
   await page.locator(".provider-oauth-action").getByRole("button", { name: "订阅登录", exact: true }).click();
   if (accounts[id].kind === "openai-codex") {
     await page.locator(".provider-oauth-options button").first().click();
+  } else {
+    await page.getByRole("button", { name: "Copy code login (headless)", exact: true }).click();
   }
   await page.waitForFunction((id) => window.__e2eAccountAuth?.[id]?.authUrl?.url && window.__e2eAccountAuth?.[id]?.prompt?.type === "manual_code", id);
   const state = await page.evaluate((id) => window.__e2eAccountAuth[id], id);

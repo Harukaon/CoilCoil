@@ -153,6 +153,33 @@ test("an account whose stored models lost the built-in compat still sends the sa
   }
 });
 
+test("Haiku 5.5 sends adaptive thinking and the selected effort on both Anthropic accounts", async (context) => {
+  const levels = ["medium", "max"];
+  const seen = await thinkingRequests(context, [catalogueOnlyEntry("claude-haiku-5-5")], "claude-haiku-5-5", levels);
+  for (const level of levels) {
+    const official = seen.find((entry) => entry.level === level && entry.account === "anthropic")!;
+    const account = seen.find((entry) => entry.level === level && entry.account === "claude-work")!;
+    assert.equal((account.thinking as { type: string }).type, "adaptive");
+    assert.ok(!("budget_tokens" in (account.thinking as object)), `${level}: adaptive thinking must not carry a fixed budget`);
+    assert.deepEqual(account.efforts, [level], `${level}: effort must reach the service`);
+    assert.deepEqual({ ...account, account: "" }, { ...official, account: "" }, `${level}: both accounts must send the same request`);
+  }
+});
+
+test("Haiku 4.5 keeps budget-based thinking on both Anthropic accounts", async (context) => {
+  const levels = ["medium", "max"];
+  const seen = await thinkingRequests(context, [catalogueOnlyEntry("claude-haiku-4-5")], "claude-haiku-4-5", levels);
+  for (const level of levels) {
+    const official = seen.find((entry) => entry.level === level && entry.account === "anthropic")!;
+    const account = seen.find((entry) => entry.level === level && entry.account === "claude-work")!;
+    const budget = level === "medium" ? 8192 : 16384;
+    assert.equal((account.thinking as { type: string }).type, "enabled");
+    assert.equal((account.thinking as { budget_tokens?: number }).budget_tokens, budget);
+    assert.deepEqual(account.efforts, [], `${level}: Haiku 4.5 must not receive adaptive effort`);
+    assert.deepEqual({ ...account, account: "" }, { ...official, account: "" }, `${level}: both accounts must send the same request`);
+  }
+});
+
 test("compat written explicitly in an account's model entry is not overwritten by the built-in one", async (context) => {
   const seen = await thinkingRequests(context, [catalogueOnlyEntry("claude-sonnet-5-5", { compat: { forceAdaptiveThinking: false, supportsMidConvoEffort: false } })], "claude-sonnet-5-5", ["max"]);
   const account = seen.find((entry) => entry.account === "claude-work")!;
