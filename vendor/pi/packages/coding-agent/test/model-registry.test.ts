@@ -660,7 +660,7 @@ describe("ModelRegistry", () => {
 			writeModelsJson({
 				anthropic: providerConfig("https://second-proxy.example.com/v1", [{ id: "claude-custom-2" }]),
 			});
-			await registry.refresh();
+			await registry.refresh({ providers: ["anthropic"], allowNetwork: false });
 
 			const anthropicModels = getModelsForProvider(registry, "anthropic");
 			expect(anthropicModels.some((m) => m.id === "claude-custom")).toBe(false);
@@ -754,7 +754,7 @@ describe("ModelRegistry", () => {
 			expect(compat?.allowedFallbackModels).toEqual([]);
 		});
 
-		test("custom model and model override carry sampling params", async () => {
+		test("custom models and model overrides carry sampling params", async () => {
 			writeRawModelsJson({
 				openrouter: {
 					baseUrl: "https://my-proxy.example.com/v1",
@@ -763,11 +763,22 @@ describe("ModelRegistry", () => {
 						{
 							id: "custom/sampling-model",
 							samplingParams: { temperature: 1, top_p: 0.95, top_k: 0 },
+							samplingParamsByThinkingLevel: {
+								low: { temperature: 0.6, top_p: 0.95 },
+								high: { temperature: 0.8 },
+							},
 						},
 					],
 					modelOverrides: {
+						"custom/sampling-model": {
+							samplingParamsByThinkingLevel: {
+								low: { temperature: 0.5, top_k: 20 },
+								max: { temperature: 1 },
+							},
+						},
 						"anthropic/claude-sonnet-4": {
 							samplingParams: { top_p: 0.9 },
+							samplingParamsByThinkingLevel: { high: { temperature: 0.8 } },
 						},
 					},
 				},
@@ -778,13 +789,20 @@ describe("ModelRegistry", () => {
 
 			const custom = models.find((m) => m.id === "custom/sampling-model");
 			expect(custom?.samplingParams).toEqual({ temperature: 1, top_p: 0.95, top_k: 0 });
+			expect(custom?.samplingParamsByThinkingLevel).toEqual({
+				low: { temperature: 0.5, top_p: 0.95, top_k: 20 },
+				high: { temperature: 0.8 },
+				max: { temperature: 1 },
+			});
 
 			const sonnet = models.find((m) => m.id === "anthropic/claude-sonnet-4");
 			expect(sonnet?.samplingParams).toEqual({ top_p: 0.9 });
+			expect(sonnet?.samplingParamsByThinkingLevel).toEqual({ high: { temperature: 0.8 } });
 
 			// Models without sampling config keep it unset.
 			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.1");
 			expect(opus?.samplingParams).toBeUndefined();
+			expect(opus?.samplingParamsByThinkingLevel).toBeUndefined();
 		});
 
 		test("custom model and model override carry prompt cache lifetimes", async () => {
@@ -1420,7 +1438,7 @@ describe("ModelRegistry", () => {
 				const registry = await createModelRegistry(authStorage, modelsJsonPath);
 
 				registry.registerProvider("anthropic", { baseUrl: "https://proxy.test/anthropic" });
-				await registry.refresh();
+				await registry.refresh({ providers: ["anthropic"], allowNetwork: false });
 
 				const anthropicModels = getModelsForProvider(registry, "anthropic");
 				expect(anthropicModels.length).toBeGreaterThan(1);
@@ -1434,7 +1452,7 @@ describe("ModelRegistry", () => {
 					...providerConfig("https://custom.test/anthropic", [{ id: "custom-claude" }], "anthropic-messages"),
 					baseUrl: "https://custom.test/anthropic",
 				});
-				await registry.refresh();
+				await registry.refresh({ providers: ["anthropic"], allowNetwork: false });
 
 				expect(getModelsForProvider(registry, "anthropic").map((m) => m.id)).toEqual(["custom-claude"]);
 				expect(registry.find("anthropic", "custom-claude")?.baseUrl).toBe("https://custom.test/anthropic");
@@ -1448,7 +1466,7 @@ describe("ModelRegistry", () => {
 					baseUrl: "https://custom.test/anthropic",
 				});
 				registry.registerProvider("anthropic", { baseUrl: "https://proxy.test/anthropic" });
-				await registry.refresh();
+				await registry.refresh({ providers: ["anthropic"], allowNetwork: false });
 
 				expect(getModelsForProvider(registry, "anthropic").map((m) => m.id)).toEqual(["custom-claude"]);
 				expect(registry.find("anthropic", "custom-claude")?.baseUrl).toBe("https://proxy.test/anthropic");
@@ -1461,7 +1479,7 @@ describe("ModelRegistry", () => {
 					"custom-provider",
 					providerConfig("https://custom.test/v1", [{ id: "custom-a" }, { id: "custom-b" }], "openai-completions"),
 				);
-				await registry.refresh();
+				await registry.refresh({ providers: ["custom-provider"], allowNetwork: false });
 
 				expect(getModelsForProvider(registry, "custom-provider").map((m) => m.id)).toEqual([
 					"custom-a",
@@ -1477,7 +1495,7 @@ describe("ModelRegistry", () => {
 					providerConfig("https://custom.test/v1", [{ id: "custom-a" }, { id: "custom-b" }], "openai-completions"),
 				);
 				registry.registerProvider("custom-provider", { baseUrl: "https://proxy.test/custom" });
-				await registry.refresh();
+				await registry.refresh({ providers: ["custom-provider"], allowNetwork: false });
 
 				expect(getModelsForProvider(registry, "custom-provider").map((m) => m.id)).toEqual([
 					"custom-a",
@@ -1498,7 +1516,7 @@ describe("ModelRegistry", () => {
 					providerConfig("https://custom.test/v1", [{ id: "custom-a" }, { id: "custom-b" }], "openai-completions"),
 				);
 				registry.registerProvider("custom-provider", { headers: { "x-proxy": "enabled" } });
-				await registry.refresh();
+				await registry.refresh({ providers: ["custom-provider"], allowNetwork: false });
 
 				const models = getModelsForProvider(registry, "custom-provider");
 				expect(models.map((m) => m.id)).toEqual(["custom-a", "custom-b"]);
