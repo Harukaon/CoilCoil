@@ -1231,6 +1231,10 @@ export interface ProjectMemoryRuntimeStatus {
   projectName?: string;
   memoryFile?: string;
   projectMemoryDir?: string;
+  notesDir?: string;
+  pendingNotes?: number;
+  legacyMemoryDir?: string;
+  migrationNotice?: string;
   contentChars?: number;
   estimatedTokens?: number;
   content?: string;
@@ -1249,6 +1253,9 @@ export interface MemorySettings {
   globalMaxChars: number;
   generationRules: string;
   autoSummarize: boolean;
+  /** Global model selection shared by every workspace's background memory worker. */
+  workerProvider?: string;
+  workerModelId?: string;
   /** 自动整理的间隔轮数：累计这么多轮回复后，后台才检查一次记忆。 */
   summarizeEveryTurns: number;
   globalEnabled: boolean;
@@ -1258,7 +1265,7 @@ export interface MemorySettings {
 export interface MemoryDocumentSnapshot {
   scope: "global" | "project";
   /** `entry` is one memory body file; `index` is the file that lists them. */
-  kind?: "index" | "entry";
+  kind?: "index" | "entry" | "jotting";
   label: string;
   filePath: string;
   directory: string;
@@ -1274,11 +1281,16 @@ export interface MemoryConfigurationSnapshot {
   settings: MemorySettings;
   settingsFile: string;
   storageRoot: string;
+  /** Preserved legacy directory whose workspace ownership could not be established. */
+  legacyMemoryDir?: string;
+  migrationNotice?: string;
   global: MemoryDocumentSnapshot;
   /** The open project's memory, which is also the entry for it in `projects`. */
   project?: MemoryDocumentSnapshot;
   /** Every project the memory store holds, sorted by name, open project included. */
   projects: MemoryDocumentSnapshot[];
+  /** Uncurated notes from the current workspace, never injected as long-term memory. */
+  jottings?: MemoryDocumentSnapshot[];
   /** Turns counted for the open project since the last background summary ran. */
   turnsSinceSummary: number;
 }

@@ -24,10 +24,10 @@ async function inputOnScreen(app, page) {
 
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
-  await ui.send([{ tool: "browser_open", args: { url: site.url("form.html") } }, { echo: true }], "共用");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("form.html") } } }, { echo: true }], "共用");
   const opened = await inPage(app, "1");
   check("Agent 开的页面是离屏页面", opened.type === "offscreen", JSON.stringify(opened));
-  await ui.send([{ tool: "browser_click", args: { handle: "btab-1", uid: "999_999" } }, { echo: true }], "共用");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: "999_999" } } }, { echo: true }], "共用");
   const snapshot = await ui.lastEcho();
   const input = /uid=(\S+) textbox/.exec(snapshot)?.[1];
   const button = /uid=(\S+) button/.exec(snapshot)?.[1];
@@ -39,8 +39,8 @@ export async function run({ app, page, ui, site, check, shot }) {
   const echoes = await page.getByText("工具返回", { exact: false }).count();
   await composer.click();
   await page.keyboard.insertText(`共用 MOCK:${JSON.stringify([
-    { tool: "browser_click", args: { handle: "btab-1", uid: button } },
-    { tool: "browser_type", args: { handle: "btab-1", uid: input, value: "agent typed" } },
+    { tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: button } } },
+    { tool: "browser", args: { action: "call", tool: "type", args: { handle: "btab-1", uid: input, value: "agent typed" } } },
     { echo: true },
   ])}`);
   await page.keyboard.press("Enter");
@@ -90,16 +90,16 @@ export async function run({ app, page, ui, site, check, shot }) {
   check("点回对话框后，网页不再收字", await inputValue(app) === "x你好", await inputValue(app));
 
   // 7. Agent 接着用同一个页面：读得到用户打的字，也还能接着打。
-  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "evaluate_script", args: { function: "() => document.querySelector('#q').value" } } }, { echo: true }], "共用");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.evaluate_script", args: { function: "() => document.querySelector('#q').value" } } }, { echo: true }], "共用");
   check("Agent 读到了用户打的字", (await ui.lastEcho()).includes("x你好"), (await ui.lastEcho()).slice(0, 240));
-  await ui.send([{ tool: "browser_type", args: { handle: "btab-1", uid: input, value: "agent again" } }, { echo: true }], "共用");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "type", args: { handle: "btab-1", uid: input, value: "agent again" } } }, { echo: true }], "共用");
   check("Agent 接着在同一个页面上打字", await ui.waitFor(async () => await inputValue(app) === "agent again"), await inputValue(app));
   check("自始至终是同一次加载的页面", (await inPage(app, "performance.timeOrigin")).value === loadedAt);
   check("还是只有一张标签页", (await ui.browserTabs()).length === 1, JSON.stringify(await ui.browserTabs()));
   await shot("after");
 
   // 8. 鼠标：拖着选中文字、双击选一个词、滚轮翻页，都和直接在浏览器里一样。
-  await ui.send([{ tool: "browser_navigate", args: { handle: "btab-1", url: site.url("long.html") } }, { echo: true }], "共用");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "navigate", args: { handle: "btab-1", url: site.url("long.html") } } }, { echo: true }], "共用");
   const inLong = (code) => app.evaluate(({ webContents }, code) => {
     const contents = webContents.getAllWebContents().find((item) => !item.isDestroyed() && item.getURL().includes("long.html"));
     return contents ? contents.executeJavaScript(code) : undefined;
@@ -132,7 +132,7 @@ export async function run({ app, page, ui, site, check, shot }) {
   check("滚轮往下翻，页面往下走", await ui.waitFor(async () => (await inLong("scrollY")) > 100), String(await inLong("scrollY")));
 
   // 9. 网页下拉框：离屏页面里原生弹层出不来，面板自己画选项，选好写回页面。
-  await ui.send([{ tool: "browser_navigate", args: { handle: "btab-1", url: site.url("select.html") } }, { echo: true }], "共用");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "navigate", args: { handle: "btab-1", url: site.url("select.html") } } }, { echo: true }], "共用");
   const inSelect = (code) => app.evaluate(({ webContents }, code) => {
     const contents = webContents.getAllWebContents().find((item) => !item.isDestroyed() && item.getURL().includes("select.html"));
     return contents ? contents.executeJavaScript(code) : undefined;

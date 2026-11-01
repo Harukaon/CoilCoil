@@ -499,13 +499,16 @@ export function RuntimePanel({
         <p className="runtime-section-footnote">只有「展示给 Agent」的 MCP，其工具才会出现在 Agent 面前；停用即永不展示。</p>
       </RuntimeSection>
 
-      <RuntimeSection title="项目记忆" icon={<Sparkles size={14} />} badge={inspection?.memory ? ({ idle: "就绪", running: "整理中", busy: "正忙", succeeded: "已完成", failed: "失败", disabled: "已停用" }[inspection.memory.state]) : undefined} open={inspection?.memory?.state === "running" || inspection?.memory?.state === "failed"}>
+      <RuntimeSection title="Workspace 记忆与做梦 Agent" icon={<Sparkles size={14} />} badge={inspection?.memory ? ({ idle: "就绪", running: "整理中", busy: "正忙", succeeded: "已完成", failed: "失败", disabled: "已停用" }[inspection.memory.state]) : undefined} open={inspection?.memory?.state === "running" || inspection?.memory?.state === "failed"}>
         {inspection?.memory ? <div className="runtime-memory-card">
-          <p className="runtime-section-footnote">这里显示工作区当前记忆文件；已开始的会话继续使用原有记忆，更新将在新对话生效。</p>
+          <p className="runtime-section-footnote">Agent 先写随手记，后台做梦 Agent 筛选后维护长期索引和文档。更新在新对话生效。</p>
           {inspection.memory.message ? <p>{inspection.memory.message}</p> : null}
+          {inspection.memory.migrationNotice ? <p className="runtime-section-footnote">{inspection.memory.migrationNotice}</p> : null}
           {inspection.memory.error ? <p className="runtime-summary-error">{inspection.memory.error}</p> : null}
           <dl>
             {inspection.memory.memoryFile ? <div><dt>记忆文件</dt><dd title={inspection.memory.memoryFile}>{inspection.memory.memoryFile}</dd></div> : null}
+            {inspection.memory.notesDir ? <div><dt>随手记目录</dt><dd title={inspection.memory.notesDir}>{inspection.memory.notesDir}</dd></div> : null}
+            {inspection.memory.pendingNotes !== undefined ? <div><dt>待筛选随手记</dt><dd>{inspection.memory.pendingNotes} 份</dd></div> : null}
             {inspection.memory.estimatedTokens !== undefined ? <div><dt>内容体积</dt><dd>估算 {tokenNumber(inspection.memory.estimatedTokens)} Token</dd></div> : null}
             {inspection.memory.injected ? <div><dt>当前会话</dt><dd>已注入</dd></div> : null}
             {inspection.memory.processedSessions.length ? <div><dt>最近处理</dt><dd>{inspection.memory.processedSessions.length} 个会话</dd></div> : null}

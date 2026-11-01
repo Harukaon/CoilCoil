@@ -9,7 +9,7 @@ const inPage = (app, code) => app.evaluate(({ webContents }, code) => {
 export async function run({ app, page, ui, site, check }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("form.html") } }, { echo: true }], "安全");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("form.html") } } }, { echo: true }], "安全");
   await ui.waitFor(async () => (await inPage(app, "document.readyState")) === "complete", 15_000);
 
   // 1. 以前网页是界面里的 <webview>，界面脚本能自己造一个；现在主窗口关了这个口子。
@@ -57,7 +57,7 @@ export async function run({ app, page, ui, site, check }) {
     JSON.stringify(pages.map((item) => item.storage)));
 
   // 5. Agent 连的调试通道：看得到这个会话的网页，看不到 App 自己的界面。
-  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "list_pages" } }, { echo: true }], "安全");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.list_pages", args: {} } }, { echo: true }], "安全");
   const listed = await ui.lastEcho();
   const appUrl = page.url().split("#")[0];
   check("Agent 列出的页面里有这张网页", listed.includes("form.html"), listed.slice(0, 300));
@@ -65,8 +65,8 @@ export async function run({ app, page, ui, site, check }) {
 
   // 6. 面板来的查找、光标、悬停提示只对「桌面窗口正显示的那张」生效：后台那张不理。两张都开
   //    同一个带提示文字的页面，后台那张要是被问到，也答得出来——这样才看得出区别。
-  await ui.send([{ tool: "browser_open", args: { url: `${site.url("tooltip.html")}?behind` } }, { echo: true }], "安全");
-  await ui.send([{ tool: "browser_open", args: { url: site.url("tooltip.html") } }, { echo: true }], "安全");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: `${site.url("tooltip.html")}?behind` } } }, { echo: true }], "安全");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("tooltip.html") } } }, { echo: true }], "安全");
   await page.waitForTimeout(800);
   await app.evaluate(({ ipcMain }) => {
     globalThis.__browserIds = undefined;

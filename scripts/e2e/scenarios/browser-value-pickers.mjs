@@ -9,7 +9,7 @@ const takeLog = async (app) => JSON.parse(await inPage(app, "JSON.stringify(log.
 export async function run({ app, page, ui, site, check }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("pickers.html") } }, { echo: true }], "选择器");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("pickers.html") } } }, { echo: true }], "选择器");
   await ui.waitFor(async () => (await inPage(app, "document.readyState")) === "complete");
   await page.waitForTimeout(500);
   const box = await page.locator(".browser-live-page").boundingBox();

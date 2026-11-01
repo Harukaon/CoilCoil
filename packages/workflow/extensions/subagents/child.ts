@@ -7,11 +7,13 @@ import {
   createAgentSession,
   createEventBus,
   DefaultResourceLoader,
+  ModelRuntime,
   type ExtensionFactory,
   type InlineExtension,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { installMemoryWritePolicy } from "../memory-jottings.ts";
 import fileDiffExtension from "../file-diff.ts";
 import readCacheExtension from "../read-cache.ts";
 import runtimeBridgeExtension from "../runtime-bridge.ts";
@@ -22,6 +24,7 @@ import { COILCOIL_BACKGROUND_WAIT_STANDARDS, COILCOIL_SUBAGENT_GIT_SAFETY, COILC
 import terminalExtension from "../terminal/extension.ts";
 import { DEFAULT_CHILD_TOOLS } from "./profiles.ts";
 import { createChildRunDriver, type ChildRunDriver } from "./child-run.ts";
+import { syncSubscriptionAccounts } from "../providers/subscription-accounts.ts";
 import type { SubagentChildMeta } from "./types.ts";
 import { SUBAGENT_META_ENTRY_TYPE } from "./types.ts";
 
@@ -218,6 +221,8 @@ async function buildChildSession(options: {
   const tools = childToolsForPlatform(options.tools ?? DEFAULT_CHILD_TOOLS);
   const promptAdditions = childPromptAdditions(tools, options.systemPrompt);
   const extensionFactories: InlineExtension[] = childToolExtensions(tools);
+  extensionFactories.push({ name: "coilcoil-subagent-memory-policy", hidden: true,
+    factory: (pi) => installMemoryWritePolicy(pi, { ...process.env, PI_CODING_AGENT_DIR: options.agentDir }, true) });
   if (promptAdditions.length > 0) {
     const appended = promptAdditions.join("\n\n");
     extensionFactories.push({
@@ -240,13 +245,38 @@ async function buildChildSession(options: {
     extensionFactories,
   });
   await loader.reload();
+  const modelRuntime = await ModelRuntime.create({
+    authPath: join(options.agentDir, "auth.json"),
+    modelsPath: join(options.agentDir, "models.json"),
+    // Restored children resolve their saved model through this catalog. An
+    // unrefreshed runtime has no catalog when there are no named subscriptions.
+    allowModelNetwork: false,
+  });
+  // A model's provider ID alone does not install its OAuth strategy. Register
+  // named accounts before both fresh selection and saved-child model restore.
+  await syncSubscriptionAccounts(modelRuntime, options.agentDir);
+  const savedSelection = options.sessionManager.getBranch().filter((entry) => entry.type === "model_change").at(-1)
+    ?? options.sessionManager.buildSessionContext().model;
+  const selection = options.model ? { provider: options.model.provider, modelId: options.model.id } : savedSelection;
+  let selectedModel = options.model;
+  if (selection) {
+    const registeredModel = modelRuntime.getModel(selection.provider, selection.modelId);
+    if (!registeredModel) throw new Error(`子 Agent 指定的模型不可用：${selection.provider}/${selection.modelId}。请恢复该账号或重新创建子 Agent。`);
+    if (!modelRuntime.hasConfiguredAuth(selection.provider)) {
+      throw new Error(`子 Agent 指定的账号未登录或已禁用：${selection.provider}。请重新登录该账号后继续。`);
+    }
+    // The SDK otherwise silently substitutes another configured account when
+    // restoring a saved model without credentials. Children keep their identity.
+    selectedModel ??= registeredModel as Model<never>;
+  }
   const created = await createAgentSession({
     cwd: options.cwd,
     agentDir: options.agentDir,
     settingsManager,
     sessionManager: options.sessionManager,
     resourceLoader: loader,
-    model: options.model,
+    modelRuntime,
+    model: selectedModel,
     tools,
     excludeTools: ["subagent"],
   });

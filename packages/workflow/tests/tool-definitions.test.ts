@@ -62,7 +62,7 @@ test("the recorder sees the tools of every extension", async () => {
   const names = (await registeredTools()).map((tool) => tool.name);
   for (const expected of [
     "bash", "terminal", "monitor", "mcp", "coilcoil", "subagent", "plan", "goal_complete",
-    "browser_open", "browser_navigate", "browser_click", "browser_type", "browser_tabs",
+    "browser",
   ]) {
     assert.ok(names.includes(expected), `${expected} was not registered; the checks below would be vacuous`);
   }

@@ -17,21 +17,21 @@ export async function run({ app, page, ui, site, check, shot }) {
   await inDraft(app, "document.querySelector('#note').value = '用户写了一半'");
   const loadedAt = await inDraft(app, "performance.timeOrigin");
 
-  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "list_pages" } }, { echo: true }], "草稿会话");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.list_pages", args: {} } }, { echo: true }], "草稿会话");
   const tabs = (await ui.browserTabs()).map((tab) => tab.label);
   check("发出第一条消息后：面板里还是 draft 页，没有多出空白页", JSON.stringify(tabs) === '["page-draft"]', JSON.stringify(tabs));
   check("用户开的页面 Agent 也看得到", (await ui.lastEcho()).includes("draft.html"), (await ui.lastEcho()).slice(0, 200));
 
-  await ui.send([{ tool: "browser_tabs", args: {} }, { echo: true }], "草稿会话");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "tabs", args: {} } }, { echo: true }], "草稿会话");
   const listing = await ui.lastEcho();
   const handle = /(btab-\d+)（用户正看着）（用户开的）：page-draft/.exec(listing)?.[1];
   check("browser_tabs 列出 draft 页：用户正看着、用户开的，给了句柄", Boolean(handle), listing.slice(0, 240));
 
   // 拿一份页面快照找输入框：点一个不存在的元素，工具会把新快照带回来。
-  await ui.send([{ tool: "browser_click", args: { handle, uid: "999_999" } }, { echo: true }], "草稿会话");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle, uid: "999_999" } } }, { echo: true }], "草稿会话");
   const input = /uid=(\S+) textbox "AI 写的"/.exec(await ui.lastEcho())?.[1];
   check("快照里找得到 AI 该填的输入框", Boolean(input), (await ui.lastEcho()).slice(0, 300));
-  await ui.send([{ tool: "browser_type", args: { handle, uid: input, value: "AI 接着写" } }, { echo: true }], "草稿会话");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "type", args: { handle, uid: input, value: "AI 接着写" } } }, { echo: true }], "草稿会话");
   check("Agent 拿句柄直接在用户的页面里打字", await ui.waitFor(async () => (await inDraft(app, "document.querySelector('#ai').value")) === "AI 接着写"),
     String(await inDraft(app, "document.querySelector('#ai').value")));
   check("用户写了一半的东西还在", (await inDraft(app, "document.querySelector('#note').value")) === "用户写了一半");

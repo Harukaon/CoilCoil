@@ -18,7 +18,7 @@ const HIDDEN = JSON.stringify({ visible: false, fullScreen: false });
 export async function run({ app, page, ui, site, check }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("fullscreen.html") } }, { echo: true }], "全屏");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("fullscreen.html") } } }, { echo: true }], "全屏");
   await ui.waitFor(async () => (await inPage(app, "document.readyState")) === "complete");
   await app.evaluate(({ app, BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find((item) => !item.webContents.isOffscreen());
@@ -28,14 +28,14 @@ export async function run({ app, page, ui, site, check }) {
   });
 
   // 1. Agent 点网页上的全屏按钮：用户在对话框里，什么都不该变。
-  await ui.send([{ tool: "browser_click", args: { handle: "btab-1", uid: "999_999" } }, { echo: true }], "全屏");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: "999_999" } } }, { echo: true }], "全屏");
   const uid = /uid=(\S+) button "全屏播放"/.exec(await ui.lastEcho())?.[1];
   check("快照里找得到全屏按钮", Boolean(uid));
   // 在对话框里按回车发出去（ui.send 点的是发送按钮，焦点会落在按钮上）：看 Agent 点完以后焦点还在不在对话框。
   const composer = page.locator(".prompt-editor");
   const echoes = await page.getByText("工具返回", { exact: false }).count();
   await composer.click();
-  await page.keyboard.insertText(`全屏 MOCK:${JSON.stringify([{ tool: "browser_click", args: { handle: "btab-1", uid } }, { echo: true }])}`);
+  await page.keyboard.insertText(`全屏 MOCK:${JSON.stringify([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid } } }, { echo: true }])}`);
   await page.keyboard.press("Enter");
   await ui.waitFor(async () => (await page.getByText("工具返回", { exact: false }).count()) > echoes, 60_000);
   await page.waitForTimeout(1500);

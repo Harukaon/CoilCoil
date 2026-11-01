@@ -61,8 +61,17 @@ export async function syncMountedProjects(): Promise<ProjectSelection[]> {
   const stored = await window.coilcoil.mountedProjects?.().catch(() => []) ?? [];
   // 本地那份直接从 localStorage 现读，避免调用方传进来一份不全的。
   const merged = uniqueProjects([...loadStoredProjects(), ...stored.filter(isWorkspace)]);
-  saveMountedProjects(merged);
-  return merged;
+  // The main process resolves filesystem aliases; use its returned identities in
+  // the sidebar as well as on disk, including aliases from old localStorage data.
+  const normalized = window.coilcoil.setMountedProjects
+    ? await window.coilcoil.setMountedProjects(merged.map((project) => ({ ...project, kind: "workspace" as const })))
+    : merged;
+  try {
+    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // The authoritative normalized list has already been saved by the main process.
+  }
+  return normalized;
 }
 
 export function uniqueProjects(projects: ProjectSelection[]): ProjectSelection[] {

@@ -2,8 +2,8 @@ export const description = "用户在 Agent 共用页上的箭头、手型和文
 
 export async function run({ app, page, ui, site, check }) {
   await ui.newConversation("projA");
-  await ui.send([{ tool: "browser_open", args: { url: site.url("cursor.html") } }, { echo: true }], "光标");
-  await ui.send([{ tool: "browser_click", args: { handle: "btab-1", uid: "999_999" } }, { echo: true }], "光标");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("cursor.html") } } }, { echo: true }], "光标");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: "999_999" } } }, { echo: true }], "光标");
   const uid = /uid=(\S+) link/.exec(await ui.lastEcho())?.[1];
   check("Agent 找到了网页链接", Boolean(uid));
 
@@ -16,7 +16,7 @@ export async function run({ app, page, ui, site, check }) {
   await page.mouse.move(blank.x, blank.y);
   check("空白处是普通箭头，不是小手", await ui.waitFor(async () => (await cursor()) === "default"), await cursor());
 
-  await ui.send([{ tool: "browser_click", args: { handle: "btab-1", uid } }, { echo: true }], "光标");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid } } }, { echo: true }], "光标");
   check("Agent 点击链接生效", await ui.waitFor(async () => (await app.evaluate(({ webContents }) => {
     const contents = webContents.getAllWebContents().find((item) => item.getURL().includes("cursor.html"));
     return contents?.getTitle();

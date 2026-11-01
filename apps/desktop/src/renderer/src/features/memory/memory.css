@@ -12,6 +12,24 @@
 .memory-controls { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 10px 26px; padding: 12px 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-922)); }
 .memory-control-group { display: flex; align-items: center; gap: 8px 16px; }
 .memory-control-group.end { margin-left: auto; gap: 8px; }
+.memory-worker-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-922)); }
+.memory-worker-settings > div:first-child { display: grid; flex: 1 1 320px; min-width: 0; gap: 4px; margin-right: auto; }
+.memory-worker-settings strong { font-size: 12px; }
+.memory-worker-settings small { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 10px; }
+.memory-worker-settings > label { display: flex; flex: 0 0 230px; min-width: 0; align-items: center; gap: 8px; font-size: 11px; }
+.memory-worker-settings > label > span { flex-shrink: 0; white-space: nowrap; }
+.memory-worker-settings .coil-select { min-width: 170px; max-width: 240px; }
+.memory-view-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 26px; border-bottom: 1px solid hsl(var(--th) var(--ts) var(--l-922)); }
+.memory-view-tabs button { padding: 6px 10px; border-radius: var(--radius-lg); background: transparent; font-size: 11px; cursor: pointer; }
+.memory-view-tabs button[aria-pressed="true"] { background: hsl(var(--th) var(--ts) var(--l-925)); }
+.memory-view-tabs > span { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 10px; }
+.memory-migration-notice { padding: 10px 26px; background: var(--c-amber-subtle); color: var(--c-amber-text); font-size: 11px; }
+.memory-migration-notice p { margin: 0 0 4px; }
+.memory-migration-notice code { overflow-wrap: anywhere; }
+.memory-jottings-list { display: flex; flex-direction: column; gap: 8px; padding: 18px 26px; overflow: auto; }
+.memory-jottings-list > button { display: flex; justify-content: space-between; gap: 16px; padding: 12px; border: 1px solid hsl(var(--th) var(--ts) var(--l-884)); border-radius: var(--radius-lg); background: hsl(var(--th) var(--ts) var(--l-1000)); text-align: left; cursor: pointer; }
+.memory-jottings-list > button[aria-pressed="true"] { border-color: var(--c-green-muted); }
+.memory-jottings-list small, .memory-jottings-list > p { color: hsl(var(--th) var(--ts) var(--l-563)); font-size: 11px; }
 .memory-control-group > label { display: inline-flex; align-items: center; gap: 6px; color: hsl(var(--th) var(--ts) var(--l-431)); font-size: 11px; white-space: nowrap; cursor: pointer; }
 /* 勾选态用中性主色，不用状态绿：绿在这套界面里只表示「运行中/新增」这类状态。 */
 input.memory-control-checkbox { accent-color: hsl(var(--th) var(--ts) var(--l-310)); }

@@ -32,13 +32,13 @@ export async function run({ app, page, ui, site, check, shot, remotePort }) {
   await web.newConversation("projB");
 
   // 1. Agent 新开一张：桌面用户什么都不做，标签条和画面都要自己跟上。
-  await ui.send([{ tool: "browser_open", args: { url: site.url("a.html") } }, { echo: true }], "实时");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("a.html") } } }, { echo: true }], "实时");
   check("桌面：Agent 开的页面不用动手就出现在标签条上", await ui.waitFor(() => hasTab(ui, "page-a")), JSON.stringify(await ui.browserTabs()));
   check("桌面：Agent 页面的画面自己出来了，不是一直「正在读取」", await ui.waitFor(() => showsAgentPage(page, "page-a")));
   await shot("desktop-first");
 
   // 2. 再开一张，同样要立刻跟上，画面换成新的这张。
-  await ui.send([{ tool: "browser_open", args: { url: site.url("form.html") } }, { echo: true }], "实时");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("form.html") } } }, { echo: true }], "实时");
   check("桌面：第二张也立刻出现在标签条上", await ui.waitFor(() => hasTab(ui, "page-form")), JSON.stringify(await ui.browserTabs()));
   check("桌面：画面换成了第二张", await ui.waitFor(() => showsAgentPage(page, "page-form")));
 
@@ -56,7 +56,7 @@ export async function run({ app, page, ui, site, check, shot, remotePort }) {
 
   // 4. 两边都开着时 Agent 再开一张：两边都要自己跟上。
   await page.bringToFront();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("b.html") } }, { echo: true }], "实时");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("b.html") } } }, { echo: true }], "实时");
   check("桌面：两边都开着时，新页面照样立刻出现", await ui.waitFor(() => hasTab(ui, "page-b")), JSON.stringify(await ui.browserTabs()));
   check("桌面：两边都开着时，画面照样换成新页面", await ui.waitFor(() => showsAgentPage(page, "page-b")));
   check("网页版：不用动手也出现了新页面", await web.waitFor(() => hasTab(web, "page-b")), JSON.stringify(await web.browserTabs()));
@@ -69,7 +69,7 @@ export async function run({ app, page, ui, site, check, shot, remotePort }) {
   // 网页版切会话时发出去的就是这一句（走远程桥，不是桌面的 preload）。
   await remote.evaluate(() => window.coilcoil.setBrowserScope("web-client-other-conversation"));
   await page.bringToFront();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("c.html") } }, { echo: true }], "实时");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("c.html") } } }, { echo: true }], "实时");
   check("桌面：网页版换去看别的会话后，Agent 新开的页面照样立刻出现", await ui.waitFor(() => hasTab(ui, "page-c")), JSON.stringify(await ui.browserTabs()));
   check("桌面：网页版换去看别的会话后，画面照样换成新页面", await ui.waitFor(() => showsAgentPage(page, "page-c")));
   await shot("web-elsewhere");

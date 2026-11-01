@@ -75,7 +75,7 @@ export async function run({ app, page, ui, site, check, shot }) {
   await onMainWindow(app, "restore");
   // 窗口被别人的窗口整个挡住时画面会按设计降帧省电，量帧率前先让它一直露着。
   const release = await keepAppWindowUncovered(app);
-  await ui.send([{ tool: "browser_open", args: { url: site.url("anim.html") } }, { echo: true }], "画面");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("anim.html") } } }, { echo: true }], "画面");
   const mode = () => frame(page).getAttribute("data-mode").catch(() => null);
   check("开着 GPU 时，面板画面走共享纹理", await ui.waitFor(async () => (await mode()) === "texture", 20_000), String(await mode()));
   const fps = await measureFps(page);
@@ -83,7 +83,7 @@ export async function run({ app, page, ui, site, check, shot }) {
   await shot("anim");
 
   const color = (hex) => `${site.url("color.html")}?c=${hex}`;
-  await ui.send([{ tool: "browser_navigate", args: { handle: "btab-1", url: color("2266aa") } }, { echo: true }], "画面");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "navigate", args: { handle: "btab-1", url: color("2266aa") } } }, { echo: true }], "画面");
   check("跳到纯色页，面板画的就是这个颜色", await ui.waitFor(async () => sameColor(await centerColor(page), "2266aa")), JSON.stringify(await centerColor(page)));
   const canvasSize = () => frame(page).evaluate((canvas) => ({ width: canvas.width, height: canvas.height }));
   const panelSize = await page.locator(".browser-live-page").boundingBox();
@@ -91,7 +91,7 @@ export async function run({ app, page, ui, site, check, shot }) {
   check("画面按屏幕像素画，放大不糊", size.width >= Math.round(panelSize.width) - 2, `${JSON.stringify(size)} vs 面板 ${Math.round(panelSize.width)}`);
 
   // 新开第二张（另一种颜色）：面板切过去画它；点回第一张，画回第一张。
-  await ui.send([{ tool: "browser_open", args: { url: color("aa3322") } }, { echo: true }], "画面");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: color("aa3322") } } }, { echo: true }], "画面");
   check("新开的标签页，面板画的是它", await ui.waitFor(async () => sameColor(await centerColor(page), "aa3322")), JSON.stringify(await centerColor(page)));
   await page.locator(".inspector-tab-select").first().click();
   check("点回第一张标签页，画面换回它", await ui.waitFor(async () => sameColor(await centerColor(page), "2266aa")), JSON.stringify(await centerColor(page)));
@@ -140,7 +140,7 @@ export async function run({ app, page, ui, site, check, shot }) {
   check("最小化再恢复，画面照常", await ui.waitFor(async () => sameColor(await centerColor(page), "33aa55") && (await mode()) === "texture"), JSON.stringify(await centerColor(page)));
 
   // 回到动画页：来回折腾之后帧率照旧，没有纹理卡住没还。
-  await ui.send([{ tool: "browser_navigate", args: { handle: "btab-1", url: site.url("anim.html") } }, { echo: true }], "画面");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "navigate", args: { handle: "btab-1", url: site.url("anim.html") } } }, { echo: true }], "画面");
   await ui.waitFor(async () => !sameColor(await centerColor(page), "33aa55"));
   const after = await measureFps(page);
   check(`来回折腾之后，一秒照样画 45 帧以上（实测 ${after} 帧）`, after >= 45, after >= 45 ? "" : await diagnose(app, page));

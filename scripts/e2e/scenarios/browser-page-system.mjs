@@ -35,8 +35,8 @@ export async function run({ app, page, ui, site, check, shot }) {
 
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("system.html") } }, { echo: true }], "系统窗口");
-  await ui.send([{ tool: "browser_click", args: { handle: "btab-1", uid: "999_999" } }, { echo: true }], "系统窗口");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("system.html") } } }, { echo: true }], "系统窗口");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: "999_999" } } }, { echo: true }], "系统窗口");
   const snapshot = await ui.lastEcho();
   const fileUid = /uid=(\S+) button "上传文件/.exec(snapshot)?.[1] ?? /uid=(\S+)[^\n]*上传文件/.exec(snapshot)?.[1];
   const printUid = /uid=(\S+) button "打印"/.exec(snapshot)?.[1];
@@ -56,8 +56,8 @@ export async function run({ app, page, ui, site, check, shot }) {
   const echoes = await page.getByText("工具返回", { exact: false }).count();
   await composer.click();
   await page.keyboard.insertText(`系统窗口 MOCK:${JSON.stringify([
-    { tool: "browser_click", args: { handle: "btab-1", uid: fileUid } },
-    { tool: "browser_click", args: { handle: "btab-1", uid: printUid } },
+    { tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: fileUid } } },
+    { tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: printUid } } },
     { echo: true },
   ])}`);
   await page.keyboard.press("Enter");
@@ -72,7 +72,7 @@ export async function run({ app, page, ui, site, check, shot }) {
     JSON.stringify({ dialogs: await openDialogs(), pdf: await openedPaths() }));
 
   // 2. Agent 用自己的工具上传：拦截不影响它。
-  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "upload_file", args: { uid: fileUid, filePath: upload } } }, { echo: true }], "系统窗口");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.upload_file", args: { uid: fileUid, filePath: upload } } }, { echo: true }], "系统窗口");
   check("Agent 用 upload_file 上传成功", await ui.waitFor(async () => (await title(app)) === "file-agent-upload.txt"), `${await title(app)} ${(await ui.lastEcho()).slice(0, 200)}`);
 
   // 3. 用户自己在画面上点上传框：弹选文件的面板（这里是替身），挑的文件进了页面。

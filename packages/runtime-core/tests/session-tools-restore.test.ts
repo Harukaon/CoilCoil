@@ -16,18 +16,20 @@ function stripCache(value: unknown): unknown {
   return value;
 }
 
-test("a pre-monitor conversation reopens and continues with its saved request prefix; new conversations enable monitor", async (t) => {
+test("a pre-monitor conversation upgrades its tools on reopen while preserving saved history and system prompt", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "coil-legacy-tools-"));
   const cwd = join(root, "project"), agentDir = join(root, "agent"), workflowDir = join(root, "workflow");
   for (const path of [cwd, agentDir, workflowDir]) mkdirSync(path);
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  writeFileSync(join(workflowDir, "package.json"), JSON.stringify({ pi: { extensions:
-    ["default-tools", "terminal", "mcp-tools", "runtime-bridge"].map((name) =>
-      fileURLToPath(new URL(`../../workflow/extensions/${name}.ts`, import.meta.url))),
-  } }));
+  const legacyBrowser = ["browser_open", "browser_navigate", "browser_click", "browser_type", "browser_tabs", "mcp__coilcoil_browser__take_snapshot"];
+  const legacyExtension = join(root, "legacy-browser.ts");
+  writeFileSync(legacyExtension, `export default (pi) => { for (const name of ${JSON.stringify(legacyBrowser)}) pi.registerTool({ name, label: name, description: name, parameters: { type: "object", properties: {} }, execute: async () => ({ content: [], details: {} }) }); };`);
+  const extensions = ["default-tools", "terminal", "browser-act", "mcp-tools", "runtime-bridge"].map((name) =>
+    fileURLToPath(new URL(`../../workflow/extensions/${name}.ts`, import.meta.url)));
+  writeFileSync(join(workflowDir, "package.json"), JSON.stringify({ pi: { extensions: [...extensions, legacyExtension] } }));
   const authPath = join(agentDir, "auth.json");
   writeFileSync(authPath, JSON.stringify({ anthropic: { type: "api_key", key: "offline-test" } }));
-  const modelRuntime = await ModelRuntime.create({ authPath, modelsPath: null, refreshOnCreate: false });
+  const modelRuntime = await ModelRuntime.create({ authPath, modelsPath: null, allowModelNetwork: false });
   const runtime = new CoilCoilRuntime({ agentDir, sessionDir: join(root, "sessions"), workflowDir,
     checkpoints: false, modelRuntime });
   const internal = runtime as unknown as { active: ActiveSession; mcpManager(): unknown };
@@ -55,21 +57,23 @@ test("a pre-monitor conversation reopens and continues with its saved request pr
   await runtime.createSession(cwd, selection);
   assert.ok(internal.active.session.getActiveToolNames().includes("monitor"));
   internal.active.titleAttempted = true;
-  const legacy = internal.active.session.getActiveToolNames().filter((name) => name !== "monitor");
+  const legacy = [...new Set([...internal.active.session.getActiveToolNames().filter((name) => name !== "monitor" && name !== "browser"), ...legacyBrowser])];
   internal.active.session.setActiveToolsByName(legacy);
   await internal.active.session.prompt("a conversation started before monitor existed");
   const first = requests.at(-1)!;
   const path = internal.active.session.sessionFile!;
+  writeFileSync(join(workflowDir, "package.json"), JSON.stringify({ pi: { extensions } }));
 
   await runtime.openSession(cwd, path);
-  await internal.active.session.setModel(modelRuntime.getModel(selection.provider, selection.modelId)!);
   internal.active.titleAttempted = true;
   assert.ok(internal.active.session.getToolDefinition("monitor"), "capability must still be installed");
-  assert.deepEqual(internal.active.session.getActiveToolNames(), legacy, "restore must not add tool declarations");
+  assert.deepEqual(internal.active.session.getActiveToolNames(), [...legacy.filter((name) => !legacyBrowser.includes(name)), "monitor", "browser"], "version upgrades must enable monitor and consolidate old browser declarations");
   await internal.active.session.prompt("continue the saved conversation");
   const resumed = requests.at(-1)!;
   assert.deepEqual(stripCache(resumed.system), stripCache(first.system));
-  assert.deepEqual(stripCache(resumed.tools), stripCache(first.tools));
+  assert.ok(JSON.stringify(resumed.tools).includes('"name":"monitor"'));
+  assert.ok(!JSON.stringify(first.tools).includes('"name":"monitor"'));
+  assert.deepEqual((resumed.tools as Array<{ name: string }>).filter((tool) => tool.name.includes("browser")).map((tool) => tool.name), ["browser"]);
   assert.deepEqual(stripCache(resumed.messages.slice(0, first.messages.length)), stripCache(first.messages));
   assert.equal(requests.length, 2, "only the two explicit user turns request a model");
 

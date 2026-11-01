@@ -13,9 +13,9 @@ export async function run({ page, ui, site, check, shot }) {
   await ui.openBrowserPanel();
   await ui.typeAddress(site.url("u.html"));
   await ui.waitFor(async () => (await ui.browserTabs()).some((tab) => tab.label === "u"));
-  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "list_pages" } }, { echo: true }], "回收");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.list_pages", args: {} } }, { echo: true }], "回收");
   for (const name of ["p1", "p2", "p3", "p4", "p5"]) {
-    await ui.send([{ tool: "browser_open", args: { url: site.url(`${name}.html`) } }, { echo: true }], "回收");
+    await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url(`${name}.html`) } } }, { echo: true }], "回收");
     await hoverPanel();
   }
   const five = await ui.browserTabs();
@@ -25,14 +25,14 @@ export async function run({ page, ui, site, check, shot }) {
   await shot("five");
 
   // 先用一下最老的 p1，它就不再是最久没用的。
-  await ui.send([{ tool: "browser_navigate", args: { handle: "btab-1", url: site.url("p1.html") } }, { echo: true }], "回收");
-  await ui.send([{ tool: "browser_open", args: { url: site.url("p6.html") } }, { echo: true }], "回收");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "navigate", args: { handle: "btab-1", url: site.url("p1.html") } } }, { echo: true }], "回收");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("p6.html") } } }, { echo: true }], "回收");
   const six = (await ui.browserTabs()).map((tab) => tab.label);
   check("第 6 张：p1 刚用过，收掉的是最久没用的 p2", six.includes("p1") && !six.includes("p2") && six.includes("u"), JSON.stringify(six));
   const echo6 = await ui.lastEcho();
   check("工具返回里写明回收了哪张（id + url）", /id=\d+ 的标签页，url 是：\S*p2\.html/.test(echo6), echo6.slice(0, 200));
 
-  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "new_page", args: { url: site.url("p7.html") } } }, { echo: true }], "回收");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.new_page", args: { url: site.url("p7.html") } } }, { echo: true }], "回收");
   const seven = await ui.browserTabs();
   check("走 mcp new_page 开第 7 张：p3 被收掉，Agent 页仍是 5 张", !seven.some((tab) => tab.label === "p3") && seven.filter((tab) => tab.agent).length === 5, JSON.stringify(seven.map((tab) => tab.label)));
   const echo7 = await ui.lastEcho();

@@ -142,6 +142,35 @@ async function registerMcpResult(result: unknown) {
   });
 }
 
+test("the built-in browser is absent from MCP discovery and restored direct tools", async () => {
+  let calls = 0;
+  const tools = [
+    { server: "coilcoil-browser", tool: { name: "list_pages", inputSchema: { type: "object", properties: {} } } },
+    { server: "github", tool: { name: "search", inputSchema: { type: "object", properties: {} } } },
+  ];
+  const manager = {
+    directTools: async () => tools,
+    listServers: async () => tools.map(({ server, tool }) => ({ server, status: "connected", tools: [tool] })),
+    callTool: async () => { calls++; return {}; },
+    serverTools: async () => { calls++; return { status: "connected", tools: [] }; },
+  };
+  const h = lifecycle(manager, [{ type: "custom", customType: MCP_TOOLS_SNAPSHOT_ENTRY,
+    data: { version: 1, sessionId: "session-a", tools, activeNames: tools.map(({ server, tool }) => directToolName(server, tool.name)) } }]);
+  h.emit("session_start");
+  assert.ok(h.active().includes("mcp__github__search"));
+  assert.ok(!h.active().some((name) => name.startsWith("mcp__coilcoil_browser__")));
+  assert.ok(!h.tools.has("mcp__coilcoil_browser__list_pages"));
+  const mcp = h.tools.get("mcp")!;
+  const listed = await mcp.execute("list", { action: "list" });
+  assert.doesNotMatch(listed.content[0].text!, /coilcoil-browser/);
+  for (const action of ["tools", "call"]) {
+    const denied = await mcp.execute(action, { action, server: "coilcoil-browser", tool: "list_pages" });
+    assert.equal(denied.isError, true);
+    assert.equal(denied.details.error, "use_browser");
+  }
+  assert.equal(calls, 0);
+});
+
 const MCP_TEXT_LIMIT = 20 * 1024;
 
 for (const direct of [false, true]) {

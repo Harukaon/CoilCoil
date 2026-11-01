@@ -41,7 +41,8 @@ import {
 import { BROWSER_PARTITION } from "./browser-page-policy";
 import { configureBrowserIdentity } from "./browser-user-agent";
 import { readMountedProjects, writeMountedProjects } from "./mounted-projects";
-import { checkWorkspaceName, memoryBucketName, rememberedMemoryNames, workspaceNamePrompt } from "./workspace-name-guard";
+import { canonicalWorkspacePath } from "./workspace-path";
+import { BrowserWorkspacePartitions } from "./browser-workspace-partitions";
 import { proxyEnvironment, refreshProxyEnvironment } from "./system-proxy";
 import { browserDataStats, clearBrowserData, importBrowserCookies, listImportableProfiles, savedLogins } from "./browser-import";
 import { saveProjectFile } from "./file-edit";
@@ -93,6 +94,24 @@ const MOUNTED_PROJECTS_SET_CHANNEL = "projects:mounted:set";
 /** 挂载的文件夹清单：和 window.json 一样，userData 下自己一个小文件。 */
 function mountedProjectsFile(): string {
   return join(app.getPath("userData"), "mounted-projects.json");
+}
+
+let browserPartitions: BrowserWorkspacePartitions | undefined;
+function workspaceBrowserPartitions(): BrowserWorkspacePartitions {
+  return browserPartitions ??= new BrowserWorkspacePartitions(app.getPath("userData"));
+}
+
+function mountedProjects(): ProjectSelection[] {
+  return readMountedProjects(mountedProjectsFile(), workspaceBrowserPartitions().remember);
+}
+
+function saveMountedProjects(projects: unknown): ProjectSelection[] {
+  return writeMountedProjects(mountedProjectsFile(), projects, workspaceBrowserPartitions().remember);
+}
+
+function workspaceSelection(path: string): ProjectSelection {
+  workspaceBrowserPartitions().remember(path);
+  return { name: basename(path), path: canonicalWorkspacePath(path), kind: "workspace" };
 }
 
 /** 透明度存在 userData 下的单独一个小文件里，和 remote.json 一样。 */
@@ -533,7 +552,8 @@ let remoteAccess: RemoteAccessController | undefined;
 async function homeProject(): Promise<ProjectSelection> {
   const path = join(app.getPath("userData"), "Home");
   await mkdir(path, { recursive: true });
-  return { name: "Home", path, kind: "home" };
+  workspaceBrowserPartitions().remember(path);
+  return { name: "Home", path: canonicalWorkspacePath(path), kind: "home" };
 }
 
 /** What an absolute path in the transcript actually is, so a link can be routed. */
@@ -590,7 +610,7 @@ function remoteController(): RemoteAccessController {
       if (channel === PROJECT_SELECT_CHANNEL) {
         const result = await dialog.showOpenDialog({ title: "打开项目", properties: ["openDirectory"] });
         const path = result.filePaths[0];
-        return result.canceled || !path ? null : { name: basename(path), path, kind: "workspace" } satisfies ProjectSelection;
+        return result.canceled || !path ? null : workspaceSelection(path);
       }
       if (channel === PICK_DIRECTORY_CHANNEL) {
         const options = args[0] as { title?: unknown } | undefined;
@@ -639,8 +659,8 @@ function remoteController(): RemoteAccessController {
       }
       // 手机上的浏览器存储是另一个来源的，挂载的文件夹清单只能问这台机器
       // 要——同一份文件，桌面和手机看到的是同一份清单。
-      if (channel === MOUNTED_PROJECTS_CHANNEL) return readMountedProjects(mountedProjectsFile());
-      if (channel === MOUNTED_PROJECTS_SET_CHANNEL) return writeMountedProjects(mountedProjectsFile(), args[0]);
+      if (channel === MOUNTED_PROJECTS_CHANNEL) return mountedProjects();
+      if (channel === MOUNTED_PROJECTS_SET_CHANNEL) return saveMountedProjects(args[0]);
       // 文件预览：内容是这台机器读出来直接放进返回值里的，手机拿到的和桌面拿到的
       // 是同一份文档，所以图片、PDF、Markdown 在手机上照样看得到。
       if (channel === PREVIEW_OPEN_CHANNEL) return openFilePreview(remotePreviewOwner, args[0] as OpenFilePreviewInput, safePreviewPath);
@@ -877,7 +897,7 @@ async function createWindow(): Promise<void> {
   }, (scopeId) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
     remoteAccess?.broadcast(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
-  }, (contents, params) => popupGuestContextMenu(contents, mainWindow, params));
+  }, (contents, params) => popupGuestContextMenu(contents, mainWindow, params), workspaceBrowserPartitions().partitionFor);
   const terminalRuntime = new TerminalRuntimeManager((state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_STATE_CHANNEL, state);
     remoteAccess?.broadcast(TERMINAL_STATE_CHANNEL, state);
@@ -1092,33 +1112,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(MCP_TEST_CHANNEL, async (_event, input: McpConnectionTestInput) => testMcpConnection(input));
   ipcMain.handle(APP_VERSION_CHANNEL, (): string => app.getVersion());
   ipcMain.handle(PROJECT_HOME_CHANNEL, () => homeProject());
-  ipcMain.handle(PROJECT_SELECT_CHANNEL, async (event): Promise<ProjectSelection | null> => {
+  ipcMain.handle(PROJECT_SELECT_CHANNEL, async (): Promise<ProjectSelection | null> => {
     const result = await dialog.showOpenDialog({
       title: "打开项目",
       properties: ["openDirectory"],
     });
     const path = result.filePaths[0];
     if (result.canceled || !path) return null;
-    // Memory is filed by project name alone, so two same-named folders would
-    // share one memory. Rather than give the store an identity of its own, the
-    // person importing the folder decides. See workspace-name-guard.ts.
-    const open = readMountedProjects(mountedProjectsFile())
-      .map((project) => ({ name: memoryBucketName(project.path), path: project.path }));
-    const verdict = checkWorkspaceName(
-      { name: memoryBucketName(path), path },
-      open,
-      rememberedMemoryNames(join(app.getPath("userData"), "agent", "memory")),
-    );
-    const prompt = workspaceNamePrompt(verdict);
-    if (prompt) {
-      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-      const options = { ...prompt, defaultId: prompt.proceedId ?? 0, cancelId: 0 };
-      const answer = owner
-        ? await dialog.showMessageBox(owner, options)
-        : await dialog.showMessageBox(options);
-      if (prompt.proceedId === undefined || answer.response !== prompt.proceedId) return null;
-    }
-    return { name: basename(path), path, kind: "workspace" };
+    return workspaceSelection(path);
   });
   ipcMain.handle(PICK_DIRECTORY_CHANNEL, async (_event, options?: { title?: string }): Promise<string | null> => {
     const result = await dialog.showOpenDialog({
@@ -1154,9 +1155,9 @@ app.whenReady().then(async () => {
    * 只有未读会计数，运行中的不算——角标问的是「有几件事等着你」，还在跑的那些
    * 不需要你做任何事。0 要显式清掉，否则上一次的数字会一直挂在图标上。
    */
-  ipcMain.handle(MOUNTED_PROJECTS_CHANNEL, () => readMountedProjects(mountedProjectsFile()));
+  ipcMain.handle(MOUNTED_PROJECTS_CHANNEL, () => mountedProjects());
   ipcMain.handle(MOUNTED_PROJECTS_SET_CHANNEL, (_event, projects: unknown) =>
-    writeMountedProjects(mountedProjectsFile(), projects));
+    saveMountedProjects(projects));
   ipcMain.handle(BADGE_COUNT_CHANNEL, (_event, count: number): void => {
     const unread = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
     // 角标的红底白字是系统画的，跟界面里那两个未读点无关：用户要的是界面里别用

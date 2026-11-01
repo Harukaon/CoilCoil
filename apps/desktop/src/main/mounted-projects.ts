@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { canonicalWorkspacePath } from "./workspace-path";
 
 /**
  * 「挂载了哪几个文件夹」这份清单存在磁盘上，而不是只存在网页的 localStorage 里。
@@ -33,26 +34,31 @@ function isMountedProject(value: unknown): value is MountedProject {
 }
 
 /** 只保留认得出来的条目，按路径去重，顺序保持不变。 */
-export function normalizeMountedProjects(value: unknown): MountedProject[] {
+export function normalizeMountedProjects(value: unknown, rememberPath?: (path: string) => void): MountedProject[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const out: MountedProject[] = [];
   for (const entry of value) {
-    if (!isMountedProject(entry) || seen.has(entry.path)) continue;
-    seen.add(entry.path);
-    out.push({ name: entry.name, path: entry.path, kind: "workspace" });
+    if (!isMountedProject(entry)) continue;
+    rememberPath?.(entry.path);
+    const path = canonicalWorkspacePath(entry.path);
+    if (seen.has(path)) continue;
+    seen.add(path);
+    out.push({ name: entry.name, path, kind: "workspace" });
     if (out.length >= MAX_ENTRIES) break;
   }
   return out;
 }
 
 /** 读不到、读坏了都当作空清单——启动不能因为这个文件失败。 */
-export function readMountedProjects(file: string): MountedProject[] {
+export function readMountedProjects(file: string, rememberPath?: (path: string) => void): MountedProject[] {
+  let value: unknown;
   try {
-    return normalizeMountedProjects(JSON.parse(readFileSync(file, "utf8")));
+    value = JSON.parse(readFileSync(file, "utf8"));
   } catch {
     return [];
   }
+  return normalizeMountedProjects(value, rememberPath);
 }
 
 /**
@@ -61,8 +67,8 @@ export function readMountedProjects(file: string): MountedProject[] {
  * 写失败不抛：这条清单丢一次的代价是用户要重新挂一遍文件夹，而让挂载这个动作
  * 本身报错的代价更大。
  */
-export function writeMountedProjects(file: string, value: unknown): MountedProject[] {
-  const projects = normalizeMountedProjects(value);
+export function writeMountedProjects(file: string, value: unknown, rememberPath?: (path: string) => void): MountedProject[] {
+  const projects = normalizeMountedProjects(value, rememberPath);
   try {
     writeFileSync(file, `${JSON.stringify(projects, null, 2)}\n`, "utf8");
   } catch (error) {

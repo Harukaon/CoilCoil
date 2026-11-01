@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -51,4 +51,19 @@ test("两处存储取并集，本地的顺序打底", () => {
   assert.deepEqual(mergeMountedProjects([one], [one]), [one]);
   assert.deepEqual(mergeMountedProjects([], [one, two]), [one, two]);
   assert.deepEqual(mergeMountedProjects([one, two], []), [one, two]);
+});
+
+test("filesystem aliases share one workspace identity while distinct same-named folders remain separate", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-mount-alias-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const first = join(root, "first", "project");
+  const second = join(root, "second", "project");
+  const alias = join(root, "alias");
+  mkdirSync(first, { recursive: true });
+  mkdirSync(second, { recursive: true });
+  symlinkSync(first, alias, "dir");
+  const paths: string[] = [];
+  const entries = normalizeMountedProjects([alias, first, second].map((path) => ({ name: "project", path, kind: "workspace" })), (path) => paths.push(path));
+  assert.deepEqual(entries.map((entry) => entry.path), [realpathSync.native(first), realpathSync.native(second)]);
+  assert.deepEqual(paths, [alias, first, second], "retain original aliases for existing browser accounts before normalizing");
 });

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mkdir, open, readdir, rm, stat, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
+import type { MemoryInputBatch } from "./memory-jottings.ts";
 import type { ProjectMemoryPaths } from "./memory-settings.ts";
 import { buildMemoryWorkerPrompt, expandHome, PROJECT_MEMORY_MAX_CHARS } from "./memory-settings.ts";
 
@@ -17,7 +18,8 @@ const MEMORY_WORKER_SYSTEM_PROMPT = `你是 Pi 的无人值守项目记忆整理
 
 export interface MemoryWorkerRequest {
   paths: ProjectMemoryPaths;
-  sessionFile: string;
+  sessionFile?: string;
+  inputs?: MemoryInputBatch;
   provider: string;
   model: string;
   maximum?: number;
@@ -126,7 +128,7 @@ export function buildMemoryWorkerLaunch(
   const env = options.env ?? process.env;
   const invocation = resolvePiWorkerInvocation(env, options.argv ?? process.argv);
   const guardPath = options.workerGuardPath ?? WORKER_GUARD_PATH;
-  const prompt = buildMemoryWorkerPrompt(request.paths, request.sessionFile, request.maximum, request.generationRules);
+  const prompt = buildMemoryWorkerPrompt(request.paths, request.sessionFile, request.maximum, request.generationRules, request.inputs);
   return {
     command: invocation.command,
     args: [
@@ -138,6 +140,7 @@ export function buildMemoryWorkerLaunch(
       "--name", "memory-worker",
       "--no-extensions",
       "--extension", guardPath,
+      "--extension", fileURLToPath(new URL("./providers/subscription-extension.ts", import.meta.url)),
       "--no-context-files",
       "--no-skills",
       "--no-prompt-templates",
@@ -152,6 +155,8 @@ export function buildMemoryWorkerLaunch(
       NO_COLOR: "1",
       PI_MEMORY_WORKER: "1",
       PI_MEMORY_WORKER_SESSION_FILE: request.sessionFile,
+      PI_MEMORY_WORKER_SESSION_FILES: JSON.stringify(request.inputs?.sessionFiles ?? (request.sessionFile ? [request.sessionFile] : [])),
+      PI_MEMORY_WORKER_NOTES_DIR: request.paths.notesDir,
       PI_MEMORY_WORKER_MAIN_FILE: request.paths.memoryFile,
       PI_MEMORY_WORKER_DETAILS_DIR: request.paths.projectMemoryDir,
       PI_MEMORY_WORKER_LOCK_FILE: request.paths.workerLockFile,
@@ -177,11 +182,13 @@ export async function launchMemoryWorker(
   request: MemoryWorkerRequest,
   options: MemoryWorkerOptions,
   callbacks: {
+    /** Synchronous commit gate after asynchronous lease/setup work. */
+    canStart?: () => boolean;
     onStarted?: () => void | Promise<void>;
     onComplete?: () => void | Promise<void>;
     onError?: (error: unknown) => void | Promise<void>;
   } = {},
-): Promise<"started" | "busy" | "failed"> {
+): Promise<"started" | "busy" | "deferred" | "failed"> {
   const spawnWorker = options.spawnWorker ?? defaultSpawnWorker;
   const workerTimeoutMs = options.workerTimeoutMs ?? WORKER_TIMEOUT_MS;
   let lease: WorkerLease | undefined;
@@ -189,6 +196,10 @@ export async function launchMemoryWorker(
     lease = await tryAcquireWorkerLease(request.paths);
     if (!lease) return "busy";
     await mkdir(request.paths.workerSessionsDir, { recursive: true, mode: 0o700 });
+    if (callbacks.canStart && !callbacks.canStart()) {
+      await lease.release();
+      return "deferred";
+    }
     const child = spawnWorker(buildMemoryWorkerLaunch(request, options));
     child.unref?.();
     await callbacks.onStarted?.();

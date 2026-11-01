@@ -24,7 +24,7 @@ const sameSize = (a, b) => Boolean(a && b) && Math.abs(a.width - b.width) <= 1 &
 
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
-  await ui.send([{ tool: "browser_open", args: { url: site.url("form.html") } }, { echo: true }], "尺寸");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("form.html") } } }, { echo: true }], "尺寸");
   const frame = page.locator("canvas.browser-live-frame");
   // 画布的像素大小跟着页面大小走：页面换了尺寸，新画面到了，画布大小就变。
   const frameSize = () => frame.evaluate((canvas) => `${canvas.width}x${canvas.height}`).catch(() => "");

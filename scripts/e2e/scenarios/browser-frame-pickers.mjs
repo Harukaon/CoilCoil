@@ -11,7 +11,7 @@ const inFrame = (app, which, code) => app.evaluate(({ webContents }, { which, co
 export async function run({ app, page, ui, site, check }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("frames.html") } }, { echo: true }], "内嵌页");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("frames.html") } } }, { echo: true }], "内嵌页");
   await ui.waitFor(async () => (await inFrame(app, "inner", "document.readyState")) === "complete", 10_000);
   await page.waitForTimeout(500);
   const separate = await app.evaluate(({ webContents }) => {

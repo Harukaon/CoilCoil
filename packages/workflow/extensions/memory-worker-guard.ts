@@ -1,10 +1,12 @@
-import { readFile, realpath, unlink } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildMemorySizeNotice, PROJECT_MEMORY_MAX_CHARS } from "./memory-settings.ts";
 
 interface GuardConfig {
-  sessionFile: string;
+  sessionFile?: string;
+  sessionFiles: string[];
+  notesDir?: string;
   memoryFile: string;
   requestedMemoryFile: string;
   detailsDir: string;
@@ -24,7 +26,7 @@ async function canonicalExisting(path: string): Promise<string> {
   return realpath(resolve(path));
 }
 
-async function canonicalCandidate(path: string, cwd: string): Promise<string> {
+export async function canonicalCandidate(path: string, cwd: string): Promise<string> {
   const absolute = resolve(cwd, path);
   try {
     return await realpath(absolute);
@@ -54,9 +56,10 @@ function requiredPath(env: NodeJS.ProcessEnv, name: string): string {
 }
 
 async function loadGuardConfig(env: NodeJS.ProcessEnv): Promise<GuardConfig> {
-  const sessionFile = await canonicalExisting(
-    requiredPath(env, "PI_MEMORY_WORKER_SESSION_FILE"),
-  );
+  const sessionFiles: string[] = env.PI_MEMORY_WORKER_SESSION_FILES === undefined
+    ? [await canonicalExisting(requiredPath(env, "PI_MEMORY_WORKER_SESSION_FILE"))]
+    : await Promise.all((JSON.parse(env.PI_MEMORY_WORKER_SESSION_FILES) as string[]).map(canonicalExisting));
+  const sessionFile = sessionFiles[0];
   const requestedMemoryFile = requiredPath(env, "PI_MEMORY_WORKER_MAIN_FILE");
   const memoryFile = await canonicalExisting(requestedMemoryFile);
   const detailsDir = await canonicalExisting(
@@ -66,6 +69,8 @@ async function loadGuardConfig(env: NodeJS.ProcessEnv): Promise<GuardConfig> {
   const maximum = Number.parseInt(env.PI_MEMORY_WORKER_MAX_CHARS?.trim() ?? "", 10);
   return {
     sessionFile,
+    sessionFiles,
+    notesDir: env.PI_MEMORY_WORKER_NOTES_DIR ? await canonicalCandidate(env.PI_MEMORY_WORKER_NOTES_DIR, detailsDir) : undefined,
     memoryFile,
     requestedMemoryFile,
     detailsDir,
@@ -84,13 +89,13 @@ function isProjectMarkdown(detailsDir: string, path: string): boolean {
 }
 
 function canRead(config: GuardConfig, path: string, toolName: string): boolean {
-  if (path === config.sessionFile) return true;
+  if (config.sessionFiles.includes(path)) return true;
   if (toolName === "grep" && isInside(config.detailsDir, path)) return true;
   return isProjectMarkdown(config.detailsDir, path);
 }
 
 function canWrite(config: GuardConfig, path: string): boolean {
-  return isProjectMarkdown(config.detailsDir, path);
+  return isProjectMarkdown(config.detailsDir, path) && !(config.notesDir && isInside(config.notesDir, path));
 }
 
 function blocked(reason: string): { block: true; reason: string } {
@@ -174,12 +179,4 @@ export default function memoryWorkerGuard(
     };
   });
 
-  pi.on("session_shutdown", async () => {
-    try {
-      const config = await configPromise;
-      if (config.lockFile) await unlink(config.lockFile).catch(() => undefined);
-    } catch {
-      // Invalid configuration already blocks every model tool call.
-    }
-  });
 }

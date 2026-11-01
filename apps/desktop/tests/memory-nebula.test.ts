@@ -88,13 +88,13 @@ test("收起状态下没有任何两张卡重叠", () => {
 
 test("展开最大的那个项目，仍然没有卡片重叠", () => {
   // 27 条的块很宽；如果只按高度让位，处在圆环侧面的块会压回自己的项目卡上。
-  const layout = buildMemoryNebula(globalDocument, realisticStore(), new Set(["feedmob"]));
+  const layout = buildMemoryNebula(globalDocument, realisticStore(), new Set(["project:/store/feedmob"]));
   assert.equal(layout.nodes.filter((node) => node.kind === "entry").length, 27);
   assert.deepEqual(overlappingPairs(layout.nodes), []);
 });
 
 test("九个项目全部展开，七十五张卡也互不重叠", () => {
-  const all = new Set(["Home", "SuoCode", "feedmob", "project", "shijieshuju3", "unity2"]);
+  const all = new Set(["Home", "SuoCode", "feedmob", "project", "shijieshuju3", "unity2"].map((name) => `project:/store/${name}`));
   const layout = buildMemoryNebula(globalDocument, realisticStore(), all);
   assert.equal(layout.nodes.length, 75);
   assert.deepEqual(overlappingPairs(layout.nodes), []);
@@ -102,9 +102,9 @@ test("九个项目全部展开，七十五张卡也互不重叠", () => {
 
 test("展开的项目把邻居推开，而不是画到它们身上", () => {
   const closed = buildMemoryNebula(globalDocument, realisticStore());
-  const open = buildMemoryNebula(globalDocument, realisticStore(), new Set(["feedmob"]));
+  const open = buildMemoryNebula(globalDocument, realisticStore(), new Set(["project:/store/feedmob"]));
   const ringRadius = (layout: ReturnType<typeof buildMemoryNebula>): number => {
-    const project = layout.nodes.find((node) => node.id === "project:Home")!;
+    const project = layout.nodes.find((node) => node.id === "project:/store/Home")!;
     return Math.hypot(project.x, project.y);
   };
   assert.ok(ringRadius(open) > ringRadius(closed), "展开后外圈必须变大");
@@ -120,7 +120,7 @@ test("记忆块摆成近似方形，不会拉成一长条", () => {
 
 test("卡片尺寸就是样式里的尺寸——两边对不上就会重叠", () => {
   // 第一版按每张卡 34px 排，实际画出来 140px，于是 92 对卡片压在一起。
-  const layout = buildMemoryNebula(globalDocument, realisticStore(), new Set(["SuoCode"]));
+  const layout = buildMemoryNebula(globalDocument, realisticStore(), new Set(["project:/store/SuoCode"]));
   for (const node of layout.nodes.filter((item) => item.kind === "entry")) {
     assert.equal(node.width, ENTRY_SIZE.width);
     assert.equal(node.height, ENTRY_SIZE.height);
@@ -128,7 +128,7 @@ test("卡片尺寸就是样式里的尺寸——两边对不上就会重叠", ()
 });
 
 test("每个展开的项目只牵一条线到它的块，不是每条记忆一条", () => {
-  const layout = buildMemoryNebula(globalDocument, realisticStore(), new Set(["feedmob"]));
+  const layout = buildMemoryNebula(globalDocument, realisticStore(), new Set(["project:/store/feedmob"]));
   const toEntries = layout.links.filter((link) => link.to.includes("/memories/"));
   assert.equal(toEntries.length, 1);
   assert.equal(layout.links.filter((link) => link.from === GLOBAL_NODE_ID).length, 9);
@@ -139,4 +139,20 @@ test("空的记忆库也画得出来", () => {
   assert.deepEqual(layout.nodes.map((node) => node.id), [GLOBAL_NODE_ID]);
   assert.deepEqual(layout.links, []);
   assert.ok(layout.width > 0 && layout.height > 0);
+});
+
+
+test("equally named workspaces have separate groups and expand independently", () => {
+  const docs = [
+    document({ projectName: "project", filePath: "/store/project-aaa/MEMORY.md" }),
+    document({ projectName: "project", filePath: "/store/project-bbb/MEMORY.md" }),
+    { ...entry("project-aaa", "one"), projectName: "project" },
+    { ...entry("project-bbb", "two"), projectName: "project" },
+  ];
+  const groups = groupMemoryProjects(docs);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map((group) => group.entries.length), [1, 1]);
+  const layout = buildMemoryNebula(globalDocument, docs, new Set([groups[0].id]));
+  assert.equal(layout.nodes.filter((node) => node.kind === "entry").length, 1);
+  assert.equal(new Set(layout.nodes.map((node) => node.id)).size, layout.nodes.length);
 });

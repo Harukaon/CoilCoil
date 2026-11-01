@@ -7,7 +7,7 @@ import {
   createAgentSession, createEventBus, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import projectMemoryExtension from "@coilcoil/workflow/extensions/project-memory.js";
+import projectMemoryExtension, { resolveProjectMemoryPaths } from "@coilcoil/workflow/extensions/project-memory.js";
 import contextTranscriptExtension, { transcriptPathFor } from "@coilcoil/workflow/extensions/context-transcript.js";
 import compactionExtension from "@coilcoil/workflow/extensions/compaction.js";
 import runtimeBridgeExtension, { RUNTIME_BRIDGE_STATE_EVENT, type RuntimeBridgeState } from "@coilcoil/workflow/extensions/runtime-bridge.js";
@@ -27,7 +27,6 @@ test("actual requests keep their session prompt through memory edits, reload, co
   const project = join(root, "project");
   const agentDir = join(root, "agent");
   const memoryRoot = join(root, "memory");
-  const memoryDir = join(memoryRoot, "project");
   const sessions = new Set<AgentSession>();
   const originalEnv = new Map(["PI_CODING_AGENT_DIR", "PI_MEMORY_WORKER_ENTRY", "PI_PROJECT_MEMORY_DIR"].map((key) => [key, process.env[key]]));
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -42,6 +41,7 @@ test("actual requests keep their session prompt through memory edits, reload, co
   });
   mkdirSync(project, { recursive: true });
   mkdirSync(agentDir, { recursive: true });
+  const memoryDir = (await resolveProjectMemoryPaths(project, memoryRoot)).projectMemoryDir;
   mkdirSync(memoryDir, { recursive: true });
   writeFileSync(join(project, "SYSTEM.md"), "original project instructions");
   writeFileSync(join(memoryDir, "MEMORY.md"), "original project memory");

@@ -17,7 +17,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { convertMcpResult, type ExtensionAPI, type ExtensionContext, limitMcpContent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { McpManager } from "@coilcoil/mcp";
-import { BROWSER_MCP_SERVER, drainBrowserNotice, noteBrowserCall } from "./browser-recycle-notice.ts";
+import { BROWSER_MCP_SERVER } from "./browser-recycle-notice.ts";
 import { MCP_TOOLS_REFRESH_ENTRY, MCP_TOOLS_SNAPSHOT_ENTRY } from "./mcp-session-state.ts";
 export { MCP_TOOLS_REFRESH_ENTRY, MCP_TOOLS_SNAPSHOT_ENTRY } from "./mcp-session-state.ts";
 
@@ -208,6 +208,7 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
     description: [
       "Access the configured MCP servers in three steps: action=\"list\" shows which servers exist (no network, fast); action=\"tools\" with a server name shows that server's tools and their input schemas (this connects, which can take a few seconds); action=\"call\" with server, tool and args matching that tool's input schema runs a tool.",
       "When you need a capability from an external system, start with list; once you have picked a server, use tools on it. Do not query every server up front.",
+      "Use the browser tool for the built-in browser, including browser debugging operations.",
     ].join(" "),
     parameters: McpParams,
 
@@ -218,7 +219,7 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
       }
 
       if (params.action === "list") {
-        const servers = await manager.listServers();
+        const servers = (await manager.listServers()).filter((entry) => entry.server !== BROWSER_MCP_SERVER);
         return textResult(describeServers(servers), {
           servers: servers.map((entry) => entry.server),
           connected: servers.filter((entry) => entry.status === "connected").map((entry) => entry.server),
@@ -226,6 +227,9 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
       }
 
       const server = params.server?.trim();
+      if (server === BROWSER_MCP_SERVER) {
+        return textResult("内置浏览器已统一到 browser 工具，请用它的 list、tools、call 按需查询和调用；未提供 browser 的 Agent 不能使用内置浏览器。", { error: "use_browser" }, true);
+      }
       if (params.action === "tools") {
         if (!server) return textResult("tools 需要给出 server。", { error: "missing_target" }, true);
         try {
@@ -247,19 +251,8 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
       }
       try {
         const result = await manager.callTool(server, tool, (params.args ?? {}) as Record<string, unknown>, signal);
-        let notice = "";
-        if (server === BROWSER_MCP_SERVER) {
-          const content = (result as { content?: Array<{ type: string; text?: string }> }).content;
-          const text = Array.isArray(content)
-            ? content.filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n")
-            : JSON.stringify(result);
-          // 内置浏览器替 Agent 收掉了超出上限的标签页的话，就在这次返回里告诉它。
-          const session = ctx?.sessionManager?.getSessionId();
-          await noteBrowserCall(session, text);
-          notice = drainBrowserNotice(session);
-        }
         // 工具报错是返回 isError，不是抛异常；照实标成失败，界面和模型才不会当它成功了。
-        return toolResult(server, tool, result, notice);
+        return toolResult(server, tool, result);
       } catch (error) {
         // The server's own words, verbatim. "Invalid API key" tells the model
         // what to do next; "MCP call failed" does not.
@@ -278,8 +271,9 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
     let listed: DirectTool[] = [];
     const registeredNames = new Set<string>();
     const replace = (next: DirectTool[], activeNames?: string[]): void => {
-      const ordinary = pi.getActiveTools().filter((name) => !registeredNames.has(name));
-      listed = next;
+      const ordinary = pi.getActiveTools().filter((name) => !registeredNames.has(name)
+        && !name.startsWith("mcp__coilcoil_browser__"));
+      listed = next.filter((entry) => entry.server !== BROWSER_MCP_SERVER);
       registerDirectTools(pi, manager, listed);
       const names = listed.map(({ server, tool }) => directToolName(server, tool.name));
       for (const name of names) registeredNames.add(name);

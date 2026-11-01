@@ -72,7 +72,7 @@ function helpers({ app, page, ui }) {
 
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
-  await ui.send([{ tool: "browser_open", args: { url: site.url("form.html") } }, { echo: true }], "元素");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("form.html") } } }, { echo: true }], "元素");
   await ui.waitFor(async () => Boolean(await inPage(app, "form.html", "document.readyState === 'complete'")), 15_000);
   await page.waitForTimeout(800);
   const t = helpers({ app, page, ui });

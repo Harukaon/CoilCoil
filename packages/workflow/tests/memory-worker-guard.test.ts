@@ -282,15 +282,15 @@ test("guard with missing configuration blocks every tool instead of failing open
   assert.match(result.reason, /缺少环境变量/);
 });
 
-test("guard removes only its current project worker lock on shutdown", async (t) => {
+test("guard leaves workspace lease release to the parent after completion bookkeeping", async (t) => {
   const harness = await createGuardHarness(t);
   const otherProjectLock = join(harness.memoryRoot, "B", ".worker.lock");
   await mkdir(join(harness.memoryRoot, "B"), { recursive: true });
   await writeFile(harness.lockFile, "A", "utf8");
   await writeFile(otherProjectLock, "B", "utf8");
 
-  await harness.handlers.get("session_shutdown")![0]();
+  assert.equal(harness.handlers.has("session_shutdown"), false);
 
-  assert.equal(await pathMissing(harness.lockFile), true);
+  assert.equal(await pathMissing(harness.lockFile), false);
   assert.equal(await pathMissing(otherProjectLock), false);
 });

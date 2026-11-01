@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -27,6 +28,7 @@ interface MemoryRuntime {
     projectContents?: Array<{ filePath: string; content: string }>;
   }, cwd?: string): Promise<MemoryConfigurationSnapshot>;
   reloadActiveSessionResources(label?: string): void;
+  ready(): Promise<{ getModel(provider: string, modelId: string): unknown; checkAuth(provider: string): Promise<unknown> }>;
 }
 
 test("memory configuration reads and saves global and project documents", async (context) => {
@@ -50,6 +52,7 @@ test("memory configuration reads and saves global and project documents", async 
     assert.equal(initial.settings.globalMaxChars, 2_000);
     assert.equal(initial.global.exists, false);
     assert.equal(initial.project?.exists, false);
+    assert.deepEqual(initial.jottings, []);
 
     const settings: MemorySettings = {
       ...initial.settings,
@@ -137,6 +140,9 @@ test("memory bodies and the turn counter reach the panel", async (context) => {
   mkdirSync(join(project, ".git"), { recursive: true });
   const projectStore = join(storageRoot, "project-open");
   mkdirSync(join(projectStore, "memories"), { recursive: true });
+  writeFileSync(join(projectStore, ".coilcoil-workspace.json"), JSON.stringify({
+    version: 1, projectRoot: realpathSync(project), projectName: "project-open",
+  }));
   writeFileSync(join(projectStore, "MEMORY.md"), "- [部署](memories/部署.md)：生产用 server-a\n");
   writeFileSync(join(projectStore, "memories", "部署.md"), "端口 8443");
   writeFileSync(
@@ -173,4 +179,48 @@ test("memory bodies and the turn counter reach the panel", async (context) => {
     if (previousStorage === undefined) delete process.env.PI_PROJECT_MEMORY_DIR;
     else process.env.PI_PROJECT_MEMORY_DIR = previousStorage;
   }
+});
+
+test("workspace jottings stay separate from durable memory and global worker model settings are shared", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-memory-dream-"));
+  const previousStorage = process.env.PI_PROJECT_MEMORY_DIR;
+  process.env.PI_PROJECT_MEMORY_DIR = join(root, "memory");
+  context.after(() => {
+    if (previousStorage === undefined) delete process.env.PI_PROJECT_MEMORY_DIR;
+    else process.env.PI_PROJECT_MEMORY_DIR = previousStorage;
+    rmSync(root, { recursive: true, force: true });
+  });
+  const project = join(root, "workspace");
+  mkdirSync(project, { recursive: true });
+  const runtime = Object.create(CoilCoilRuntime.prototype) as MemoryRuntime;
+  runtime.agentDir = join(root, "agent");
+  runtime.mcpCwd = (cwd) => cwd ?? project;
+  runtime.reloadActiveSessionResources = () => undefined;
+  runtime.ready = async () => ({
+    getModel: (provider, modelId) => provider === "claude-secondary" && modelId === "model/a" ? {} : undefined,
+    checkAuth: async (provider) => provider === "claude-secondary" ? "configured" : undefined,
+  });
+  const initial = await runtime.getMemoryConfiguration(project);
+  const notesDir = join(initial.project!.directory, "jottings");
+  mkdirSync(notesDir, { recursive: true });
+  writeFileSync(join(notesDir, "candidate.md"), "A provisional observation, not a durable fact.");
+  const listed = await runtime.getMemoryConfiguration(project);
+  assert.equal(listed.jottings?.length, 1);
+  assert.equal(listed.jottings?.[0].kind, "jotting");
+  assert.equal(listed.jottings?.[0].maxChars, 0);
+  assert.ok(!listed.projects.some((document) => document.kind === "jotting"));
+  const settings = { ...listed.settings, workerProvider: "claude-secondary", workerModelId: "model/a" };
+  await runtime.saveMemoryConfiguration({ settings, globalContent: "", projectContents: [
+    { filePath: listed.jottings![0].filePath, content: "Corrected candidate" },
+  ] }, project);
+  assert.equal(readFileSync(listed.jottings![0].filePath, "utf8"), "Corrected candidate");
+  const another = join(root, "another-workspace");
+  mkdirSync(another);
+  assert.deepEqual((await runtime.getMemoryConfiguration(another)).settings, settings);
+  await assert.rejects(runtime.saveMemoryConfiguration({
+    settings: { ...settings, workerModelId: "removed" }, globalContent: "",
+  }, project), /模型已不可用/);
+  await assert.rejects(runtime.saveMemoryConfiguration({
+    settings: { ...settings, workerModelId: undefined }, globalContent: "",
+  }, project), /同时选择/);
 });

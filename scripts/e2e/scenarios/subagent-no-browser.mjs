@@ -14,7 +14,7 @@ export async function run({ ui, check, gatewayLog }) {
   const childRequests = gatewayLog().filter((entry) => (entry.systemFull ?? "").includes("You are a read-only code reconnaissance subagent."));
   const tools = [...new Set(childRequests.flatMap((entry) => entry.tools))];
   check("子 Agent 拿到 mcp 和 terminal", tools.includes("mcp") && tools.includes("terminal"), tools.join(","));
-  check("子 Agent 没有 browser_* 工具", tools.length > 0 && !tools.some((tool) => tool.startsWith("browser_")), tools.join(","));
+  check("子 Agent 没有 browser 工具", tools.length > 0 && !tools.some((tool) => tool === "browser" || tool.startsWith("browser_")), tools.join(","));
   const listed = childRequests.find((entry) => entry.last.role === "tool");
   check("子 Agent 的 mcp list 里没有 coilcoil-browser", Boolean(listed) && !listed.last.text.includes("coilcoil-browser"), listed?.last.text.slice(0, 120));
 }

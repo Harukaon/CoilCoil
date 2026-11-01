@@ -61,7 +61,7 @@ const onMainWindow = (app, action) => app.evaluate(({ BrowserWindow, app: electr
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: colorUrl(site, "localhost", "2266aa") } }, { echo: true }], "后台");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: colorUrl(site, "localhost", "2266aa") } } }, { echo: true }], "后台");
   const first = await sampleColor(app);
   check("AI 打开了纯色测试页，截图是这个页面", first.ok && sameColor(first.rgb, "2266aa"), JSON.stringify(first));
 
@@ -97,8 +97,8 @@ export async function run({ app, page, ui, site, check, shot }) {
     await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.insertText(`后台 MOCK:${JSON.stringify([
       { tool: "bash", args: { command: "sleep 3" } },
-      { tool: "browser_navigate", args: { handle: "btab-1", url: colorUrl(site, state.host, state.color) } },
-      { tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "take_screenshot" } },
+      { tool: "browser", args: { action: "call", tool: "navigate", args: { handle: "btab-1", url: colorUrl(site, state.host, state.color) } } },
+      { tool: "browser", args: { action: "call", tool: "devtools.take_screenshot", args: {} } },
       { echo: true },
     ])}`);
     await page.getByRole("button", { name: "发送消息" }).click();

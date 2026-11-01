@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { workspaceMemoryDirectory } from "./memory-workspace.ts";
 import {
   mkdir,
   open,
@@ -108,15 +109,17 @@ export async function resolveProjectMemoryPaths(
   const projectRoot = await resolveProjectRoot(cwd);
   const canonicalStorageRoot = resolve(storageRoot);
   const projectName = basename(projectRoot) || "root";
-  const projectMemoryDir = join(canonicalStorageRoot, projectName);
+  const workspace = await workspaceMemoryDirectory(canonicalStorageRoot, projectRoot, projectName);
+  const { projectMemoryDir } = workspace;
   return {
     projectRoot,
     projectName,
     storageRoot: canonicalStorageRoot,
     memoryFile: join(projectMemoryDir, "MEMORY.md"),
     globalMemoryFile: join(canonicalStorageRoot, "GLOBAL.md"),
-    projectMemoryDir,
+    ...workspace,
     entriesDir: join(projectMemoryDir, MEMORY_ENTRIES_DIRNAME),
+    notesDir: join(projectMemoryDir, "jottings"),
     workerSessionsDir: join(projectMemoryDir, ".worker-sessions"),
     workerLockFile: join(projectMemoryDir, ".worker.lock"),
     runtimeStateFile: join(projectMemoryDir, ".coilcoil-memory-state.json"),
@@ -428,7 +431,9 @@ export async function ensureProjectMemory(paths: ProjectMemoryPaths): Promise<vo
   await mkdir(paths.storageRoot, { recursive: true, mode: 0o700 });
   await ensureFile(paths.globalMemoryFile, "");
   await mkdir(paths.projectMemoryDir, { recursive: true, mode: 0o700 });
+  await ensureFile(join(paths.projectMemoryDir, ".coilcoil-workspace.json"), JSON.stringify({ version: 1, projectRoot: paths.projectRoot, projectName: paths.projectName }) + "\n");
   await migrateLegacyProjectMemory(paths);
+  await mkdir(paths.notesDir, { recursive: true, mode: 0o700 });
   await ensureFile(paths.memoryFile, MEMORY_TEMPLATE);
   await migrateProjectMemoryToIndex(paths);
 }

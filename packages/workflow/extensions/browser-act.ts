@@ -1,24 +1,11 @@
-/**
- * 交互层浏览器工具：像人一样操作页面，而不是调试页面。
- *
- * coilcoil-browser 是调试型工具（脚本/控制台/网络/性能/快照），模型拿它做点击、
- * 等待、切页时错误率 8.27%（4573 次调用里 378 次错，导航/等待/选页占大头）。
- * 这一层只做四件事，每一步都自动带上当前页面状态，模型不用自己拼 pageId、
- * 不用猜工具名、不用在导航后手动重取快照：
- *
- * - browser_open：开页即返回句柄，后续操作拿句柄而不是 pageId 数字
- * - browser_navigate：导航含等待可加载，超时报错带当前状态
- * - browser_click：点击后自动重读快照；点不中时把新快照交回去，让模型用新 uid 再点
- * - browser_type：输入后回读确认
- * - browser_tabs：这个对话里的全部网页（用户开的也在），每张给一个句柄；用户和 Agent
- *   用的是同一个页面，不用接管、不会刷新
- *
- * 调试继续用 coilcoil-browser，两层分家。
- */
+/** Browser actions share one progressively disclosed browser entry point. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { browserBridgeEndpoint, drainBrowserNotice, noteBrowserCall } from "./browser-recycle-notice.ts";
 import { requestMcpManager } from "./mcp-tools.ts";
+import { registerBrowserGateway, type BrowserAction } from "./browser-tool.ts";
+
+export const LEGACY_BROWSER_TOOLS = ["browser_open", "browser_navigate", "browser_click", "browser_type", "browser_tabs"] as const;
 
 const BROWSER_SERVER = "coilcoil-browser";
 
@@ -97,7 +84,7 @@ export function pageIdsForTabs(listing: string, tabs: ReadonlyArray<{ title: str
 export function pendingDialogNotice(message: string): string | undefined {
   const match = /Open dialog\s*(alert|confirm|prompt|beforeunload):\s*([^\n]*?)\.?\s*Call handle_dialog/i.exec(message);
   if (!match) return undefined;
-  return `操作已生效，网页弹出了一个 ${match[1]} 对话框：「${match[2]}」。页面在等回答，别再重复这一步：用 coilcoil-browser 的 handle_dialog（accept 或 dismiss）处理它，用户也可能直接在面板里点掉。`;
+  return `操作已生效，网页弹出了一个 ${match[1]} 对话框：「${match[2]}」。页面在等回答，别再重复这一步：用 browser 调用 devtools.handle_dialog（accept 或 dismiss）处理它，用户也可能直接在面板里点掉。`;
 }
 
 interface BrowserTabInfo {
@@ -169,7 +156,7 @@ async function currentState(
 
 const handleFields = {
   handle: Type.Optional(Type.String({
-    description: "Page handle returned by browser_open. With a handle you do not need pageId; with neither, the call applies to the currently selected page.",
+    description: "Page handle returned by open. With a handle you do not need pageId; with neither, the call applies to the currently selected page.",
   })),
   pageId: Type.Optional(Type.Number({
     description: "Kept for backward compatibility: the numeric page id. Prefer handle, and use the handle of a newly opened page.",
@@ -179,13 +166,16 @@ const handleFields = {
 export default function browserActExtension(pi: ExtensionAPI): void {
   // 这个扩展属于一个会话；会话 id 用来找它那一份浏览器的回收记录。
   let sessionId: string | undefined;
+  const actions = new Map<string, BrowserAction>();
   const registerTool: ExtensionAPI["registerTool"] = (tool) => {
     const execute = tool.execute;
-    pi.registerTool({
-      ...tool,
+    actions.set(tool.name, {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
       async execute(toolCallId, params, signal, onUpdate, ctx) {
         sessionId = ctx?.sessionManager?.getSessionId() ?? sessionId;
-        const result = await execute(toolCallId, params, signal, onUpdate, ctx);
+        const result = await execute(toolCallId, params as never, signal, onUpdate, ctx);
         const notice = drainBrowserNotice(sessionId);
         const first = result.content[0];
         if (notice && first?.type === "text") first.text += notice;
@@ -208,18 +198,21 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   };
   const resolvePageId = (handle?: string, pageId?: number): number | undefined => {
     if (pageId !== undefined) return pageId;
-    if (handle && handleToPage.has(handle)) return handleToPage.get(handle);
+    if (handle) {
+      if (!handleToPage.has(handle)) throw new Error("Unknown browser handle; list tabs to obtain a current handle.");
+      return handleToPage.get(handle);
+    }
     return undefined;
   };
 
   registerTool({
-    name: "browser_open",
+    name: "open",
     label: "Browser Open",
     description: [
       "Open a web page in the built-in browser and return a handle for it.",
-      "Use the browser_open, browser_navigate, browser_click, browser_type and browser_tabs group to interact with pages like a person (click, fill forms, navigate); for debugging (scripts, console, network, performance) keep using coilcoil-browser.",
+      "Use these browser actions to interact with pages; discover additional debugging operations with browser action=tools.",
       "Pass the returned handle to the later calls instead of tracking pageId numbers yourself.",
-      "Do your own work in pages you opened yourself. When the user says 'this page' or 'the one I opened', call browser_tabs to find the page the user is looking at and act through its handle. A page the user opened may hold work in progress, so do not navigate or change forms there unless asked.",
+      "Do your own work in pages you opened yourself. When the user says 'this page' or 'the one I opened', call tabs to find the page the user is looking at and act through its handle. A page the user opened may hold work in progress, so do not navigate or change forms there unless asked.",
     ].join(" "),
     parameters: Type.Object({
       url: Type.String({ description: "Address to open" }),
@@ -258,7 +251,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   });
 
   registerTool({
-    name: "browser_navigate",
+    name: "navigate",
     label: "Browser Navigate",
     description: "Navigate the page behind a handle to a new address and wait until it has loaded. When it times out, the error carries the current page state; read that state before retrying instead of retrying blindly.",
     parameters: Type.Object({
@@ -295,7 +288,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   });
 
   registerTool({
-    name: "browser_click",
+    name: "click",
     label: "Browser Click",
     description: "Click a page element. The current page state comes back automatically after every click; when the click misses (for example the uid has expired), a fresh snapshot comes back instead, and you should click again with the uid from that new snapshot.",
     parameters: Type.Object({
@@ -331,7 +324,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   });
 
   registerTool({
-    name: "browser_type",
+    name: "type",
     label: "Browser Type",
     description: "Fill text into an input and read it back to confirm. Take a snapshot with take_snapshot first to get the input's uid.",
     parameters: Type.Object({
@@ -368,14 +361,14 @@ export default function browserActExtension(pi: ExtensionAPI): void {
   });
 
   registerTool({
-    name: "browser_tabs",
+    name: "tabs",
     label: "Browser Tabs",
-    description: "List every page of the built-in browser in this conversation (the ones you opened and the ones the user opened), give each a handle, and mark which one the user is looking at. You and the user share the very same pages: act on a page directly with its handle through browser_click, browser_type or browser_navigate; there is nothing to take over and the page is not reloaded.",
+    description: "List every page of the built-in browser in this conversation (the ones you opened and the ones the user opened), give each a handle, and mark which one the user is looking at. You and the user share the very same pages: act on a page directly with its handle through click, type or navigate; there is nothing to take over and the page is not reloaded.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, signal) {
       try {
         const { tabs } = await bridgeRequest<{ tabs: BrowserTabInfo[] }>("tabs", sessionId);
-        if (!tabs.length) return textResult("这个对话里还没有打开的网页。要看网页就用 browser_open 打开。", { tabs });
+        if (!tabs.length) return textResult("这个对话里还没有打开的网页。要看网页就用 open 打开。", { tabs });
         // 新开的页面刚出现在浏览器里时，页面列表可能要等一下才列得到。
         let ids: Array<number | undefined> = [];
         for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -396,4 +389,5 @@ export default function browserActExtension(pi: ExtensionAPI): void {
       }
     },
   });
+  registerBrowserGateway(pi, actions);
 }

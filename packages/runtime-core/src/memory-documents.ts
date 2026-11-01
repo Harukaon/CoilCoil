@@ -8,14 +8,18 @@ export const PROJECT_MEMORY_FILE = "MEMORY.md";
 /** Memory bodies live one file each in this subfolder; the index only points at them. */
 export const PROJECT_MEMORY_ENTRIES_DIR = "memories";
 
+/** Uncurated notes are shown separately from the long-term index and bodies. */
+export function listMemoryJottings(directory: string, projectName: string): MemoryDocumentSnapshot[] {
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
+    .map((entry) => entry.name).sort()
+    .map((name) => readMemoryDocument("project", name.replace(/\.md$/i, ""), join(directory, name),
+      directory, 0, undefined, projectName, "jotting"));
+}
+
 /** Where the background summarizer keeps its per-project turn counter. */
 const PROJECT_MEMORY_STATE_FILE = ".coilcoil-memory-state.json";
-
-/** Turns between background summaries. A count, not a character budget, so it has its own clamp. */
-export function normalizeSummarizeEveryTurns(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return 30;
-  return Math.min(1_000, Math.max(1, Math.round(value)));
-}
 
 /** Read one memory file into the shape the UI edits. A missing file is an empty document. */
 export function readMemoryDocument(
@@ -73,6 +77,7 @@ export function readMemoryTurnCount(projectDirectory: string): number {
 function projectMemoryEntries(
   directory: string,
   projectName: string,
+  projectRoot?: string,
 ): MemoryDocumentSnapshot[] {
   const entriesDirectory = join(directory, PROJECT_MEMORY_ENTRIES_DIR);
   let names: string[] = [];
@@ -92,7 +97,7 @@ function projectMemoryEntries(
     join(entriesDirectory, name),
     entriesDirectory,
     0,
-    undefined,
+    projectRoot,
     projectName,
     "entry",
   ));
@@ -124,19 +129,29 @@ export function listProjectMemoryDocuments(
   const byPath = new Map<string, MemoryDocumentSnapshot>();
   for (const name of names) {
     const directory = join(storageRoot, name);
+    let projectName = name;
+    let projectRoot: string | undefined;
+    const ownerFile = join(directory, ".coilcoil-workspace.json");
+    if (existsSync(ownerFile)) {
+      const owner = JSON.parse(readFileSync(ownerFile, "utf8")) as { version?: number; projectRoot?: string; projectName?: string };
+      if (owner.version === 1 && typeof owner.projectRoot === "string") {
+        projectRoot = owner.projectRoot;
+        if (typeof owner.projectName === "string" && owner.projectName.trim()) projectName = owner.projectName;
+      }
+    }
     const document = readMemoryDocument(
       "project",
-      name,
+      projectName,
       join(directory, PROJECT_MEMORY_FILE),
       directory,
       maxChars,
-      undefined,
-      name,
+      projectRoot,
+      projectName,
     );
     if (document.exists) byPath.set(document.filePath, document);
     // Bodies follow their own index so the panel keeps showing everything the
     // store holds, not just the summaries that stayed in the index file.
-    for (const entry of projectMemoryEntries(directory, name)) byPath.set(entry.filePath, entry);
+    for (const entry of projectMemoryEntries(directory, projectName, projectRoot)) byPath.set(entry.filePath, entry);
   }
   if (current) byPath.set(current.filePath, current);
   return [...byPath.values()].sort((left, right) => (

@@ -8,7 +8,7 @@ const inPage = (app, code) => app.evaluate(({ webContents }, code) => {
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("tooltip.html") } }, { echo: true }], "提示");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("tooltip.html") } } }, { echo: true }], "提示");
   await ui.waitFor(async () => (await inPage(app, "document.readyState")) === "complete");
   await page.waitForTimeout(500);
   const box = await page.locator(".browser-live-page").boundingBox();

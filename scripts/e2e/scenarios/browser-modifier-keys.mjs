@@ -11,7 +11,7 @@ export async function run({ app, page, ui, site, check }) {
     return;
   }
   await ui.newConversation("projA");
-  await ui.send([{ tool: "browser_open", args: { url: site.url("form.html") } }, { echo: true }], "按键");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("form.html") } } }, { echo: true }], "按键");
   await ui.waitFor(async () => (await inPage(app, "document.readyState")) === "complete", 15_000);
   await page.waitForTimeout(800);
 

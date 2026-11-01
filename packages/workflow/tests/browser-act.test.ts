@@ -40,15 +40,11 @@ function collectTools(): { tools: Map<string, { description: string; execute: (i
   return { tools, pi };
 }
 
-test("browser-act 注册交互工具，描述里分清交互与调试；接管工具已经没有了", () => {
+test("browser exposes one compact entry point and keeps operation schemas out of the default tool list", () => {
   const { tools } = collectTools();
-  for (const name of ["browser_open", "browser_navigate", "browser_click", "browser_type", "browser_tabs"]) {
-    assert.ok(tools.has(name), `缺少 ${name}`);
-  }
-  for (const name of ["browser_user_tabs", "browser_take_over"]) assert.equal(tools.has(name), false, `${name} 应该删掉了`);
-  for (const [name, tool] of tools) assert.doesNotMatch(tool.description, /browser_take_over|browser_user_tabs/, `${name} 的描述里不该再让模型去调已经删掉的工具`);
-  const open = tools.get("browser_open")!;
-  assert.match(open.description, /coilcoil-browser/, "browser_open 描述要指明调试继续用 coilcoil-browser");
+  assert.deepEqual([...tools.keys()], ["browser"]);
+  assert.match(tools.get("browser")!.description, /action=tools/);
+  assert.doesNotMatch(tools.get("browser")!.description, /browser_open|browser_navigate|browser_click|browser_type|browser_tabs/);
 });
 
 test("browser_open 返回句柄，后续操作可拿句柄", async () => {
@@ -63,7 +59,7 @@ test("browser_open 返回句柄，后续操作可拿句柄", async () => {
     },
   };
   browserActExtension(pi as never);
-  const opened = await tools.get("browser_open")!.execute("t1", { url: "https://example.com" } as never);
+  const opened = await tools.get("browser")!.execute("t1", { action: "call", tool: "open", args: { url: "https://example.com" } } as never);
   const handle = (opened.details as { handle: string }).handle;
   assert.match(handle, /^btab-\d+$/, "句柄格式");
   assert.match(opened.content[0]?.text ?? "", /已打开/, "打开回执");
@@ -84,7 +80,7 @@ test("browser_click 失败时带回新快照而不是吞错", async () => {
     },
   };
   browserActExtension(pi as never);
-  const result = await tools.get("browser_click")!.execute("t1", { uid: "stale-uid" } as never);
+  const result = await tools.get("browser")!.execute("t1", { action: "call", tool: "click", args: { uid: "stale-uid" } } as never);
   assert.equal(result.isError, true);
   assert.match(result.content[0]?.text ?? "", /已重取快照/, "失败要带回新快照");
   assert.match(result.content[0]?.text ?? "", /fresh-snapshot/, "新快照内容要交出去");
@@ -139,7 +135,7 @@ function realisticTools(behavior: (tool: string, args: Record<string, unknown>) 
       tools.set(entry.name, entry);
     },
   } as never);
-  return { calls, run: (name, params) => tools.get(name)!.execute("t", params as never) };
+  return { calls, run: (name, params) => tools.get("browser")!.execute("t", { action: "call", tool: name, args: params } as never) };
 }
 
 const text = (value: string) => ({ content: [{ type: "text", text: value }] });
@@ -155,9 +151,9 @@ test("第二次 browser_open 的句柄绑在新开的那一页上，导航动的
     if (tool === "new_page") return text("## Pages\n1: page-a (http://a)\n2: page-b (http://b) [selected]");
     return text(`${tool}-ok`);
   });
-  const opened = await run("browser_open", { url: "http://b" });
+  const opened = await run("open", { url: "http://b" });
   assert.equal(opened.details.pageId, 2, "句柄要绑新页，不能绑第一个标签页");
-  await run("browser_navigate", { handle: opened.details.handle, url: "http://c" });
+  await run("navigate", { handle: opened.details.handle, url: "http://c" });
   const navigate = calls.find((call) => call.tool === "navigate_page");
   assert.equal(navigate?.args.pageId, 2);
 });
@@ -168,11 +164,11 @@ test("MCP 返回 isError 时报失败，不报成功", async () => {
     if (tool === "navigate_page") return { ...text("Error: NAVIGATION_FAILED"), isError: true };
     return text("uid=2_0 RootWebArea");
   });
-  const clicked = await run("browser_click", { uid: "9_9" });
+  const clicked = await run("click", { uid: "9_9" });
   assert.equal(clicked.isError, true);
   assert.match(clicked.content[0]?.text ?? "", /点击失败/);
   assert.match(clicked.content[0]?.text ?? "", /uid=2_0/, "失败时要带回新快照");
-  const navigated = await run("browser_navigate", { url: "http://nope" });
+  const navigated = await run("navigate", { url: "http://nope" });
   assert.equal(navigated.isError, true);
   assert.match(navigated.content[0]?.text ?? "", /导航失败/);
 });
@@ -180,11 +176,11 @@ test("MCP 返回 isError 时报失败，不报成功", async () => {
 test("句柄每个会话一份，两个会话的 btab-1 不会串", async () => {
   const first = realisticTools((tool) => (tool === "new_page" ? text("1: a [selected]") : text("ok")));
   const second = realisticTools((tool) => (tool === "new_page" ? text("1: x\n2: y [selected]") : text("ok")));
-  const a = await first.run("browser_open", { url: "http://a" });
-  const b = await second.run("browser_open", { url: "http://y" });
+  const a = await first.run("open", { url: "http://a" });
+  const b = await second.run("open", { url: "http://y" });
   assert.equal(a.details.handle, "btab-1");
   assert.equal(b.details.handle, "btab-1");
-  await first.run("browser_navigate", { handle: "btab-1", url: "http://c" });
+  await first.run("navigate", { handle: "btab-1", url: "http://c" });
   assert.equal(first.calls.find((call) => call.tool === "navigate_page")?.args.pageId, 1);
 });
 
@@ -233,23 +229,23 @@ test("browser_tabs 列出这个对话的全部网页，给句柄、标出用户�
   process.env.COILCOIL_BROWSER_MCP_ARGS = JSON.stringify(["--wsEndpoint", `ws://127.0.0.1:${port}/devtools/browser/secret`, "--wsHeaders", JSON.stringify({ Authorization: "Bearer token" })]);
   const ctx = { sessionManager: { getSessionId: () => "session-1" } };
   try {
-    const tabs = tools.get("browser_tabs")! as unknown as { execute: (...args: unknown[]) => Promise<{ content: Array<{ text?: string }> }> };
-    const first = await tabs.execute("1", {}, undefined, undefined, ctx);
+    const tabs = tools.get("browser")! as unknown as { execute: (...args: unknown[]) => Promise<{ content: Array<{ text?: string }> }> };
+    const first = await tabs.execute("1", { action: "call", tool: "tabs", args: {} }, undefined, undefined, ctx);
     const text = first.content[0].text ?? "";
     assert.match(text, /btab-1（你开的）：mine/, text);
     assert.match(text, /btab-2（用户正看着）（用户开的）：theirs/, text);
     assert.ok(requested.some((url) => url.startsWith("/coilcoil/tabs/secret?scope=session-1")), requested.join(","));
-    const again = await tabs.execute("2", {}, undefined, undefined, ctx);
+    const again = await tabs.execute("2", { action: "call", tool: "tabs", args: {} }, undefined, undefined, ctx);
     assert.equal(again.content[0].text, text, "同一张页面再列一次还是原来的句柄");
     // 浏览器里有、页面列表里还没出现的那张：不给句柄，免得句柄落到别的页上。
     listPages = "1: mine (http://x/a.html)\n2: theirs (http://x/b.html) [selected]";
     extraTab = { id: "t3", title: "fresh", url: "http://x/fresh.html", active: false, owner: "agent" };
-    const pending = await tabs.execute("3", {}, undefined, undefined, ctx);
+    const pending = await tabs.execute("3", { action: "call", tool: "tabs", args: {} }, undefined, undefined, ctx);
     assert.match(pending.content[0].text ?? "", /还拿不到句柄[^\n]*fresh/, pending.content[0].text);
     assert.doesNotMatch(pending.content[0].text ?? "", /btab-3/);
     extraTab = undefined;
-    const click = tools.get("browser_click")! as unknown as { execute: (...args: unknown[]) => Promise<unknown> };
-    await click.execute("3", { handle: "btab-2", uid: "1_1" }, undefined, undefined, ctx);
+    const click = tools.get("browser")! as unknown as { execute: (...args: unknown[]) => Promise<unknown> };
+    await click.execute("3", { action: "call", tool: "click", args: { handle: "btab-2", uid: "1_1" } }, undefined, undefined, ctx);
     assert.equal(calls.find((call) => call.tool === "click")?.args.pageId, 2, "用户那张页面拿句柄就能直接点");
   } finally {
     server.close();
@@ -275,14 +271,14 @@ test("只是整页 load 没等完：页面已换到新地址就算打开/导航�
     if (tool === "list_pages") return text(current);
     return text("uid=1_0 RootWebArea \"slow\"\n  uid=1_1 heading \"Hello\"");
   });
-  const opened = await run("browser_open", { url: "http://slow.example/" });
+  const opened = await run("open", { url: "http://slow.example/" });
   assert.equal(opened.isError, false, opened.content[0]?.text);
   assert.equal(opened.details.pageId, 2);
   assert.match(opened.content[0]?.text ?? "", /页面主体已可用/);
   assert.match(String(opened.details.handle), /^btab-\d+$/);
 
   current = "1: old (http://site/a)\n2: slow (http://slow.example/next) [selected]";
-  const navigated = await run("browser_navigate", { handle: opened.details.handle, url: "http://slow.example/next" });
+  const navigated = await run("navigate", { handle: opened.details.handle, url: "http://slow.example/next" });
   assert.equal(navigated.isError, false, navigated.content[0]?.text);
   assert.match(navigated.content[0]?.text ?? "", /导航完成/);
 });
@@ -294,7 +290,7 @@ test("load 超时但页面还停在旧地址或空白页：照实报未完成，
     if (tool === "list_pages") return text("1: same site (http://site/a) [selected]");
     return text("snapshot");
   });
-  const navigated = await run("browser_navigate", { url: "http://site/b" });
+  const navigated = await run("navigate", { url: "http://site/b" });
   assert.equal(navigated.isError, true, "同站但还停在旧地址，不能当成功");
   assert.match(navigated.content[0]?.text ?? "", /导航失败/);
   const blank = realisticTools((tool) => {
@@ -302,7 +298,7 @@ test("load 超时但页面还停在旧地址或空白页：照实报未完成，
     if (tool === "list_pages") return text("3:  (about:blank) [selected]");
     return text("snapshot");
   });
-  const opened = await blank.run("browser_open", { url: "http://never.example/" });
+  const opened = await blank.run("open", { url: "http://never.example/" });
   assert.equal(opened.isError, true);
   assert.equal(opened.details.pageId, 3);
   assert.match(opened.content[0]?.text ?? "", /不要再开新页/);

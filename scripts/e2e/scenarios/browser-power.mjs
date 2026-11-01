@@ -69,20 +69,20 @@ export async function run({ app, page, ui, site, check }) {
   const color = `${site.url("color.html")}?c=2266aa`;
 
   // 1. 静止的页面：画好以后不再出帧。
-  await ui.send([{ tool: "browser_open", args: { url: color } }, { echo: true }], "耗电");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: color } } }, { echo: true }], "耗电");
   await page.waitForTimeout(1500);
   const still = await countPaints(app, "color.html", 3000);
   check(`静止的页面 3 秒里几乎不出帧（${still} 帧）`, still >= 0 && still <= 6, String(still));
 
   // 2. 一直在动、用户正看着：流畅（对照）。
-  await ui.send([{ tool: "browser_navigate", args: { handle: "btab-1", url: site.url("anim.html") } }, { echo: true }], "耗电");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "navigate", args: { handle: "btab-1", url: site.url("anim.html") } } }, { echo: true }], "耗电");
   await page.waitForTimeout(1000);
   const watched = await countPaints(app, "anim.html", 2000);
   check(`正看着的动画页 2 秒出 90 帧以上（${watched} 帧）`, watched >= 90, String(watched));
   console.log(`INFO  正看着动画页时，网页进程 ${await pageCost(app, 2000)}`);
 
   // 3. 新开一张静止页，动画页退到后台标签：每秒约 1 帧，页面自己的动画也跟着慢下来。
-  await ui.send([{ tool: "browser_open", args: { url: color } }, { echo: true }], "耗电");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: color } } }, { echo: true }], "耗电");
   await page.waitForTimeout(1000);
   const background = await countPaints(app, "anim.html", 3000);
   check(`后台标签里的动画页 3 秒最多出 6 帧（${background} 帧）`, background >= 0 && background <= 6, String(background));

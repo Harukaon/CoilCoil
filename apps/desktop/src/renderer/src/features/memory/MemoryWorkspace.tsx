@@ -5,12 +5,14 @@ import type {
   MemoryDocumentSnapshot,
   MemorySettings,
   RuntimeInspectionSnapshot,
+  RuntimeConfiguration,
 } from "@coilcoil/runtime-protocol";
 import { toastError, toastSuccess } from "../../ui/toast";
 import { WindowDragBar } from "../../ui/WindowDragBar";
 import { MemoryNebula } from "./MemoryNebula";
 import type { NebulaNode } from "./nebulaLayout";
 import { memoryMaxChars } from "./memoryState";
+import { MemoryWorkerSettings } from "./MemoryWorkerSettings";
 import "./memory.css";
 import { Checkbox, TextArea, TextField } from "../../ui/form";
 
@@ -42,13 +44,14 @@ function draftsFor(configuration: MemoryConfigurationSnapshot): Record<string, s
   return Object.fromEntries([
     [configuration.global.filePath, configuration.global.content],
     ...configuration.projects.map((document) => [document.filePath, document.content] as const),
+    ...(configuration.jottings ?? []).map((document) => [document.filePath, document.content] as const),
   ]);
 }
 
 function statusLabel(inspection?: RuntimeInspectionSnapshot): string {
   const state = inspection?.memory?.state;
   if (state === "running") return "整理中";
-  if (state === "busy") return "排队中";
+  if (state === "busy") return "工作区正忙";
   if (state === "succeeded") return "已完成";
   if (state === "failed") return "失败";
   if (state === "disabled") return "已停用";
@@ -78,6 +81,8 @@ export function MemoryWorkspace({
   const [inspection, setInspection] = useState<RuntimeInspectionSnapshot>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<MemorySettings>();
+  const [models, setModels] = useState<RuntimeConfiguration["models"]>([]);
+  const [view, setView] = useState<"curated" | "jottings">("curated");
   const [selectedPath, setSelectedPath] = useState<string>();
   const [rulesOpen, setRulesOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -87,16 +92,18 @@ export function MemoryWorkspace({
   const load = useCallback(async (surfaceError = false): Promise<void> => {
     setLoading(true);
     try {
-      const [next, nextInspection] = await Promise.all([
+      const [next, nextInspection, nextModels] = await Promise.all([
         window.coilcoil.request<MemoryConfigurationSnapshot>({ type: "get_memory_configuration", cwd }, runtimeId),
         runtimeId
           ? window.coilcoil.request<RuntimeInspectionSnapshot>({ type: "get_runtime_inspection" }, runtimeId)
           : Promise.resolve(undefined),
+        window.coilcoil.request<RuntimeConfiguration>({ type: "get_configuration" }, runtimeId),
       ]);
       setConfiguration(next);
       setSettings(next.settings);
       setDrafts(draftsFor(next));
       setInspection(nextInspection);
+      setModels(nextModels.models);
       setSelectedPath((current) => current ?? next.global.filePath);
     } catch (caught) {
       if (surfaceError) toastError(caught instanceof Error ? caught.message : String(caught));
@@ -116,12 +123,12 @@ export function MemoryWorkspace({
   }, [runtimeId]);
 
   const documents = useMemo((): MemoryDocumentSnapshot[] => (
-    configuration ? [configuration.global, ...configuration.projects] : []
+    configuration ? [configuration.global, ...configuration.projects, ...(configuration.jottings ?? [])] : []
   ), [configuration]);
   const selected = documents.find((document) => document.filePath === selectedPath);
   const selectedDraft = selectedPath ? drafts[selectedPath] ?? "" : "";
   const selectedLimit = selected
-    ? selected.kind === "entry" ? 0 : memoryMaxChars(selected.scope, settings, selected)
+    ? selected.kind === "entry" || selected.kind === "jotting" ? 0 : memoryMaxChars(selected.scope, settings, selected)
     : 0;
   const selectedCount = charCount(selectedDraft);
 
@@ -157,7 +164,7 @@ export function MemoryWorkspace({
       setConfiguration(next);
       setSettings(next.settings);
       setDrafts(draftsFor(next));
-      toastSuccess("记忆已保存，后续会话将使用新内容。");
+      toastSuccess("已保存。随手记由后台筛选，长期记忆更新将在新对话生效。");
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -169,7 +176,7 @@ export function MemoryWorkspace({
     setRunning(true);
     try {
       await window.coilcoil.request({ type: "run_memory_now" }, runtimeId);
-      toastSuccess("记忆整理已在后台启动。");
+      toastSuccess("做梦 Agent 已在后台启动，筛选随手记和对话中的长期信息。");
     } catch (caught) {
       toastError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -193,7 +200,7 @@ export function MemoryWorkspace({
             <div className="memory-control-group">
               <label><Checkbox look="plain" className="memory-control-checkbox" checked={settings.globalEnabled} onChange={(event) => updateSettings("globalEnabled", event.target.checked)} /><span>注入全局记忆</span></label>
               <label><Checkbox look="plain" className="memory-control-checkbox" checked={settings.projectEnabled} onChange={(event) => updateSettings("projectEnabled", event.target.checked)} /><span>注入项目记忆</span></label>
-              <label><Checkbox look="plain" className="memory-control-checkbox" checked={settings.autoSummarize} onChange={(event) => updateSettings("autoSummarize", event.target.checked)} /><span>回复后自动整理</span></label>
+              <label><Checkbox look="plain" className="memory-control-checkbox" checked={settings.autoSummarize} onChange={(event) => updateSettings("autoSummarize", event.target.checked)} /><span>启用后台做梦整理</span></label>
             </div>
             <div className="memory-control-group">
               <label><span>全局上限</span><TextField look="plain" className="memory-control-number" type="number" min={100} max={1000000} step={100} value={settings.globalMaxChars} onChange={(event) => updateSettings("globalMaxChars", Math.max(100, Number(event.target.value) || 100))} /></label>
@@ -202,29 +209,47 @@ export function MemoryWorkspace({
             </div>
             <div className="memory-control-group end">
               <button className="memory-rules-toggle" type="button" aria-expanded={rulesOpen} onClick={() => setRulesOpen((open) => !open)}>
-                {rulesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}生成规则
+                {rulesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}长期记忆筛选规则
               </button>
-              <button className="memory-run-button" type="button" disabled={!runtimeId || running || inspection?.memory?.state === "running"} onClick={() => void runMemory()}>
+              <button className="memory-run-button" type="button" title={dirty ? "请先保存配置和编辑内容" : undefined} disabled={dirty || !runtimeId || running || inspection?.memory?.state === "running"} onClick={() => void runMemory()}>
                 {running || inspection?.memory?.state === "running" ? <LoaderCircle className="spin" size={13} /> : <CheckCircle2 size={13} />}立即整理
               </button>
             </div>
           </div>
+          <MemoryWorkerSettings settings={settings} models={models}
+            onChange={(change) => setSettings((current) => current ? { ...current, ...change } : current)} />
+          {configuration.migrationNotice ? <div className="memory-migration-notice" role="status">
+            <p>{configuration.migrationNotice}</p>
+            {configuration.legacyMemoryDir ? <code>{configuration.legacyMemoryDir}</code> : null}
+          </div> : null}
           {rulesOpen ? <div className="memory-rules-strip">
             <TextArea look="plain" className="memory-rules-input" value={settings.generationRules} onChange={(event) => updateSettings("generationRules", event.target.value)} spellCheck={false} aria-label="记忆生成规则" />
-            <p>这段规则会随记忆一起进系统提示，决定后台整理时什么该记、什么不该记。</p>
+            <p>做梦 Agent 按这些规则筛选长期信息、去重并维护索引；随手记不会直接进入长期记忆。</p>
           </div> : null}
 
+          <div className="memory-view-tabs">
+            <button type="button" aria-pressed={view === "curated"} onClick={() => { setView("curated"); setSelectedPath(configuration.project?.filePath ?? configuration.global.filePath); }}>长期记忆</button>
+            <button type="button" aria-pressed={view === "jottings"} onClick={() => { setView("jottings"); setSelectedPath(configuration.jottings?.[0]?.filePath); }}>当前 Workspace 随手记（{configuration.jottings?.length ?? 0}）</button>
+            <span>随手记先保存候选内容，后台筛选后才写入长期索引和文档。</span>
+          </div>
+
           <div className="memory-stage">
-            <MemoryNebula
+            {view === "curated" ? <MemoryNebula
               global={configuration.global}
               documents={configuration.projects}
               selectedPath={selectedPath}
               onSelect={selectNode}
-            />
+            /> : <div className="memory-jottings-list">
+              {(configuration.jottings ?? []).map((document) => <button type="button" key={document.filePath}
+                aria-pressed={document.filePath === selectedPath} onClick={() => setSelectedPath(document.filePath)}>
+                <strong>{document.label}</strong><small>{document.contentChars.toLocaleString()} 字</small>
+              </button>)}
+              {!configuration.jottings?.length ? <p>当前 Workspace 还没有随手记。Agent 会先在这里记录候选信息，后台再决定哪些值得长期保留。</p> : null}
+            </div>}
             <aside className="memory-inspector">
               {selected ? <>
                 <header>
-                  <strong>{selected.kind === "entry" ? selected.label : `${selected.projectName ?? "全局"} 的索引`}</strong>
+                  <strong>{selected.kind === "jotting" ? `随手记 · ${selected.label}` : selected.kind === "entry" ? selected.label : `${selected.projectName ?? "全局"} 的索引`}</strong>
                   <small className={selectedLimit > 0 && selectedCount > selectedLimit ? "over" : ""}>
                     {selectedLimit > 0
                       ? `${selectedCount.toLocaleString()} / ${selectedLimit.toLocaleString()} 字`
@@ -238,11 +263,11 @@ export function MemoryWorkspace({
                   value={selectedDraft}
                   onChange={(event) => setDrafts((current) => ({ ...current, [selected.filePath]: event.target.value }))}
                   spellCheck={false}
-                  placeholder={selected.kind === "entry" ? "这条记忆的正文，写细一点…" : "索引和重要事实…"}
+                  placeholder={selected.kind === "jotting" ? "候选观察、来源和证据…" : selected.kind === "entry" ? "这条记忆的正文，写细一点…" : "索引和重要事实…"}
                 />
-                <p>{selected.kind === "entry"
+                <p>{selected.kind === "jotting" ? "随手记是待筛选的材料，不会常驻模型上下文。整理过的原始记录保留以便追溯。" : selected.kind === "entry"
                   ? "正文不常驻上下文，也不限字数——模型按索引里的一句话说明决定要不要读它。"
-                  : "只有这一层会每轮注入模型，所以它只放索引行和极少数重要事实。"}</p>
+                  : "长期索引在新会话开始时注入；已开始的会话沿用原有快照。"}</p>
               </> : <p className="memory-empty">在左边的星云里点一个节点，<br />就能在这里读它、改它。</p>}
             </aside>
           </div>
@@ -256,7 +281,7 @@ export function MemoryWorkspace({
           <span className="settings-icon"><BookOpen size={17} /></span>
           <div>
             <h1 id="memory-workspace-title">记忆星云</h1>
-            <p>这台机器上的全部记忆：中心是全局记忆，外圈是各个项目和它们的记忆条目。</p>
+            <p>Agent 先写随手记，每个 Workspace 的做梦 Agent 再筛选出长期记忆。</p>
           </div>
         </div>
         <div className="memory-header-actions">

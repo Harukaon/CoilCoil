@@ -33,7 +33,7 @@ Linux 服务器上没有屏幕时套一层虚拟显示：`xvfb-run -a npm run e2
 它同时会成为会话标题，方便在侧栏里找：
 
 ```
-会话一 MOCK:[{"tool":"browser_open","args":{"url":"http://..."}},{"echo":true}]
+会话一 MOCK:[{"tool":"browser","args":{"action":"call","tool":"open","args":{"url":"http://..."}}},{"echo":true}]
 ```
 
 每一步是其中之一：

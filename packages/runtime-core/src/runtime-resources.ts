@@ -37,8 +37,7 @@ import {
 } from "node:path";
 import {
   listProjectMemoryDocuments,
-  normalizeSummarizeEveryTurns,
-  PROJECT_MEMORY_FILE,
+  listMemoryJottings,
   readMemoryDocument,
   readMemoryTurnCount,
 } from "./memory-documents.js";
@@ -49,6 +48,9 @@ import {
   serveMcpToExtension,
   withBundledBrowserMcp,
 } from "./browser-mcp.js";
+import { normalizeMemorySettings } from "@coilcoil/workflow/extensions/memory-settings.js";
+import { resolveProjectMemoryPaths, resolveProjectMemoryStorageRoot } from "@coilcoil/workflow/extensions/memory-storage.js";
+import { WORKSPACE_MEMORY_OWNER_FILE } from "@coilcoil/workflow/extensions/memory-workspace.js";
 import { RuntimeProviderAuth } from "./runtime-provider-auth.js";
 import { expectCacheChange } from "./session-request-policy.js";
 import { MCP_TOOLS_REFRESH_ENTRY } from "@coilcoil/workflow/extensions/mcp-session-state.js";
@@ -75,54 +77,17 @@ import {
 
 export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
   private userToolReloadPending?: ActiveSession;
-  private static readonly defaultMemoryGenerationRules = "只记录跨会话仍会复用的稳定事实、项目约定和用户长期偏好；不要记录临时进度、一次性错误、通用知识或任何密码、API Key、Token、Cookie、私钥和 Authorization。";
-
   private memorySettingsPath(): string {
     return join(this.agentDir, "memory-settings.json");
   }
 
-  private memoryStorageRoot(): string {
-    const configured = process.env.PI_PROJECT_MEMORY_DIR?.trim();
-    const expanded = configured === "~"
-      ? homedir()
-      : configured?.startsWith("~/")
-        ? join(homedir(), configured.slice(2))
-        : configured;
-    return resolve(expanded || join(this.agentDir, "memory"));
-  }
-
-  private normalizeMemorySettings(value: unknown): MemorySettings {
-    const record = value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
-    const integer = (key: string, fallback: number): number => {
-      const number = record[key];
-      return typeof number === "number" && Number.isFinite(number)
-        ? Math.min(1_000_000, Math.max(100, Math.round(number)))
-        : fallback;
-    };
-    const rules = typeof record.generationRules === "string" && record.generationRules.trim()
-      ? record.generationRules.trim().slice(0, 20_000)
-      : RuntimeResourcesController.defaultMemoryGenerationRules;
-    return {
-      version: 1,
-      projectMaxChars: integer("projectMaxChars", 1_000),
-      globalMaxChars: integer("globalMaxChars", 2_000),
-      generationRules: rules,
-      autoSummarize: record.autoSummarize !== false,
-      summarizeEveryTurns: normalizeSummarizeEveryTurns(record.summarizeEveryTurns),
-      globalEnabled: record.globalEnabled !== false,
-      projectEnabled: record.projectEnabled !== false,
-    };
-  }
-
-  private readMemorySettings(): MemorySettings {
+  protected readMemorySettings(): MemorySettings {
     const path = this.memorySettingsPath();
-    if (!existsSync(path)) return this.normalizeMemorySettings(undefined);
+    if (!existsSync(path)) return normalizeMemorySettings(undefined);
     try {
-      return this.normalizeMemorySettings(JSON.parse(readFileSync(path, "utf8")));
+      return normalizeMemorySettings(JSON.parse(readFileSync(path, "utf8")));
     } catch {
-      return this.normalizeMemorySettings(undefined);
+      return normalizeMemorySettings(undefined);
     }
   }
 
@@ -134,30 +99,18 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     renameSync(temporaryPath, path);
   }
 
-  private memoryProjectRoot(cwd: string): string {
-    let current = safeRealPath(cwd);
-    while (true) {
-      if (existsSync(join(current, ".git"))) return current;
-      const parent = dirname(current);
-      if (parent === current) return safeRealPath(cwd);
-      current = parent;
-    }
-  }
-
-
   async getMemoryConfiguration(cwd?: string): Promise<MemoryConfigurationSnapshot> {
     const settings = this.readMemorySettings();
-    const storageRoot = this.memoryStorageRoot();
+    const storageRoot = resolveProjectMemoryStorageRoot({ ...process.env, PI_CODING_AGENT_DIR: this.agentDir });
     const globalFile = join(storageRoot, "GLOBAL.md");
     const global = readMemoryDocument("global", "全局记忆", globalFile, storageRoot, settings.globalMaxChars);
     const resolvedCwd = this.mcpCwd(cwd);
-    const projectRoot = this.memoryProjectRoot(resolvedCwd);
-    const projectName = basename(projectRoot) || "root";
-    const projectDirectory = join(storageRoot, projectName);
+    const paths = await resolveProjectMemoryPaths(resolvedCwd, storageRoot);
+    const { projectRoot, projectName, projectMemoryDir: projectDirectory } = paths;
     const project = readMemoryDocument(
       "project",
       projectName,
-      join(projectDirectory, PROJECT_MEMORY_FILE),
+      paths.memoryFile,
       projectDirectory,
       settings.projectMaxChars,
       projectRoot,
@@ -167,16 +120,22 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
       settings,
       settingsFile: this.memorySettingsPath(),
       storageRoot,
+      legacyMemoryDir: paths.legacyMemoryDir,
+      migrationNotice: paths.migrationNotice,
       global,
       project,
       projects: listProjectMemoryDocuments(storageRoot, settings.projectMaxChars, project),
       turnsSinceSummary: readMemoryTurnCount(projectDirectory),
+      jottings: listMemoryJottings(paths.notesDir, projectName),
     };
   }
 
   async saveMemoryConfiguration(input: SaveMemoryConfigurationInput, cwd?: string): Promise<MemoryConfigurationSnapshot> {
     if (!input || typeof input !== "object") throw new Error("记忆配置无效。");
-    const settings = this.normalizeMemorySettings(input.settings);
+    const hasProvider = typeof input.settings?.workerProvider === "string" && Boolean(input.settings.workerProvider.trim());
+    const hasModel = typeof input.settings?.workerModelId === "string" && Boolean(input.settings.workerModelId.trim());
+    if (hasProvider !== hasModel) throw new Error("请同时选择后台整理 Agent 的供应商和模型。");
+    const settings = normalizeMemorySettings(input.settings);
     if (typeof input.globalContent !== "string") throw new Error("全局记忆内容无效。");
     if (input.projectContent !== undefined && typeof input.projectContent !== "string") {
       throw new Error("项目记忆内容无效。");
@@ -187,7 +146,18 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     ))) {
       throw new Error("项目记忆内容无效。");
     }
+    if (settings.workerProvider && settings.workerModelId) {
+      const models = await this.ready();
+      if (!models.getModel(settings.workerProvider, settings.workerModelId)) throw new Error("所选后台整理模型已不可用，请重新选择。");
+      if (!(await models.checkAuth(settings.workerProvider))) throw new Error("后台整理模型的供应商尚未配置凭据。");
+    }
     const configuration = await this.getMemoryConfiguration(cwd);
+    const documents = [...configuration.projects, ...(configuration.jottings ?? [])];
+    const validatedEdits = projectEdits.map((edit) => {
+      const target = documents.find((document) => document.filePath === edit.filePath);
+      if (!target) throw new Error(`未知的项目记忆：${edit.filePath}`);
+      return { target, content: edit.content };
+    });
     const writeMemory = (path: string, content: string): void => {
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       const temporaryPath = `${path}.${process.pid}.tmp`;
@@ -200,10 +170,12 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     }
     // Only paths this store itself listed may be written, so an edit can never
     // reach outside the memory directory however it was addressed.
-    for (const edit of projectEdits) {
-      const target = configuration.projects.find((document) => document.filePath === edit.filePath);
-      if (!target) throw new Error(`未知的项目记忆：${edit.filePath}`);
-      writeMemory(target.filePath, edit.content);
+    for (const { target, content } of validatedEdits) writeMemory(target.filePath, content);
+    const project = configuration.project;
+    if (project && (input.projectContent !== undefined || validatedEdits.some(({ target }) => target.filePath.startsWith(`${project.directory}${sep}`)))) {
+      writeMemory(join(project.directory, WORKSPACE_MEMORY_OWNER_FILE), `${JSON.stringify({
+        version: 1, projectRoot: project.projectRoot, projectName: project.projectName,
+      }, null, 2)}\n`);
     }
     this.writeMemorySettings(settings);
     this.reloadActiveSessionResources("记忆设置重新加载失败");

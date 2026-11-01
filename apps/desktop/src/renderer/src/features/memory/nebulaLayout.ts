@@ -79,6 +79,7 @@ export interface NebulaLayout {
 }
 
 export interface MemoryProjectGroup {
+  id: string;
   name: string;
   index?: MemoryDocumentSnapshot;
   entries: MemoryDocumentSnapshot[];
@@ -87,7 +88,7 @@ export interface MemoryProjectGroup {
 /**
  * Group the store's flat document list back into projects.
  *
- * Keyed by project name rather than built from the index files, because a
+ * Keyed by its storage directory so equally named workspaces stay separate. A
  * project can hold memories with no index — the file was deleted, or never
  * written — and it must still appear on the map.
  */
@@ -95,10 +96,14 @@ export function groupMemoryProjects(documents: readonly MemoryDocumentSnapshot[]
   const groups = new Map<string, MemoryProjectGroup>();
   for (const document of documents) {
     const name = document.projectName ?? document.label;
-    const group = groups.get(name) ?? { name, entries: [] };
+    const directory = document.kind === "entry"
+      ? document.filePath.replace(/[\\/][^\\/]+[\\/][^\\/]+$/, "")
+      : document.filePath.replace(/[\\/][^\\/]+$/, "");
+    const id = `project:${directory}`;
+    const group = groups.get(id) ?? { id, name, entries: [] };
     if (document.kind === "entry") group.entries.push(document);
     else group.index = document;
-    groups.set(name, group);
+    groups.set(id, group);
   }
   return [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "zh-Hans"));
 }
@@ -161,7 +166,7 @@ function placeNodes(
     const unit = { x: Math.cos(angle), y: Math.sin(angle) };
     const x = unit.x * radius;
     const y = unit.y * radius;
-    const projectId = `project:${group.name}`;
+    const projectId = group.id;
     const shape = shapes[index];
     placed.push({
       id: projectId,
@@ -243,7 +248,7 @@ export function buildMemoryNebula(
   // Each project claims ring space equal to how wide it actually draws, so an
   // opened project pushes its neighbours apart instead of drawing over them.
   const shapes = groups.map((group) => (
-    expanded.has(group.name) ? entryBlockShape(group.entries.length) : entryBlockShape(0)
+    expanded.has(group.id) ? entryBlockShape(group.entries.length) : entryBlockShape(0)
   ));
   const footprints = shapes.map((shape) => Math.max(PROJECT_SIZE.width, shape.width) + RING_GAP);
   const total = footprints.reduce((sum, width) => sum + width, 0);

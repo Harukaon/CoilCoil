@@ -201,7 +201,7 @@ export async function run({ app, page, ui, site, check, shot, root, paths }) {
 
   await step("browser", async () => {
     await inspectorTab("浏览器");
-    await ui.send([{ tool: "browser_open", args: { url: site.url("find.html") } }, { echo: true }], "浏览");
+    await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("find.html") } } }, { echo: true }], "浏览");
     await page.waitForTimeout(1200);
     await audit("browser-bar");
     const box = await page.locator(".browser-live-page").boundingBox();
@@ -213,7 +213,7 @@ export async function run({ app, page, ui, site, check, shot, root, paths }) {
   });
 
   await step("value-picker", async () => {
-    await ui.send([{ tool: "browser_open", args: { url: site.url("pickers.html") } }, { echo: true }], "选择器");
+    await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("pickers.html") } } }, { echo: true }], "选择器");
     await page.waitForTimeout(1200);
     const area = await page.locator(".browser-live-page").boundingBox();
     const layout = await app.evaluate(({ webContents }) => {

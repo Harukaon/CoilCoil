@@ -4,7 +4,7 @@
 // conversation. Anything before it on the line is a label, which also becomes
 // the session title, so scenarios can find the conversation in the sidebar:
 //
-//   会话一 MOCK:[{"tool":"browser_open","args":{"url":"http://..."}}, {"echo":true}]
+//   会话一 MOCK:[{"tool":"browser","args":{"action":"call","tool":"open","args":{"url":"http://..."}}}, {"echo":true}]
 //
 // Each assistant turn after that message plays the next step:
 //   {"tool": name, "args": {...}}   one tool call (a `purpose` is filled in)

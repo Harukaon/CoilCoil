@@ -111,7 +111,7 @@ function NebulaCanvas({
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const projectNames = useMemo(
-    () => groupMemoryProjects(documents).filter((group) => group.entries.length).map((group) => group.name),
+    () => groupMemoryProjects(documents).filter((group) => group.entries.length).map((group) => group.id),
     [documents],
   );
 
@@ -232,8 +232,8 @@ function NebulaCanvas({
         onNodeClick={(_event, node) => {
           const data = node.data as NebulaNodeData;
           if (data.kind === "project" && data.childCount) {
-            if (!expanded.has(data.label)) setFraming({ token: Date.now(), target: data.id });
-            toggle(data.label);
+            if (!expanded.has(data.id)) setFraming({ token: Date.now(), target: data.id });
+            toggle(data.id);
           }
           onSelect(data);
         }}

@@ -22,8 +22,8 @@ export async function run({ app, page, ui, site, check, shot }) {
   app.on("window", keepDialogs);
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("dialog.html") } }, { echo: true }], "弹窗");
-  await ui.send([{ tool: "browser_click", args: { handle: "btab-1", uid: "999_999" } }, { echo: true }], "弹窗");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("dialog.html") } } }, { echo: true }], "弹窗");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: "999_999" } } }, { echo: true }], "弹窗");
   const snapshot = await ui.lastEcho();
   const uid = (label) => new RegExp(`uid=(\\S+) button "${label}"`).exec(snapshot)?.[1];
   check("快照里找得到两个按钮", uid("弹提示") && uid("弹确认"), snapshot.slice(0, 300));
@@ -42,7 +42,7 @@ export async function run({ app, page, ui, site, check, shot }) {
   // 新版 macOS 在有人正用着电脑时不让别的程序抢前台：拿不到就跳过「系统焦点」那一项。
   const systemFocus = await ui.waitFor(() => appWindowFocused(app), 3000);
   await composer.click();
-  await page.keyboard.insertText(`弹窗 MOCK:${JSON.stringify([{ tool: "browser_click", args: { handle: "btab-1", uid: uid("弹提示") } }, { echo: true }])}`);
+  await page.keyboard.insertText(`弹窗 MOCK:${JSON.stringify([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: uid("弹提示") } } }, { echo: true }])}`);
   await page.keyboard.press("Enter");
   await ui.waitFor(async () => (await page.getByText("工具返回", { exact: false }).count()) > echoes, 60_000);
   check("Agent 收到的是「操作已生效、先处理对话框」，不是点击失败", (await ui.lastEcho()).includes("操作已生效"), (await ui.lastEcho()).slice(0, 200));
@@ -60,9 +60,9 @@ export async function run({ app, page, ui, site, check, shot }) {
   check("卡片收起来了", await ui.waitFor(async () => (await card.count()) === 0));
 
   // 3. Agent 点出一个 confirm，自己用 CDP 答「确定」：卡片随之消失。
-  await ui.send([{ tool: "browser_click", args: { handle: "btab-1", uid: uid("弹确认") } }, { echo: true }], "弹窗");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: uid("弹确认") } } }, { echo: true }], "弹窗");
   check("确认卡片出来了", await ui.waitFor(async () => (await card.count()) === 1 && (await card.innerText()).includes("sure?")));
-  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "handle_dialog", args: { action: "accept" } } }, { echo: true }], "弹窗");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.handle_dialog", args: { action: "accept" } } }, { echo: true }], "弹窗");
   check("Agent 答了确认，页面拿到的是「确定」", await ui.waitFor(async () => (await title(app)) === "confirm-true"), await title(app));
   check("Agent 答完，面板里的卡片也消失了", await ui.waitFor(async () => (await card.count()) === 0));
   // prompt 不测：Electron 里的网页调用 window.prompt 会直接抛错（Electron 不支持），根本走不到对话框这一步。

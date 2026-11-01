@@ -18,6 +18,8 @@ import {
   DEFAULT_CHILD_TOOLS,
   type ParentEvents,
 } from "../extensions/subagents/child.ts";
+import { memoryIdleCoordinator } from "../extensions/memory-jottings.ts";
+import { resolveProjectMemoryPaths, resolveProjectMemoryStorageRoot } from "../extensions/memory-storage.ts";
 import { loadProfiles } from "../extensions/subagents/profiles.ts";
 
 function childWorkspace(context: test.TestContext): { cwd: string; agentDir: string; sessionDir: string } {
@@ -254,9 +256,9 @@ test("a child's MCP tool neither lists nor calls the built-in browser", async (c
 });
 
 test("a child session never gets the browser interaction tools", async (context) => {
-  const { handle } = await openChild(context, { tools: [...DEFAULT_CHILD_TOOLS, "browser_open", "browser_click"] });
+  const { handle } = await openChild(context, { tools: [...DEFAULT_CHILD_TOOLS, "browser", "browser_open", "browser_click"] });
   const active = handle.session.getActiveToolNames();
-  assert.ok(!active.some((tool) => tool.startsWith("browser_")), `got ${active.join(",")}`);
+  assert.ok(!active.some((tool) => tool === "browser" || tool.startsWith("browser_")), `got ${active.join(",")}`);
 });
 
 test("child request prefixes survive restart and instruction or MCP schema edits; explicit MCP refresh applies", async (context) => {
@@ -316,4 +318,26 @@ test("child request prefixes survive restart and instruction or MCP schema edits
   await fresh.session.prompt("new child");
   assert.match(JSON.stringify(bodies.at(-1)!.system), /updated child project instructions/);
   assert.match(JSON.stringify(bodies.at(-1)!.system), /updated child profile/);
+});
+
+
+test("a read-only child postpones workspace curation until it settles", async (t) => {
+  const workspace = childWorkspace(t);
+  const handle = await createChildSession({ ...workspace, parentSessionDir: workspace.sessionDir,
+    parentSessionId: "parent-memory", tools: ["read", "grep"], onEvent: () => undefined });
+  t.after(() => handle.dispose());
+  const paths = await resolveProjectMemoryPaths(workspace.cwd,
+    resolveProjectMemoryStorageRoot({ ...process.env, PI_CODING_AGENT_DIR: workspace.agentDir }));
+  const parent = memoryIdleCoordinator(paths.projectMemoryDir, 10);
+  let runs = 0;
+  await handle.session.extensionRunner.emitBeforeAgentStart({ messageType: "user", prompt: "inspect" },
+    { cwd: workspace.cwd, forceSystemPrompt: "test instructions" });
+  await parent.settled(async () => { runs++; }, true);
+  assert.equal(runs, 0, "read-only child activity must hold off the curator");
+  await handle.session.extensionRunner.emit({ type: "agent_settled", aborted: false });
+  // The parent callback remains queued; use its short test interval after the child releases it.
+  parent.enqueue(async () => { runs++; });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(runs, 1);
+  parent.cancel();
 });

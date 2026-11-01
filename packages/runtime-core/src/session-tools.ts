@@ -1,7 +1,10 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { shutdownAgentSession } from "./runtime-state.js";
+import { expectCacheChange } from "./session-request-policy.js";
 
-/** Validate installed capabilities while preserving the transcript's restored loadout. */
+const LEGACY_BROWSER_TOOLS = new Set(["browser_open", "browser_navigate", "browser_click", "browser_type", "browser_tabs"]);
+
+/** Upgrade bundled capabilities on session restore, before starting a new turn. */
 export async function configureSessionTools(
   session: AgentSession,
   effectiveModel: (model: NonNullable<AgentSession["model"]>) => NonNullable<AgentSession["model"]>,
@@ -10,15 +13,23 @@ export async function configureSessionTools(
     const model = effectiveModel(session.model);
     if (model !== session.model) await session.setModel(model);
   }
-  session.setActiveToolsByName(session.getActiveToolNames().filter((name) => name !== "find"));
-  const active = new Set(session.getActiveToolNames());
-  // New sessions activate monitor by default. Restored sessions retain their saved
-  // declarations: adding a tool during restore would change their cached prefix.
   if (!session.getToolDefinition("monitor")) {
     await shutdownAgentSession(session, "quit").catch(() => undefined);
     throw new Error("CoilCoil workflow did not register required tools: monitor");
   }
-  const required = ["read", "bash", "edit", "write", "grep", "ls", "terminal", "mcp"];
+  const previous = session.getActiveToolNames();
+  const upgraded = new Set(previous.filter((name) => name !== "find" && !LEGACY_BROWSER_TOOLS.has(name)
+    && !name.startsWith("mcp__coilcoil_browser__")));
+  upgraded.add("monitor");
+  if (session.getToolDefinition("browser")) upgraded.add("browser");
+  if (previous.length !== upgraded.size || previous.some((name) => !upgraded.has(name))) {
+    // This application upgrade was requested by the user; it changes declarations
+    // once, while the saved messages and system-prompt snapshot stay intact.
+    expectCacheChange(session, "user_tools_changed");
+  }
+  session.setActiveToolsByName([...upgraded]);
+  const active = new Set(session.getActiveToolNames());
+  const required = ["read", "bash", "edit", "write", "grep", "ls", "terminal", "monitor", "mcp"];
   if (process.platform === "win32") required.push("powershell");
   const missing = required.filter((name) => !active.has(name));
   if (missing.length) {

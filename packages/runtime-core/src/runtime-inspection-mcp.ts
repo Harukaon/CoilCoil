@@ -235,21 +235,13 @@ export abstract class RuntimeInspectionMcp extends RuntimeSubagents {
       this.publishManualMemoryStatus(active, "busy", message);
       throw new Error(message);
     }
-    if (!active.session.model) {
+    const memorySettings = this.readMemorySettings();
+    if (!active.session.model && !(memorySettings.workerProvider && memorySettings.workerModelId)) {
       const message = "当前没有可用于记忆整理的模型。";
       this.publishManualMemoryStatus(active, "failed", message, message);
       throw new Error(message);
     }
-    if (
-      active.session.messages.length === 0
-      || !active.session.sessionFile
-      || !existsSync(active.session.sessionFile)
-    ) {
-      const message = "当前会话还没有可供整理的历史记录。";
-      this.publishManualMemoryStatus(active, "failed", message, message);
-      throw new Error(message);
-    }
-    this.publishManualMemoryStatus(active, "running", "正在启动当前项目的记忆整理…");
+    this.publishManualMemoryStatus(active, "running", "正在启动当前 Workspace 的做梦 Agent…");
     this.promptStarting = true;
     try {
       await active.session.prompt("/memory", {

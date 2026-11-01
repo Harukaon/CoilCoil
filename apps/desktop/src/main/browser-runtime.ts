@@ -134,6 +134,7 @@ export class BrowserRuntimeManager {
     private readonly onAgentActivated: (scopeId: string) => void,
     /** 在 App 窗口里弹出网页的右键菜单（菜单本身由主进程入口搭）。 */
     private readonly showPageContextMenu: (contents: WebContents, params: Electron.ContextMenuParams) => void = () => {},
+    private readonly workspacePartition: (path?: string) => string = browserPartitionFor,
   ) {
     this.frames = new BrowserSurfaceStream(window.webContents, {
       textures: sharedTexture,
@@ -235,7 +236,7 @@ export class BrowserRuntimeManager {
   noteScopeWorkspace(scopeId: string, workspacePath?: string): void {
     const scope = scopeId.trim();
     if (!scope || !workspacePath) return;
-    const partition = browserPartitionFor(workspacePath);
+    const partition = this.workspacePartition(workspacePath);
     this.scopePartitions.set(scope, partition);
     this.prepareIdentity(partition);
   }
@@ -273,7 +274,7 @@ export class BrowserRuntimeManager {
     this.uiScopeId = scopeId.trim() || DEFAULT_SCOPE_ID;
     this.noteScopeWorkspace(this.uiScopeId, workspacePath);
     if (workspacePath) {
-      this.partition = browserPartitionFor(workspacePath);
+      this.partition = this.workspacePartition(workspacePath);
       this.prepareIdentity(this.partition);
     }
     this.refreshViewportOverrides();

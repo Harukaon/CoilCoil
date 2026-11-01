@@ -13,7 +13,7 @@ const takeLog = async (app) => JSON.parse(await inPage(app, "JSON.stringify(log.
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
-  await ui.send([{ tool: "browser_open", args: { url: site.url("drag.html") } }, { echo: true }], "拖放");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("drag.html") } } }, { echo: true }], "拖放");
   await ui.waitFor(async () => (await inPage(app, "document.readyState")) === "complete");
   await page.waitForTimeout(500);
   const box = await page.locator(".browser-live-page").boundingBox();
@@ -55,12 +55,12 @@ export async function run({ app, page, ui, site, check, shot }) {
   check("拖完以后点按钮照常", await ui.waitFor(async () => (await takeLog(app)).includes("clicked"), 3000));
 
   // 4. Agent 用 drag 工具把 A 拖到 B。
-  await ui.send([{ tool: "browser_click", args: { handle: "btab-1", uid: "999_999" } }, { echo: true }], "拖放");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "click", args: { handle: "btab-1", uid: "999_999" } } }, { echo: true }], "拖放");
   const snapshot = await ui.lastEcho();
   const fromUid = /uid=(\S+) button "拖我"/.exec(snapshot)?.[1];
   const toUid = /uid=(\S+) button "放这里"/.exec(snapshot)?.[1];
   check("快照里找得到 A 和 B", fromUid && toUid, snapshot.slice(0, 300));
-  await ui.send([{ tool: "mcp", args: { action: "call", server: "coilcoil-browser", tool: "drag", args: { from_uid: fromUid, to_uid: toUid } } }, { echo: true }], "拖放");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.drag", args: { from_uid: fromUid, to_uid: toUid } } }, { echo: true }], "拖放");
   log = [];
   await ui.waitFor(async () => { log = log.concat(await takeLog(app)); return log.some((line) => line.startsWith("a:dragend")); }, 8000);
   check("Agent 拖：放在 B 上，拿到了拖的内容", log.includes("b:drop:from-a"), `${JSON.stringify(log)} ${(await ui.lastEcho()).slice(0, 200)}`);

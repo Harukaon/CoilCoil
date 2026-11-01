@@ -9,7 +9,7 @@ const inPage = (app, marker, code) => app.evaluate(({ webContents }, [marker, co
 
 export async function run({ app, page, ui, site, check, shot }) {
   await ui.newConversation("projA");
-  await ui.send([{ tool: "browser_open", args: { url: site.url("scrolled.html") } }, { echo: true }], "元素");
+  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("scrolled.html") } } }, { echo: true }], "元素");
   await ui.waitFor(async () => Boolean(await inPage(app, "scrolled.html", "document.readyState === 'complete'")), 15_000);
   await page.waitForTimeout(800);
   const scrollY = await inPage(app, "scrolled.html", "scrollY");

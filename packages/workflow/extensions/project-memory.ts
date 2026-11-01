@@ -1,3 +1,4 @@
+import { collectMemoryInputs, completeMemoryInputs, installMemoryWritePolicy, memoryIdleCoordinator, pendingMemoryNotes } from "./memory-jottings.ts";
 import { randomUUID } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
 import { RUNTIME_BRIDGE_STATE_EVENT, type RuntimeBridgeState } from "./runtime-bridge.ts";
@@ -98,6 +99,10 @@ export interface ProjectMemoryStatusEvent {
   projectName?: string;
   memoryFile?: string;
   projectMemoryDir?: string;
+  notesDir?: string;
+  legacyMemoryDir?: string;
+  migrationNotice?: string;
+  pendingNotes?: number;
   state: ProjectMemoryRunState;
   source: "startup" | "prompt" | "manual" | "automatic";
   exists: boolean;
@@ -117,7 +122,10 @@ export interface EnforcedMemory {
   content: string;
 }
 
-export type ProjectMemoryExtensionOptions = MemoryWorkerOptions;
+export interface ProjectMemoryExtensionOptions extends MemoryWorkerOptions {
+  /** Test/host override; the product default is five quiet minutes. */
+  idleDelayMs?: number;
+}
 
 
 async function prepareMemory(
@@ -167,6 +175,8 @@ export default function projectMemoryExtension(
   const warningState = { warned: false };
   const backgroundWarningState = { warned: false };
   const storageRoot = resolveProjectMemoryStorageRoot(env);
+  installMemoryWritePolicy(pi, env);
+  let idle: ReturnType<typeof memoryIdleCoordinator> | undefined;
   let active = true;
   let sessionPromptLocked = false;
   let status: ProjectMemoryStatusEvent | undefined;
@@ -209,7 +219,7 @@ export default function projectMemoryExtension(
   });
 
   const memoryMetadata = async (paths: ProjectMemoryPaths): Promise<Pick<ProjectMemoryStatusEvent,
-    "projectRoot" | "projectName" | "memoryFile" | "projectMemoryDir" | "exists" | "contentChars" | "estimatedTokens" | "processedSessions"
+    "projectRoot" | "projectName" | "memoryFile" | "projectMemoryDir" | "notesDir" | "legacyMemoryDir" | "migrationNotice" | "pendingNotes" | "exists" | "contentChars" | "estimatedTokens" | "processedSessions"
   >> => {
     const content = await readUtf8(paths.memoryFile);
     const contentChars = countCharacters(content);
@@ -219,6 +229,10 @@ export default function projectMemoryExtension(
       projectName: paths.projectName,
       memoryFile: paths.memoryFile,
       projectMemoryDir: paths.projectMemoryDir,
+      notesDir: paths.notesDir,
+      legacyMemoryDir: paths.legacyMemoryDir,
+      migrationNotice: paths.migrationNotice,
+      pendingNotes: (await pendingMemoryNotes(paths)).length,
       exists: await pathExists(paths.memoryFile),
       contentChars,
       estimatedTokens: Math.ceil(contentChars / 4),
@@ -230,15 +244,20 @@ export default function projectMemoryExtension(
     ctx: ExtensionContext,
     notifyStarted: boolean,
     source: ProjectMemoryStatusEvent["source"] = notifyStarted ? "manual" : "automatic",
+    canStart?: () => boolean,
   ): Promise<"started" | "busy" | "skipped" | "failed"> => {
     // Pi deliberately invalidates ExtensionContext after reload/session replacement.
     // A memory worker can outlive that context, so capture every value needed by its
     // completion callbacks before the first await and never retain `ctx` there.
     const cwd = ctx.cwd;
     const currentModel = ctx.model;
-    const model = currentModel ? { provider: currentModel.provider, id: currentModel.id } : undefined;
     const sessionFile = ctx.sessionManager.getSessionFile();
+    const sessionDirectory = ctx.sessionManager.getSessionDir?.();
     const capturedNotify = snapshotNotifier(ctx);
+    const settings = await readMemorySettings(env);
+    const model = settings.workerProvider && settings.workerModelId
+      ? { provider: settings.workerProvider, id: settings.workerModelId }
+      : currentModel ? { provider: currentModel.provider, id: currentModel.id } : undefined;
     const notify = (message: string, type?: "info" | "warning" | "error"): void => {
       if (active) capturedNotify?.(message, type);
     };
@@ -248,32 +267,38 @@ export default function projectMemoryExtension(
       if (notifyStarted) notify?.("当前目录位于 .pi 内，已禁用记忆整理以防递归", "warning");
       return "skipped";
     }
+    if (Boolean(settings.workerProvider) !== Boolean(settings.workerModelId)) {
+      publishStatus(cwd, { state: "failed", source, attemptId, error: "后台整理模型配置不完整，请同时选择供应商和模型" });
+      return "failed";
+    }
     if (!model) {
       publishStatus(cwd, { state: "failed", source, attemptId, error: "当前没有可用于记忆整理的模型" });
       if (notifyStarted) notify?.("当前没有可用于记忆整理的模型", "warning");
       return "skipped";
     }
-    if (!sessionFile || !(await pathExists(sessionFile))) {
-      publishStatus(cwd, { state: "failed", source, attemptId, error: "当前会话没有可读取的 session 文件" });
-      if (notifyStarted) notify?.("当前会话没有可读取的 session 文件", "warning");
-      return "skipped";
-    }
 
     try {
-      const settings = await readMemorySettings(env);
+      if (source === "automatic" && (!settings.autoSummarize || !settings.projectEnabled)) return "skipped";
       const { paths } = await prepareMemory(cwd, storageRoot, settings.projectMaxChars);
-      const canonicalSessionFile = await canonicalPath(sessionFile);
+      const canonicalSessionFile = sessionFile && await pathExists(sessionFile) ? await canonicalPath(sessionFile) : undefined;
+      const inputs = await collectMemoryInputs(paths, canonicalSessionFile, sessionDirectory);
+      if (source === "automatic" && inputs.inputs.length === 0) return "skipped";
       const persisted = await readPersistedMemoryState(paths);
       const processedSessions = [...new Set([...(status?.processedSessions ?? []), ...persisted.processedSessions])];
       const startedAt = Date.now();
+      const nextContext = { cwd, model: currentModel, hasUI: Boolean(capturedNotify), ui: { notify: capturedNotify },
+        sessionManager: { getSessionFile: () => sessionFile, getSessionDir: () => sessionDirectory } } as ExtensionContext;
+      const workspaceIdle = memoryIdleCoordinator(paths.projectMemoryDir, options.idleDelayMs);
       const result = await launchMemoryWorker({
         paths,
         sessionFile: canonicalSessionFile,
+        inputs,
         provider: model.provider,
         model: model.id,
         maximum: settings.projectMaxChars,
         generationRules: settings.generationRules,
       }, options, {
+        canStart: source === "automatic" ? canStart : undefined,
         onStarted: () => {
           publishStatus(cwd, {
             state: "running",
@@ -287,14 +312,21 @@ export default function projectMemoryExtension(
             completedAt: undefined,
             durationMs: undefined,
             error: undefined,
-            message: "正在整理当前项目记忆…",
+            message: "后台 Agent 正在筛选随手记与 Workspace 对话…",
           });
         },
         onComplete: async () => {
           try {
-            const completedSessions = await recordProcessedSession(paths, canonicalSessionFile);
+            await completeMemoryInputs(paths, inputs);
+            let completedSessions: string[] = [];
+            for (const file of inputs.sessionFiles) completedSessions = await recordProcessedSession(paths, file);
             const metadata = await memoryMetadata(paths);
             const completedAt = Date.now();
+            const latestSettings = await readMemorySettings(env);
+            if (latestSettings.autoSummarize && latestSettings.projectEnabled && inputs.inputs.length
+              && (await collectMemoryInputs(paths, canonicalSessionFile, sessionDirectory)).inputs.length) {
+              workspaceIdle.enqueue(async (allowed) => { await summarizeSession(nextContext, false, "automatic", allowed); });
+            }
             publishStatus(cwd, {
               state: "succeeded",
               source,
@@ -306,7 +338,7 @@ export default function projectMemoryExtension(
               completedAt,
               durationMs: completedAt - startedAt,
               error: undefined,
-              message: "项目记忆整理完成",
+              message: "随手记筛选与长期记忆整理完成",
             });
           } catch (error) {
             publishStatus(cwd, {
@@ -337,6 +369,10 @@ export default function projectMemoryExtension(
           });
         },
       });
+      if (result === "deferred") {
+        workspaceIdle.enqueue(async (allowed) => { await summarizeSession(nextContext, false, "automatic", allowed); });
+        return "skipped";
+      }
       // 跑过一次就从头开始数：手动整理同样重置倒计时，否则用户点完「立即整理」
       // 还会在几轮后被自动整理再跑一遍。
       if (result === "started") await resetMemoryTurns(paths);
@@ -375,6 +411,11 @@ export default function projectMemoryExtension(
     sessionPromptLocked = false;
     const cwd = ctx.cwd;
     const notify = snapshotNotifier(ctx);
+    const currentModel = ctx.model;
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const sessionDirectory = ctx.sessionManager.getSessionDir?.();
+    const captured = { cwd, model: currentModel, hasUI: Boolean(notify), ui: { notify },
+      sessionManager: { getSessionFile: () => sessionFile, getSessionDir: () => sessionDirectory } } as ExtensionContext;
     if (await memoryIsDisabled(cwd, env)) {
       publishStatus(cwd, { state: "disabled", source: "startup", exists: false, injected: false });
       return;
@@ -382,6 +423,10 @@ export default function projectMemoryExtension(
     try {
       const settings = await readMemorySettings(env);
       const { paths } = await prepareMemory(cwd, storageRoot, settings.projectMaxChars);
+      idle = memoryIdleCoordinator(paths.projectMemoryDir, options.idleDelayMs);
+      if (settings.autoSummarize && settings.projectEnabled) {
+        idle.enqueue(async (allowed) => { await summarizeSession(captured, false, "automatic", allowed); });
+      }
       publishStatus(cwd, {
         state: "idle",
         source: "startup",
@@ -395,9 +440,10 @@ export default function projectMemoryExtension(
   });
 
   pi.on("session_tree", () => { sessionPromptLocked = false; });
-  pi.on("session_shutdown", () => { active = false; unsubscribePrompt(); });
+  pi.on("session_shutdown", () => { active = false; unsubscribePrompt(); idle?.close(); });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    idle?.start();
     // The bridge owns the final prompt snapshot. Later turns need no disk reads
     // or extra memory messages, even if settings or background memory changed.
     if (sessionPromptLocked) return undefined;
@@ -430,54 +476,36 @@ export default function projectMemoryExtension(
     }
   });
 
-  // Counting in-process keeps the budget check working on Windows, where the
-  // shell command the model used to run for it does not exist, and saves a
-  // tool round trip everywhere else.
   pi.on("tool_result", async (event, ctx) => {
-    if (event.isError) return undefined;
-    if (event.toolName !== "write" && event.toolName !== "edit") return undefined;
+    if (event.isError || !["write", "edit"].includes(event.toolName)) return;
     const rawPath = (event.input as Record<string, unknown>).path;
-    if (typeof rawPath !== "string" || !rawPath.trim()) return undefined;
-    const cwd = ctx.cwd;
-    if (await memoryIsDisabled(cwd, env)) return undefined;
-    try {
-      const settings = await readMemorySettings(env);
-      if (!settings.projectEnabled) return undefined;
-      const paths = await resolveProjectMemoryPaths(cwd, storageRoot);
-      const written = await canonicalPath(resolvePath(cwd, rawPath));
-      if (written !== await canonicalPath(paths.memoryFile)) return undefined;
-      const content = await readUtf8(paths.memoryFile);
-      return {
-        content: [
-          ...event.content,
-          {
-            type: "text" as const,
-            text: buildMemorySizeNotice(paths.memoryFile, content, settings.projectMaxChars),
-          },
-        ],
-      };
-    } catch {
-      return undefined;
+    if (typeof rawPath !== "string") return;
+    const paths = await resolveProjectMemoryPaths(ctx.cwd, storageRoot);
+    if (resolvePath(ctx.cwd, rawPath).startsWith(paths.notesDir + "/")) {
+      publishStatus(ctx.cwd, { state: status?.state ?? "idle", source: "prompt", ...await memoryMetadata(paths),
+        message: "随手记已保存，等待后台筛选；尚未进入长期记忆" });
     }
   });
 
-  // 每轮回复结束都会触发 agent_settled，但记忆整理是一次完整的后台模型调用，
-  // 一轮跑一次既贵又提炼不出新东西。这里只累计轮数，攒够配置的间隔才真正去跑。
-  pi.on("agent_settled", async (_event, ctx) => {
+  // One workspace coordinator waits until every conversation is idle. The captured
+  // values remain usable after a tab closes; no retired ExtensionContext is held.
+  pi.on("agent_settled", async (event, ctx) => {
     const cwd = ctx.cwd;
+    const currentModel = ctx.model;
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const sessionDirectory = ctx.sessionManager.getSessionDir?.();
+    const notify = snapshotNotifier(ctx);
+    const captured = { cwd, model: currentModel, hasUI: Boolean(notify), ui: { notify },
+      sessionManager: { getSessionFile: () => sessionFile, getSessionDir: () => sessionDirectory } } as ExtensionContext;
     const settings = await readMemorySettings(env);
-    if (!settings.autoSummarize) return;
-    if (await memoryIsDisabled(cwd, env)) return;
+    if (!settings.autoSummarize || !settings.projectEnabled || await memoryIsDisabled(cwd, env)) { idle?.cancel(); return; }
     try {
       const paths = await resolveProjectMemoryPaths(cwd, storageRoot);
-      const turns = await recordMemoryTurn(paths);
-      if (turns < settings.summarizeEveryTurns) return;
-      await resetMemoryTurns(paths);
+      idle ??= memoryIdleCoordinator(paths.projectMemoryDir, options.idleDelayMs);
+      const turns = event.aborted ? (await readPersistedMemoryState(paths)).turnsSinceSummary : await recordMemoryTurn(paths);
+      await idle.settled(async (allowed) => { await summarizeSession(captured, false, "automatic", allowed); }, turns >= settings.summarizeEveryTurns);
     } catch (error) {
-      notifyOnce(backgroundWarningState, snapshotNotifier(ctx), error, "记忆整理轮次计数失败");
-      return;
+      notifyOnce(backgroundWarningState, notify, error, "记忆整理调度失败");
     }
-    await summarizeSession(ctx, false, "automatic");
   });
-
 }
