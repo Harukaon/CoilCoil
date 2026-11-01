@@ -19,11 +19,7 @@ import {
   type SessionSummary,
   type ThinkingLevel,
 } from "@coilcoil/runtime-protocol";
-import {
-  existsSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { fileHistoryExtension } from "./runtime-checkpoints.js";
 import { SessionListingCache } from "./session-listing-cache.js";
 import { listSessionsForCwd, type SessionListEntry } from "./session-index.js";
@@ -53,10 +49,10 @@ import {
 } from "./runtime-constants.js";
 import { installSetupRpc } from "./runtime-setup-rpc.js";
 import { installMemoryStatusChannel } from "./runtime-memory-status.js";
+import { installWorkflowDiagnostics } from "./runtime-workflow-diagnostics.js";
 import { installBackgroundWaitState } from "./runtime-background-wait.js";
 import { contextClearingRecord } from "./runtime-state.js";
 import { sessionUsage } from "./session-values.js";
-import { isRecord } from "./runtime-utils.js";
 import { installCompactionSettings } from "./compaction-settings.js";
 import { RuntimeMcpConfig } from "./runtime-mcp-config.js";
 import {
@@ -75,11 +71,14 @@ import {
   errorDetail,
   errorMessage,
   safeRealPath,
+  isRecord,
 } from "./runtime-utils.js";
 import { rewriteSessionHeaderCwd } from "./session-relocation.js";
 import { systemPromptLayerFiles } from "./system-prompt-layers.js";
 import { installSessionRequestPolicy } from "./session-request-policy.js";
 import { configureSessionTools } from "./session-tools.js";
+import { subscribeSessionDiagnostics } from "./session-diagnostics.js";
+import { requestDiagnosticExtension } from "@coilcoil/workflow/extensions/request-diagnostics.ts";
 import { CACHED_SESSION_REQUEST } from "@coilcoil/workflow/extensions/anthropic-cache-policy.js";
 import {
   SESSION_TITLE_MANUAL_ENTRY_TYPE,
@@ -469,6 +468,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
         freedTokens: value.freedTokens,
       }, compactionLogContext());
     });
+    installWorkflowDiagnostics(eventBus, this.log);
     const memoryStatus = installMemoryStatusChannel(eventBus, {
       cwd,
       installedActive: () => installedActive,
@@ -503,7 +503,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       settingsManager,
       eventBus,
       additionalExtensionPaths: this.extensionPaths,
-      extensionFactories: this.checkpointsEnabled ? [fileHistoryExtension(this.agentDir, this.log)] : [],
+      extensionFactories: [requestDiagnosticExtension(this.log, { role: "main" }), ...(this.checkpointsEnabled ? [fileHistoryExtension(this.agentDir, this.log)] : [])],
       additionalSkillPaths: this.skillPaths,
       additionalPromptTemplatePaths: this.promptPaths,
       noExtensions: true,
@@ -673,7 +673,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     // in place before any tool call, and per-session so a late request after
     // a switch answers for nobody. Every answer runs the panel's own method.
     installSetupRpc(this, eventBus, () => { this.requireActive(); });
-    active.unsubscribe = created.session.subscribe((event) => this.handleSessionEvent(event));
+    active.unsubscribe = subscribeSessionDiagnostics(created.session, this.log, cwd, (event) => this.handleSessionEvent(event));
     eventBus.on(SUBAGENT_ACTIVITY_CHANNEL, (raw) => {
       if (this.active !== active) return;
       this.mergeSubagentActivities(subagentActivitiesFromPayload(raw));

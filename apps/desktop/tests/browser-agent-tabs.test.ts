@@ -1,36 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentTabsToRecycle, isAgentTabUse } from "../src/main/browser-agent-tabs.ts";
+import { assertBrowserTabCapacity, isAgentTabUse, isSettledAgentBlank, SESSION_TAB_LIMIT } from "../src/main/browser-agent-tabs.ts";
 
-const tab = (id: string, owner: "agent" | "user", lastUsedAt: number, userInputAt?: number) => ({ id, owner, lastUsedAt, ...userInputAt === undefined ? {} : { userInputAt } });
-
-test("没超上限就一张都不收", () => {
-  const tabs = [tab("a", "agent", 1), tab("b", "agent", 2), tab("u", "user", 0)];
-  assert.deepEqual(agentTabsToRecycle(tabs, new Set(), 5), []);
+test("eight tabs is a hard session cap; rejection tells callers to reuse or close, never evicts", () => {
+  assert.equal(SESSION_TAB_LIMIT, 8);
+  for (let count = 0; count < 8; count += 1) assert.doesNotThrow(() => assertBrowserTabCapacity(count));
+  assert.throws(() => assertBrowserTabCapacity(8), /8 browser tabs.*Reuse.*close/);
+  assert.throws(() => assertBrowserTabCapacity(9), /8 browser tabs/);
 });
 
-test("超上限时只收 Agent 的、最久没用的那张；用户的再老也不动", () => {
-  const tabs = [tab("u", "user", 0), ...[1, 2, 3, 4, 5, 6].map((n) => tab(`p${n}`, "agent", n))];
-  assert.deepEqual(agentTabsToRecycle(tabs, new Set(["p6"]), 5).map((t) => t.id), ["p1"]);
-});
-
-test("用户动过的 Agent 页不收、也不占名额；Agent 用过的用户页更不收", () => {
-  const tabs = [
-    tab("user-worked-in", "agent", 0, 10),
-    tab("user-own", "user", 0),
-    ...[1, 2, 3, 4, 5, 6].map((n) => tab(`p${n}`, "agent", n)),
-  ];
-  assert.deepEqual(agentTabsToRecycle(tabs, new Set(["p6"]), 5).map((t) => t.id), ["p1"]);
-});
-
-test("刚开的和当前显示的那张不收，哪怕它们最老", () => {
-  const tabs = [1, 2, 3, 4, 5, 6].map((n) => tab(`p${n}`, "agent", n));
-  assert.deepEqual(agentTabsToRecycle(tabs, new Set(["p6", "p1"]), 5).map((t) => t.id), ["p2"]);
-});
-
-test("看的是最近一次使用，不是打开的先后", () => {
-  const tabs = [tab("p1", "agent", 100), tab("p2", "agent", 2), tab("p3", "agent", 3), tab("p4", "agent", 4), tab("p5", "agent", 5), tab("p6", "agent", 6)];
-  assert.deepEqual(agentTabsToRecycle(tabs, new Set(["p6"]), 5).map((t) => t.id), ["p2"]);
+test("settled blank cleanup keeps user pages, interacted pages, loading pages and real content", () => {
+  const agent = { owner: "agent" as const, phase: "ready" };
+  assert.equal(isSettledAgentBlank(agent, "about:blank", false), true);
+  assert.equal(isSettledAgentBlank({ ...agent, owner: "user" }, "about:blank", false), false);
+  assert.equal(isSettledAgentBlank({ ...agent, userInputAt: 0 }, "about:blank", false), false);
+  for (const phase of ["creating", "loading", "closing"]) assert.equal(isSettledAgentBlank({ ...agent, phase }, "about:blank", false), false);
+  assert.equal(isSettledAgentBlank(agent, "about:blank", true), false);
+  assert.equal(isSettledAgentBlank(agent, "https://example.com", false), false);
+  assert.equal(isSettledAgentBlank(agent, "", false), false);
 });
 
 test("只有有意图的动作才算用过这张页", () => {

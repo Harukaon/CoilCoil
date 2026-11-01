@@ -132,7 +132,13 @@ export abstract class RuntimeBase {
     this.extensionPaths = [...resources.extensions, ...options.additionalExtensionPaths ?? []];
     this.skillPaths = resources.skills;
     this.promptPaths = resources.prompts;
-    this.emitEvent = options.onEvent ?? (() => undefined);
+    this.emitEvent = (event) => {
+      if (event.type === "runtime_error" || (event.type === "runtime_notice" && event.level === "error")) {
+        this.log.error("runtime", event.type, event.message, { sessionId: this.active?.session.sessionId, cwd: this.active?.cwd },
+          { sessionPath: this.active?.session.sessionFile });
+      }
+      options.onEvent?.(event);
+    };
     this.modelRuntime = options.modelRuntime ? this.withModelOverrides(options.modelRuntime) : undefined;
     if (!this.modelRuntime && options.modelRuntimePromise) {
       this.modelRuntimePromise = options.modelRuntimePromise.then((runtime) => {

@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { workflowDiagnosticLog } from "../diagnostic-channel.ts";
 import { closeSync, createWriteStream, openSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -62,6 +63,15 @@ function notificationReason(session: ManagedTerminal, event: { mode: string; pat
 }
 
 export default function terminalExtension(pi: ExtensionAPI): void {
+  const diagnostic = workflowDiagnosticLog(pi.events);
+  let diagnosticContext: { cwd?: string; sessionId?: string; sessionPath?: string } = {};
+  const record = (event: string, data: Record<string, unknown>, error?: unknown): void => {
+    const { sessionPath, ...association } = diagnosticContext;
+    diagnostic.log(error === undefined ? "info" : "error", "monitor", event, { ...association, ...data }, { sessionPath, error });
+  };
+  pi.on("session_start", (_event, ctx) => {
+    diagnosticContext = { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), sessionPath: ctx.sessionManager.getSessionFile() };
+  });
   const sessions = new Map<string, ManagedTerminal>();
   // A foreground command still belongs to this activity after its bounded wait
   // ends. Compaction may change the underlying run/signal before the activity settles.
@@ -94,14 +104,22 @@ export default function terminalExtension(pi: ExtensionAPI): void {
           display: true,
           details: { ...payload.details, origin: { kind: "task-notification", producer: "background-monitor" } },
         }, { triggerTurn: true, deliverAs: delivery });
+        record("notification_sent", { delivery, noticeCount: delivered.length,
+          terminalIds: delivered.map((notice) => notice.terminalId), monitorIds: delivered.flatMap((notice) => notice.monitorId ? [notice.monitorId] : []) });
       } catch (error) {
+        record("notification_failed", { delivery, noticeCount: delivered.length }, error);
         pi.events.emit(BACKGROUND_WAKE_FAILURE_CHANNEL, { error: error instanceof Error ? error.message : String(error) });
       }
     },
   });
   const monitors = createTerminalMonitorRegistry({
-    onWaitingChange: (state) => pi.events.emit(BACKGROUND_WAIT_STATE_CHANNEL, state),
+    onWaitingChange: (state) => {
+      record("waiting_changed", { waiting: state.waiting, monitorIds: state.monitorIds });
+      pi.events.emit(BACKGROUND_WAIT_STATE_CHANNEL, state);
+    },
     onEvent: (event) => {
+      record("event_ready", { monitorId: event.monitorId, terminalId: event.terminalId, mode: event.mode,
+        status: event.status, outputBytes: Buffer.byteLength(event.output, "utf8") });
       const monitor = monitors.get(event.monitorId);
       const session = sessions.get(event.terminalId);
       notices.enqueue(session?.timeoutRequested
@@ -128,12 +146,15 @@ export default function terminalExtension(pi: ExtensionAPI): void {
     notices.setAgentRunning(true);
   });
   const cancelBackgroundWork = (): { cancelled: boolean; completion: Promise<void> } => {
+    const startedAt = Date.now();
     stopGeneration += 1;
     const owned = [...new Set([...foregroundTerminals, ...[...ownedMonitorTerminals]
       .flatMap((id) => sessions.get(id) ? [sessions.get(id)!] : [])])].filter(isRunning);
     const cancelled = owned.length > 0 || notices.pendingCount() > 0
       || monitors.list().some((monitor) => monitor.status === "watching")
       || [...sessions.values()].some((session) => session.notifications.some((item) => !item.fired));
+    if (cancelled) record("cancellation_started", { processCount: owned.length, pendingNotices: notices.pendingCount(),
+      monitorCount: monitors.list().filter((monitor) => monitor.status === "watching").length });
     monitors.cancelAll();
     notices.clear();
     for (const session of sessions.values()) {
@@ -146,7 +167,12 @@ export default function terminalExtension(pi: ExtensionAPI): void {
       finally { publishTerminalState(session); }
     })).then((results) => {
       const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
-      if (errors.length) throw new AggregateError(errors, "Failed to stop owned background monitor processes");
+      if (errors.length) {
+        const error = new AggregateError(errors, "Failed to stop owned background monitor processes");
+        record("cancellation_failed", { processCount: owned.length, errorCount: errors.length, durationMs: Date.now() - startedAt }, error);
+        throw error;
+      }
+      if (cancelled) record("cancellation_completed", { processCount: owned.length, durationMs: Date.now() - startedAt });
     });
     return { cancelled, completion };
   };

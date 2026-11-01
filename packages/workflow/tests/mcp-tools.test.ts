@@ -98,7 +98,8 @@ test("MCP 工具报错（返回 isError）时，mcp 工具如实标成失败", a
     events: { emit: (channel: string, data: { manager?: unknown }) => { if (channel === MCP_MANAGER_CHANNEL) data.manager = manager; } },
     registerTool: (tool: never) => { const entry = tool as { name: string; execute: never }; tools.set(entry.name, entry); },
   } as never);
-  const result = await tools.get("mcp")!.execute("t", { action: "call", server: "some-server", tool: "x" }, undefined, undefined, undefined);
+  const result = await tools.get("mcp")!.execute("t", { action: "call", server: "some-server", tool: "x" }, undefined, undefined,
+    { cwd: "/project", sessionManager: { getSessionId: () => "session-a", getSessionFile: () => "/sessions/a.jsonl" } });
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /No page found/);
 });
@@ -111,6 +112,7 @@ type ToolResult = {
 
 type SavedEntry = { type: "custom"; customType: string; data: unknown };
 function lifecycle(manager: unknown, entries: SavedEntry[] = [], sessionId = "session-a") {
+  const ctx = { cwd: "/project", sessionManager: { getBranch: () => entries, getSessionId: () => sessionId, getSessionFile: () => `/sessions/${sessionId}.jsonl` } };
   const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
   const tools = new Map<string, { name: string; description: string; parameters: unknown;
     execute: (id: string, params: Record<string, unknown>) => Promise<ToolResult> }>();
@@ -118,13 +120,12 @@ function lifecycle(manager: unknown, entries: SavedEntry[] = [], sessionId = "se
   coilcoilMcpTools({
     on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { handlers.set(name, handler); },
     events: { emit: (name: string, data: { manager?: unknown }) => { if (name === MCP_MANAGER_CHANNEL) data.manager = manager; } },
-    registerTool: (tool: never) => { const entry = tool as { name: string; description: string; parameters: unknown; execute: never };
-      tools.set(entry.name, entry); if (!active.includes(entry.name)) active.push(entry.name); },
+    registerTool: (tool: never) => { const entry = tool as { name: string; description: string; parameters: unknown; execute: (...args: unknown[]) => Promise<ToolResult> };
+      tools.set(entry.name, { ...entry, execute: (id, params) => entry.execute(id, params, undefined, undefined, ctx) }); if (!active.includes(entry.name)) active.push(entry.name); },
     getActiveTools: () => [...active],
     setActiveTools: (names: string[]) => { active = [...names]; },
     appendEntry: (customType: string, data: unknown) => { entries.push({ type: "custom", customType, data }); },
   } as never);
-  const ctx = { sessionManager: { getBranch: () => entries, getSessionId: () => sessionId } };
   return { tools, entries, active: () => [...active], emit: (name: string) => handlers.get(name)?.({}, ctx) };
 }
 

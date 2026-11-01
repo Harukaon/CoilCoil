@@ -2,7 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server as HttpServer } from "node:http";
 import type { Event, WebContents } from "electron";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
-import { AGENT_TAB_LIMIT, isAgentTabUse } from "./browser-agent-tabs";
+import { EMPTY_BROWSER_DOCUMENT, isAgentTabUse } from "./browser-agent-tabs";
 import { isDirectPageTargetInfoRequest, isSharedStateReset, isTabActivationCommand, routePageCommand } from "./browser-cdp-commands";
 import { detachDebuggerListener } from "./browser-cdp-teardown";
 import type { PageDrags } from "./browser-page-drags";
@@ -44,20 +44,18 @@ interface CdpClient {
 export interface BrowserCdpHost {
   onAgentActivated(scopeId: string): void;
   ensureActiveTab(scopeId: string): Promise<BrowserTab>;
+  browserVersion(scopeId: string): Record<string, unknown>;
+  onAgentCommand(scopeId: string): void;
   createTab(rawUrl: string | undefined, activate: boolean, scopeId: string): Promise<BrowserTab>;
-  /** Agent 刚操作过这张标签页：上限收页时它就不是「最久没用的」。 */
+  /** Agent 正在操作这张标签页，取消结束清理并更新活动标记。 */
   noteAgentUse(tab: BrowserTab): void;
   /** Agent 的虚拟鼠标刚移动，别让它改掉用户面板里的真实光标。 */
   noteAgentPointer(tab: BrowserTab): void;
-  /** 这个作用域里因为超过上限被关掉的 Agent 标签页，取一次就清空。 */
-  takeRecycledTabs(scopeId: string): Array<{ url: string; title: string }>;
   /** 这个作用域（会话）里的全部标签页，用户开的、Agent 开的都在；用户正看着哪张也标出来。 */
   tabList(scopeId: string): Array<{ id: string; title: string; url: string; active: boolean; owner: "agent" | "user" }>;
   selectTab(id: string, scopeId: string): void;
   closeTab(id: string, scopeId: string): void;
   cdpTabs(scopeId: string): BrowserTab[];
-  /** 这个作用域里随便一张已经就绪的页面，只拿来答浏览器版本这种不碰页面的问题。 */
-  anyReadyTab(scopeId: string): BrowserTab | undefined;
   /** 这个作用域里没人要过、还停在空白页上的那张占位标签页，不管现在归谁。 */
   blankPlaceholder(scopeId: string): BrowserTab | undefined;
   tabById(id: string): BrowserTab | undefined;
@@ -112,18 +110,12 @@ export class BrowserCdpBridge {
 
   constructor(private readonly host: BrowserCdpHost) {
     this.server = createServer((request, response) => {
-      // 运行时在每次调内置浏览器之后来取一次：上限收掉了哪些 Agent 标签页，好在那次
-      // 工具返回里告诉 Agent。鉴权和 CDP 连接同一套：路径里的令牌加 Bearer。
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
       const scopeId = requestUrl.searchParams.get("scope")?.trim() || DEFAULT_BROWSER_SCOPE_ID;
       const json = (status: number, body: unknown): void => {
         response.writeHead(status, { "content-type": "application/json" });
         response.end(JSON.stringify(body));
       };
-      if (request.method === "GET" && requestUrl.pathname === `/coilcoil/recycled-tabs/${this.pathToken}` && this.authorized(request)) {
-        json(200, { limit: AGENT_TAB_LIMIT, recycled: this.host.takeRecycledTabs(scopeId) });
-        return;
-      }
       // Agent 的 browser_tabs：这个会话里的全部标签页，同一套鉴权。
       if (request.method === "GET" && requestUrl.pathname === `/coilcoil/tabs/${this.pathToken}` && this.authorized(request)) {
         json(200, { tabs: this.host.tabList(scopeId) });
@@ -337,7 +329,7 @@ export class BrowserCdpBridge {
       }
     }
     if (isTabActivationCommand(request.method)) {
-      // Agent 把这张切到前台：算它在操作（面板亮「正在操作」，上限收页时不算久没用）。这条命令
+      // Agent 把这张切到前台：算它在操作（面板亮「正在操作」）。这条命令
       // 在这里就答完了，走不到 executePageCommand 里的 isAgentTabUse，所以在这儿记。
       this.host.noteAgentUse(tab);
       this.host.selectTab(tab.id, tab.scopeId);
@@ -414,31 +406,26 @@ export class BrowserCdpBridge {
     }
   }
 
-  /**
-   * 开新标签页之前，先用掉这个桥自己垫出来的那张空白页。
-   *
-   * 一个客户端刚连上来就会问浏览器版本、要目标列表，这两条都得有一个页面才答得
-   * 出来，`ensureActiveTab` 于是先垫一张空白页。agent 紧接着 new_page，结果每个
-   * 会话都从「一张没人要的空白页 + 一张真正在用的页」开始——用户看到的就是「默认
-   * 两个标签页起步」。那张空白页只要还停在 about:blank 上，就没有任何理由不给
-   * agent 用。
-   *
-   * 只有这条 CDP 路径会复用。用户自己按「+」开的空白页不算（implicit 是 false）：
-   * 那是他刚开的，替他导航走会很奇怪。
-   */
+  /** Adopt only an untouched automatic placeholder; explicit blank pages remain independent. */
   private async adoptBlankTab(url: string | undefined, activate: boolean, scopeId: string): Promise<BrowserTab | undefined> {
     const blank = this.host.blankPlaceholder(scopeId);
     if (!blank) return undefined;
-    // 面板打开时垫的那张空白页也一样：还没人用过它，Agent 直接拿来用，免得多一张。
-    // 用户在空白页上点过的痕迹也清掉，不然这张 Agent 的页永远不会被上限收掉。
+    // Reserve before awaiting so concurrent creates cannot both adopt this page.
     blank.implicit = false;
-    blank.userInputAt = undefined;
-    blank.userPressAt = undefined;
+    const guest = this.host.guestOf(blank);
+    if (await guest.executeJavaScript(EMPTY_BROWSER_DOCUMENT) !== true) return undefined;
+    // The probe yielded: a user may have started interacting or navigating meanwhile.
+    if (blank.phase !== "ready" || blank.userInputAt !== undefined || guest.isLoading() || guest.getURL() !== DEFAULT_BROWSER_URL) return undefined;
     // 垫出来的空白页被 Agent 拿去用了，就是 Agent 的页。
     blank.owner = "agent";
     blank.lastUsedAt = Date.now();
     if (activate) this.host.selectTab(blank.id, scopeId);
-    await this.host.guestOf(blank).loadURL(normalizeBrowserUrl(url));
+    blank.phase = "loading";
+    try {
+      await guest.loadURL(normalizeBrowserUrl(url));
+    } finally {
+      if (blank.phase === "loading") blank.phase = "ready";
+    }
     this.announceChanged(blank);
     return blank;
   }
@@ -446,10 +433,8 @@ export class BrowserCdpBridge {
   private async executeRootCommand(client: CdpClient, method: string, params: Record<string, unknown>): Promise<unknown> {
     if (method === "Target.getBrowserContexts") return { browserContextIds: [browserContextId(client.scopeId)] };
     if (method === "Browser.getVersion") {
-      // 只读的浏览器信息，哪张页面答都一样；借用户的页面答也不碰它的内容。一张页面都
-      // 没有时才给 Agent 开一张。
-      const tab = this.host.anyReadyTab(client.scopeId) ?? await this.host.ensureActiveTab(client.scopeId);
-      return this.host.guestOf(tab).debugger.sendCommand(method, params);
+      // A read-only version query must not leave a new blank tab behind.
+      return this.host.browserVersion(client.scopeId);
     }
     if (method === "Target.setDiscoverTargets") {
       // 不再为了「有个页面」先垫一张：Agent 还没有自己的标签页时，目标列表就是空的，
@@ -469,6 +454,7 @@ export class BrowserCdpBridge {
       return { targetInfo: this.findTargetInfo(requestedId, client.scopeId) };
     }
     if (method === "Target.createTarget") {
+      this.host.onAgentCommand(client.scopeId);
       const url = typeof params.url === "string" ? params.url : undefined;
       const activate = params.background !== true;
       const tab = await this.adoptBlankTab(url, activate, client.scopeId)

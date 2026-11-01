@@ -23,7 +23,8 @@ import type {
 import { McpAuthCallbackServer, sharedAuthCallbackServer, type McpAuthCallback } from "./auth-callback.js";
 import { McpConnection, type McpConnectionStatus, type McpToolSummary } from "./connection.js";
 import { credentialKey, type McpCredentialStore } from "./credential-store.js";
-import type { McpDiagnosticLogger } from "./diagnostic.js";
+import type { McpDiagnosticContext, McpDiagnosticLogger } from "./diagnostic.js";
+import { diagnoseMcpCall } from "./call-diagnostics.js";
 import { launchFor, type EnvironmentSource } from "./definition.js";
 
 export interface McpManagerOptions {
@@ -35,6 +36,7 @@ export interface McpManagerOptions {
   openAuthorization: (url: URL) => void | Promise<void>;
   /** Optional sink for redacted authentication diagnostics. */
   diagnostic?: McpDiagnosticLogger;
+  diagnosticContext?: () => McpDiagnosticContext;
   environment?: EnvironmentSource;
   clientVersion?: string;
 }
@@ -655,7 +657,12 @@ export class McpManager {
     return { tools: connection.tools, status };
   }
 
-  async callTool(server: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  async callTool(server: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal, context?: McpDiagnosticContext): Promise<unknown> {
+    return diagnoseMcpCall(this.options.diagnostic, { ...this.options.diagnosticContext?.(), ...context }, server, tool, args,
+      () => this.executeTool(server, tool, args, signal));
+  }
+
+  private async executeTool(server: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     await this.reload();
     const definition = this.definitions.get(server);
     if (!definition) throw new Error(`没有找到 MCP Server「${server}」。`);

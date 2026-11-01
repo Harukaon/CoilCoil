@@ -159,7 +159,7 @@ export class RuntimeServer {
       const result = await this.dispatch(envelope.command, envelope.runtimeId);
       return { id: envelope.id, ok: true, result };
     } catch (error) {
-      this.log.error("command", "command_failed", error, { command: envelope.command.type }, {
+      this.log.error("command", "command_failed", error, { commandType: envelope.command.type }, {
         runtimeId: envelope.runtimeId,
       });
       return { id: envelope.id, ok: false, error: errorMessage(error) };
@@ -473,7 +473,7 @@ export class RuntimeServer {
     } catch (error) {
       this.removeRuntimeReferences(runtimeId);
       await runtime.dispose().catch((cleanupError) => {
-        this.log.error("process", "session_initialization_cleanup_failed", cleanupError, { command: "create_session", cwd }, { runtimeId });
+        this.log.error("process", "session_initialization_cleanup_failed", cleanupError, { commandType: "create_session", cwd }, { runtimeId });
       });
       throw error;
     }
@@ -522,7 +522,7 @@ export class RuntimeServer {
       } catch (error) {
         this.removeRuntimeReferences(runtimeId);
         await runtime.dispose().catch((cleanupError) => {
-          this.log.error("process", "session_initialization_cleanup_failed", cleanupError, { command: "open_session", cwd }, { runtimeId, sessionPath });
+          this.log.error("process", "session_initialization_cleanup_failed", cleanupError, { commandType: "open_session", cwd }, { runtimeId, sessionPath });
         });
         throw error;
       }
@@ -905,7 +905,7 @@ export function attachProcessIpc(options = runtimeOptionsFromEnvironment()): Run
     // process exited anyway; the runtimes it failed to close left no trace.
     void server.dispose()
       .catch((error) => server.log.error("process", "shutdown_failed", error))
-      .finally(() => process.exit(0));
+      .finally(async () => { await server.log.flush(); process.exit(0); });
   };
   process.once("disconnect", shutdown);
   process.once("SIGTERM", shutdown);

@@ -341,14 +341,11 @@ export abstract class RuntimeInspectionMcp extends RuntimeSubagents {
     return new McpManager({
       loadServers,
       store: new McpCredentialStore(defaultCredentialFile(this.agentDir)),
+      diagnosticContext: () => ({ sessionId: this.active?.session.sessionId, sessionPath: this.active?.session.sessionFile, cwd: this.active?.cwd }),
       diagnostic: (level, event, data, error) => {
-        if (level === "error") {
-          this.log.error("mcp-auth", event, error ?? new Error(event), data);
-        } else if (level === "warn") {
-          this.log.warn("mcp-auth", event, data);
-        } else {
-          this.log.info("mcp-auth", event, data);
-        }
+        this.log.log(level, event.startsWith("mcp_") ? "mcp" : "mcp-auth", event, data,
+          { sessionPath: typeof data?.sessionPath === "string" ? data.sessionPath : undefined,
+            ...(error === undefined ? {} : { error }) });
       },
       // The renderer opens the authorization page itself, so that it can show
       // the dialog and the browser in the right order; the manager only has to
@@ -391,7 +388,8 @@ export abstract class RuntimeInspectionMcp extends RuntimeSubagents {
         return result.failure ? { ...result, failure: redactSensitiveText(result.failure, await this.mcpSensitiveValues(cwd)) } : result;
       }
       if (request.server === "coilcoil-browser") await requireBundledBrowserAvailable(signal);
-      const result = await manager.callTool(request.server, request.tool, request.args, signal);
+      const result = await manager.callTool(request.server, request.tool, request.args, signal, { cwd,
+        ...(this.active?.cwd === cwd ? { sessionId: this.active.session.sessionId, sessionPath: this.active.session.sessionFile } : { sessionId: undefined, sessionPath: undefined }) });
       return request.server === "coilcoil-browser" ? redactSensitiveValue(result, bundledBrowserSensitiveValues()) : result;
     } catch (error) {
       throw new Error(redactSensitiveText(errorMessage(error), await this.mcpSensitiveValues(cwd)));

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { MCP_MANAGER_CHANNEL, MCP_TOOLS_REFRESH_ENTRY } from "../extensions/mcp-tools.ts";
+import { WORKFLOW_DIAGNOSTIC_PUBLISHER_REQUEST } from "../extensions/diagnostic-channel.ts";
 import { COILCOIL_BACKGROUND_WAIT_STANDARDS, COILCOIL_SUBAGENT_GIT_SAFETY, COILCOIL_WINDOWS_SHELL_STANDARDS } from "../extensions/system/engineering-standards.ts";
 import {
   BROWSER_MCP_SERVER,
@@ -49,7 +50,7 @@ async function openChild(
 async function execute(handle: ChildSessionHandle, name: string, params: Record<string, unknown>, cwd: string) {
   const tool = handle.session.getToolDefinition(name);
   assert.ok(tool, `${name} must be registered in the child session`);
-  return tool.execute(`call-${name}`, params as never, undefined, undefined, { cwd } as never) as Promise<{
+  return tool.execute(`call-${name}`, params as never, undefined, undefined, { cwd, sessionManager: handle.session.sessionManager } as never) as Promise<{
     content: Array<{ type: string; text?: string }>;
     details: Record<string, unknown>;
     isError?: boolean;
@@ -268,11 +269,17 @@ test("child request prefixes survive restart and instruction or MCP schema edits
   writeFileSync(join(workspace.cwd, "AGENTS.md"), "original child project instructions");
   const model = getBuiltinModels("anthropic").find((entry) => entry.id === "claude-sonnet-5-5")!;
   const bodies: Array<{ system: unknown; tools: Array<{ name: string; description?: string }> }> = [];
+  const cacheDiagnostics: Array<{ data: any; context: any }> = [];
   let description = "original direct schema";
   const manager = { directTools: async () => [{ server: "database", tool: { name: "query", description,
     inputSchema: { type: "object", required: ["filter"], properties: { filter: { type: "string" } } } } }] };
   const parentEvents: ParentEvents = { emit(channel, data) {
     if (channel === MCP_MANAGER_CHANNEL) (data as { manager?: unknown }).manager = manager;
+    if (channel === WORKFLOW_DIAGNOSTIC_PUBLISHER_REQUEST) (data as any).log = {
+      log(_level: string, scope: string, event: string, data: unknown, context: unknown) {
+        if (scope === "cache" && event === "request") cacheDiagnostics.push({ data, context });
+      },
+    };
   } };
   context.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
     bodies.push(JSON.parse(String(init.body)));
@@ -318,6 +325,10 @@ test("child request prefixes survive restart and instruction or MCP schema edits
   await fresh.session.prompt("new child");
   assert.match(JSON.stringify(bodies.at(-1)!.system), /updated child project instructions/);
   assert.match(JSON.stringify(bodies.at(-1)!.system), /updated child profile/);
+  assert.equal(cacheDiagnostics.length, bodies.length, "every child request emits cache metadata to its parent");
+  assert.ok(cacheDiagnostics.every((entry) => entry.data.role === "subagent" && entry.context.sessionPath));
+  assert.equal(cacheDiagnostics[0].data.parentSessionId, "parent-a");
+  assert.doesNotMatch(JSON.stringify(cacheDiagnostics), /original child profile|updated child profile|offline response|offline-key/);
 });
 
 

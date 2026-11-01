@@ -1,41 +1,39 @@
-export const description = "Agent 标签页只留最近用过的 5 张，用户的不动，标签条上分得开";
+export const description = "每个会话最多 8 页，common/raw/UI 都拒绝第 9 页，并发创建也不突破上限";
+const call = (tool, args) => ({ tool: "browser", args: { action: "call", tool, args } });
 
-export async function run({ page, ui, site, check, shot }) {
-  // 用户的鼠标就停在面板上：Agent 每开一张，画面上都有鼠标经过。经过不算「用户用过」，
-  // 不能因此让这张页面免收（以前算，鼠标一晃上限就失效了）。
-  const hoverPanel = async () => {
-    const box = await page.locator(".browser-live-page").boundingBox();
-    if (!box) return;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2 + 8);
-  };
+export async function run({ page, ui, site, check, shot, paths }) {
   await ui.newConversation("projA");
   await ui.openBrowserPanel();
   await ui.typeAddress(site.url("u.html"));
   await ui.waitFor(async () => (await ui.browserTabs()).some((tab) => tab.label === "u"));
-  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.list_pages", args: {} } }, { echo: true }], "回收");
-  for (const name of ["p1", "p2", "p3", "p4", "p5"]) {
-    await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url(`${name}.html`) } } }, { echo: true }], "回收");
-    await hoverPanel();
+  await ui.send([
+    ...[1, 2, 3, 4, 5, 6].map((n) => call("open", { url: site.url(`p${n}.html`) })),
+    call("devtools.new_page", { url: site.url("p7.html") }), { echo: true },
+  ], "上限");
+  const full = await ui.browserTabs();
+  check("用户页与 Agent 页合计 8 张，全部保留", full.length === 8 && full.some((tab) => tab.label === "u") && full.filter((tab) => tab.agent).length === 7, JSON.stringify(full));
+  for (const tool of ["open", "devtools.new_page"]) {
+    await ui.send([call(tool, { url: site.url("a.html") }), { echo: true }], "上限");
+    const text = await ui.lastEcho();
+    check(`${tool} 拒绝第 9 张并要求复用或关闭`, /8 browser tabs/.test(text) && /Reuse.*close/.test(text) && (await ui.browserTabs()).length === 8, text.slice(0, 400));
   }
-  const five = await ui.browserTabs();
-  check("开满 5 张：用户页 + 5 张 Agent 页都在", five.length === 6, JSON.stringify(five));
-  check("用户自己开的 u 没有 Agent 标识", five.find((tab) => tab.label === "u")?.agent === false);
-  check("Agent 开的都带 Agent 标识", five.filter((tab) => tab.label.startsWith("p")).every((tab) => tab.agent));
-  await shot("five");
-
-  // 先用一下最老的 p1，它就不再是最久没用的。
-  await ui.send([{ tool: "browser", args: { action: "call", tool: "navigate", args: { handle: "btab-1", url: site.url("p1.html") } } }, { echo: true }], "回收");
-  await ui.send([{ tool: "browser", args: { action: "call", tool: "open", args: { url: site.url("p6.html") } } }, { echo: true }], "回收");
-  const six = (await ui.browserTabs()).map((tab) => tab.label);
-  check("第 6 张：p1 刚用过，收掉的是最久没用的 p2", six.includes("p1") && !six.includes("p2") && six.includes("u"), JSON.stringify(six));
-  const echo6 = await ui.lastEcho();
-  check("工具返回里写明回收了哪张（id + url）", /id=\d+ 的标签页，url 是：\S*p2\.html/.test(echo6), echo6.slice(0, 200));
-
-  await ui.send([{ tool: "browser", args: { action: "call", tool: "devtools.new_page", args: { url: site.url("p7.html") } } }, { echo: true }], "回收");
-  const seven = await ui.browserTabs();
-  check("走 mcp new_page 开第 7 张：p3 被收掉，Agent 页仍是 5 张", !seven.some((tab) => tab.label === "p3") && seven.filter((tab) => tab.agent).length === 5, JSON.stringify(seven.map((tab) => tab.label)));
-  const echo7 = await ui.lastEcho();
-  check("mcp 这条路的返回里也有回收提示", /id=\d+ 的标签页，url 是：\S*p3\.html/.test(echo7), echo7.slice(0, 200));
-  await shot("seven");
+  const scope = await page.evaluate(async (cwd) => (await window.coilcoil.request({ type: "list_sessions", cwd }))[0].id, paths.projA);
+  const userFailure = await page.evaluate(async (id) => {
+    try { await window.coilcoil.createBrowserTab(id); return "unexpected success"; }
+    catch (error) { return String(error); }
+  }, scope);
+  check("用户 UI 开页路径使用相同上限", userFailure.includes("8 browser tabs") && (await ui.browserTabs()).length === 8, userFailure);
+  await ui.send([call("navigate", { handle: "btab-1", url: site.url("a.html") }), { echo: true }], "复用");
+  check("满额时仍能复用已有页面，其他页面没有被回收", (await ui.browserTabs()).some((tab) => tab.label === "page-a") && (await ui.browserTabs()).length === 8);
+  await shot("eight");
+  await page.evaluate(async (id) => {
+    const current = await window.coilcoil.getBrowserState(id);
+    for (const tab of current.tabs) await window.coilcoil.closeBrowserTab(id, tab.id);
+  }, scope);
+  const parallel = await page.evaluate(async ({ id, url }) => {
+    const results = await Promise.allSettled(Array.from({ length: 12 }, () => window.coilcoil.createBrowserTab(id, url)));
+    const current = await window.coilcoil.getBrowserState(id);
+    return { accepted: results.filter((entry) => entry.status === "fulfilled").length, rejected: results.filter((entry) => entry.status === "rejected").map((entry) => String(entry.reason)), count: current.tabs.length };
+  }, { id: scope, url: site.url("b.html") });
+  check("12 个并发创建只有 8 个成功，失败不留下半成品标签", parallel.accepted === 8 && parallel.rejected.length === 4 && parallel.rejected.every((text) => text.includes("8 browser tabs")) && parallel.count === 8, JSON.stringify(parallel));
 }

@@ -88,6 +88,8 @@ Verification on 2026-10-31: all **1,703 workspace tests** pass with no skips or 
 
 The agent sees one `browser` tool. `list` returns common operations without a browser connection; `tools` discovers operation descriptions and, when given a name, that operation's input schema; `call` validates the arguments and executes it. Common operations retain the managed page handles and snapshots. Additional built-in browser MCP operations are exposed under `devtools.*` through the same gateway. The agent-facing `mcp` gateway excludes this server, while the external local MCP CLI retains its existing access. Child agents remain unable to control the shared desktop browser.
 
+Each conversation permits eight total browser tabs. Creation reserves capacity synchronously, including concurrent CDP/MCP and UI requests; exceeding the limit returns an error asking the caller to reuse or close an existing page. Ordinary pages are never evicted to make room. When an Agent turn settles, untouched Agent-owned blank pages are cleaned up only after loading ends and a DOM check confirms they have no content. User pages and new navigation remain protected. Reading browser version information does not create a tab.
+
 Application upgrades activate `monitor` in restored main conversations and replace the former individual browser declarations with `browser`. This explicit upgrade changes the next request's tool declarations; it preserves saved conversation messages and the session's system-prompt snapshot. Routine turns continue to use the stable prompt.
 
 Main and child agents write memory candidates into the workspace's `jottings/` directory. These notes are not injected as durable memory. The file-tool policy directs writes away from the long-term index, documents and global memory. A workspace curator reads changed notes and workspace conversation transcripts, selects durable facts, removes duplication and maintains `MEMORY.md` plus its documents. Global memory remains user-managed. Successful batches acknowledge only the input revisions they captured, so notes changed during a run remain pending; failures do not acknowledge inputs. Source notes remain available for review.
@@ -99,6 +101,14 @@ New workspace memory directories use canonical path identities, keeping same-nam
 Mounted folders and browser partitions use the same canonical workspace identity, including symlinks and macOS `/var` aliases. The browser retains an existing alias cookie partition when no canonical partition exists, persisting that association. If both already exist, it selects the canonical partition and leaves the other data untouched; it never merges or overwrites login stores.
 
 Named Claude and Codex subscription providers are initialized from the same account definitions for the main runtime, child sessions and headless memory workers. Account credentials stay under their own IDs in the existing auth store. Children initialize their local model catalog before restoring a saved selection and report unavailable models or credentials without switching accounts. Headless workers load the subscription extension before resolving their configured model.
+
+## Operational diagnostics
+
+Main, child and memory agents share metadata-only observers for model requests, responses and tool execution. Records include session/workspace identity, provider/model, elapsed time, provider-reported token/cache/cost usage, tool routing, parameter shapes and fingerprints, output size, and the preceding failed call for the same target. These failure associations support investigating parameter corrections without retaining the arguments. MCP adds backend invocation IDs, connection/reconnection/transport failures and returned-error results. Browser lifecycle, monitor wake/cancel and memory scheduling/completion events use the same diagnostic format.
+
+Tool text token counts are explicitly estimates (`text_chars_div_4`), separate from model-reported usage; an MCP call generally does not report an exact model token charge. Byte measurements count string content and mark bounded traversal. Diagnostic records do not contain full model request bodies, prompts or tool results. Existing conversation JSONL remains the source transcript rather than being duplicated into diagnostic logs. Observers do not change model payloads or saved context.
+
+Diagnostics rotate into gzip at 10 MiB, keep ordinary archives for 7 days and error mirrors for 30 days within a shared 256 MiB budget, and prioritize error history when trimming. Active writes and unfinished compression sources are protected. See [diagnostic retention and configuration](../packages/diagnostics/README.md) for recovery, privacy and size limits.
 
 ## Extension-first product architecture
 

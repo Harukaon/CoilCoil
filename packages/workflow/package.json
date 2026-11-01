@@ -7,10 +7,12 @@
     "pi-package"
   ],
   "type": "module",
-  "imports": { "#cache/*": "./extensions/cache/*.ts" },
+  "imports": {
+    "#cache/*": "./extensions/cache/*.ts"
+  },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "pi": {
     "extensions": [
@@ -40,7 +42,8 @@
     "@coilcoil/mcp": "0.1.0",
     "diff": "8.0.4",
     "jiti": "2.7.0",
-    "node-pty": "1.2.0-beta.15"
+    "node-pty": "1.2.0-beta.15",
+    "@coilcoil/diagnostics": "0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -58,6 +61,7 @@
     "@earendil-works/pi-coding-agent": "file:../../vendor/pi/packages/coding-agent",
     "@earendil-works/pi-tui": "file:../../vendor/pi/packages/tui",
     "typebox": "1.1.38",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "tsx": "4.20.6"
   }
 }

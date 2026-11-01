@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 import { closeFilePreview, imageMimeType, openFilePreview, previewKind } from "../src/main/file-preview.ts";
 
 test("file preview recognizes common image formats and their MIME types", () => {
@@ -21,6 +22,23 @@ test("force-text keeps image source files inspectable as text", () => {
 test("unsupported binary files still use the fallback actions", () => {
   assert.equal(previewKind("archive.zip", false), undefined);
   assert.equal(imageMimeType("archive.zip"), undefined);
+});
+
+test("gzip diagnostic archives open as read-only text without changing the compressed file", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-gzip-preview-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, "runtime-123-456-abcd.archive-789-abcd.jsonl.gz");
+  const content = '{"event":"tool_failed","level":"error"}\n';
+  const compressed = gzipSync(content);
+  writeFileSync(path, compressed);
+  const owner = { id: 77, alive: () => true, send: () => undefined, onGone: () => () => undefined };
+  const result = await openFilePreview(owner, { path }, async () => ({ root, path }));
+  assert.ok(result.opened);
+  assert.equal(result.document.kind, "text");
+  assert.equal(result.document.content, content);
+  assert.equal(result.document.editable, false);
+  assert.deepEqual(readFileSync(path), compressed);
+  closeFilePreview(owner.id, result.document.id);
 });
 
 test("the HTML preview runs scripts but never on this window's origin", () => {

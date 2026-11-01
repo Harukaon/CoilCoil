@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import * as pty from "node-pty";
 import terminalExtension from "../extensions/terminal.ts";
+import { WORKFLOW_DIAGNOSTIC_PUBLISHER_REQUEST } from "../extensions/diagnostic-channel.ts";
 import goalExtension from "../extensions/goal.ts";
 import {
   BACKGROUND_WAIT_CANCEL_CHANNEL,
@@ -41,6 +42,7 @@ async function harness(t: TestContext, withGoal = false) {
   const userMessages: string[] = [];
   const entries: Array<{ customType: string; data: any }> = [];
   const transitions: Array<{ channel: string; value: any }> = [];
+  const diagnostics: Array<{ scope: string; event: string; data: any }> = [];
   let running = false;
   let shutDown = false;
   const ctx = {
@@ -49,7 +51,8 @@ async function harness(t: TestContext, withGoal = false) {
     hasUI: false,
     isIdle: () => !running,
     hasPendingMessages: () => false,
-    sessionManager: { getBranch: () => entries.map((entry) => ({ type: "custom", ...entry })) },
+    sessionManager: { getBranch: () => entries.map((entry) => ({ type: "custom", ...entry })),
+      getSessionId: () => "monitor-test", getSessionFile: () => join(cwd, "session.jsonl") },
   };
   const pi = {
     registerTool(tool: any) { tools.set(tool.name, tool); },
@@ -70,6 +73,7 @@ async function harness(t: TestContext, withGoal = false) {
         return () => { listeners.delete(listener); };
       },
       emit(channel: string, value: any) {
+        if (channel === WORKFLOW_DIAGNOSTIC_PUBLISHER_REQUEST) value.log = { log: (_level: string, scope: string, event: string, data: any) => diagnostics.push({ scope, event, data }) };
         transitions.push({ channel, value });
         for (const listener of [...channels.get(channel) ?? []]) listener(value);
       },
@@ -105,7 +109,7 @@ async function harness(t: TestContext, withGoal = false) {
     await emit("agent_settled", { aborted: false });
   };
   return { cwd, ctx, run, emit, cancel, shutdown, listTerminals, restartFromNotice,
-    messages, userMessages, entries, transitions, commands };
+    messages, userMessages, entries, transitions, commands, diagnostics };
 }
 
 test("terminal await ignores a 900000ms legacy timeout, suspends immediately and wakes exactly once", unix, async (t) => {
@@ -127,6 +131,10 @@ test("terminal await ignores a 900000ms legacy timeout, suspends immediately and
   assert.equal(h.transitions.filter((entry) => entry.channel === BACKGROUND_WAIT_STATE_CHANNEL).at(-1)!.value.waiting, false);
   await sleep(250);
   assert.equal(h.messages.length, 1, "automatic terminal exit and monitor exit share one notification owner");
+  assert.equal(h.diagnostics.filter((entry) => entry.event === "notification_sent").length, 1);
+  assert.ok(h.diagnostics.some((entry) => entry.event === "event_ready" && entry.data.outputBytes > 0));
+  assert.ok(h.diagnostics.some((entry) => entry.event === "waiting_changed" && entry.data.waiting === false));
+  assert.doesNotMatch(JSON.stringify(h.diagnostics), /DONE|printf|sleep/, "monitor logs contain lifecycle metadata, not stdout or shell commands");
 });
 
 test("readiness wakes the agent and cancelling an attached subscription leaves its service alive", unix, async (t) => {
@@ -208,6 +216,8 @@ test("the cancellation channel synchronously revokes idle waits and cleans owned
   await sleep(1_700);
   assert.equal(h.messages.length, 0);
   assert.equal(h.userMessages.length, 1, "idle Goal must not create a second model round after a cancelled wait");
+  assert.ok(h.diagnostics.some((entry) => entry.event === "cancellation_started" && entry.data.processCount === 1));
+  assert.ok(h.diagnostics.some((entry) => entry.event === "cancellation_completed" && entry.data.durationMs >= 0));
 });
 
 test("a result available before await returns directly without a duplicate wake-up", unix, async (t) => {

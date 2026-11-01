@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, extname } from "node:path";
+import { promisify } from "node:util";
+import { gunzip } from "node:zlib";
 import type { FilePreviewDocument, OpenFilePreviewInput, OpenFilePreviewResult } from "../shared/desktop-api";
 import { editableState } from "./file-edit";
 
@@ -30,6 +32,8 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 
 const TEXT_PREVIEW_LIMIT = 2 * 1024 * 1024;
 const EMBEDDED_PREVIEW_LIMIT = 20 * 1024 * 1024;
+const decompressLog = promisify(gunzip);
+const isCompressedLog = (path: string): boolean => /\.(?:jsonl|ndjson|log)(?:\.1)?\.gz$/i.test(path);
 
 /**
  * 谁在看这份预览，以及文件变了要把新内容送到哪里去。
@@ -99,6 +103,7 @@ export function imageMimeType(path: string): string | undefined {
 
 export function previewKind(path: string, forceText: boolean): FilePreviewDocument["kind"] | undefined {
   const extension = extname(path).toLowerCase();
+  if (isCompressedLog(path)) return "text";
   if (!forceText && extension === ".pdf") return "pdf";
   if (!forceText && imageMimeType(path)) return "image";
   if (!forceText && [".md", ".mdx", ".markdown"].includes(extension)) return "markdown";
@@ -110,7 +115,10 @@ export function previewKind(path: string, forceText: boolean): FilePreviewDocume
 async function readPreview(record: PreviewRecord): Promise<FilePreviewDocument> {
   const kind = previewKind(record.path, record.forceText);
   if (!kind) throw new Error("此文件类型暂不支持预览。");
-  const [buffer, stats] = await Promise.all([readFile(record.path), stat(record.path)]);
+  const [stored, stats] = await Promise.all([readFile(record.path), stat(record.path)]);
+  const compressed = isCompressedLog(record.path);
+  if (compressed && stored.byteLength > EMBEDDED_PREVIEW_LIMIT) throw new Error("压缩日志超过 20 MB，暂不支持预览。");
+  const buffer = compressed ? await decompressLog(stored, { maxOutputLength: 32 * 1024 * 1024 }) : stored;
   const limit = kind === "text" || kind === "markdown" || kind === "html" ? TEXT_PREVIEW_LIMIT : EMBEDDED_PREVIEW_LIMIT;
   if (kind === "image" && buffer.byteLength > limit) {
     throw new Error("图片超过 20 MB，暂不支持预览。");
@@ -132,7 +140,7 @@ async function readPreview(record: PreviewRecord): Promise<FilePreviewDocument> 
     truncated,
     updatedAt: Date.now(),
     mtimeMs: stats.mtimeMs,
-    ...editableState(kind, buffer, truncated),
+    ...(compressed ? { editable: false, readOnlyReason: "压缩日志只能查看；原始归档保留为 gzip 文件。" } : editableState(kind, buffer, truncated)),
   };
 }
 

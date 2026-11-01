@@ -17,7 +17,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { convertMcpResult, type ExtensionAPI, type ExtensionContext, limitMcpContent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { McpManager } from "@coilcoil/mcp";
-import { BROWSER_MCP_SERVER } from "./browser-recycle-notice.ts";
+import { BROWSER_MCP_SERVER } from "./browser-bridge.ts";
 import { MCP_TOOLS_REFRESH_ENTRY, MCP_TOOLS_SNAPSHOT_ENTRY } from "./mcp-session-state.ts";
 export { MCP_TOOLS_REFRESH_ENTRY, MCP_TOOLS_SNAPSHOT_ENTRY } from "./mcp-session-state.ts";
 
@@ -188,9 +188,10 @@ function registerDirectTools(pi: ExtensionAPI, manager: McpManager, listed: Dire
       parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as never,
       // signal 是 pi 给工具的中断信号。不接它，界面上的停止按钮就按不停一次 MCP
       // 调用：pi 那边早就放手了，这条请求还在跑，人只能干等它自己结束。
-      async execute(_toolCallId, params, signal) {
+      async execute(toolCallId, params, signal, _onUpdate, ctx) {
         try {
-          const result = await manager.callTool(server, tool.name, (params ?? {}) as Record<string, unknown>, signal);
+          const result = await manager.callTool(server, tool.name, (params ?? {}) as Record<string, unknown>, signal,
+            { toolCallId, sessionId: ctx.sessionManager.getSessionId(), sessionPath: ctx.sessionManager.getSessionFile(), cwd: ctx.cwd });
           return toolResult(server, tool.name, result);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -212,7 +213,7 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
     ].join(" "),
     parameters: McpParams,
 
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const manager = requestMcpManager(pi.events);
       if (!manager) {
         return textResult("MCP 客户端当前不可用。", { error: "manager_unavailable" }, true);
@@ -250,7 +251,8 @@ export default function coilcoilMcpTools(pi: ExtensionAPI): void {
         return textResult("call 需要同时给出 server 和 tool。", { error: "missing_target" }, true);
       }
       try {
-        const result = await manager.callTool(server, tool, (params.args ?? {}) as Record<string, unknown>, signal);
+        const result = await manager.callTool(server, tool, (params.args ?? {}) as Record<string, unknown>, signal,
+          { toolCallId, sessionId: ctx.sessionManager.getSessionId(), sessionPath: ctx.sessionManager.getSessionFile(), cwd: ctx.cwd });
         // 工具报错是返回 isError，不是抛异常；照实标成失败，界面和模型才不会当它成功了。
         return toolResult(server, tool, result);
       } catch (error) {

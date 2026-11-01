@@ -175,11 +175,9 @@ try {
   console.log("PASS: after all desktop windows close, browser calls return a clear reopen-window error.");
   console.log("All external browser smoke checks passed.");
 } catch (error) {
-  for (const name of ["main.jsonl", "runtime.jsonl"]) {
-    const logs = await readFile(join(agent, "logs", name), "utf8").catch(() => "");
-    console.error(name, logs.trim().split("\n").filter(Boolean).slice(-8).map((line) => {
-      try { const entry = JSON.parse(line); return `${entry.level}:${entry.event}`; } catch { return "invalid log"; }
-    }));
+  const { readDiagnosticEntries } = await import("./lib/diagnostic-logs.mjs");
+  for (const name of ["main", "runtime"]) {
+    console.error(name, readDiagnosticEntries(join(agent, "logs"), name, 8).map((entry) => `${entry.level}:${entry.event}`));
   }
   throw error;
 } finally {

@@ -24,6 +24,7 @@ export interface MemoryWorkerRequest {
   model: string;
   maximum?: number;
   generationRules?: string;
+  attemptId?: string;
 }
 
 export interface MemoryWorkerLaunch {
@@ -141,6 +142,7 @@ export function buildMemoryWorkerLaunch(
       "--no-extensions",
       "--extension", guardPath,
       "--extension", fileURLToPath(new URL("./providers/subscription-extension.ts", import.meta.url)),
+      "--extension", fileURLToPath(new URL("./memory-worker-diagnostics.ts", import.meta.url)),
       "--no-context-files",
       "--no-skills",
       "--no-prompt-templates",
@@ -154,6 +156,8 @@ export function buildMemoryWorkerLaunch(
       ...env,
       NO_COLOR: "1",
       PI_MEMORY_WORKER: "1",
+      PI_MEMORY_WORKER_ATTEMPT_ID: request.attemptId,
+      PI_MEMORY_WORKER_WORKSPACE: request.paths.projectRoot,
       PI_MEMORY_WORKER_SESSION_FILE: request.sessionFile,
       PI_MEMORY_WORKER_SESSION_FILES: JSON.stringify(request.inputs?.sessionFiles ?? (request.sessionFile ? [request.sessionFile] : [])),
       PI_MEMORY_WORKER_NOTES_DIR: request.paths.notesDir,

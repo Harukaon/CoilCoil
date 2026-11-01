@@ -2,7 +2,7 @@ import { StringEnum, validateToolArguments, type ToolCall } from "@earendil-work
 import { convertMcpResult, limitMcpContent, type ExtensionAPI, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { requestMcpManager } from "./mcp-tools.ts";
-import { BROWSER_MCP_SERVER, drainBrowserNotice, noteBrowserCall } from "./browser-recycle-notice.ts";
+import { BROWSER_MCP_SERVER } from "./browser-bridge.ts";
 
 export type BrowserAction = Pick<ToolDefinition, "name" | "description" | "parameters" | "execute">;
 
@@ -17,7 +17,7 @@ export function registerBrowserGateway(pi: ExtensionAPI, actions: ReadonlyMap<st
   pi.registerTool({
     name: "browser",
     label: "Browser",
-    description: "Use the built-in browser through this single entry point. action=list shows common browsing actions without connecting; action=tools lists all available operations, or shows one operation's input schema when tool is supplied; action=call runs tool with args. Discover a schema before calling it. Common operations are open, navigate, click, type and tabs; additional debugging operations use the devtools. prefix. Use tabs to identify the user's page, and change user-opened pages only when requested.",
+    description: "Use the built-in browser through this single entry point. action=list shows common browsing actions without connecting; action=tools lists all available operations, or shows one operation's input schema when tool is supplied; action=call runs tool with args. Discover a schema before calling it. Common operations are open, navigate, click, type and tabs; additional debugging operations use the devtools. prefix. Each conversation allows at most 8 tabs; reuse or close existing pages before opening more. Untouched Agent blank pages are cleaned up when the agent turn ends. Use tabs to identify the user's page, and change user-opened pages only when requested.",
     parameters: Type.Object({
       action: StringEnum(["list", "tools", "call"] as const),
       tool: Type.Optional(Type.String({ description: "Operation name from list/tools; required for call" })),
@@ -55,13 +55,10 @@ export function registerBrowserGateway(pi: ExtensionAPI, actions: ReadonlyMap<st
         if (params.action === "tools") return result({ name: tool, description: definition.description, inputSchema: schema });
         const args = validateToolArguments({ name: tool, description: definition.description ?? "", parameters: schema as never },
           { type: "toolCall", id, name: tool, arguments: (params.args ?? {}) as ToolCall["arguments"] });
-        const raw = await manager.callTool(BROWSER_MCP_SERVER, rawName, args, signal) as Parameters<typeof convertMcpResult>[2];
-        const session = ctx?.sessionManager?.getSessionId();
-        const text = (raw.content ?? []).flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
-        await noteBrowserCall(session, text);
-        const notice = drainBrowserNotice(session);
+        const raw = await manager.callTool(BROWSER_MCP_SERVER, rawName, args, signal, {
+          sessionId: ctx?.sessionManager?.getSessionId(), sessionPath: ctx?.sessionManager?.getSessionFile(), cwd: ctx?.cwd, toolCallId: id,
+        }) as Parameters<typeof convertMcpResult>[2];
         const converted = await convertMcpResult(BROWSER_MCP_SERVER, rawName, { ...raw, content: raw.content ?? [] });
-        if (notice) converted.content.push({ type: "text", text: notice });
         return { ...converted, isError: raw.isError === true };
       } catch (error) {
         signal?.throwIfAborted();

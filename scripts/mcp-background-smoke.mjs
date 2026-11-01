@@ -102,11 +102,9 @@ try {
   console.log("PASS: explicitly quitting the app removes the MCP endpoint.");
 } catch (error) {
   // Only event names: failure diagnostics must not print launch secrets.
-  for (const name of ["main.jsonl", "runtime.jsonl"]) {
-    const entries = await readFile(join(agent, "logs", name), "utf8").catch(() => "");
-    console.error(name, entries.trim().split("\n").filter(Boolean).slice(-10).map((line) => {
-      try { const entry = JSON.parse(line); return `${entry.level}:${entry.event}`; } catch { return "invalid log entry"; }
-    }));
+  const { readDiagnosticEntries } = await import("./lib/diagnostic-logs.mjs");
+  for (const name of ["main", "runtime"]) {
+    console.error(name, readDiagnosticEntries(join(agent, "logs"), name, 10).map((entry) => `${entry.level}:${entry.event}`));
   }
   throw error;
 } finally {

@@ -46,6 +46,8 @@ test("桥垫出来的那张空白页会被 agent 的新标签页接管，不再�
   assert.equal(isReusableBlankTab({ implicit: false, phase: "ready" }, "about:blank"), false);
   // 还没就绪的没有 WebContents 可导航。
   assert.equal(isReusableBlankTab({ implicit: true, phase: "loading" }, "about:blank"), false);
+  assert.equal(isReusableBlankTab({ implicit: true, phase: "ready", userInputAt: 1 }, "about:blank"), false);
+  assert.equal(isReusableBlankTab({ implicit: true, phase: "ready" }, "about:blank", true), false);
 });
 
 test("a load that ends in an error page is a finished navigation, not a failure", async () => {

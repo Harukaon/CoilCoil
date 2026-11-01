@@ -69,6 +69,8 @@ function fakeHost(tabs: BrowserTab[], blank?: BrowserTab) {
   const selected: string[] = [];
   const created: BrowserTab[] = [];
   const host = {
+    browserVersion: () => ({ product: "Chrome/test", protocolVersion: "1.3" }),
+    onAgentCommand: () => undefined,
     noteAgentUse: (tab: BrowserTab) => { noted.push(tab.id); },
     selectTab: (id: string) => { selected.push(id); },
     createTab: async (_url: string | undefined, _activate: boolean, scopeId: string) => {
@@ -77,10 +79,10 @@ function fakeHost(tabs: BrowserTab[], blank?: BrowserTab) {
       tabs.push(tab);
       return tab;
     },
-    blankPlaceholder: () => blank,
+    blankPlaceholder: () => blank?.implicit && blank.phase === "ready" && blank.userInputAt === undefined ? blank : undefined,
     cdpTabs: () => tabs,
     tabById: (id: string) => tabs.find((tab) => tab.id === id),
-    guestOf: () => ({ loadURL: async () => undefined, debugger: { sendCommand: async () => ({ product: "Chrome/test" }) } }),
+    guestOf: () => ({ executeJavaScript: async () => true, isLoading: () => false, getURL: () => "about:blank", loadURL: async () => undefined, debugger: { sendCommand: async () => ({ product: "Chrome/test" }) } }),
     anyReadyTab: () => undefined,
     ensureActiveTab: async () => {
       const tab = fakeTab("implicit", { owner: "agent", implicit: true });
@@ -127,8 +129,27 @@ test("Agent 切到某张（Target.activateTarget、Page.bringToFront）：算它
   assert.deepEqual(f.selected, ["user", "user"]);
 });
 
-test("桥自己为了答浏览器版本垫的空白页：不算 Agent 在操作", async () => {
-  const f = fakeHost([]);
-  await f.bridge.executeRootCommand(fakeClient(), "Browser.getVersion", {});
+test("querying browser version never creates a blank tab", async () => {
+  const tabs: BrowserTab[] = [];
+  const f = fakeHost(tabs);
+  assert.deepEqual(await f.bridge.executeRootCommand(fakeClient(), "Browser.getVersion", {}), { product: "Chrome/test", protocolVersion: "1.3" });
+  assert.equal(tabs.length, 0);
   assert.deepEqual(f.noted, []);
+});
+
+test("concurrent createTarget calls adopt the automatic blank at most once", async () => {
+  const blank = fakeTab("blank", { owner: "agent", implicit: true });
+  const f = fakeHost([blank], blank);
+  const results = await Promise.all([1, 2].map(() => f.bridge.executeRootCommand(fakeClient(), "Target.createTarget", { url: "https://example.com/" })));
+  assert.equal(f.created.length, 1);
+  assert.notDeepEqual(results[0], results[1]);
+});
+
+test("a user-touched automatic blank is not adopted or stripped of its user ownership", async () => {
+  const blank = fakeTab("blank", { owner: "user", implicit: true, userInputAt: 123 });
+  const f = fakeHost([blank], blank);
+  await f.bridge.executeRootCommand(fakeClient(), "Target.createTarget", { url: "https://example.com/" });
+  assert.equal(f.created.length, 1);
+  assert.equal(blank.owner, "user");
+  assert.equal(blank.userInputAt, 123);
 });

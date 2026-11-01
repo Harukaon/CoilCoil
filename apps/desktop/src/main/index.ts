@@ -500,15 +500,21 @@ class RuntimeHost {
 
 class RuntimeBridge {
   private host?: RuntimeHost;
+  private readonly browserSessionIds = new Map<string, string>();
 
   private broadcast = (runtimeId: string | undefined, event: RuntimeEventEnvelope["event"]): void => {
     // 浏览器按会话分，一个会话一批标签页；cookie 仍按工作区分。每个会话在哪个工作区，
     // 只有快照说得清：用会话 id 记下它的工作区，它的 Agent 在后台开的标签页才会落在
     // 那个工作区的 cookie jar 里——界面切到别处也不影响。
-    // 会话结束、运行时被回收时都不关它的标签页：切回来页面还要在，一直留到退出 App。
+    // Finished turns retain real pages; only untouched Agent blanks are cleaned up.
     if (runtimeId && event.type === "session_snapshot") {
       const { id, cwd } = event.snapshot.session;
+      this.browserSessionIds.set(runtimeId, id);
       for (const runtime of browserRuntimes.values()) runtime.noteScopeWorkspace(id, cwd);
+    }
+    if (runtimeId && event.type === "run_state") {
+      const scopeId = this.browserSessionIds.get(runtimeId);
+      if (scopeId) for (const browser of browserRuntimes.values()) browser.setAgentRunning(scopeId, event.running);
     }
     for (const window of appWindows()) {
       window.webContents.send(RUNTIME_EVENT_CHANNEL, { runtimeId, event });
@@ -897,7 +903,11 @@ async function createWindow(): Promise<void> {
   }, (scopeId) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
     remoteAccess?.broadcast(BROWSER_AGENT_ACTIVATED_CHANNEL, scopeId);
-  }, (contents, params) => popupGuestContextMenu(contents, mainWindow, params), workspaceBrowserPartitions().partitionFor);
+  }, (contents, params) => popupGuestContextMenu(contents, mainWindow, params), workspaceBrowserPartitions().partitionFor,
+  (level, event, data, error) => {
+    if (error !== undefined) diagnosticLog().error("browser", event, error, data);
+    else diagnosticLog().log(level, "browser", event, data);
+  });
   const terminalRuntime = new TerminalRuntimeManager((state) => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send(TERMINAL_STATE_CHANNEL, state);
     remoteAccess?.broadcast(TERMINAL_STATE_CHANNEL, state);
@@ -1359,17 +1369,20 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
   if (isQuitting) return;
+  event.preventDefault();
   isQuitting = true;
   closeAllFilePreviews();
-  for (const browser of browserRuntimes.values()) void browser.dispose().catch(() => {});
+  const browserShutdowns = [...browserRuntimes.values()].map((browser) => browser.dispose()
+    .catch((error) => diagnosticLog().error("browser", "shutdown_failed", error)));
   for (const terminal of terminalRuntimes.values()) terminal.dispose();
   browserRuntimes.clear();
   terminalRuntimes.clear();
   remoteAccess?.stop();
   remoteAccess = undefined;
   runtime.stop();
+  void Promise.all(browserShutdowns).then(() => diagnosticLog().flush()).finally(() => app.quit());
 });
 
 app.on("window-all-closed", () => {

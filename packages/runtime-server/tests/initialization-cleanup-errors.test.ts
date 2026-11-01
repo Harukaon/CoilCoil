@@ -39,7 +39,7 @@ for (const type of ["create_session", "open_session"] as const) {
     const cleanup = entries.filter((entry) => entry.event === "session_initialization_cleanup_failed");
     assert.equal(cleanup.length, 1);
     assert.equal(cleanup[0].runtimeId, "failed-runtime");
-    assert.equal(cleanup[0].data?.command, type);
+    assert.equal(cleanup[0].data?.commandType, type);
     assert.match(JSON.stringify(cleanup[0].error), /cleanup failed/);
     if (type === "open_session") assert.equal(cleanup[0].sessionPath, sessionPath);
     assert.ok(entries.some((entry) => entry.event === "command_failed" && JSON.stringify(entry.error).includes("initialization failed")));

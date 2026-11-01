@@ -1,7 +1,7 @@
 /** Browser actions share one progressively disclosed browser entry point. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { browserBridgeEndpoint, drainBrowserNotice, noteBrowserCall } from "./browser-recycle-notice.ts";
+import { browserBridgeEndpoint } from "./browser-bridge.ts";
 import { requestMcpManager } from "./mcp-tools.ts";
 import { registerBrowserGateway, type BrowserAction } from "./browser-tool.ts";
 
@@ -124,13 +124,11 @@ async function callBrowser(
 ): Promise<{ text: string; json: unknown }> {
   const manager = requestMcpManager(events);
   if (!manager) throw new Error("MCP 客户端当前不可用。");
-  const result = await manager.callTool(BROWSER_SERVER, tool, args, signal);
+  const result = await manager.callTool(BROWSER_SERVER, tool, args, signal, { sessionId: session });
   const content = (result as { content?: Array<{ type: string; text?: string }> }).content;
   const text = Array.isArray(content)
     ? content.filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n")
     : JSON.stringify(result);
-  // 记下页面编号、取回「超过上限被收掉的 Agent 标签页」，工具返回时一起告诉 Agent。
-  await noteBrowserCall(session, text);
   // MCP 工具出错是「返回 isError」，不是抛异常。不在这里转成异常，下面各个工具的
   // 失败分支就永远走不到：点不中报成「点击完成」，导航失败报成「导航完成」。
   if ((result as { isError?: unknown }).isError === true) throw new Error(text || `${tool} 失败`);
@@ -164,7 +162,7 @@ const handleFields = {
 } as const;
 
 export default function browserActExtension(pi: ExtensionAPI): void {
-  // 这个扩展属于一个会话；会话 id 用来找它那一份浏览器的回收记录。
+  // 这个扩展属于一个会话；会话 id 用来查询属于它的浏览器标签页。
   let sessionId: string | undefined;
   const actions = new Map<string, BrowserAction>();
   const registerTool: ExtensionAPI["registerTool"] = (tool) => {
@@ -175,11 +173,7 @@ export default function browserActExtension(pi: ExtensionAPI): void {
       parameters: tool.parameters,
       async execute(toolCallId, params, signal, onUpdate, ctx) {
         sessionId = ctx?.sessionManager?.getSessionId() ?? sessionId;
-        const result = await execute(toolCallId, params as never, signal, onUpdate, ctx);
-        const notice = drainBrowserNotice(sessionId);
-        const first = result.content[0];
-        if (notice && first?.type === "text") first.text += notice;
-        return result;
+        return execute(toolCallId, params as never, signal, onUpdate, ctx);
       },
     });
   };

@@ -11,3 +11,10 @@ export type McpDiagnosticLogger = (
   data?: Record<string, unknown>,
   error?: unknown,
 ) => void;
+
+export interface McpDiagnosticContext {
+  sessionId?: string;
+  sessionPath?: string;
+  cwd?: string;
+  toolCallId?: string;
+}

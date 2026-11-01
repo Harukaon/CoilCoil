@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { readDiagnosticEntries } from "../../lib/diagnostic-logs.mjs";
 
 export const description = "上下文压缩走 CoilCoil 自己的两层：清完够小就停在第 1 层（整理稿，不调模型）；/compact 带额外要求时走第 2 层（调模型写交接摘要）；每一步都进运行日志";
 
@@ -18,7 +19,7 @@ function sessionFile(root, marker) {
 }
 
 const compactions = (path) => readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((entry) => entry.type === "compaction");
-const runtimeLog = (root) => readFileSync(join(root, "data", "agent", "logs", "runtime.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+const runtimeLog = (root) => readDiagnosticEntries(join(root, "data", "agent", "logs"), "runtime");
 
 export async function run({ page, ui, root, check }) {
   await ui.newConversation("projA");

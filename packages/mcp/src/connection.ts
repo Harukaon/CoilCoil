@@ -333,6 +333,8 @@ export class McpConnection {
   }
 
   private async runConnect(generation: number): Promise<McpConnectionStatus> {
+    const startedAt = Date.now();
+    this.diagnostic("info", "mcp_connect_started", { generation, transport: this.options.definition.transport });
     this.state = "connecting";
     this.lastFailure = undefined;
     this.lastFailureHttpStatus = undefined;
@@ -358,6 +360,7 @@ export class McpConnection {
       if (generation !== this.generation) return this.state;
       if (this.client !== client) throw new Error(`MCP Server「${this.name}」在发现工具和资源时断开了连接。`);
       this.state = "connected";
+      this.diagnostic("info", "mcp_connected", { elapsedMs: Date.now() - startedAt, toolCount: this.discoveredTools.length, resourceCount: this.discoveredResources.length });
       return this.state;
     } catch (error) {
       if (generation !== this.generation) return this.state;
@@ -366,12 +369,14 @@ export class McpConnection {
       if (error instanceof UnauthorizedError) {
         this.state = "needs-auth";
         this.lastFailure = undefined;
+        this.diagnostic("warn", "mcp_auth_required", { elapsedMs: Date.now() - startedAt });
         if (this.oauth) this.diagnostic("warn", "oauth_auth_required", tokenSummary(this.oauth.tokens()));
         return this.state;
       }
       this.state = "failed";
       this.lastFailure = this.failureText(error);
       this.lastFailureHttpStatus = httpStatusOf(error);
+      this.options.diagnostic?.("error", "mcp_connect_failed", { server: this.name, elapsedMs: Date.now() - startedAt, httpStatus: this.lastFailureHttpStatus }, error);
       if (this.oauth) this.diagnostic("warn", "oauth_connect_failed", {
         httpStatus: this.lastFailureHttpStatus,
         ...tokenSummary(this.oauth.tokens()),
@@ -404,8 +409,14 @@ export class McpConnection {
    * and leaves the status `close` and `runConnect` are in the middle of setting.
    */
   private watchForClose(client: Client): void {
+    const onError = client.onerror;
+    client.onerror = (error) => {
+      this.options.diagnostic?.("error", "mcp_transport_error", { server: this.name }, error);
+      onError?.(error);
+    };
     client.onclose = () => {
       if (this.client !== client) return;
+      this.diagnostic("warn", "mcp_disconnected", { previousStatus: this.state });
       this.client = undefined;
       this.transport = undefined;
       this.state = "not connected";
@@ -528,6 +539,7 @@ export class McpConnection {
         // ——它要的是工具的结果，不是我们内部先后顺序的报告——所以重连一次再试。只试
         // 一次：真连不上的时候，第二次的失败才是要交出去的那条原因。
         if (signal?.aborted || !isDisconnected(error)) throw error;
+        this.options.diagnostic?.("warn", "mcp_tool_reconnecting", { server: this.name, tool: name, attempt: 2 }, error);
         await this.close();
         return await this.sendCall(name, args, signal);
       }

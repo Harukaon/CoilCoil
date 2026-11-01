@@ -3,12 +3,14 @@ import { randomUUID } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
 import { RUNTIME_BRIDGE_STATE_EVENT, type RuntimeBridgeState } from "./runtime-bridge.ts";
 import { MEMORY_STATUS_PUBLISHER_REQUEST, type MemoryStatusPublisherRequest } from "./memory-status-channel.ts";
+import { workflowDiagnosticLog } from "./diagnostic-channel.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
   MEMORY_PROMPT_MARKER,
+  DEFAULT_MEMORY_IDLE_DELAY_MS,
   PROJECT_MEMORY_MAX_CHARS,
   buildGlobalMemoryPrompt,
   buildProjectMemoryPrompt,
@@ -175,6 +177,11 @@ export default function projectMemoryExtension(
   const warningState = { warned: false };
   const backgroundWarningState = { warned: false };
   const storageRoot = resolveProjectMemoryStorageRoot(env);
+  const diagnostic = workflowDiagnosticLog(pi.events);
+  const recordSchedule = (cwd: string, sessionFile: string | undefined, reason: string, immediate = false): void => {
+    diagnostic.log("info", "memory", "scheduled", { cwd, source: "automatic", reason,
+      delayMs: immediate ? 0 : options.idleDelayMs ?? DEFAULT_MEMORY_IDLE_DELAY_MS }, { sessionPath: sessionFile });
+  };
   installMemoryWritePolicy(pi, env);
   let idle: ReturnType<typeof memoryIdleCoordinator> | undefined;
   let active = true;
@@ -262,27 +269,42 @@ export default function projectMemoryExtension(
       if (active) capturedNotify?.(message, type);
     };
     const attemptId = randomUUID();
+    const attemptStartedAt = Date.now();
+    const record = (event: string, data: Record<string, unknown> = {}, error?: unknown): void => {
+      diagnostic.log(error !== undefined || event === "failed" ? "error" : "info", "memory", event,
+        { cwd, source, attemptId, provider: model?.provider, model: model?.id, ...data }, { sessionPath: sessionFile, error });
+    };
     if (await memoryIsDisabled(cwd, env)) {
+      record("skipped", { reason: "directory_disabled" });
       publishStatus(cwd, { state: "disabled", source, attemptId, exists: false, injected: false, message: "当前目录已禁用项目记忆" });
       if (notifyStarted) notify?.("当前目录位于 .pi 内，已禁用记忆整理以防递归", "warning");
       return "skipped";
     }
     if (Boolean(settings.workerProvider) !== Boolean(settings.workerModelId)) {
+      record("failed", { reason: "incomplete_model_configuration" });
       publishStatus(cwd, { state: "failed", source, attemptId, error: "后台整理模型配置不完整，请同时选择供应商和模型" });
       return "failed";
     }
     if (!model) {
+      record("skipped", { reason: "model_unavailable" });
       publishStatus(cwd, { state: "failed", source, attemptId, error: "当前没有可用于记忆整理的模型" });
       if (notifyStarted) notify?.("当前没有可用于记忆整理的模型", "warning");
       return "skipped";
     }
 
     try {
-      if (source === "automatic" && (!settings.autoSummarize || !settings.projectEnabled)) return "skipped";
+      if (source === "automatic" && (!settings.autoSummarize || !settings.projectEnabled)) {
+        record("skipped", { reason: "automatic_disabled" }); return "skipped";
+      }
       const { paths } = await prepareMemory(cwd, storageRoot, settings.projectMaxChars);
       const canonicalSessionFile = sessionFile && await pathExists(sessionFile) ? await canonicalPath(sessionFile) : undefined;
       const inputs = await collectMemoryInputs(paths, canonicalSessionFile, sessionDirectory);
-      if (source === "automatic" && inputs.inputs.length === 0) return "skipped";
+      const inputMetadata = { inputSessions: inputs.sessionFiles.length, inputNotes: inputs.noteFiles.length,
+        inputBytes: inputs.inputs.reduce((sum, input) => sum + input.bytes, 0) };
+      record("inputs_prepared", inputMetadata);
+      if (source === "automatic" && inputs.inputs.length === 0) {
+        record("skipped", { reason: "no_changed_inputs", ...inputMetadata }); return "skipped";
+      }
       const persisted = await readPersistedMemoryState(paths);
       const processedSessions = [...new Set([...(status?.processedSessions ?? []), ...persisted.processedSessions])];
       const startedAt = Date.now();
@@ -293,6 +315,7 @@ export default function projectMemoryExtension(
         paths,
         sessionFile: canonicalSessionFile,
         inputs,
+        attemptId,
         provider: model.provider,
         model: model.id,
         maximum: settings.projectMaxChars,
@@ -300,6 +323,7 @@ export default function projectMemoryExtension(
       }, options, {
         canStart: source === "automatic" ? canStart : undefined,
         onStarted: () => {
+          record("started", { ...inputMetadata, preparationMs: Date.now() - attemptStartedAt });
           publishStatus(cwd, {
             state: "running",
             source,
@@ -326,7 +350,10 @@ export default function projectMemoryExtension(
             if (latestSettings.autoSummarize && latestSettings.projectEnabled && inputs.inputs.length
               && (await collectMemoryInputs(paths, canonicalSessionFile, sessionDirectory)).inputs.length) {
               workspaceIdle.enqueue(async (allowed) => { await summarizeSession(nextContext, false, "automatic", allowed); });
+              recordSchedule(cwd, sessionFile, "remaining_inputs");
             }
+            record("completed", { ...inputMetadata, durationMs: completedAt - startedAt,
+              contentChars: metadata.contentChars, pendingNotes: metadata.pendingNotes });
             publishStatus(cwd, {
               state: "succeeded",
               source,
@@ -341,6 +368,7 @@ export default function projectMemoryExtension(
               message: "随手记筛选与长期记忆整理完成",
             });
           } catch (error) {
+            record("failed", { reason: "completion_bookkeeping_failed", ...inputMetadata, durationMs: Date.now() - startedAt }, error);
             publishStatus(cwd, {
               state: "failed",
               source,
@@ -356,6 +384,7 @@ export default function projectMemoryExtension(
         onError: (error) => {
           notifyOnce(backgroundWarningState, notify, error, "后台记忆整理失败");
           const completedAt = Date.now();
+          record("failed", { reason: "worker_failed", ...inputMetadata, durationMs: completedAt - startedAt }, error);
           publishStatus(cwd, {
             state: "failed",
             source,
@@ -370,7 +399,9 @@ export default function projectMemoryExtension(
         },
       });
       if (result === "deferred") {
+        record("deferred", { reason: "workspace_activity", ...inputMetadata, durationMs: Date.now() - attemptStartedAt });
         workspaceIdle.enqueue(async (allowed) => { await summarizeSession(nextContext, false, "automatic", allowed); });
+        recordSchedule(cwd, sessionFile, "workspace_activity");
         return "skipped";
       }
       // 跑过一次就从头开始数：手动整理同样重置倒计时，否则用户点完「立即整理」
@@ -378,6 +409,7 @@ export default function projectMemoryExtension(
       if (result === "started") await resetMemoryTurns(paths);
       if (notifyStarted && result === "started") notify?.("记忆整理已在后台启动", "info");
       if (result === "busy") {
+        record("busy", { reason: "workspace_worker_lease", ...inputMetadata });
         publishStatus(cwd, {
           state: "busy",
           source,
@@ -390,6 +422,7 @@ export default function projectMemoryExtension(
       }
       return result;
     } catch (error) {
+      record("failed", { reason: "preparation_failed", durationMs: Date.now() - attemptStartedAt }, error);
       notifyOnce(backgroundWarningState, notify, error, "后台记忆整理失败");
       publishStatus(cwd, { state: "failed", source, attemptId, error: error instanceof Error ? error.message : String(error) });
       return "failed";
@@ -426,6 +459,7 @@ export default function projectMemoryExtension(
       idle = memoryIdleCoordinator(paths.projectMemoryDir, options.idleDelayMs);
       if (settings.autoSummarize && settings.projectEnabled) {
         idle.enqueue(async (allowed) => { await summarizeSession(captured, false, "automatic", allowed); });
+        recordSchedule(cwd, sessionFile, "startup");
       }
       publishStatus(cwd, {
         state: "idle",
@@ -435,6 +469,7 @@ export default function projectMemoryExtension(
         message: "项目记忆已就绪",
       });
     } catch (error) {
+      diagnostic.log("error", "memory", "failed", { cwd, source: "startup", reason: "initialization_failed" }, { sessionPath: sessionFile, error });
       notifyOnce(warningState, notify, error, "项目记忆初始化失败");
     }
   });
@@ -471,6 +506,7 @@ export default function projectMemoryExtension(
         systemPrompt: [event.systemPrompt, injected].filter(Boolean).join("\n\n"),
       };
     } catch (error) {
+      diagnostic.log("error", "memory", "failed", { cwd, source: "prompt", reason: "snapshot_read_failed" }, { error });
       notifyOnce(warningState, notify, error, "项目记忆注入失败");
       return undefined;
     }
@@ -503,8 +539,10 @@ export default function projectMemoryExtension(
       const paths = await resolveProjectMemoryPaths(cwd, storageRoot);
       idle ??= memoryIdleCoordinator(paths.projectMemoryDir, options.idleDelayMs);
       const turns = event.aborted ? (await readPersistedMemoryState(paths)).turnsSinceSummary : await recordMemoryTurn(paths);
+      recordSchedule(cwd, sessionFile, turns >= settings.summarizeEveryTurns ? "turn_threshold" : "workspace_idle", turns >= settings.summarizeEveryTurns);
       await idle.settled(async (allowed) => { await summarizeSession(captured, false, "automatic", allowed); }, turns >= settings.summarizeEveryTurns);
     } catch (error) {
+      diagnostic.log("error", "memory", "failed", { cwd, source: "automatic", reason: "scheduling_failed" }, { sessionPath: sessionFile, error });
       notifyOnce(backgroundWarningState, notify, error, "记忆整理调度失败");
     }
   });

@@ -30,8 +30,9 @@ export function installProcessErrorHandlers(
 ): () => void {
   const onUncaught = (error: unknown): void => {
     log.error("process", "uncaught_exception", error, { pid: process.pid });
-    options.onFatal?.(error);
-    if (options.exitOnUncaught) process.exit(1);
+    try { options.onFatal?.(error); }
+    catch (callbackError) { log.error("process", "fatal_callback_failed", callbackError); }
+    if (options.exitOnUncaught) void log.flush().finally(() => process.exit(1));
   };
   const onRejection = (reason: unknown): void => {
     log.error("process", "unhandled_rejection", reason, { pid: process.pid });
@@ -39,16 +40,19 @@ export function installProcessErrorHandlers(
   const onWarning = (warning: Error): void => {
     // Node reports a leaking listener here long before it becomes a symptom the
     // user can describe, and it is the shape a stuck session tends to take.
-    if (warning.name !== "MaxListenersExceededWarning") return;
-    log.warn("process", "listener_leak_warning", { message: warning.message });
+    log.log("warn", "process", warning.name === "MaxListenersExceededWarning" ? "listener_leak_warning" : "process_warning",
+      { name: warning.name }, { error: warning });
   };
+  const onBeforeExit = (): void => { void log.flush(); };
   process.on("uncaughtException", onUncaught);
   process.on("unhandledRejection", onRejection);
   process.on("warning", onWarning);
+  process.on("beforeExit", onBeforeExit);
   return () => {
     process.off("uncaughtException", onUncaught);
     process.off("unhandledRejection", onRejection);
     process.off("warning", onWarning);
+    process.off("beforeExit", onBeforeExit);
   };
 }
 

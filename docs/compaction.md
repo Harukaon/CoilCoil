@@ -15,7 +15,7 @@ CoilCoil 自己负责「压缩的内容」，Pi 负责「什么时候压、从�
 | Pi | 触发（上下文超过「窗口 − 预留量」、模型报超长、手动 /compact）；保留最近约 2 万 token 原样不动（`keepRecentTokens`，切在消息边界，不拆开工具调用和结果）；把结果写进会话；压完重试这一轮 |
 | CoilCoil 压缩扩展 | 保留区之外那段历史变成什么（第 1 层 / 第 2 层） |
 | context-transcript 扩展 | 把被压掉的原文存成纯文字存档，放在会话文件旁边；系统提示从第一轮起只给稳定路径，分段索引需要时从存档读取，避免每次压缩后改写系统提示 |
-| 运行时（runtime-core） | 把压缩扩展报上来的每一步写进 `runtime.jsonl`（`coilcoil_*` 事件）；失败时用真实原因提示用户 |
+| 运行时（runtime-core） | 把压缩扩展报上来的每一步写进 `runtime-*.jsonl`（`coilcoil_*` 事件）；失败时用真实原因提示用户 |
 
 原始会话文件从不修改：压缩只是在当前这条线上追加一条压缩记录，模型看到的是「最新摘要 + 切点之后的原文」。
 
@@ -50,7 +50,7 @@ CoilCoil 自己负责「压缩的内容」，Pi 负责「什么时候压、从�
 
 ## 日志
 
-`agent/logs/runtime.jsonl` 里 scope 为 `compaction`、事件名以 `coilcoil_` 开头：
+`agent/logs/runtime-*.jsonl` 和已归档的 `.jsonl.gz` 中，scope 为 `compaction`、事件名以 `coilcoil_` 开头：
 `layer1_planned`（估算和决定）、`layer2_started`、`chunked`、`request_started` / `request_completed`（每次请求耗时）、`request_stalled` / `request_retry`、`done`、`failed`、`skipped`。每条都带会话路径。
 
 `cache_prefix` 记录这次是否能复用主会话缓存，`prefix_fallback` 记录回退原因，`request_usage` 记录摘要每次请求的普通输入、输出、缓存读取和写入。

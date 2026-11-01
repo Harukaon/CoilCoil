@@ -1825,7 +1825,7 @@ export const SESSION_OPEN_SUPERSEDED_ERROR = "COILCOIL_SESSION_OPEN_SUPERSEDED";
  * ignored, a composer still spinning — is usually the seam between two of them,
  * so an entry is only useful next to the entries from the other two.
  */
-export type DiagnosticProcess = "main" | "renderer" | "runtime";
+export type DiagnosticProcess = "main" | "renderer" | "runtime" | "memory";
 
 export type DiagnosticLevel = "debug" | "info" | "warn" | "error";
 

@@ -7,7 +7,7 @@ import { DEFAULT_MEMORY_IDLE_DELAY_MS } from "./memory-settings.ts";
 import { atomicWrite, canonicalPath, readUtf8, resolveProjectMemoryPaths, resolveProjectMemoryStorageRoot } from "./memory-storage.ts";
 import { canonicalCandidate } from "./memory-worker-guard.ts";
 
-export interface MemoryInput { path: string; revision: string; kind: "session" | "note" }
+export interface MemoryInput { path: string; revision: string; kind: "session" | "note"; bytes: number }
 export interface MemoryInputBatch { inputs: MemoryInput[]; sessionFiles: string[]; noteFiles: string[] }
 const INPUT_STATE = ".dream-inputs.json";
 const MAX_SESSION_INPUTS = 12;
@@ -34,8 +34,9 @@ export async function pendingMemoryNotes(paths: ProjectMemoryPaths): Promise<Mem
   for (const item of names.sort((a, b) => a.name.localeCompare(b.name))) {
     if (!item.isFile() || !item.name.endsWith(".md")) continue;
     const path = join(paths.notesDir, item.name);
-    const revision = createHash("sha256").update(await readFile(path)).digest("hex");
-    if (processed[path] !== revision) result.push({ path, revision, kind: "note" });
+    const content = await readFile(path);
+    const revision = createHash("sha256").update(content).digest("hex");
+    if (processed[path] !== revision) result.push({ path, revision, kind: "note", bytes: content.byteLength });
   }
   return result;
 }
@@ -76,7 +77,7 @@ export async function collectMemoryInputs(paths: ProjectMemoryPaths, currentSess
   for (const path of files) {
     const info = await stat(path);
     const revision = `${info.size}:${info.mtimeMs}`;
-    if (processed[path] !== revision) sessions.push({ path, revision, kind: "session" });
+    if (processed[path] !== revision) sessions.push({ path, revision, kind: "session", bytes: info.size });
   }
   const notes = (await pendingMemoryNotes(paths)).slice(0, MAX_NOTE_INPUTS);
   const selected = sessions.slice(0, MAX_SESSION_INPUTS);

@@ -26,7 +26,7 @@ export interface BrowserTab {
   owner: BrowserTabOwner;
   /** 承载这个页面的隐藏离屏窗口（每张标签页一个）。 */
   offscreen?: BrowserWindow;
-  /** 最近一次被 Agent 操作或被选中的时间，上限收页时先关最久没用的。 */
+  /** 最近一次被 Agent 操作或被选中的时间，用于选择最近使用的页面。 */
   lastUsedAt: number;
   tabTargetId: string;
   pageTargetId: string;
@@ -37,16 +37,8 @@ export interface BrowserTab {
   /** Agent 最近一次在这张页面上动手的时间（导航、点击、打字、截图、读快照）：面板据此提示「正在操作」。 */
   agentActiveAt?: number;
   announced: boolean;
-  /**
-   * 这张空白页是桥自己开出来的，agent 并没有要过。
-   *
-   * 一个 CDP 客户端刚连上来就会问浏览器版本、列目标，这两条都得有一个页面才答得
-   * 出来，于是桥先垫一张空白页。垫出来的这张只要还停在 about:blank，下一次
-   * `Target.createTarget`（也就是 agent 的 new_page）就直接拿它用，不再开第二张
-   * ——否则每个会话都是「一张没人要的空白页 + 一张真正在用的页」起步。
-   * 标记本身不会随导航清掉，因为「能不能拿去用」每次都拿当前地址现算：只要它已经
-   * 导航到别处，就不再是空白页，也就不会被拿去用。
-   */
+  /** Automatic UI/protocol placeholder, never an explicit user or Agent new-page request.
+   * It can be adopted only while idle, untouched and genuinely empty. */
   implicit?: boolean;
   emulatedSize?: { width: number; height: number };
   /**
@@ -54,7 +46,7 @@ export interface BrowserTab {
    * （点进了面板里的这张页面）。任何一边要就开着，两边都不要才关；applied 是页面上现在的样子。
    */
   focusEmulation?: { agent: boolean; user: boolean; applied: boolean };
-  /** 用户最近一次在这张页面上点、滚、打字的时间；用户动过的，Agent 开页超上限时不会收掉它。 */
+  /** 用户最近一次在这张页面上点、滚、打字的时间；用户动过的空白页不会自动清理。 */
   userInputAt?: number;
   /** 用户最近一次在这张页面上真按下去（点、按键、输入法上屏）的时间：网页这时要选文件、要打印，是用户要的。 */
   userPressAt?: number;
@@ -69,10 +61,11 @@ export interface BrowserTab {
  * ——那时候它已经是一张在用的页了，替 agent 把它导航走会把用户看着的东西换掉。
  */
 export function isReusableBlankTab(
-  tab: Pick<BrowserTab, "implicit" | "phase">,
+  tab: Pick<BrowserTab, "implicit" | "phase" | "userInputAt">,
   url: string | undefined,
+  loading = false,
 ): boolean {
-  if (!tab.implicit || tab.phase !== "ready") return false;
+  if (!tab.implicit || tab.phase !== "ready" || tab.userInputAt !== undefined || loading) return false;
   return !url || /^about:blank$/i.test(url);
 }
 

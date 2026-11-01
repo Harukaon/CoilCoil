@@ -212,16 +212,16 @@ test("browser_tabs 列出这个对话的全部网页，给句柄、标出用户�
       tools.set(entry.name, entry);
     },
   } as never);
-  // 桌面端 CDP 桥上 CoilCoil 自己的接口：标签页列表，和每次调用后取一次的回收记录。
+  // 桌面端 CDP 桥上的会话标签页列表。
   const requested: string[] = [];
   const server = (await import("node:http")).createServer((request, response) => {
     requested.push(request.url ?? "");
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify((request.url ?? "").startsWith("/coilcoil/tabs/") ? { tabs: [
+    response.end(JSON.stringify({ tabs: [
       { id: "t1", title: "mine", url: "http://x/a.html", active: false, owner: "agent" },
       { id: "t2", title: "theirs", url: "http://x/b.html", active: true, owner: "user" },
       ...extraTab ? [extraTab] : [],
-    ] } : { recycled: [] }));
+    ] }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as { port: number };

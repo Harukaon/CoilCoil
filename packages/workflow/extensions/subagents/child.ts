@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
+import { AgentDiagnosticRecorder } from "@coilcoil/diagnostics";
 import {
   type AgentSession,
   type AgentSessionEvent,
@@ -14,6 +15,8 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { installMemoryWritePolicy } from "../memory-jottings.ts";
+import { WORKFLOW_DIAGNOSTIC_PUBLISHER_REQUEST, workflowDiagnosticLog } from "../diagnostic-channel.ts";
+import { requestDiagnosticExtension } from "../request-diagnostics.ts";
 import fileDiffExtension from "../file-diff.ts";
 import readCacheExtension from "../read-cache.ts";
 import runtimeBridgeExtension from "../runtime-bridge.ts";
@@ -152,6 +155,7 @@ export interface ChildSessionHandle {
 function createChildEventBus(parentEvents?: ParentEvents) {
   const bus = createEventBus();
   if (parentEvents) {
+    bus.on(WORKFLOW_DIAGNOSTIC_PUBLISHER_REQUEST, (data) => parentEvents.emit(WORKFLOW_DIAGNOSTIC_PUBLISHER_REQUEST, data));
     bus.on(MCP_MANAGER_CHANNEL, (data) => {
       parentEvents.emit(MCP_MANAGER_CHANNEL, data);
       const request = data as { manager?: unknown };
@@ -214,13 +218,17 @@ async function buildChildSession(options: {
   tools?: string[];
   systemPrompt?: string;
   parentEvents?: ParentEvents;
-}): Promise<{ session: AgentSession; driver: ChildRunDriver }> {
+  parentSessionId?: string;
+}): Promise<{ session: AgentSession; driver: ChildRunDriver; diagnostics: AgentDiagnosticRecorder }> {
   const settingsManager = SettingsManager.create(options.cwd, options.agentDir, { projectTrusted: true });
+  const eventBus = createChildEventBus(options.parentEvents);
+  const diagnostic = workflowDiagnosticLog(eventBus);
   // 平台调整放在这里而不只在派发时做：新建和恢复都经过这一处，恢复的运行可能是在
   // 另一个平台上保存的。
   const tools = childToolsForPlatform(options.tools ?? DEFAULT_CHILD_TOOLS);
   const promptAdditions = childPromptAdditions(tools, options.systemPrompt);
   const extensionFactories: InlineExtension[] = childToolExtensions(tools);
+  extensionFactories.push(requestDiagnosticExtension(diagnostic, { role: "subagent", parentSessionId: options.parentSessionId }));
   extensionFactories.push({ name: "coilcoil-subagent-memory-policy", hidden: true,
     factory: (pi) => installMemoryWritePolicy(pi, { ...process.env, PI_CODING_AGENT_DIR: options.agentDir }, true) });
   if (promptAdditions.length > 0) {
@@ -234,7 +242,6 @@ async function buildChildSession(options: {
     });
   }
   extensionFactories.push({ name: "coilcoil-subagent-prompt-snapshot", hidden: true, factory: runtimeBridgeExtension });
-  const eventBus = createChildEventBus(options.parentEvents);
   const loader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: options.agentDir,
@@ -281,7 +288,11 @@ async function buildChildSession(options: {
     excludeTools: ["subagent"],
   });
   const cache = new AnthropicCacheController(restoreCacheLedger(created.session.sessionManager.getBranch()),
-    (state) => { created.session.sessionManager.appendCustomEntry(CACHE_LEDGER_ENTRY, cacheLedgerCheckpoint(state)); });
+    (state, record) => {
+      created.session.sessionManager.appendCustomEntry(CACHE_LEDGER_ENTRY, cacheLedgerCheckpoint(state));
+      diagnostic.log("info", "cache", "request", { ...record, cwd: options.cwd, role: "subagent",
+        parentSessionId: options.parentSessionId }, { sessionPath: created.session.sessionFile });
+    });
   const stream = created.session.agent.streamFunction;
   created.session.agent.streamFunction = (selected, context, options) => {
     if (selected.api !== "anthropic-messages") return stream(selected, context, options);
@@ -290,12 +301,16 @@ async function buildChildSession(options: {
     return cache.observe(stream(selected, context, prepared.options), prepared.pending, purpose);
   };
   const driver = createChildRunDriver(created.session, eventBus);
+  const diagnostics = new AgentDiagnosticRecorder(diagnostic, () => ({
+    cwd: options.cwd, sessionId: created.session.sessionId, sessionPath: created.session.sessionFile,
+    parentSessionId: options.parentSessionId, role: "subagent", provider: created.session.model?.provider, model: created.session.model?.id,
+  }));
   await created.session.bindExtensions({ onError: (error) => driver.onExtensionError(error) });
-  return { session: created.session, driver };
+  return { session: created.session, driver, diagnostics };
 }
 
-function wrapHandle(session: AgentSession, driver: ChildRunDriver, onEvent: (event: AgentSessionEvent) => void): ChildSessionHandle {
-  const unsubscribe = session.subscribe(onEvent);
+function wrapHandle(session: AgentSession, driver: ChildRunDriver, onEvent: (event: AgentSessionEvent) => void, diagnostics: AgentDiagnosticRecorder): ChildSessionHandle {
+  const unsubscribe = session.subscribe((event) => { diagnostics.record({ ...event }); onEvent(event); });
   let disposePromise: Promise<void> | undefined;
   const dispose = (): Promise<void> => {
     disposePromise ??= (async () => {
@@ -356,8 +371,9 @@ export async function createChildSession(options: CreateChildSessionOptions): Pr
     tools: options.tools,
     systemPrompt: options.systemPrompt,
     parentEvents: options.parentEvents,
+    parentSessionId: options.parentSessionId,
   });
-  return wrapHandle(created.session, created.driver, options.onEvent);
+  return wrapHandle(created.session, created.driver, options.onEvent, created.diagnostics);
 }
 
 export interface ReopenChildSessionOptions {
@@ -379,8 +395,9 @@ export async function reopenChildSession(options: ReopenChildSessionOptions): Pr
     tools: options.tools,
     systemPrompt: options.systemPrompt,
     parentEvents: options.parentEvents,
+    parentSessionId: readChildMeta(options.sessionFile)?.parentSessionId,
   });
-  return wrapHandle(created.session, created.driver, options.onEvent);
+  return wrapHandle(created.session, created.driver, options.onEvent, created.diagnostics);
 }
 
 export interface ResumableChild {

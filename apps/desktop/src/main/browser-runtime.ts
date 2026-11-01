@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { app, BrowserWindow, dialog, session, sharedTexture, shell, type Session, type WebContents } from "electron";
 import type { BrowserCaret, BrowserElementSelection, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
-import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabOwner } from "./browser-agent-tabs";
+import { EMPTY_BROWSER_DOCUMENT, SESSION_TAB_LIMIT, assertBrowserTabCapacity, isSettledAgentBlank, type BrowserTabOwner } from "./browser-agent-tabs";
 import { captureGuestFrame } from "./browser-capture";
 import { BrowserCdpBridge } from "./browser-cdp-bridge";
 import { BrowserElementPicker } from "./browser-element-picker";
@@ -43,11 +43,7 @@ const REMOTE_SCOPE_LIMIT = 8;
 /** Agent 停手多久以后，面板上「正在操作」的提示收起：盖住它两步之间思考的空当，不一闪一闪。 */
 const AGENT_ACTIVE_MS = 8000;
 
-/**
- * 内置浏览器的全部标签页：每一张都是一个离屏页面（见 browser-offscreen.ts），用户在
- * 面板里看它的画面、直接在上面操作，Agent 通过 CDP（BrowserCdpBridge）操作同一个页面。
- * 这里管标签页的生老病死、给界面的快照，以及用户操作怎么送进页面。
- */
+/** Owns offscreen tabs shared by the user's browser panel and the Agent's CDP client. */
 export class BrowserRuntimeManager {
   private readonly tabs = new Map<string, BrowserTab>();
   private readonly cdp: BrowserCdpBridge;
@@ -84,8 +80,10 @@ export class BrowserRuntimeManager {
   private readonly identityReady = new Set<string>();
   /** One in-flight creation per scope; see ensureActiveTab. */
   private readonly pendingEnsure = new Map<string, Promise<BrowserTab>>();
-  /** 每个会话还没告诉 Agent 的回收记录。 */
-  private readonly recycledTabs = new RecycledAgentTabs();
+  /** A finished turn may leave a blank page whose last load event is still pending. */
+  private readonly settledAgentScopes = new Map<string, number>();
+  private settlementSequence = 0;
+  private readonly pendingBlankChecks = new Set<string>();
   /** 网页弹的 alert/confirm/prompt 挂在标签页上，面板里回答，不弹系统对话框。 */
   private readonly dialogs = new PageDialogs(() => this.publish());
   private readonly drags = new PageDrags();
@@ -135,6 +133,7 @@ export class BrowserRuntimeManager {
     /** 在 App 窗口里弹出网页的右键菜单（菜单本身由主进程入口搭）。 */
     private readonly showPageContextMenu: (contents: WebContents, params: Electron.ContextMenuParams) => void = () => {},
     private readonly workspacePartition: (path?: string) => string = browserPartitionFor,
+    private readonly log: (level: "info" | "warn" | "error", event: string, data: Record<string, unknown>, error?: unknown) => void = () => {},
   ) {
     this.frames = new BrowserSurfaceStream(window.webContents, {
       textures: sharedTexture,
@@ -150,14 +149,17 @@ export class BrowserRuntimeManager {
         this.onAgentActivated(scopeId);
       },
       ensureActiveTab: (scopeId) => this.ensureAgentTab(scopeId),
+      browserVersion: (scopeId) => ({
+        protocolVersion: "1.3", product: `Chrome/${process.versions.chrome}`, revision: "",
+        userAgent: session.fromPartition(this.partitionForScope(scopeId)).getUserAgent(), jsVersion: process.versions.v8,
+      }),
+      onAgentCommand: (scopeId) => this.setAgentRunning(scopeId, true),
       createTab: (rawUrl, activate, scopeId) => this.createCdpTab(rawUrl, activate, scopeId, false, "agent"),
       tabList: (scopeId) => this.tabList(scopeId),
-      anyReadyTab: (scopeId) => this.tabsForScope(scopeId).find((tab) => tab.phase === "ready" && tab.guest && !tab.guest.isDestroyed()),
       blankPlaceholder: (scopeId) => this.tabsForScope(scopeId).find((tab) =>
-        tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab(tab, tab.guest.getURL())),
+        tab.guest && !tab.guest.isDestroyed() && isReusableBlankTab(tab, tab.guest.getURL(), tab.guest.isLoading())),
       noteAgentUse: (tab) => this.noteAgentUse(tab),
       noteAgentPointer: (tab) => this.pageCursors.agentMoved(tab.id),
-      takeRecycledTabs: (scopeId) => this.recycledTabs.take(scopeId),
       selectTab: (id, scopeId) => { this.selectTab(id, scopeId); },
       closeTab: (id, scopeId) => { this.closeTab(id, scopeId); },
       cdpTabs: (scopeId) => this.cdpTabs(scopeId),
@@ -394,26 +396,63 @@ export class BrowserRuntimeManager {
     return this.state(scopeId);
   }
 
-  /**
-   * Agent 在这个会话里有了自己的页面，面板垫的空白占位页就没用了：还停在空白页（或
-   * 还没加载完）的那几张收掉，不然标签条上总挂着一张谁也没用过的空白页。
-   */
+  /** Only unused, fully loaded automatic placeholders can be replaced by a real page. */
   private dropBlankPlaceholders(scopeId: string, keepId: string): void {
     for (const tab of this.tabsForScope(scopeId)) {
-      if (tab.id === keepId || !tab.implicit || tab.owner !== "user") continue;
-      const url = tab.guest && !tab.guest.isDestroyed() ? tab.guest.getURL() : "";
-      if (!url || /^about:blank$/i.test(url)) this.closeTab(tab.id, scopeId);
+      if (tab.id === keepId || !tab.guest || tab.guest.isDestroyed()) continue;
+      if (!isReusableBlankTab(tab, tab.guest.getURL(), tab.guest.isLoading())) continue;
+      this.checkAndCleanBlank(tab, "unused_placeholder");
     }
   }
 
-  /**
-   * 先同步占好这张标签页的位置，再去等页面建好。
-   *
-   * 记录和它在 activeTabIds 里的位置必须在同一轮里落下：ensureActiveTab 有十几个调用方，
-   * 不这样每个都会在第一张还没建好时各开一张。页面提交之前它是隔离的——announced 为
-   * false、pageTargetId 是占位的——CDP 客户端看不到一个背后还没有页面的目标。
-   */
+  setAgentRunning(scopeId: string, running: boolean): void {
+    if (running) this.settledAgentScopes.delete(scopeId);
+    else {
+      this.settledAgentScopes.set(scopeId, ++this.settlementSequence);
+      this.cleanupSettledAgentBlanks(scopeId);
+    }
+  }
+
+  /** End of the agent turn, never between createTarget and its following navigate. */
+  cleanupSettledAgentBlanks(scopeId: string): void {
+    if (!this.settledAgentScopes.has(scopeId)) return;
+    for (const tab of this.tabsForScope(scopeId)) {
+      if (!tab.guest || tab.guest.isDestroyed()) continue;
+      if (!isSettledAgentBlank(tab, tab.guest.getURL(), tab.guest.isLoading())) continue;
+      this.checkAndCleanBlank(tab, "agent_turn_settled");
+    }
+  }
+
+  private checkAndCleanBlank(tab: BrowserTab, reason: "unused_placeholder" | "agent_turn_settled"): void {
+    const guest = tab.guest;
+    if (!guest || guest.isDestroyed() || this.pendingBlankChecks.has(tab.id)) return;
+    const settlement = this.settledAgentScopes.get(tab.scopeId);
+    this.pendingBlankChecks.add(tab.id);
+    void guest.executeJavaScript(EMPTY_BROWSER_DOCUMENT).then((empty: unknown) => {
+      if (empty !== true || this.tabs.get(tab.id) !== tab || guest.isDestroyed()) return;
+      const eligible = reason === "agent_turn_settled"
+        ? settlement !== undefined && this.settledAgentScopes.get(tab.scopeId) === settlement && isSettledAgentBlank(tab, guest.getURL(), guest.isLoading())
+        : isReusableBlankTab(tab, guest.getURL(), guest.isLoading());
+      if (!eligible) return;
+      this.logTab("info", "tab.blank_cleaned", tab, { reason });
+      this.closeTab(tab.id, tab.scopeId);
+    }).catch((error) => {
+      if (!guest.isDestroyed()) this.logTab("warn", "tab.blank_check_failed", tab, { reason }, error);
+    }).finally(() => this.pendingBlankChecks.delete(tab.id));
+  }
+
+  private logTab(level: "info" | "warn" | "error", event: string, tab: BrowserTab, data: Record<string, unknown> = {}, error?: unknown): void {
+    this.log(level, event, { scopeId: tab.scopeId, tabId: tab.id, owner: tab.owner, implicit: tab.implicit === true,
+      partition: tab.partition, currentCount: this.tabsForScope(tab.scopeId).length, limit: SESSION_TAB_LIMIT, ...data }, error);
+  }
+
+  /** Reserve synchronously before creation awaits; unannounced targets remain hidden from CDP. */
   private createTabRecord(activate: boolean, scopeId: string, implicit: boolean, owner: BrowserTabOwner): BrowserTab {
+    const currentCount = this.tabsForScope(scopeId).length;
+    if (currentCount >= SESSION_TAB_LIMIT) {
+      this.log("warn", "tab.creation_rejected", { scopeId, owner, implicit, currentCount, limit: SESSION_TAB_LIMIT, reason: "session_tab_limit" });
+    }
+    assertBrowserTabCapacity(currentCount);
     const id = randomUUID();
     const tab: BrowserTab = {
       id,
@@ -428,19 +467,14 @@ export class BrowserRuntimeManager {
       ...implicit ? { implicit: true } : {},
     };
     this.tabs.set(id, tab);
+    this.logTab("info", "tab.created", tab);
     if (activate || !this.activeTabIds.has(scopeId)) this.activeTabIds.set(scopeId, id);
     // 标签条上立刻出现一个「新标签页」，页面建好再换成真的标题。
     this.publish();
     return tab;
   }
 
-  /**
-   * 建一个离屏页面，按这个顺序接好：安全、事件、调试器，都在第一次真正的导航之前
-   * （为什么用离屏页面见 browser-offscreen.ts）。
-   *
-   * 调试器之前先让它加载点东西：从没加载过页面的离屏页面还没有渲染进程，这时发的
-   * CDP 命令会一直等下去。
-   */
+  /** Install security and events before navigation; an initial blank starts Chromium's renderer for CDP. */
   private async attachOffscreen(tab: BrowserTab): Promise<void> {
     const page = createOffscreenPage(tab.partition, this.offscreenSize(tab), (contents, texture, image) => this.frames.paint(tab.id, contents, texture, image));
     if (tab.phase === "closing" || !this.tabs.has(tab.id)) {
@@ -548,32 +582,18 @@ export class BrowserRuntimeManager {
       await loadGuestUrl(tab.guest!, url);
       await this.finishTabCreation(tab);
     } catch (error) {
+      this.logTab("error", "tab.creation_failed", tab, {}, error);
       this.closeTabRecord(tab);
       this.publish();
       throw error;
     }
     if (owner === "agent") {
-      this.keepAgentTabsWithinLimit(tab);
       if (!implicit) this.dropBlankPlaceholders(scopeId, tab.id);
     }
     return tab;
   }
 
-  /** 见 browser-agent-tabs.ts：Agent 再开新页、超过上限时，关掉它最久没用过的那几张。 */
-  private keepAgentTabsWithinLimit(opened: BrowserTab): void {
-    const keep = new Set([opened.id, this.activeTabIds.get(opened.scopeId) ?? ""]);
-    for (const tab of agentTabsToRecycle(this.tabsForScope(opened.scopeId), keep, AGENT_TAB_LIMIT)) {
-      const guest = tab.guest && !tab.guest.isDestroyed() ? tab.guest : undefined;
-      this.recycledTabs.record(tab.scopeId, { url: guest?.getURL() || DEFAULT_URL, title: guest?.getTitle() || "" });
-      this.closeTab(tab.id, tab.scopeId);
-    }
-  }
-
-  /**
-   * Creation is asynchronous now, so concurrent callers must share one attempt:
-   * every CDP root command funnels through here, and a fresh client typically
-   * issues several at once.
-   */
+  /** Concurrent protocol callers share one initial page creation. */
   async ensureAgentTab(scopeId = this.uiScopeId): Promise<BrowserTab> {
     // 用户和 Agent 用的是同一批页面：当前那张能用就是它，不然用最近用过的那张。
     const active = this.readyTab(scopeId);
@@ -584,7 +604,7 @@ export class BrowserRuntimeManager {
     if (recent) return recent;
     const inFlight = this.pendingEnsure.get(scopeId);
     if (inFlight) return inFlight;
-    // 一张都没有：给 CDP 客户端垫一张空白页，算 Agent 的，Agent 第一次 new_page 就拿它用。
+    // Window-specific protocol commands may still need an automatic placeholder.
     const attempt = this.createCdpTab(undefined, !this.activeTabIds.has(scopeId), scopeId, true, "agent")
       .finally(() => {
         if (this.pendingEnsure.get(scopeId) === attempt) this.pendingEnsure.delete(scopeId);
@@ -720,7 +740,7 @@ export class BrowserRuntimeManager {
     // 用户在 Agent 开的页面里动过手（点、打字、滚着看、复制粘贴），这页就归他用，超上限时不收；
     // 鼠标只是从画面上经过不算——面板一直显示着 Agent 的页面，不然谁的鼠标一晃，上限就没了。
     if (pressed || input.kind === "wheel" || input.kind === "edit") tab.userInputAt = now;
-    // 用户正在用的页面不算「最久没用」，Agent 开新页超上限时不会先收掉它。
+    // 用户正在使用的页面不得被空白清理接管。
     tab.lastUsedAt = now;
     if (input.kind === "mouse" && input.type === "down" && input.button === "right") tab.userContextMenuAt = now;
     // 滚轮不移动页面里的虚拟鼠标；Agent 刚停在链接上时不能借一次滚动把它的小手换到用户身上。
@@ -967,8 +987,9 @@ export class BrowserRuntimeManager {
     return tab.guest;
   }
 
-  /** Agent 在这张页面上动了手：记下（上限收页看这个），面板亮出「正在操作」，停手一会儿后收起。 */
+  /** Agent 使用页面时取消结束清理，并更新面板中的「正在操作」标记。 */
   private noteAgentUse(tab: BrowserTab): void {
+    this.setAgentRunning(tab.scopeId, true);
     const now = Date.now();
     const wasActive = now - (tab.agentActiveAt ?? 0) < AGENT_ACTIVE_MS;
     tab.lastUsedAt = tab.agentActiveAt = now;
@@ -985,6 +1006,7 @@ export class BrowserRuntimeManager {
     clearTimeout(this.agentIdle.get(tab.id));
     this.agentIdle.delete(tab.id);
     if (!this.tabs.delete(tab.id)) return;
+    this.logTab("info", "tab.closed", tab);
     if (this.activeTabIds.get(tab.scopeId) === tab.id) {
       const replacement = this.tabsForScope(tab.scopeId)[0];
       if (replacement) this.activeTabIds.set(tab.scopeId, replacement.id);
@@ -1075,7 +1097,10 @@ export class BrowserRuntimeManager {
       if (tab.announced) this.cdp.announceChanged(tab);
     };
     contents.on("did-start-loading", update);
-    contents.on("did-stop-loading", update);
+    contents.on("did-stop-loading", () => {
+      update();
+      this.cleanupSettledAgentBlanks(tab.scopeId);
+    });
     contents.on("page-title-updated", update);
     contents.on("did-navigate", () => {
       this.applyZoom(tab);
