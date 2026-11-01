@@ -8,7 +8,6 @@ import {
   validateMcpJsonText,
 } from "@coilcoil/runtime-protocol";
 import {
-  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -21,7 +20,9 @@ import {
   resolve,
 } from "node:path";
 import { createHash } from "node:crypto";
+import stripJsonComments from "strip-json-comments";
 import {
+  type McpAdapterEffectiveConfig,
   McpAdapterConfigModule,
   loadMcpAdapterConfigModule,
   mcpImportKind,
@@ -30,13 +31,51 @@ import {
 import { discoverImportableMcpServers } from "./mcp-discovery.js";
 import { RuntimeInspectionMcp } from "./runtime-inspection-mcp.js";
 import {
+  errorMessage,
   isRecord,
   recordOfStrings,
   safeRealPath,
   stringArray,
 } from "./runtime-utils.js";
 
+/** Missing files mean first use; unreadable or invalid existing files are failures. */
+function readMcpJsonFile(path: string, comments = false): unknown {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new Error(`无法读取 MCP 配置 ${path}：${errorMessage(error)}`, { cause: error });
+  }
+  try {
+    return JSON.parse(comments ? stripJsonComments(text, { trailingCommas: true }) : text);
+  } catch (error) {
+    throw new Error(`MCP 配置 ${path} 不是有效 JSON，请修复后重试。`, { cause: error });
+  }
+}
+
+function readMcpDocument(path: string): Record<string, unknown> | undefined {
+  const value = readMcpJsonFile(path, true);
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error(`MCP 配置 ${path} 必须是 JSON 对象。`);
+  const serverKey = Object.hasOwn(value, "mcpServers") ? "mcpServers" : Object.hasOwn(value, "mcp-servers") ? "mcp-servers" : undefined;
+  const servers = serverKey ? value[serverKey] : undefined;
+  if (serverKey && (!isRecord(servers)
+    || Object.values(servers).some((entry) => !isRecord(entry)))) {
+    throw new Error(`MCP 配置 ${path} 的 mcpServers 和各服务器定义必须是对象。`);
+  }
+  const { "mcp-servers": _legacy, ...rest } = value;
+  return servers === undefined ? rest : { ...rest, mcpServers: servers };
+}
+
 export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
+  /** The adapter tolerates broken imported files; CoilCoil-owned configuration must fail explicitly. */
+  protected loadEffectiveMcpConfiguration(adapter: McpAdapterConfigModule, cwd?: string): McpAdapterEffectiveConfig {
+    const path = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    readMcpDocument(path);
+    return this.withWorkspaceMcpServers(adapter.loadMcpConfig(path, this.mcpCwd(cwd)), cwd);
+  }
+
   protected removedMcpServersPath(): string {
     return join(this.agentDir, "mcp-removed-servers.json");
   }
@@ -65,16 +104,8 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
   protected workspaceMcpServers(cwd?: string): Record<string, Record<string, unknown>> {
     if (!cwd) return {};
     const path = this.workspaceMcpConfigPath(this.mcpCwd(cwd));
-    if (!existsSync(path)) return {};
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-      if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) return {};
-      return Object.fromEntries(
-        Object.entries(parsed.mcpServers).filter(([, value]) => isRecord(value)),
-      ) as Record<string, Record<string, unknown>>;
-    } catch {
-      return {};
-    }
+    const parsed = readMcpDocument(path);
+    return (parsed?.mcpServers ?? {}) as Record<string, Record<string, unknown>>;
   }
 
   /**
@@ -109,15 +140,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
 
   protected writeWorkspaceMcpServer(cwd: string, name: string, definition: Record<string, unknown> | undefined): void {
     const path = this.workspaceMcpConfigPath(this.mcpCwd(cwd));
-    let parsed: Record<string, unknown> = {};
-    if (existsSync(path)) {
-      try {
-        const current = JSON.parse(readFileSync(path, "utf8")) as unknown;
-        if (isRecord(current)) parsed = current;
-      } catch {
-        parsed = {};
-      }
-    }
+    const parsed = readMcpDocument(path) ?? {};
     const servers = isRecord(parsed.mcpServers) ? { ...parsed.mcpServers } : {};
     if (definition) servers[name] = definition;
     else delete servers[name];
@@ -129,22 +152,21 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
   }
 
   protected readNamedMcpServerSet(path: string): Set<string> {
-    if (!existsSync(path)) return new Set();
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-      const list = isRecord(parsed) && Array.isArray(parsed.servers)
-        ? parsed.servers
-        : Array.isArray(parsed) ? parsed : [];
-      return new Set(list.filter((name): name is string => typeof name === "string" && Boolean(name.trim())).map((name) => name.trim()));
-    } catch {
-      return new Set();
+    const parsed = readMcpJsonFile(path);
+    if (parsed === undefined) return new Set();
+    const list = isRecord(parsed) ? parsed.servers : parsed;
+    if (!Array.isArray(list) || list.some((name) => typeof name !== "string" || !name.trim())) {
+      throw new Error(`MCP 配置 ${path} 必须包含由非空服务器名称组成的 servers 数组。`);
     }
+    return new Set((list as string[]).map((name) => name.trim()));
   }
 
   protected writeNamedMcpServerSet(path: string, names: Set<string>): void {
     mkdirSync(this.agentDir, { recursive: true });
     const servers = [...names].sort((left, right) => left.localeCompare(right));
-    writeFileSync(path, `${JSON.stringify({ servers }, null, 2)}\n`, "utf8");
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify({ servers }, null, 2)}\n`, "utf8");
+    renameSync(temporaryPath, path);
   }
 
   protected readRemovedMcpServers(): Set<string> {
@@ -187,20 +209,15 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
   }
 
   protected removeBareMcpServerTombstone(configPath: string, name: string): boolean {
-    if (!existsSync(configPath)) return false;
-    try {
-      const parsed = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
-      if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) return false;
-      const entry = parsed.mcpServers[name];
-      if (!isRecord(entry) || entry.disabled !== true || Object.keys(entry).some((key) => key !== "disabled")) return false;
-      delete parsed.mcpServers[name];
-      const temporaryPath = `${configPath}.${process.pid}.tmp`;
-      writeFileSync(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
-      renameSync(temporaryPath, configPath);
-      return true;
-    } catch {
-      return false;
-    }
+    const parsed = readMcpDocument(configPath);
+    if (!isRecord(parsed?.mcpServers)) return false;
+    const entry = parsed.mcpServers[name];
+    if (!isRecord(entry) || entry.disabled !== true || Object.keys(entry).some((key) => key !== "disabled")) return false;
+    delete parsed.mcpServers[name];
+    const temporaryPath = `${configPath}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    renameSync(temporaryPath, configPath);
+    return true;
   }
 
   protected cleanRemovedMcpServerState(adapter: McpAdapterConfigModule, cwd?: string): boolean {
@@ -243,7 +260,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const cleaned = this.cleanRemovedMcpServerState(adapter, resolvedCwd);
     if (cleaned) this.reloadMcpExtension();
     const projectConfigPath = cwd ? this.workspaceMcpConfigPath(resolvedCwd) : undefined;
-    const config = this.withWorkspaceMcpServers(adapter.loadMcpConfig(configPath, resolvedCwd), cwd);
+    const config = this.loadEffectiveMcpConfiguration(adapter, cwd);
     const discovery = adapter.getMcpDiscoverySummary(configPath, resolvedCwd);
     const provenance = adapter.getServerProvenance(configPath, resolvedCwd);
     // Pi's provenance only covers the files Pi itself knows about, so a server
@@ -303,10 +320,13 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
 
   async getMcpJson(): Promise<McpJsonDocument> {
     const path = await this.mcpJsonPath();
-    if (!existsSync(path)) {
-      return { path, content: `${JSON.stringify({ mcpServers: {} }, null, 2)}\n` };
+    try {
+      // The editor must still be able to open malformed JSON for manual repair.
+      return { path, content: readFileSync(path, "utf8") };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { path, content: `${JSON.stringify({ mcpServers: {} }, null, 2)}\n` };
+      throw new Error(`无法读取 MCP 配置 ${path}：${errorMessage(error)}`, { cause: error });
     }
-    return { path, content: readFileSync(path, "utf8") };
   }
 
   async saveMcpJson(content: string, cwd?: string): Promise<McpConfigurationSnapshot> {
@@ -339,6 +359,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const resolvedCwd = this.mcpCwd(cwd);
     const projectScoped = server.scope === "project";
     const configPath = projectScoped ? this.workspaceMcpConfigPath(resolvedCwd) : globalConfigPath;
+    readMcpDocument(configPath);
     if (previousName) {
       const previous = (await this.getMcpConfiguration(cwd)).servers.find((item) => item.name === previousName);
       const previouslyProjectScoped = previous?.scope === "project";
@@ -375,8 +396,8 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
   }
 
   protected removeMcpServerFromFile(configPath: string, name: string): boolean {
-    if (!existsSync(configPath)) return false;
-    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    const parsed = readMcpDocument(configPath);
+    if (!parsed) return false;
     const servers = parsed.mcpServers;
     if (!servers || typeof servers !== "object" || Array.isArray(servers) || !(name in servers)) return false;
     delete (servers as Record<string, unknown>)[name];
@@ -416,7 +437,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     // External/shared definitions belong to another application, so CoilCoil
     // does not mutate their source file. The private exclusion is permanent
     // from CoilCoil's perspective and is never exposed to Pi or the Settings UI.
-    const stillPresent = Boolean(adapter.loadMcpConfig(globalConfigPath, resolvedCwd ?? process.cwd()).mcpServers[normalizedName]);
+    const stillPresent = Boolean(this.loadEffectiveMcpConfiguration(adapter, resolvedCwd ?? process.cwd()).mcpServers[normalizedName]);
     if (stillPresent) {
       this.markMcpServerRemovedLocally(normalizedName);
     } else {
@@ -433,8 +454,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     if (!normalizedName) throw new Error("缺少 MCP Server 名称。");
     const adapter = await loadMcpAdapterConfigModule();
     const resolvedCwd = this.mcpCwd(cwd);
-    const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
-    const effective = this.withWorkspaceMcpServers(adapter.loadMcpConfig(globalConfigPath, resolvedCwd), cwd);
+    const effective = this.loadEffectiveMcpConfiguration(adapter, cwd);
     if (!effective.mcpServers[normalizedName]) throw new Error(`MCP Server 不存在：${normalizedName}`);
     // Enablement lives in CoilCoil's own opt-out list, and the effective
     // configuration handed to the Agent is filtered by it. Nothing has to be
@@ -473,6 +493,7 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
     const adapter = await loadMcpAdapterConfigModule();
     const discovery = await this.discoverMcpServers(input.cwd);
     const globalConfigPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    readMcpDocument(globalConfigPath);
     let wrote = 0;
     for (const server of discovery.servers) {
       if (!wanted.has(`${server.origin}\u0000${server.name}`) || server.alreadyPresent) continue;
@@ -488,7 +509,9 @@ export abstract class RuntimeMcpConfig extends RuntimeInspectionMcp {
 
   async enableMcpImports(imports: McpImportConfiguration["kind"][], cwd?: string): Promise<McpConfigurationSnapshot> {
     const adapter = await loadMcpAdapterConfigModule();
-    adapter.ensureCompatibilityImports(imports, join(this.agentDir, "mcp.json"));
+    const path = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
+    readMcpDocument(path);
+    adapter.ensureCompatibilityImports(imports, path);
     await this.reloadMcpExtensionNow();
     return this.getMcpConfiguration(cwd);
   }

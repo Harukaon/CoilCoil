@@ -1,0 +1,195 @@
+{
+  "checkedAt": "2026-10-31",
+  "scope": "Read-only inspection of installed Claude Code and existing Orb transcript; no model calls or changes to Claude.",
+  "officialReferences": [
+    "https://code.claude.com/docs/en/tools-reference#monitor-tool",
+    "https://code.claude.com/docs/en/tools-reference#background-commands",
+    "https://code.claude.com/docs/en/tools-reference#when-a-background-command-stops"
+  ],
+  "transcript": {
+    "path": "/home/hao/.claude/projects/-home-hao-feedmob/c222acc6-d5bf-4217-b894-cea98aae7136.jsonl",
+    "schemaLine": 5542,
+    "shapeHash": "a58db9df51a87e60049b8fe5d5b4334975afff6d0b7bd8b97d28fa5feeccf6f9",
+    "toolName": "Monitor",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "Short human-readable description of what you are monitoring (shown in notifications).",
+          "type": "string"
+        },
+        "timeout_ms": {
+          "description": "Kill the monitor after this deadline. Default 300000ms. Deadlines above 1800000ms are capped to 1800000ms. You are notified at expiry and can re-arm.",
+          "default": 300000,
+          "type": "number",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
+        "command": {
+          "description": "Shell command or script. Each stdout line is an event; exit ends the watch.",
+          "type": "string"
+        },
+        "ws": {
+          "description": "WebSocket to open. Each text frame is an event; binary frames are reported as a placeholder line. Socket close ends the watch. Cannot be combined with command.",
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "protocols": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+              }
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "description",
+        "timeout_ms"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "behavior": [
+    "One completion/readiness result uses Bash run_in_background with a command that exits at the condition; completion is automatically delivered.",
+    "Monitor is for repeated actionable events: each stdout line becomes an event; stdout lines within 200ms are batched. Stderr only enters the output file.",
+    "The tool returns a task ID immediately; model inference need not remain active while the source is quiet.",
+    "The monitor exits with its command, is cancelled with TaskStop, and expires at its lifecycle deadline.",
+    "The sampled schema defaults timeout_ms to 300000 and describes a runtime clamp at 1800000, despite the JSON schema maximum being 3600000.",
+    "Too many output events stop the monitor; scripts should emit only changes including every actionable terminal failure state.",
+    "Notifications are task data, not user replies or authorization.",
+    "Current Monitor also supports WebSocket frames with command/ws exclusivity; this is independent of the shell event-wait change."
+  ],
+  "immediateReturnEvidence": [
+    {
+      "callLine": 499,
+      "resultLine": 500,
+      "callAt": "2026-10-22T05:49:25.231Z",
+      "resultAt": "2026-10-22T05:49:25.269Z",
+      "timeoutMs": 900000,
+      "latencyMs": 38,
+      "returnsTaskId": true,
+      "explicitlySaysNoPolling": true
+    },
+    {
+      "callLine": 774,
+      "resultLine": 775,
+      "callAt": "2026-10-22T06:09:33.204Z",
+      "resultAt": "2026-10-22T06:09:33.232Z",
+      "timeoutMs": 900000,
+      "latencyMs": 28,
+      "returnsTaskId": true,
+      "explicitlySaysNoPolling": true
+    },
+    {
+      "callLine": 978,
+      "resultLine": 979,
+      "callAt": "2026-10-22T06:20:32.491Z",
+      "resultAt": "2026-10-22T06:20:32.528Z",
+      "timeoutMs": 3000000,
+      "latencyMs": 37,
+      "returnsTaskId": true,
+      "explicitlySaysNoPolling": true
+    }
+  ],
+  "notificationEvidence": [
+    {
+      "line": 1041,
+      "timestamp": "2026-10-22T07:04:48.740Z",
+      "type": "user",
+      "taskId": "bz8a6qq24",
+      "event": "output",
+      "origin": {
+        "kind": "task-notification",
+        "producer": "session-task"
+      }
+    },
+    {
+      "line": 1252,
+      "timestamp": "2026-10-22T07:13:32.604Z",
+      "type": "user",
+      "taskId": "bz8a6qq24",
+      "event": "output",
+      "origin": {
+        "kind": "task-notification",
+        "producer": "session-task"
+      }
+    },
+    {
+      "line": 1282,
+      "timestamp": "2026-10-22T07:43:27.768Z",
+      "type": "user",
+      "taskId": "b5m91ukx4",
+      "event": "expired",
+      "origin": {
+        "kind": "task-notification",
+        "producer": "session-task"
+      }
+    },
+    {
+      "line": 1398,
+      "timestamp": "2026-10-22T08:02:13.247Z",
+      "type": "user",
+      "taskId": "bpm6snv1l",
+      "event": "completed",
+      "origin": {
+        "kind": "task-notification",
+        "producer": "session-task",
+        "runId": "0mvj944an-13be875a"
+      }
+    },
+    {
+      "line": 1481,
+      "timestamp": "2026-10-22T08:12:48.044Z",
+      "type": "user",
+      "taskId": "b3dji36f0",
+      "event": "completed",
+      "origin": {
+        "kind": "task-notification",
+        "producer": "session-task",
+        "runId": "0mvj8pygb-6251da76"
+      }
+    },
+    {
+      "line": 1487,
+      "timestamp": "2026-10-22T08:14:13.396Z",
+      "type": "user",
+      "taskId": "bjavepp7q",
+      "event": "completed",
+      "origin": {
+        "kind": "task-notification",
+        "producer": "session-task",
+        "runId": "0mvj8pn6r-03a088d4"
+      }
+    }
+  ],
+  "binaryInspection": {
+    "path": "/home/hao/.local/share/claude/versions/2.1.314",
+    "format": "Native bytecode; Monitor behavior confirmed through exposed schema, strings and observed transcript, not reconstructed JavaScript source.",
+    "conditionalStrings": [
+      {
+        "byteOffset": 127887344,
+        "meaning": "A conditional persistent path lasts for the session without timeout; some session kinds may still stop monitors soon after a final reply."
+      },
+      {
+        "byteOffset": 127887724,
+        "meaning": "A stop still completing prevents new monitors from starting."
+      }
+    ]
+  },
+  "implementationConstraints": [
+    "Keep foreground waiting/yield, process execution timeout and monitor lifetime separate.",
+    "Main and child monitoring reuse their managed terminal extension and existing process cleanup, with explicit per-session ownership.",
+    "A monitor start that observes terminalId and all wait/stop/list actions do not launch a new shell.",
+    "Restricted file-only memory workers continue to reject monitor rather than gaining shell execution.",
+    "Preserve existing prompt snapshots; update static guidelines for newly constructed prompts only."
+  ]
+}

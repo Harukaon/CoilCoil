@@ -32,11 +32,15 @@ export function estimateTextTokens(text: string): number {
   let wide = 0;
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0;
-    if ((code >= 0x2e80 && code <= 0x9fff) || (code >= 0xac00 && code <= 0xd7af)
-      || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xff00 && code <= 0xffef)) wide++;
+    if (isWideCharacter(code)) wide++;
   }
   const narrow = text.length - wide;
   return wide + Math.ceil(narrow / 4);
+}
+
+function isWideCharacter(code: number): boolean {
+  return (code >= 0x2e80 && code <= 0x9fff) || (code >= 0xac00 && code <= 0xd7af)
+    || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xff00 && code <= 0xffef);
 }
 
 const IMAGE_TOKENS = 1200;
@@ -199,6 +203,7 @@ export function composeCleaned(options: { previousBody?: string; previousSummary
  * 按预算把材料切块，切在消息之间；单条消息比整块预算还大就按字切开。
  */
 export function chunkUnits(units: readonly string[], budgetTokens: number): string[] {
+  if (!Number.isFinite(budgetTokens) || budgetTokens < 1) throw new RangeError("分块预算至少为 1 token");
   const chunks: string[] = [];
   let current: string[] = [];
   let used = 0;
@@ -211,12 +216,29 @@ export function chunkUnits(units: readonly string[], budgetTokens: number): stri
     const tokens = estimateTextTokens(unit);
     if (tokens > budgetTokens) {
       flush();
-      // 按比例估一个安全的字数，再逐段切。
-      const chars = Math.max(1000, Math.floor(unit.length * (budgetTokens / tokens) * 0.9));
-      for (let at = 0; at < unit.length; at += chars) chunks.push(unit.slice(at, at + chars));
+      // 每一块单独计数，不能把整条消息的中英比例套到局部内容上。
+      let start = 0;
+      let at = 0;
+      let wide = 0;
+      let narrow = 0;
+      for (const char of unit) {
+        const isWide = isWideCharacter(char.codePointAt(0) ?? 0);
+        if (wide + (isWide ? 1 : 0) + Math.ceil((narrow + (isWide ? 0 : char.length)) / 4) > budgetTokens) {
+          chunks.push(unit.slice(start, at));
+          start = at;
+          wide = 0;
+          narrow = 0;
+        }
+        if (isWide) wide++;
+        else narrow += char.length;
+        at += char.length;
+      }
+      if (at > start) chunks.push(unit.slice(start, at));
       continue;
     }
-    if (used + tokens > budgetTokens) flush();
+    // 两条消息之间的换行也占预算。
+    if (used + tokens + (current.length ? 1 : 0) > budgetTokens) flush();
+    if (current.length) used++;
     current.push(unit);
     used += tokens;
   }

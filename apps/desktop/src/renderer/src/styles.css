@@ -884,13 +884,6 @@ input.plan-agent-dialog-input::placeholder { color: hsl(var(--th) var(--ts) var(
 .plan-execution-report strong { color: hsl(var(--th) var(--ts) var(--l-286)); }
 .plan-execution-report p { margin: 0; color: hsl(var(--th) var(--ts) var(--l-398)); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .plan-approval-error { padding: 9px 11px; border: 1px solid var(--c-red-border); border-radius: var(--radius-2xl); color: var(--c-red-muted); background: hsl(var(--th) var(--ts) var(--l-982)); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.composer-todo-list li { display: grid; min-width: 0; grid-template-columns: 16px minmax(0, 1fr); gap: 7px; align-items: start; padding: 5px 4px; color: hsl(var(--th) var(--ts) var(--l-402)); font-size: 11px; line-height: 1.4; }
-.composer-todo-list li span { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
-.composer-todo-list li svg { margin-top: 1px; color: hsl(var(--th) var(--ts) var(--l-563)); }
-.composer-todo-list li.in_progress { color: hsl(var(--th) var(--ts) var(--l-157)); font-weight: 550; }
-.composer-todo-list li.in_progress svg { color: var(--c-green-text); }
-.composer-todo-list li.completed { color: hsl(var(--th) var(--ts) var(--l-618)); text-decoration: line-through; }
-.composer-todo-list li.completed svg { color: #758472; }
 .composer-command-list li { padding: 0; }
 .composer-command-list button {
   display: grid;
@@ -975,6 +968,7 @@ input.plan-agent-dialog-input::placeholder { color: hsl(var(--th) var(--ts) var(
 .prompt-editor-element { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 7px; border: 1px solid hsl(214 78% 62% / 55%); border-radius: var(--radius-lg); color: hsl(214 72% 42%); background: hsl(214 86% 93%); font-size: .92em; line-height: 1.35; white-space: nowrap; user-select: none; vertical-align: baseline; }
 .prompt-history-element { margin: 0 3px; }
 .composer-toolbar { display: flex; align-items: center; min-height: 44px; padding: 4px 8px 8px 12px; }
+.composer-background-wait { padding: 4px 14px 0; color: hsl(var(--th) var(--ts) var(--l-537)); font-size: 12px; line-height: 1.5; }
 .agent-mode { display: inline-flex; max-width: 196px; align-items: center; gap: 4px; padding: 3px 6px; border-radius: var(--radius-md); color: hsl(var(--th) var(--ts) var(--l-398)); background: hsl(var(--th) var(--ts) var(--l-951)); font-size: 10px; font-weight: 500; cursor: pointer; }
 .agent-mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-mode:hover { background: hsl(var(--th) var(--ts) var(--l-914)); }

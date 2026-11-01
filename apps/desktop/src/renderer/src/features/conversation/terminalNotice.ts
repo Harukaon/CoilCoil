@@ -2,7 +2,7 @@ import type { ChatMessage } from "@coilcoil/runtime-protocol";
 
 export const TERMINAL_NOTIFICATION_TYPE = "terminal-notification";
 
-export type TerminalNoticeMode = "exit" | "match" | "regex" | "stalled";
+export type TerminalNoticeMode = "exit" | "match" | "regex" | "stalled" | "output";
 
 export interface TerminalNotice {
   terminalId: string;
@@ -20,7 +20,7 @@ function stringField(details: Record<string, unknown> | undefined, key: string):
 }
 
 function readMode(value: string | undefined): TerminalNoticeMode | undefined {
-  return value === "exit" || value === "match" || value === "regex" || value === "stalled" ? value : undefined;
+  return value === "exit" || value === "match" || value === "regex" || value === "stalled" || value === "output" ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -80,7 +80,11 @@ export function parseTerminalNotice(message: ChatMessage): TerminalNotice | unde
 
 /** Short label for the status pill; falls back to the mode when Pi sent no status. */
 export function terminalNoticeLabel(notice: TerminalNotice): string {
-  if (notice.status === "running") return notice.mode === "stalled" ? "无新输出" : "运行中";
+  if (notice.status === "running") {
+    if (notice.mode === "output") return "监控事件";
+    if (notice.mode === "match" || notice.mode === "regex") return "已匹配";
+    return notice.mode === "stalled" ? "无新输出" : "运行中";
+  }
   if (notice.status === "exited") return "已退出";
   if (notice.status === "stopped") return "已停止";
   if (notice.status === "failed") return "失败";

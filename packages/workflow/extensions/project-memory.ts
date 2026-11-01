@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
+import { RUNTIME_BRIDGE_STATE_EVENT, type RuntimeBridgeState } from "./runtime-bridge.ts";
+import { MEMORY_STATUS_PUBLISHER_REQUEST, type MemoryStatusPublisherRequest } from "./memory-status-channel.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -165,7 +167,10 @@ export default function projectMemoryExtension(
   const warningState = { warned: false };
   const backgroundWarningState = { warned: false };
   const storageRoot = resolveProjectMemoryStorageRoot(env);
+  let active = true;
+  let sessionPromptLocked = false;
   let status: ProjectMemoryStatusEvent | undefined;
+  let publishRuntimeStatus: MemoryStatusPublisherRequest["publish"];
 
   const publishStatus = (
     cwd: string,
@@ -183,9 +188,25 @@ export default function projectMemoryExtension(
       ...update,
     };
     status = { ...next, version: 1, cwd, updatedAt };
-    pi.events.emit(PROJECT_MEMORY_STATUS_EVENT, status);
+    if (!publishRuntimeStatus && active) {
+      const request: MemoryStatusPublisherRequest = {};
+      pi.events.emit(MEMORY_STATUS_PUBLISHER_REQUEST, request);
+      publishRuntimeStatus = request.publish;
+    }
+    if (publishRuntimeStatus) publishRuntimeStatus(status);
+    else if (active) pi.events.emit(PROJECT_MEMORY_STATUS_EVENT, status);
     return status;
   };
+
+  const unsubscribePrompt = pi.events.on(RUNTIME_BRIDGE_STATE_EVENT, (raw) => {
+    const state = raw as RuntimeBridgeState | undefined;
+    if (!state || typeof state.promptLocked !== "boolean" || state.promptLocked === sessionPromptLocked) return;
+    sessionPromptLocked = state.promptLocked;
+    if (!status || !sessionPromptLocked) return;
+    publishStatus(status.cwd, { state: status.state, source: "prompt",
+      injected: Boolean(state.effectiveSystemPrompt?.includes(MEMORY_PROMPT_MARKER)),
+      message: "当前会话使用固定的记忆快照，记忆更新将在新对话生效" });
+  });
 
   const memoryMetadata = async (paths: ProjectMemoryPaths): Promise<Pick<ProjectMemoryStatusEvent,
     "projectRoot" | "projectName" | "memoryFile" | "projectMemoryDir" | "exists" | "contentChars" | "estimatedTokens" | "processedSessions"
@@ -217,7 +238,10 @@ export default function projectMemoryExtension(
     const currentModel = ctx.model;
     const model = currentModel ? { provider: currentModel.provider, id: currentModel.id } : undefined;
     const sessionFile = ctx.sessionManager.getSessionFile();
-    const notify = snapshotNotifier(ctx);
+    const capturedNotify = snapshotNotifier(ctx);
+    const notify = (message: string, type?: "info" | "warning" | "error"): void => {
+      if (active) capturedNotify?.(message, type);
+    };
     const attemptId = randomUUID();
     if (await memoryIsDisabled(cwd, env)) {
       publishStatus(cwd, { state: "disabled", source, attemptId, exists: false, injected: false, message: "当前目录已禁用项目记忆" });
@@ -348,6 +372,7 @@ export default function projectMemoryExtension(
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    sessionPromptLocked = false;
     const cwd = ctx.cwd;
     const notify = snapshotNotifier(ctx);
     if (await memoryIsDisabled(cwd, env)) {
@@ -369,7 +394,13 @@ export default function projectMemoryExtension(
     }
   });
 
+  pi.on("session_tree", () => { sessionPromptLocked = false; });
+  pi.on("session_shutdown", () => { active = false; unsubscribePrompt(); });
+
   pi.on("before_agent_start", async (event, ctx) => {
+    // The bridge owns the final prompt snapshot. Later turns need no disk reads
+    // or extra memory messages, even if settings or background memory changed.
+    if (sessionPromptLocked) return undefined;
     const cwd = ctx.cwd;
     const notify = snapshotNotifier(ctx);
     if (await memoryIsDisabled(cwd, env)) return undefined;
@@ -379,6 +410,10 @@ export default function projectMemoryExtension(
       const { paths, memory } = await prepareMemory(cwd, storageRoot, settings.projectMaxChars);
       const globalContent = settings.globalEnabled ? await readUtf8(paths.globalMemoryFile) : "";
       const entryFiles = settings.projectEnabled ? await listMemoryEntryFiles(paths) : [];
+      const injected = [
+        settings.globalEnabled ? buildGlobalMemoryPrompt(paths, globalContent, settings.globalMaxChars) : "",
+        settings.projectEnabled ? buildProjectMemoryPrompt(paths, memory.content, settings.projectMaxChars, settings.generationRules, entryFiles) : "",
+      ].filter(Boolean).join("\n\n");
       publishStatus(cwd, {
         state: status?.state === "running" ? "running" : "idle",
         source: "prompt",
@@ -387,11 +422,7 @@ export default function projectMemoryExtension(
         message: "项目记忆已注入当前会话",
       });
       return {
-        systemPrompt: [
-          event.systemPrompt,
-          settings.globalEnabled ? buildGlobalMemoryPrompt(paths, globalContent, settings.globalMaxChars) : "",
-          settings.projectEnabled ? buildProjectMemoryPrompt(paths, memory.content, settings.projectMaxChars, settings.generationRules, entryFiles) : "",
-        ].filter(Boolean).join("\n\n"),
+        systemPrompt: [event.systemPrompt, injected].filter(Boolean).join("\n\n"),
       };
     } catch (error) {
       notifyOnce(warningState, notify, error, "项目记忆注入失败");

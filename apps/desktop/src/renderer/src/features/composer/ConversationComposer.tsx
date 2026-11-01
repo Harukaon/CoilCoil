@@ -20,6 +20,7 @@ export function ConversationComposer({
   variant = "footer",
   project,
   running,
+  backgroundWaiting,
   aborting,
   goalActive,
   loading,
@@ -56,6 +57,8 @@ export function ConversationComposer({
   variant?: ComposerVariant;
   project: ProjectSelection | null;
   running: boolean;
+  /** The model loop is idle while a background monitor owns the next wake-up. */
+  backgroundWaiting?: boolean;
   /** A stop was pressed and the turn has not finished winding down. */
   aborting?: boolean;
   /** A `/goal` loop owns the session: every message interjects, nothing queues. */
@@ -171,6 +174,7 @@ export function ConversationComposer({
         onKeyDown={handleKeyDown}
         autoFocus={autoFocus}
       />
+      {!inline && backgroundWaiting && !running ? <div className="composer-background-wait" role="status">正在监控后台任务，有结果后自动继续</div> : null}
       <div className="composer-toolbar">
         <ModelPicker
           configuration={configuration}
@@ -186,12 +190,12 @@ export function ConversationComposer({
           onFastChange={onFastChange}
           onOpenSettings={onOpenSettings}
         />
-        {!inline && running && onAbort ? (
+        {!inline && (running || backgroundWaiting || aborting) && onAbort ? (
           <button
             className={`stop-button ${aborting ? "aborting" : ""}`}
             type="button"
-            aria-label={aborting ? "正在停止 Agent" : "停止 Agent"}
-            title={aborting ? "正在停止：还在等一个已经发出的工具调用收尾" : "停止"}
+            aria-label={aborting ? "正在停止 Agent" : backgroundWaiting && !running ? "取消后台监控等待" : "停止 Agent"}
+            title={aborting ? "正在停止：还在等一个已经发出的工具调用收尾" : backgroundWaiting && !running ? "取消后台监控等待" : "停止"}
             disabled={aborting}
             onClick={onAbort}
           >
@@ -203,7 +207,7 @@ export function ConversationComposer({
           type="submit"
           aria-label={inline ? "从这里重新开始" : running ? (goalActive ? "介入当前轮次" : "加入队列") : "发送消息"}
           title={!inline && running && goalActive ? "目标模式：消息会插进当前轮次，不排队" : undefined}
-          disabled={!project || startingSession || modelChanging || (!draft.trim() && !images.length)}
+          disabled={!project || loading || startingSession || modelChanging || (!draft.trim() && !images.length)}
         >
           <ArrowUp size={17} strokeWidth={2.2} />
         </button>

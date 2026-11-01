@@ -11,7 +11,10 @@ export const DEFAULT_READ_LIMIT = 30_000;
 export const MAX_COMPLETED_SESSIONS = 8;
 export const COMPLETED_SESSION_TTL_MS = 30 * 60_000;
 export const MAX_WAIT_TIMEOUT_MS = 30 * 60_000;
-export const DEFAULT_BLOCK_UNTIL_MS = 30_000;
+export const DEFAULT_BLOCK_UNTIL_MS = 1_000;
+export const MAX_FOREGROUND_WAIT_MS = 1_000;
+export const DEFAULT_MONITOR_LIFETIME_MS = 5 * 60_000;
+export const MAX_MONITOR_LIFETIME_MS = 30 * 60_000;
 export const MAX_COMMAND_TIMEOUT_MS = 24 * 60 * 60_000;
 export const DEFAULT_STALLED_MS = 60_000;
 export const DEFAULT_STOP_TIMEOUT_MS = 3_000;
@@ -29,11 +32,11 @@ export const terminalParameters = Type.Object(
     cwd: Type.Optional(Type.String({ description: "Working directory for action=start" })),
     name: Type.Optional(Type.String({ maxLength: 60, description: "Optional memorable name for action=start" })),
     cursor: Type.Optional(Type.Integer({ minimum: 0, description: "Output cursor returned by start/read" })),
-    waitFor: Type.Optional(Type.String({ maxLength: 500, description: "Wait until this literal text appears in new output" })),
+    waitFor: Type.Optional(Type.String({ maxLength: 500, description: "Literal output condition; action=await registers a monitor and suspends until it matches or the process exits" })),
     timeoutMs: Type.Optional(Type.Integer({
       minimum: 0,
       maximum: MAX_WAIT_TIMEOUT_MS,
-      description: "Bounded wait for read/start/await/stop; this never becomes a process lifetime timeout",
+      description: "Short foreground wait for read/start (capped at 1000ms), or process cleanup deadline for stop. Ignored by event-driven await; never a process lifetime timeout",
     })),
     notifyOn: Type.Optional(StringEnum(["exit", "match", "stalled"] as const, {
       description: "For action=start, notify when the process exits, waitFor matches, or output stalls",
@@ -62,9 +65,9 @@ export const bashParameters = Type.Object(
     })),
     block_until_ms: Type.Optional(Type.Integer({
       minimum: 0,
-      maximum: MAX_WAIT_TIMEOUT_MS,
+      maximum: MAX_FOREGROUND_WAIT_MS,
       default: DEFAULT_BLOCK_UNTIL_MS,
-      description: "Wait this long for completion, then automatically move a still-running command to the background",
+      description: "Optional short foreground window, at most 1000ms; longer commands continue in the background and notify on exit",
     })),
     timeout_ms: Type.Optional(Type.Integer({
       minimum: 1,
@@ -91,10 +94,29 @@ export const bashParameters = Type.Object(
 
 export type TerminalParameters = Static<typeof terminalParameters>;
 export type BashParameters = Static<typeof bashParameters>;
+export const monitorParameters = Type.Object({
+  action: Type.Optional(StringEnum(["start", "wait", "stop", "list"] as const, {
+    description: "start creates a monitor (default); wait suspends for existing monitors; stop cancels one; list inspects monitors",
+  })),
+  command: Type.Optional(Type.String({ minLength: 1, description: "Background watcher command for start; print only actionable changes, one event per line. Mutually exclusive with terminalId" })),
+  terminalId: Type.Optional(Type.String({ description: "Observe an existing managed terminal without starting a new command" })),
+  description: Type.Optional(Type.String({ maxLength: 200, description: "What result or change this monitor is waiting for" })),
+  event: Type.Optional(StringEnum(["exit", "output", "match"] as const, {
+    description: "Defaults to exit for an existing terminal, output for a new watcher command; match uses literal waitFor",
+  })),
+  waitFor: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: "Literal output condition for event=match; process exit also reports a result" })),
+  repeat: Type.Optional(Type.Boolean({ description: "Report multiple output/match events; defaults to true for output and false otherwise" })),
+  suspend: Type.Optional(Type.Boolean({ description: "Default true: end this agent loop and resume automatically on an event. Set false only to continue independent work" })),
+  id: Type.Optional(Type.String({ description: "Monitor id for stop, or one monitor to wait for" })),
+  ids: Type.Optional(Type.Array(Type.String(), { maxItems: 32, description: "Monitors for wait; any one event resumes the agent. Omit to wait for all currently active monitors" })),
+  cwd: Type.Optional(Type.String({ description: "Working directory for a new watcher command" })),
+  lifetime_ms: Type.Optional(Type.Integer({ minimum: 1_000, maximum: MAX_MONITOR_LIFETIME_MS, description: "Optional watcher-process safety lifetime, default 5 minutes. This does not block the agent and applies only to command monitors" })),
+}, { additionalProperties: false });
+export type MonitorParameters = Static<typeof monitorParameters>;
 export type TerminalStatus = "running" | "exited" | "failed" | "stopped" | "cleanup_failed";
 export type WaitOutcome = "matched" | "output" | "exit" | "timeout" | "aborted";
 export type CleanupSignal = "SIGINT" | "SIGTERM" | "SIGKILL";
-export type TerminalNotifyOn = "exit" | "match" | "regex" | "stalled";
+export type TerminalNotifyOn = "exit" | "match" | "regex" | "stalled" | "output";
 
 export interface CleanupReport {
   forceRequested: boolean;
@@ -109,21 +131,26 @@ export interface CleanupReport {
   residualPids: number[];
   verified: boolean;
   enumerationError?: string;
+  unverifiedPids?: number[];
 }
 
-export interface ProcessRecord {
+export interface ProcessIdentity {
   pid: number;
-  ppid: number;
   pgid: number;
-  sessionId: number;
-  state: string;
   tty: string;
+  birth: string;
+}
+
+export interface ProcessRecord extends ProcessIdentity {
+  ppid: number;
+  state: string;
 }
 
 export interface ProcessScan {
   table: Map<number, ProcessRecord>;
   owned: ProcessRecord[];
   rootAlive: boolean;
+  unverifiedPids: number[];
 }
 
 export interface TerminalNotification {
@@ -172,13 +199,16 @@ export interface ManagedTerminal {
   stopRequested: boolean;
   timeoutRequested?: boolean;
   background: boolean;
-  processSessionId?: number;
+  processIdentity?: ProcessIdentity;
+  processDescendants?: Map<number, ProcessIdentity>;
+  processScanPromise?: Promise<ProcessScan>;
   tty?: string;
   cleanup?: CleanupReport;
   cleanupPromise?: Promise<CleanupReport>;
   hardTimeoutTimer?: ReturnType<typeof setTimeout>;
   outputMode: "screen" | "log";
   outputPath: string;
+  stderrPath?: string;
   outputStream?: WriteStream;
   buffer: string;
   bufferStart: number;
@@ -214,3 +244,37 @@ export const KEY_SEQUENCES: Record<NonNullable<TerminalParameters["key"]>, strin
   left: "\u001b[D",
   right: "\u001b[C",
 };
+
+export interface StartRequest {
+  ownerToolCallId: string;
+  command: string;
+  cwd?: string;
+  name?: string;
+  outputMode: "screen" | "log";
+  initialBackground: boolean;
+  waitFor?: string;
+  waitTimeoutMs: number;
+  waitForExitOnly: boolean;
+  hardTimeoutMs?: number;
+  notifyOn?: "exit" | "match" | "stalled";
+  notifyOutputRegex?: string;
+  stalledMs?: number;
+  limit?: number;
+  cols?: number;
+  rows?: number;
+  autoNotifyExit: boolean;
+  captureStderr?: boolean;
+  onUpdate?: (result: {
+    content: Array<{ type: "text"; text: string }>;
+    details: unknown;
+  }) => void;
+}
+
+export interface StartResult {
+  session: ManagedTerminal;
+  wait: WaitOutcome;
+  poppedOutIntoBackground: boolean;
+  output: string;
+  cursor: number;
+  hasMore: boolean;
+}

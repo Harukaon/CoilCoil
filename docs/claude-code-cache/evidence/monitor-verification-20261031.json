@@ -1,0 +1,127 @@
+{
+  "verifiedAtUTC": "2026-10-30T18:17:31.962226+00:00",
+  "workspaceTests": [
+    {
+      "workspace": "@coilcoil/desktop",
+      "tests": 662,
+      "pass": 662,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "workspace": "@coilcoil/cli",
+      "tests": 2,
+      "pass": 2,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "workspace": "@coilcoil/diagnostics",
+      "tests": 10,
+      "pass": 10,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "workspace": "@coilcoil/mcp",
+      "tests": 105,
+      "pass": 105,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "workspace": "@coilcoil/runtime-core",
+      "tests": 355,
+      "pass": 355,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "workspace": "@coilcoil/runtime-protocol",
+      "tests": 14,
+      "pass": 14,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "workspace": "@coilcoil/runtime-server",
+      "tests": 61,
+      "pass": 61,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "workspace": "@coilcoil/openai-responses-ws",
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "workspace": "@coilcoil/workflow",
+      "tests": 487,
+      "pass": 487,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "totalTests": 1703,
+  "checks": [
+    {
+      "name": "check",
+      "passed": true,
+      "log": "/tmp/coil-monitor-check-20261031-final.log",
+      "sha256": "727e9e137653eba1f09404bdaab5ebd4a14a169b5350ba0626f09e4f5b93dca1"
+    },
+    {
+      "name": "tests",
+      "passed": true,
+      "log": "/tmp/coil-monitor-tests-20261031-final.log",
+      "sha256": "cbec4801d282321a747bdc53029771fc6d2482ac42a69f213cf894cbf7ccf420"
+    },
+    {
+      "name": "build",
+      "passed": true,
+      "log": "/tmp/coil-monitor-build-20261031-final.log",
+      "sha256": "06c10085605893e76dd8d43d9533af83b9e9c61e61a4908deb263e1c238f10a4"
+    }
+  ],
+  "domSmoke": {
+    "passed": true,
+    "result": "/var/folders/_d/swwp8wcn06s5j3xbh2sm2q4c0000gn/T/coil-renderer-restore-dom-rze8yx/result.json",
+    "screenshot": "/var/folders/_d/swwp8wcn06s5j3xbh2sm2q4c0000gn/T/coil-renderer-restore-dom-rze8yx/waiting-monitor.png",
+    "scenarios": [
+      "existing steering/session restore/Stop",
+      "idle monitor status",
+      "new-message button remains enabled",
+      "switch away and back restores monitor wait",
+      "idle monitor cancellation uses runtime abort"
+    ]
+  },
+  "behavioralAcceptance": [
+    "No additional model requests while suspended; stdout event resumes a second request",
+    "Goal does not schedule polling rounds while waiting",
+    "User stop revokes watches before async process cleanup and prevents late wakes",
+    "Readiness subscription leaves an attached service running",
+    "stderr is separate from watcher event stdout",
+    "Incremental events are coalesced without silent replacement",
+    "Ready results and replacement subscriptions do not double-wake",
+    "screen line/frame updates preserve match boundaries",
+    "Stop refreshes startup process discovery before signalling independent process groups",
+    "Child sessions remain alive through monitor suspension and resume"
+  ],
+  "vendorModifiedForThisFeature": false,
+  "newPaidModelRequests": 0,
+  "installedMacAppReplaced": false,
+  "backgroundWaitStateTransport": "Synchronous background_wait_updated event; does not overwrite running/aborting with asynchronous full snapshots.",
+  "installedMacVersion": "0.1.0-beta.163.local.20261028.3"
+}

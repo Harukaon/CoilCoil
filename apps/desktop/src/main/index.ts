@@ -907,9 +907,13 @@ async function createWindow(): Promise<void> {
       primaryTerminalRuntime = terminalRuntimes.values().next().value;
     }
     if (primaryBrowserRuntime === browserRuntime) {
-      runtime.stop();
       primaryBrowserRuntime = browserRuntimes.values().next().value;
-      if (primaryBrowserRuntime && !isQuitting) runtime.start();
+      // macOS keeps the app alive after its last window closes. Keep ordinary
+      // MCP connections and external calls alive with it; only the browser goes away.
+      if (primaryBrowserRuntime || isQuitting || process.platform !== "darwin") {
+        runtime.stop();
+        if (primaryBrowserRuntime && !isQuitting) runtime.start();
+      }
     }
     void browserRuntime.dispose().catch((error) => console.error("[browser] 关闭运行时失败", error));
     terminalRuntime.dispose();
@@ -1344,7 +1348,11 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (appWindows().length === 0) {
       void createWindow()
-        .then(() => runtime.start())
+        .then(() => {
+          // A background runtime still has the old window's browser endpoint.
+          runtime.stop();
+          runtime.start();
+        })
         .catch((error) => diagnosticLog().error("window", "reactivate_failed", error));
     }
   });

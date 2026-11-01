@@ -87,6 +87,10 @@ class FakeRuntime {
     return { cwd, ordinal: this.ordinal };
   }
 
+  async accessMcp(request: { cwd: string }): Promise<{ cwd: string; ordinal: number }> {
+    return { cwd: request.cwd, ordinal: this.ordinal };
+  }
+
   async createSession(cwd: string, model?: SessionModelSelection, agentMode?: AgentMode): Promise<SessionSnapshot> {
     this.createdWithModels.push(model);
     this.createdWithModes.push(agentMode);
@@ -151,7 +155,7 @@ class FakeRuntime {
       promptQueue: [],
       tools: [],
       subagents: initialSubagent,
-      project: { cwd, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
+      project: { cwd, files: [], changes: [], terminals: [], refreshedAt: 0 },
       thinkingLevel: "off",
       fast: false,
       responseMetricsHistory: [],
@@ -893,4 +897,49 @@ test("account removal and logout route to the same control runtime as pending OA
     assert.deepEqual(runtimes[1].removedAccounts, []);
     for (const runtime of runtimes) assert.deepEqual(runtime.registryRefreshes, ["claude-work", "codex-work"]);
   } finally { await server.dispose(); }
+});
+
+test("external MCP requests reuse the matching session, preserve selection, and reject cross-workspace IDs", async (t) => {
+  const runtimes: FakeRuntime[] = [];
+  const server = new RuntimeServer({ agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" }, () => undefined, {
+    createRuntime: (options) => {
+      const runtime = new FakeRuntime(runtimes.length, options);
+      runtimes.push(runtime);
+      return runtime as unknown as CoilCoilRuntime;
+    },
+    createRuntimeId: () => `runtime-${runtimes.length}`,
+  });
+  t.after(() => server.dispose());
+  const a = (await server.handle({ id: "a", command: { type: "create_session", cwd: "/project-a" } })).result as SessionSnapshot;
+  const b = (await server.handle({ id: "b", command: { type: "create_session", cwd: "/project-b" } })).result as SessionSnapshot;
+  assert.deepEqual(await server.accessMcp({ action: "list", cwd: "/project-a" }), { cwd: "/project-a", ordinal: 1 });
+  assert.deepEqual(await server.accessMcp({ action: "list", cwd: "/no-session" }), { cwd: "/no-session", ordinal: 0 });
+  await assert.rejects(server.accessMcp({ action: "list", cwd: "/project-b", runtimeId: a.runtimeId }), /不属于/);
+  await assert.rejects(server.accessMcp({ action: "list", cwd: "/project-a", runtimeId: "retired" }), /失效/);
+  const current = await server.handle({ id: "prompt", command: { type: "prompt", text: "still b" } });
+  assert.equal(current.ok, true);
+  assert.equal(runtimes[2].promptClientMessageIds.length, 1, "accessing A must not select it in the desktop");
+  const contexts = await server.accessMcp({ action: "contexts" }) as { contexts: Array<{ runtimeId: string }> };
+  assert.deepEqual(contexts.contexts.map((entry) => entry.runtimeId), [a.runtimeId, b.runtimeId]);
+});
+
+test("a session serving an external MCP call is not retired while the call is pending", async (t) => {
+  const runtimes: FakeRuntime[] = [];
+  const server = new RuntimeServer({ agentDir: "/tmp/agent", sessionDir: "/tmp/sessions" }, () => undefined, {
+    createRuntime: (options) => {
+      const runtime = new FakeRuntime(runtimes.length, options);
+      runtimes.push(runtime);
+      return runtime as unknown as CoilCoilRuntime;
+    },
+    createRuntimeId: () => `runtime-${runtimes.length}`,
+  });
+  t.after(() => server.dispose());
+  await server.handle({ id: "first", command: { type: "create_session", cwd: "/first" } });
+  const gate = deferred();
+  runtimes[1].accessMcp = async () => { await gate.promise; return { cwd: "/first", ordinal: 1 }; };
+  const pending = server.accessMcp({ action: "list", cwd: "/first" });
+  try {
+    for (let index = 0; index < 9; index++) await server.handle({ id: `s-${index}`, command: { type: "create_session", cwd: `/other-${index}` } });
+    assert.equal(runtimes[1].disposed, false);
+  } finally { gate.resolve(); await pending; }
 });

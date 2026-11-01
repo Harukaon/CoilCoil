@@ -24,7 +24,8 @@
     "@earendil-works/pi-protocol": "file:../../vendor/pi/packages/protocol",
     "@earendil-works/pi-tui": "file:../../vendor/pi/packages/tui",
     "jiti": "2.7.0",
-    "pi-mcp-adapter": "2.21.0"
+    "pi-mcp-adapter": "2.21.0",
+    "strip-json-comments": "5.0.3"
   },
   "devDependencies": {
     "@types/node": "26.1.2",

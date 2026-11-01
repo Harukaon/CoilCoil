@@ -1,10 +1,10 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const ALLOWED_CHILD_TOOL_NAMES = ["read", "bash", "terminal", "edit", "write", "grep", "ls", "find", "mcp", "powershell"] as const;
+export const ALLOWED_CHILD_TOOL_NAMES = ["read", "bash", "terminal", "monitor", "edit", "write", "grep", "ls", "find", "mcp", "powershell"] as const;
 
 /** What a profile that does not list its own `tools` gets. */
-export const DEFAULT_CHILD_TOOLS: readonly string[] = ["read", "bash", "terminal", "edit", "write", "grep", "ls", "mcp"];
+export const DEFAULT_CHILD_TOOLS: readonly string[] = ["read", "bash", "terminal", "monitor", "edit", "write", "grep", "ls", "mcp"];
 
 /**
  * Names the settings page accepts for a new profile: lowercase, no spaces, safe as a

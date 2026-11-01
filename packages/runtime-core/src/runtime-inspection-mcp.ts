@@ -1,5 +1,7 @@
 import {
   type McpActionResult,
+  type McpToolRequest,
+  type McpServerConfiguration,
   type McpRuntimeStatus,
   type McpServerRuntimeStatus,
   type ProjectMemoryRuntimeStatus,
@@ -9,6 +11,7 @@ import {
 } from "@coilcoil/runtime-protocol";
 import {
   existsSync,
+  statSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -16,6 +19,7 @@ import {
 } from "node:fs";
 import {
   dirname,
+  isAbsolute,
   join,
 } from "node:path";
 import {
@@ -25,6 +29,8 @@ import {
 } from "@coilcoil/mcp";
 import {
   bundledBrowserServerConfiguration,
+  bundledBrowserSensitiveValues,
+  requireBundledBrowserAvailable,
   withoutRivalBrowserConfigurations,
 } from "./browser-mcp.js";
 import {
@@ -34,6 +40,7 @@ import {
   projectMemoryStatusByCwd,
 } from "./runtime-constants.js";
 import { RuntimeSubagents } from "./runtime-subagents.js";
+import { expectCacheChange } from "./session-request-policy.js";
 import {
   ActiveSession,
   RuntimeBridgeState,
@@ -263,7 +270,7 @@ export abstract class RuntimeInspectionMcp extends RuntimeSubagents {
 
   protected async mcpSensitiveValues(cwd?: string): Promise<string[]> {
     const configuration = await this.getMcpConfiguration(cwd);
-    const secrets: string[] = [];
+    const secrets: string[] = bundledBrowserSensitiveValues();
     for (const server of configuration.servers) {
       for (const [key, value] of [...Object.entries(server.env), ...Object.entries(server.headers)]) {
         if (sensitiveConfigurationKey(key) && value && !/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(value)) secrets.push(value);
@@ -328,18 +335,19 @@ export abstract class RuntimeInspectionMcp extends RuntimeSubagents {
    */
   protected mcpManager(): McpManager {
     if (this.mcpManagerInstance) return this.mcpManagerInstance;
-    this.mcpManagerInstance = new McpManager({
-      loadServers: async () => {
-        const configured = (await this.getMcpConfiguration(this.active?.cwd)).servers;
-        // 和 refreshAgentMcpConfiguration 一样：浏览器跟着会话。运行时换了当前会话，
-        // 这条配置跟着变，客户端看到定义变了会断开重连到新会话的那一批标签页。
-        const browser = bundledBrowserServerConfiguration(process.env, this.active?.session.sessionId);
-        // The built-in browser is not in the workspace's MCP file — it is wired
-        // up by the desktop app — so it has to be added here or the Agent never
-        // sees it. Which is exactly what happened when this client replaced the
-        // old adapter: the adapter got it from a different path.
-        return browser ? [...withoutRivalBrowserConfigurations(configured), browser] : configured;
-      },
+    this.mcpManagerInstance = this.createMcpManager(async () => {
+      const configured = (await this.getMcpConfiguration(this.active?.cwd)).servers;
+      // The browser's definition follows the active session; ordinary MCPs come from its workspace.
+      const browser = bundledBrowserServerConfiguration(process.env, this.active?.session.sessionId);
+      return browser ? [...withoutRivalBrowserConfigurations(configured), browser] : configured;
+    });
+    void this.mcpManagerInstance.warmUpConnections().catch(() => undefined);
+    return this.mcpManagerInstance;
+  }
+
+  private createMcpManager(loadServers: () => Promise<McpServerConfiguration[]>): McpManager {
+    return new McpManager({
+      loadServers,
       store: new McpCredentialStore(defaultCredentialFile(this.agentDir)),
       diagnostic: (level, event, data, error) => {
         if (level === "error") {
@@ -355,14 +363,48 @@ export abstract class RuntimeInspectionMcp extends RuntimeSubagents {
       // arm the loopback listener before handing the address back.
       openAuthorization: () => undefined,
     });
-    // 「启动时」这一档只在客户端刚起来的时候兑现一次，而不是每次配置刷新都重来；
-    // 失败不该拖住任何东西，所以是放出去不等。
-    // 后台预连，不 await：运行时起得来不该等 MCP 握手。
-    void this.mcpManagerInstance.warmUpConnections().catch(() => undefined);
-    return this.mcpManagerInstance;
   }
 
   private mcpManagerInstance?: McpManager;
+  private readonly externalMcpManagers = new Map<string, McpManager>();
+
+  /** Reuse a live session's client; a workspace with no session needs no model to use MCP. */
+  async accessMcp(request: McpToolRequest, signal?: AbortSignal): Promise<unknown> {
+    signal?.throwIfAborted();
+    if (!isAbsolute(request.cwd) || !existsSync(request.cwd) || !statSync(request.cwd).isDirectory()) throw new Error("cwd 必须是存在的工作目录的绝对路径。");
+    const cwd = safeRealPath(request.cwd);
+    let manager: McpManager;
+    if (this.active && safeRealPath(this.active.cwd) === cwd) {
+      manager = this.mcpManager();
+    } else {
+      manager = this.externalMcpManagers.get(cwd)!;
+      if (!manager) {
+        manager = this.createMcpManager(async () => {
+          const configured = (await this.getMcpConfiguration(cwd)).servers;
+          const browser = bundledBrowserServerConfiguration(process.env, cwd);
+          return browser ? [...withoutRivalBrowserConfigurations(configured), browser] : configured;
+        });
+        this.externalMcpManagers.set(cwd, manager);
+      }
+    }
+    if (request.action === "list") {
+      const servers = await manager.listServers();
+      return { cwd, servers: servers.map((entry) => ({
+        server: entry.server, status: entry.status, toolCount: entry.tools.length,
+      })) };
+    }
+    try {
+      if (request.action === "tools") {
+        const result = await manager.serverTools(request.server);
+        return result.failure ? { ...result, failure: redactSensitiveText(result.failure, await this.mcpSensitiveValues(cwd)) } : result;
+      }
+      if (request.server === "coilcoil-browser") await requireBundledBrowserAvailable(signal);
+      const result = await manager.callTool(request.server, request.tool, request.args, signal);
+      return request.server === "coilcoil-browser" ? redactSensitiveValue(result, bundledBrowserSensitiveValues()) : result;
+    } catch (error) {
+      throw new Error(redactSensitiveText(errorMessage(error), await this.mcpSensitiveValues(cwd)));
+    }
+  }
 
   async getMcpStatus(): Promise<McpRuntimeStatus> {
     const status = await this.mcpManager().status();
@@ -595,7 +637,9 @@ export abstract class RuntimeInspectionMcp extends RuntimeSubagents {
     if (!known.servers.some((server) => server.name === normalizedName)) {
       throw new Error(`MCP Server 不存在：${normalizedName}`);
     }
+    expectCacheChange(active.session, "user_tools_changed");
     this.mcpManager().setSessionEnabled(normalizedName, enabled);
+    await this.reloadMcpExtensionNow();
     active.mcpStatus = await this.getMcpStatus();
     const inspection = this.runtimeInspection(active);
     this.emitEvent({ type: "runtime_inspection_updated", inspection });
@@ -606,6 +650,8 @@ export abstract class RuntimeInspectionMcp extends RuntimeSubagents {
   async closeMcp(): Promise<void> {
     const manager = this.mcpManagerInstance;
     this.mcpManagerInstance = undefined;
-    await manager?.close();
+    const external = [...this.externalMcpManagers.values()];
+    this.externalMcpManagers.clear();
+    await Promise.allSettled([manager?.close(), ...external.map((entry) => entry.close())]);
   }
 }

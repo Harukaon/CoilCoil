@@ -13,7 +13,6 @@ import {
   type GoalState,
   type MoveSessionResult,
   type PlanApprovalState,
-  type ProjectMemoryRuntimeStatus,
   type ProjectSnapshot,
   type SessionModelSelection,
   type SessionSnapshot,
@@ -46,7 +45,6 @@ import {
   CONTEXT_CLEARING_SKIPPED_EVENT,
   CONTEXT_SUMMARY_TRIM_EVENT,
   MAX_CONTEXT_CLEARINGS,
-  PROJECT_MEMORY_STATUS_EVENT,
   RUNTIME_BRIDGE_COMMAND_EVENT,
   RUNTIME_BRIDGE_REPLY_PREFIX,
   RUNTIME_BRIDGE_STATE_EVENT,
@@ -54,6 +52,8 @@ import {
   projectMemoryStatusByCwd,
 } from "./runtime-constants.js";
 import { installSetupRpc } from "./runtime-setup-rpc.js";
+import { installMemoryStatusChannel } from "./runtime-memory-status.js";
+import { installBackgroundWaitState } from "./runtime-background-wait.js";
 import { contextClearingRecord } from "./runtime-state.js";
 import { sessionUsage } from "./session-values.js";
 import { isRecord } from "./runtime-utils.js";
@@ -66,10 +66,7 @@ import {
   fastRuntimeState,
   endedGoalPayload,
   goalState,
-  hydrateProjectMemoryStatus,
-  mergeWorkspaceMemoryStatus,
   planApprovalState,
-  projectMemoryStatus,
   runtimeBridgeState,
   shutdownAgentSession,
 } from "./runtime-state.js";
@@ -81,6 +78,9 @@ import {
 } from "./runtime-utils.js";
 import { rewriteSessionHeaderCwd } from "./session-relocation.js";
 import { systemPromptLayerFiles } from "./system-prompt-layers.js";
+import { installSessionRequestPolicy } from "./session-request-policy.js";
+import { configureSessionTools } from "./session-tools.js";
+import { CACHED_SESSION_REQUEST } from "@coilcoil/workflow/extensions/anthropic-cache-policy.js";
 import {
   SESSION_TITLE_MANUAL_ENTRY_TYPE,
   sessionTitleMarkers,
@@ -364,10 +364,13 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
     configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
     const eventBus = createEventBus();
     let installedActive: ActiveSession | undefined;
+    const backgroundWait = installBackgroundWaitState(eventBus, {
+      installed: () => installedActive, current: () => this.active,
+      emit: (event) => this.emitEvent(event),
+    });
     let pendingContextClearings: ContextClearingRecord[] = [];
     let pendingBridgeState: RuntimeBridgeState | undefined;
     let pendingFastState: FastRuntimeState | undefined;
-    let pendingMemoryStatus: ProjectMemoryRuntimeStatus | undefined;
     let pendingPlanApproval: PlanApprovalState | undefined;
     let pendingGoal: GoalState | undefined;
     eventBus.on(RUNTIME_BRIDGE_STATE_EVENT, (value) => {
@@ -466,25 +469,12 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
         freedTokens: value.freedTokens,
       }, compactionLogContext());
     });
-    eventBus.on(PROJECT_MEMORY_STATUS_EVENT, (value) => {
-      const parsed = projectMemoryStatus(value);
-      const next = parsed ? hydrateProjectMemoryStatus({ ...parsed, cwd: parsed.cwd || cwd }) : undefined;
-      if (!next) return;
-      const previous = installedActive?.memoryStatus ?? pendingMemoryStatus;
-      pendingMemoryStatus = next;
-      const memoryKey = safeRealPath(next.cwd);
-      projectMemoryStatusByCwd.set(
-        memoryKey,
-        mergeWorkspaceMemoryStatus(projectMemoryStatusByCwd.get(memoryKey), next),
-      );
-      if (!installedActive) return;
-      installedActive.memoryStatus = next;
-      this.publishRuntimeInspection(installedActive);
-      if (next.source !== "manual" || previous?.state === next.state) return;
-      if (next.state === "running") this.emitEvent({ type: "runtime_notice", level: "info", message: next.message || "正在整理当前项目记忆…" });
-      else if (next.state === "succeeded") this.emitEvent({ type: "runtime_notice", level: "success", message: next.message || "项目记忆整理完成" });
-      else if (next.state === "busy") this.emitEvent({ type: "runtime_notice", level: "info", message: next.message || "当前项目已有记忆整理正在运行" });
-      else if (next.state === "failed") this.emitEvent({ type: "runtime_notice", level: "error", message: next.error || "项目记忆整理失败" });
+    const memoryStatus = installMemoryStatusChannel(eventBus, {
+      cwd,
+      installedActive: () => installedActive,
+      currentActive: () => this.active,
+      publishInspection: (active) => this.publishRuntimeInspection(active),
+      emitNotice: (event) => this.emitEvent(event),
     });
     eventBus.on(GOAL_STATE_CHANNEL, (value) => {
       // The channel carries the loop the session is in, and null once it ends.
@@ -582,8 +572,20 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       excludeTools: [...HIDDEN_AGENT_TOOLS],
     });
     markTiming("createAgentSession");
+    installSessionRequestPolicy(created.session, modelRuntime, (request) => eventBus.emit(CACHED_SESSION_REQUEST, request), this.log, eventBus);
     compactionModelSource = created.session;
-    await created.session.bindExtensions({});
+    await created.session.bindExtensions({ onError: (error) => {
+      const cause = new Error(error.error);
+      if (error.stack) cause.stack = error.stack;
+      this.log.error("extension", "handler_failed", cause, {
+        extensionPath: error.extensionPath, event: error.event, cwd,
+      }, { sessionPath: created.session.sessionFile });
+      // A retired runner can still finish an async hook. Keep its diagnostics,
+      // but never present its failure as an error in the newly selected session.
+      if (this.active?.session === created.session) {
+        this.emitEvent({ type: "runtime_error", message: `工作流扩展出错（${error.event}）：${error.error}`, detail: error.stack });
+      }
+    } });
     markTiming("bindExtensions");
     if (initialAgentMode) {
       const requestId = `coilcoil-runtime-mode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -613,21 +615,7 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
         throw error;
       }
     }
-    if (created.session.model) {
-      const effectiveModel = this.modelWithRuntimeOptions(created.session.model);
-      if (effectiveModel !== created.session.model) await created.session.setModel(effectiveModel);
-    }
-    created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => name !== "find"));
-    const activeToolNames = new Set(created.session.getActiveToolNames());
-    const requiredTools = ["read", "bash", "edit", "write", "grep", "ls", "todo", "terminal", "mcp"];
-    // Pi only builds the PowerShell tool on Windows, where CoilCoil asks the
-    // Agent to prefer it over the Bash-flavoured shell tool.
-    if (process.platform === "win32") requiredTools.push("powershell");
-    const missingTools = requiredTools.filter((name) => !activeToolNames.has(name));
-    if (missingTools.length > 0) {
-      await shutdownAgentSession(created.session, "quit").catch(() => undefined);
-      throw new Error(`CoilCoil workflow did not activate required tools: ${missingTools.join(", ")}`);
-    }
+    await configureSessionTools(created.session, (model) => this.modelWithRuntimeOptions(model));
 
     const reconstructed = this.reconstructState(created.session);
     const files = await directoryNodes(cwd);
@@ -637,7 +625,6 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       files,
       changes: [],
       terminals: [...reconstructed.terminals.values()],
-      plan: reconstructed.plan,
       planApproval: reconstructed.planApproval ?? pendingPlanApproval,
       refreshedAt: Date.now(),
     };
@@ -652,7 +639,6 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       tools: reconstructed.tools,
       subagents: reconstructed.subagents,
       terminals: reconstructed.terminals,
-      plan: reconstructed.plan,
       project,
       messageIds: new WeakMap(),
       pendingPromptDocuments: new Map(),
@@ -673,9 +659,10 @@ export abstract class RuntimeSessions extends RuntimeMcpConfig {
       contextClearings: pendingContextClearings,
       bridgeState: pendingBridgeState,
       fastState: pendingFastState,
-      memoryStatus: pendingMemoryStatus ?? projectMemoryStatusByCwd.get(safeRealPath(cwd)),
+      memoryStatus: memoryStatus.getStatus() ?? projectMemoryStatusByCwd.get(safeRealPath(cwd)),
       planApproval: reconstructed.planApproval ?? pendingPlanApproval,
       goal: pendingGoal,
+      backgroundWait: backgroundWait.getState(),
       eventBus,
     };
     installedActive = active;

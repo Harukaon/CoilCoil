@@ -1,0 +1,609 @@
+{
+  "capturedAtUTC": "2026-10-30T15:22:45.138116+00:00",
+  "scope": "First 9 valid API responses of each selected session; input-token cache-read share, not request-success ratio or matched-workload benchmark.",
+  "formula": {
+    "perRequest": "R/(I+R+W)",
+    "cumulative": "sum(R)/sum(I+R+W)",
+    "officialFields": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching#tracking-cache-performance"
+  },
+  "coil": {
+    "capturedAtUTC": "2026-10-30T15:22:45.138116+00:00",
+    "file": "/Users/hao/Library/Application Support/@coilcoil/desktop/sessions/2026-10-30T15-18-56-301Z_01a18d64-802d-737c-a971-7cd701394cbf.jsonl",
+    "method": "First 9 positive-input main-session assistant responses, deduplicated by responseId or entry id. File is active; later responses excluded.",
+    "first9": [
+      {
+        "line": 13,
+        "timestamp": "2026-10-30T15:19:09.859Z",
+        "id": "msg_011CgYeRSuuwgbwJTxq94WfG",
+        "model": "claude-opus-5-5",
+        "input": 4,
+        "read": 0,
+        "write": 23095,
+        "output": 779,
+        "request": 1,
+        "requestHitPct": 0,
+        "cumulativeHitPct": 0,
+        "readMinusPreviousCached": null
+      },
+      {
+        "line": 22,
+        "timestamp": "2026-10-30T15:19:13.640Z",
+        "id": "msg_011CgYeS4R6vTjTdudWnA5WD",
+        "model": "claude-opus-5-5",
+        "input": 2,
+        "read": 23095,
+        "write": 45309,
+        "output": 197,
+        "request": 2,
+        "requestHitPct": 33.7617,
+        "cumulativeHitPct": 25.2391,
+        "readMinusPreviousCached": 0
+      },
+      {
+        "line": 27,
+        "timestamp": "2026-10-30T15:19:16.452Z",
+        "id": "msg_011CgYeSM4Dg6hRqcPebaXpS",
+        "model": "claude-opus-5-5",
+        "input": 2,
+        "read": 68404,
+        "write": 20805,
+        "output": 162,
+        "request": 3,
+        "requestHitPct": 76.6766,
+        "cumulativeHitPct": 50.6314,
+        "readMinusPreviousCached": 0
+      },
+      {
+        "line": 32,
+        "timestamp": "2026-10-30T15:19:19.224Z",
+        "id": "msg_011CgYeSZ7mChxBs1KcTqsj6",
+        "model": "claude-opus-5-5",
+        "input": 2,
+        "read": 89209,
+        "write": 20990,
+        "output": 162,
+        "request": 4,
+        "requestHitPct": 80.9512,
+        "cumulativeHitPct": 62.1167,
+        "readMinusPreviousCached": 0
+      },
+      {
+        "line": 37,
+        "timestamp": "2026-10-30T15:19:22.613Z",
+        "id": "msg_011CgYeSmFWYyojCo39gMS9Y",
+        "model": "claude-opus-5-5",
+        "input": 2,
+        "read": 110199,
+        "write": 20364,
+        "output": 163,
+        "request": 5,
+        "requestHitPct": 84.4016,
+        "cumulativeHitPct": 69.02,
+        "readMinusPreviousCached": 0
+      },
+      {
+        "line": 42,
+        "timestamp": "2026-10-30T15:19:25.947Z",
+        "id": "msg_011CgYeT2Kcs5ftfeebPqaVL",
+        "model": "claude-opus-5-5",
+        "input": 2,
+        "read": 130563,
+        "write": 21035,
+        "output": 157,
+        "request": 6,
+        "requestHitPct": 86.1234,
+        "cumulativeHitPct": 73.5444,
+        "readMinusPreviousCached": 0
+      },
+      {
+        "line": 47,
+        "timestamp": "2026-10-30T15:20:27.927Z",
+        "id": "msg_011CgYeTFnzTdRAV2zTtwwq7",
+        "model": "claude-opus-5-5",
+        "input": 2,
+        "read": 151598,
+        "write": 2741,
+        "output": 5863,
+        "request": 7,
+        "requestHitPct": 98.2228,
+        "cumulativeHitPct": 78.7806,
+        "readMinusPreviousCached": 0
+      },
+      {
+        "line": 54,
+        "timestamp": "2026-10-30T15:21:10.382Z",
+        "id": "msg_011CgYeaSg2mX6a8kzAU3EDE",
+        "model": "claude-opus-5-5",
+        "input": 2,
+        "read": 154339,
+        "write": 12335,
+        "output": 600,
+        "request": 8,
+        "requestHitPct": 92.5982,
+        "cumulativeHitPct": 81.3564,
+        "readMinusPreviousCached": 0
+      },
+      {
+        "line": 65,
+        "timestamp": "2026-10-30T15:21:20.621Z",
+        "id": "msg_011CgYeayVvtvqwruqFpkqzk",
+        "model": "claude-opus-5-5",
+        "input": 2,
+        "read": 166674,
+        "write": 11917,
+        "output": 974,
+        "request": 9,
+        "requestHitPct": 93.3262,
+        "cumulativeHitPct": 83.3493,
+        "readMinusPreviousCached": 0
+      }
+    ],
+    "observedAssistantResponses": 10,
+    "firstToolResults": [
+      {
+        "line": 17,
+        "name": "read",
+        "chars": 6055
+      },
+      {
+        "line": 18,
+        "name": "read",
+        "chars": 25323
+      },
+      {
+        "line": 19,
+        "name": "read",
+        "chars": 21063
+      },
+      {
+        "line": 24,
+        "name": "read",
+        "chars": 25010
+      },
+      {
+        "line": 29,
+        "name": "read",
+        "chars": 24836
+      },
+      {
+        "line": 34,
+        "name": "read",
+        "chars": 25354
+      },
+      {
+        "line": 39,
+        "name": "read",
+        "chars": 24575
+      },
+      {
+        "line": 44,
+        "name": "read",
+        "chars": 2975
+      },
+      {
+        "line": 50,
+        "name": "bash",
+        "chars": 4781
+      },
+      {
+        "line": 51,
+        "name": "bash",
+        "chars": 5265
+      }
+    ],
+    "firstLedgerRecords": [
+      {
+        "outcome": "cold",
+        "reason": "cold_start",
+        "parentPinned": false,
+        "input": 4,
+        "read": 0,
+        "write": 23095
+      },
+      {
+        "outcome": "hit",
+        "reason": "hit",
+        "parentPinned": true,
+        "input": 2,
+        "read": 23095,
+        "write": 45309
+      },
+      {
+        "outcome": "hit",
+        "reason": "hit",
+        "parentPinned": true,
+        "input": 2,
+        "read": 68404,
+        "write": 20805
+      },
+      {
+        "outcome": "hit",
+        "reason": "hit",
+        "parentPinned": true,
+        "input": 2,
+        "read": 89209,
+        "write": 20990
+      },
+      {
+        "outcome": "hit",
+        "reason": "hit",
+        "parentPinned": true,
+        "input": 2,
+        "read": 110199,
+        "write": 20364
+      },
+      {
+        "outcome": "hit",
+        "reason": "hit",
+        "parentPinned": true,
+        "input": 2,
+        "read": 130563,
+        "write": 21035
+      },
+      {
+        "outcome": "hit",
+        "reason": "hit",
+        "parentPinned": true,
+        "input": 2,
+        "read": 151598,
+        "write": 2741
+      },
+      {
+        "outcome": "hit",
+        "reason": "hit",
+        "parentPinned": true,
+        "input": 2,
+        "read": 154339,
+        "write": 12335
+      },
+      {
+        "outcome": "hit",
+        "reason": "hit",
+        "parentPinned": true,
+        "input": 2,
+        "read": 166674,
+        "write": 11917
+      }
+    ]
+  },
+  "orb": {
+    "method": "Unique positive-input Claude message.id; keep final snapshot for each id; first 12 API responses in each of the 14 most recently modified root session files.",
+    "selectedSessions": [
+      {
+        "file": "/home/hao/.claude/projects/-home-hao-feedmob/c222acc6-d5bf-4217-b894-cea98aae7136.jsonl",
+        "duplicatesCollapsed": 19,
+        "first9": [
+          {
+            "line": 29,
+            "timestamp": "2026-10-22T05:18:39.442Z",
+            "id": "msg_011CgGiAaEBhwk23vqZpyN6d",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 0,
+            "write": 29200,
+            "output": 74,
+            "request": 1,
+            "requestHitPct": 0,
+            "cumulativeHitPct": 0,
+            "readMinusPreviousCached": null
+          },
+          {
+            "line": 48,
+            "timestamp": "2026-10-22T05:19:11.928Z",
+            "id": "msg_011CgGiCnaQDSszY75DwGu38",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 25107,
+            "write": 6869,
+            "output": 513,
+            "request": 2,
+            "requestHitPct": 78.5134,
+            "cumulativeHitPct": 41.0379,
+            "readMinusPreviousCached": -4093
+          },
+          {
+            "line": 54,
+            "timestamp": "2026-10-22T05:19:25.103Z",
+            "id": "msg_011CgGiDjFzS9XjiCeTRHZPw",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 31976,
+            "write": 848,
+            "output": 383,
+            "request": 3,
+            "requestHitPct": 97.4106,
+            "cumulativeHitPct": 60.7227,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 65,
+            "timestamp": "2026-10-22T05:19:33.108Z",
+            "id": "msg_011CgGiEKZVbeupeBEx7jk1K",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 32824,
+            "write": 1753,
+            "output": 630,
+            "request": 4,
+            "requestHitPct": 94.9247,
+            "cumulativeHitPct": 69.9203,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 73,
+            "timestamp": "2026-10-22T05:19:38.948Z",
+            "id": "msg_011CgGiEtbrSbK9SAkusA7Ti",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 34577,
+            "write": 2363,
+            "output": 287,
+            "request": 5,
+            "requestHitPct": 93.5981,
+            "cumulativeHitPct": 75.2046,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 83,
+            "timestamp": "2026-10-22T05:19:45.850Z",
+            "id": "msg_011CgGiF9JdRY8f8KXTVTLf5",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 36940,
+            "write": 1902,
+            "output": 865,
+            "request": 6,
+            "requestHitPct": 95.0983,
+            "cumulativeHitPct": 78.9858,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 88,
+            "timestamp": "2026-10-22T05:19:53.637Z",
+            "id": "msg_011CgGiFi6782reWRD5Y38WW",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 38842,
+            "write": 2917,
+            "output": 961,
+            "request": 7,
+            "requestHitPct": 93.0102,
+            "cumulativeHitPct": 81.3653,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 92,
+            "timestamp": "2026-10-22T05:19:57.518Z",
+            "id": "msg_011CgGiGGfuxxpeS44AJNBW6",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 41759,
+            "write": 1013,
+            "output": 259,
+            "request": 8,
+            "requestHitPct": 97.6271,
+            "cumulativeHitPct": 83.7729,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 102,
+            "timestamp": "2026-10-22T05:20:04.257Z",
+            "id": "msg_011CgGiGWWNTEd3vsXqXccPA",
+            "model": "claude-sonnet-5-5",
+            "input": 2,
+            "read": 42772,
+            "write": 10410,
+            "output": 588,
+            "request": 9,
+            "requestHitPct": 80.4227,
+            "cumulativeHitPct": 83.2521,
+            "readMinusPreviousCached": 0
+          }
+        ]
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao-feedmob/661e1d89-be15-4847-a575-3f927f88ef72.jsonl",
+        "duplicatesCollapsed": 14,
+        "first9": [
+          {
+            "line": 33,
+            "timestamp": "2026-10-23T07:43:43.341Z",
+            "id": "msg_011CgJo2xUWjTA5JrYfMRn2d",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 22884,
+            "write": 13597,
+            "output": 326,
+            "request": 1,
+            "requestHitPct": 62.7251,
+            "cumulativeHitPct": 62.7251,
+            "readMinusPreviousCached": null
+          },
+          {
+            "line": 47,
+            "timestamp": "2026-10-23T07:43:46.531Z",
+            "id": "msg_011CgJo3HJ6cpDYFdKf13xWz",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 36481,
+            "write": 685,
+            "output": 240,
+            "request": 2,
+            "requestHitPct": 98.1516,
+            "cumulativeHitPct": 80.6031,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 59,
+            "timestamp": "2026-10-23T07:43:57.230Z",
+            "id": "msg_011CgJo3WNuKp5LkK9KSPcn9",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 37166,
+            "write": 13590,
+            "output": 465,
+            "request": 3,
+            "requestHitPct": 73.222,
+            "cumulativeHitPct": 77.5917,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 63,
+            "timestamp": "2026-10-23T07:44:14.929Z",
+            "id": "msg_011CgJo559f794RB6qWf5t5c",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 50756,
+            "write": 968,
+            "output": 643,
+            "request": 4,
+            "requestHitPct": 98.1247,
+            "cumulativeHitPct": 83.6217,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 67,
+            "timestamp": "2026-10-23T07:44:18.615Z",
+            "id": "msg_011CgJo5cqQEWn9C8jCSYi1F",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 51724,
+            "write": 1306,
+            "output": 250,
+            "request": 5,
+            "requestHitPct": 97.5336,
+            "cumulativeHitPct": 86.841,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 78,
+            "timestamp": "2026-10-23T07:44:25.008Z",
+            "id": "msg_011CgJo61ad6UTdxRV3ZbzFb",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 53030,
+            "write": 532,
+            "output": 463,
+            "request": 6,
+            "requestHitPct": 99.0031,
+            "cumulativeHitPct": 89.1452,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 81,
+            "timestamp": "2026-10-23T07:44:35.613Z",
+            "id": "msg_011CgJo6M4eXZ8vkKT5CWFcd",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 53562,
+            "write": 3000,
+            "output": 1215,
+            "request": 7,
+            "requestHitPct": 94.6927,
+            "cumulativeHitPct": 90.07,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 91,
+            "timestamp": "2026-10-23T07:44:45.600Z",
+            "id": "msg_011CgJo78Pg9bBFMGm74tFJq",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 56562,
+            "write": 2508,
+            "output": 766,
+            "request": 8,
+            "requestHitPct": 95.7509,
+            "cumulativeHitPct": 90.9124,
+            "readMinusPreviousCached": 0
+          },
+          {
+            "line": 103,
+            "timestamp": "2026-10-23T07:45:22.444Z",
+            "id": "msg_011CgJo7snP1LgEoGYy7oWcg",
+            "model": "claude-opus-5-5",
+            "input": 2,
+            "read": 59070,
+            "write": 2734,
+            "output": 4174,
+            "request": 9,
+            "requestHitPct": 95.5732,
+            "cumulativeHitPct": 91.5384,
+            "readMinusPreviousCached": 0
+          }
+        ]
+      }
+    ],
+    "otherSessionStarts": [
+      {
+        "file": "/home/hao/.claude/projects/-home-hao-feedmob/c222acc6-d5bf-4217-b894-cea98aae7136.jsonl",
+        "firstModel": "claude-sonnet-5-5",
+        "firstRead": 0,
+        "firstRequestPct": 0,
+        "first9CumulativePct": 83.2521
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao-feedmob/661e1d89-be15-4847-a575-3f927f88ef72.jsonl",
+        "firstModel": "claude-opus-5-5",
+        "firstRead": 22884,
+        "firstRequestPct": 62.7251,
+        "first9CumulativePct": 91.5384
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao/cfe5805a-c72f-45be-9c4b-274a72b3c3bb.jsonl",
+        "firstModel": "claude-haiku-5-5",
+        "firstRead": 23254,
+        "firstRequestPct": 64.5657,
+        "first9CumulativePct": 93.8487
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao-feedmob/112d9a78-f9fc-4c23-8c3a-bc5e1d3612e3.jsonl",
+        "firstModel": "claude-sonnet-5-5",
+        "firstRead": 24919,
+        "firstRequestPct": 69.2214,
+        "first9CumulativePct": 89.3522
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao/f9916196-2b28-497c-af4a-fbe61b1441b0.jsonl",
+        "firstModel": "claude-haiku-5-5",
+        "firstRead": 23254,
+        "firstRequestPct": 67.3073
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao-feedmob/30717f06-7853-413b-9e1f-49fce722f6af.jsonl",
+        "firstModel": "claude-sonnet-5",
+        "firstRead": 0,
+        "firstRequestPct": 0,
+        "first9CumulativePct": 86.5313
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao-feedmob/099d31d5-ac45-46a1-88fa-8f0d7f5b1e35.jsonl",
+        "firstModel": "claude-sonnet-5-5",
+        "firstRead": 23000,
+        "firstRequestPct": 64.099,
+        "first9CumulativePct": 91.9974
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao/8401c11c-0c27-4f02-b74b-0fbd379d8b97.jsonl",
+        "firstModel": "claude-sonnet-5-5",
+        "firstRead": 23000,
+        "firstRequestPct": 89.3968,
+        "first9CumulativePct": 91.0316
+      },
+      {
+        "file": "/home/hao/.claude/projects/-home-hao/5d86167d-c49f-46c1-8745-c3929afb4348.jsonl",
+        "firstModel": "claude-sonnet-5-5",
+        "firstRead": 22840,
+        "firstRequestPct": 65.6983,
+        "first9CumulativePct": 90.7628
+      }
+    ]
+  },
+  "verification": {
+    "coilAdjacentPairs": 8,
+    "coilPairsWithFullPreviousCachedVolume": 8,
+    "uiDefinition": "apps/desktop/src/renderer/src/features/runtime/CacheSection.tsx:18-20",
+    "noApplicationBehaviorChange": true,
+    "noModelRequestsMade": true
+  }
+}

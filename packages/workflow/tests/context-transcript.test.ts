@@ -10,7 +10,6 @@ import contextTranscriptExtension, {
   renderTranscript,
   transcriptNote,
   transcriptPathFor,
-  type TranscriptSection,
 } from "../extensions/context-transcript.ts";
 
 type AgentMessage = ContextEvent["messages"][number];
@@ -44,6 +43,31 @@ test("角色是标题，grep 有下手的地方", () => {
   const rendered = renderTranscript(messages());
   const headings = rendered.split("\n").filter((line) => line.startsWith("#"));
   assert.deepEqual(headings, ["## 用户", "## 助手", "### 调用 read", "### 结果 read"]);
+});
+
+test("终端执行与旧摘要从真实消息字段写入存档", () => {
+  const rendered = renderTranscript([
+    { role: "bashExecution", command: "git status", output: "working tree clean", timestamp: 1 },
+    { role: "compactionSummary", summary: "earlier constraints", timestamp: 2 },
+    { role: "branchSummary", summary: "branch decision", timestamp: 3 },
+  ] as unknown as AgentMessage[]);
+  assert.match(rendered, /git status/);
+  assert.match(rendered, /working tree clean/);
+  assert.match(rendered, /earlier constraints/);
+  assert.match(rendered, /branch decision/);
+});
+
+test("长回合中途压缩时，跨切点的回合前缀也写入存档", () => {
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  contextTranscriptExtension({ on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => handlers.set(name, handler) } as never);
+  const sessionFile = join(mkdtempSync(join(tmpdir(), "coilcoil-split-transcript-")), "s.jsonl");
+  const ctx = { sessionManager: { getSessionFile: () => sessionFile } };
+  handlers.get("session_before_compact")!({ preparation: { messagesToSummarize: [], turnPrefixMessages: messages() } }, ctx);
+  handlers.get("session_compact")!({}, ctx);
+  const archive = readFileSync(transcriptPathFor(sessionFile), "utf8");
+  assert.match(archive, /把 config\.json 里的超时改成 30 秒/);
+  assert.match(archive, /\{"timeout": 5\}/);
+  assert.equal(readSections(transcriptPathFor(sessionFile))[0]?.messageCount, 3);
 });
 
 test("超长的工具结果会截断，并说清楚原文多长", () => {
@@ -105,15 +129,11 @@ test("文件不存在或者标记写坏了，都当没有索引，不抛异常",
   assert.deepEqual(readSections(path), []);
 });
 
-test("给模型的那段话带着路径、行号，和一句别读太多", () => {
-  const sections: TranscriptSection[] = [
-    { fromLine: 1, toLine: 40, at: 1_700_000_000_000, messageCount: 12 },
-    { fromLine: 41, toLine: 90, at: 1_700_000_100_000, messageCount: 8 },
-  ];
-  const note = transcriptNote("/s/abc.transcript.md", sections) ?? "";
+test("系统提示只带稳定的存档路径，索引按需从文件读取", () => {
+  const note = transcriptNote("/s/abc.transcript.md");
   assert.match(note, /\/s\/abc\.transcript\.md/);
-  assert.match(note, /第 1–40 行 · 12 条/);
-  assert.match(note, /第 41–90 行 · 8 条/);
+  assert.match(note, /首次压缩成功前文件可能不存在/);
+  assert.match(note, /coilcoil:compaction/);
   // 能读回来就意味着能把刚腾出来的窗口重新填满，这句提醒是边界的一部分。
   assert.match(note, /按行段取|一次读回太多/);
   assert.match(note, /read|grep/);
@@ -214,9 +234,17 @@ test("自定义上下文清理暂时不随 workflow 加载", () => {
   assert.equal(clearing, -1, "自定义清理会取消 Pi 压缩，修复前不能加载");
 });
 
-test("还没压缩过就什么也不说", () => {
-  // 一个字都不该占：绝大多数会话从头到尾都用不到这段话。
-  assert.equal(transcriptNote("/s/abc.transcript.md", []), undefined);
+test("第一次压缩前后系统提示保持一致", () => {
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  contextTranscriptExtension({ on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => handlers.set(name, handler) } as never);
+  const sessionFile = join(mkdtempSync(join(tmpdir(), "coilcoil-stable-transcript-")), "s.jsonl");
+  const ctx = { sessionManager: { getSessionFile: () => sessionFile } };
+  const before = handlers.get("before_agent_start")!({ systemPrompt: "base" }, ctx);
+  handlers.get("session_before_compact")!({ preparation: { messagesToSummarize: messages() } }, ctx);
+  handlers.get("session_compact")!({}, ctx);
+  const after = handlers.get("before_agent_start")!({ systemPrompt: "base" }, ctx);
+  assert.deepEqual(after, before, "存档新增内容不能改写历史前面的系统提示");
+  assert.equal(readSections(transcriptPathFor(sessionFile)).length, 1);
 });
 
 test("记录是追加的，行号一旦给出去就不会变", () => {

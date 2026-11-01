@@ -268,6 +268,46 @@ export function bundledBrowserServerConfiguration(
   } as McpServerConfiguration;
 }
 
+/** Browser connection details stay inside the runtime, including in failure results. */
+export function bundledBrowserSensitiveValues(): string[] {
+  const browser = bundledBrowserServerConfiguration();
+  if (!browser) return [];
+  const values: string[] = [];
+  const endpoint = browser.args[browser.args.indexOf("--wsEndpoint") + 1];
+  if (browser.args.includes("--wsEndpoint") && endpoint) {
+    values.push(endpoint);
+    try { values.push(new URL(endpoint).pathname.split("/").at(-1) ?? ""); } catch { /* Invalid endpoint. */ }
+  }
+  try {
+    const index = browser.args.indexOf("--wsHeaders");
+    const headers = index < 0 ? {} : JSON.parse(browser.args[index + 1]);
+    for (const value of Object.values(headers)) {
+      if (typeof value === "string") values.push(value, value.replace(/^Bearer\s+/i, ""));
+    }
+  } catch { /* Invalid headers are rejected by the browser MCP client. */ }
+  return values.filter(Boolean);
+}
+
+/** Closing the desktop window disposes its browser, while ordinary MCP stays alive. */
+export async function requireBundledBrowserAvailable(signal?: AbortSignal): Promise<void> {
+  const browser = bundledBrowserServerConfiguration();
+  if (!browser) throw new Error("内置浏览器需要运行 CoilCoil Desktop，并保留至少一个桌面窗口。");
+  try {
+    const url = new URL(browser.args[browser.args.indexOf("--wsEndpoint") + 1]);
+    url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+    url.pathname = url.pathname.replace("/devtools/browser/", "/coilcoil/tabs/");
+    const index = browser.args.indexOf("--wsHeaders");
+    const headers = index < 0 ? {} : JSON.parse(browser.args[index + 1]);
+    const timeout = AbortSignal.timeout(2_000);
+    const response = await fetch(url, { headers, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+    await response.body?.cancel();
+    if (!response.ok) throw new Error("Browser endpoint unavailable");
+  } catch {
+    signal?.throwIfAborted();
+    throw new Error("内置浏览器不可用，请打开 CoilCoil 桌面窗口后重试；普通 MCP 仍可在后台使用。");
+  }
+}
+
 /** Drop a user-configured browser server that would fight with the bundled one. */
 export function withoutRivalBrowserConfigurations(
   servers: readonly McpServerConfiguration[],

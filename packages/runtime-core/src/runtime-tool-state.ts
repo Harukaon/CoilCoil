@@ -10,7 +10,6 @@ import {
   type RewindPreview,
   type SubagentActivity,
   type TerminalRun,
-  type TodoItem,
   type ToolRun,
 } from "@coilcoil/runtime-protocol";
 import {
@@ -21,13 +20,13 @@ import {
   mapMessage,
   promptDocumentFromUnknown,
   messageTimestamp,
-  normalizeTodoPlan,
   restoredSubagentActivity,
   subagentActivitiesFromPayload,
   subagentActivityFromDetails,
 } from "./message-helpers.js";
 import {
   ABANDONED_TOOL_OUTPUT,
+  isShellCommandCall,
   isShellToolName,
   MAX_TERMINAL_OUTPUT,
   PLAN_ENTRY_TYPE,
@@ -89,7 +88,6 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     const tools = new Map<string, ToolRun>();
     const subagents = new Map<string, SubagentActivity>();
     const terminals = new Map<string, TerminalRun>();
-    let plan: TodoItem[] = [];
     let planApproval: PlanApprovalState | undefined;
     const promptDocumentsByEntryId = new Map<string, PromptDocument>();
     // `rawId` is kept because the tool-purpose audit entries are keyed by the id
@@ -151,8 +149,6 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         startedAt: call?.timestamp ?? messageTimestamp(rawMessage),
         endedAt: messageTimestamp(rawMessage),
       });
-      const restoredPlan = normalizeTodoPlan(isRecord(rawMessage.details) ? rawMessage.details.plan : undefined);
-      if (name === "todo" && restoredPlan) plan = restoredPlan;
       if (name === "plan") {
         const restoredApproval = planApprovalState(isRecord(rawMessage.details) ? rawMessage.details.plan ?? rawMessage.details : undefined);
         if (restoredApproval) planApproval = restoredApproval;
@@ -161,7 +157,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         const activity = subagentActivityFromDetails(rawMessage.details, id);
         if (activity) subagents.set(activity.id, restoredSubagentActivity(activity));
       }
-      if (isShellToolName(name) || (name === "terminal" && args.action === "start")) {
+      if (isShellCommandCall(name, args)) {
         const terminalId = terminalIdFromResult(rawMessage.details) ?? id;
         const terminalStatus = terminalStatusFromResult(rawMessage.details, failed);
         terminals.set(terminalId, {
@@ -190,7 +186,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         startedAt: call.timestamp,
         endedAt: call.timestamp,
       });
-      if (isShellToolName(call.name) || (call.name === "terminal" && call.args.action === "start")) {
+      if (isShellCommandCall(call.name, call.args)) {
         terminals.set(call.id, {
           id: call.id,
           command: stringValue(call.args.command) || call.name,
@@ -228,7 +224,6 @@ export abstract class RuntimeToolState extends RuntimeSessions {
       tools,
       subagents,
       terminals,
-      plan,
       nextTimelineOrder: order,
       toolRunIds,
       responseMetrics: responseMetricsHistory.at(-1),
@@ -253,9 +248,9 @@ export abstract class RuntimeToolState extends RuntimeSessions {
     if (name === "edit") return `编辑 ${stringValue(args.path) || "文件"}`;
     if (name === "grep") return `搜索 ${stringValue(args.pattern) || "项目"}`;
     if (name === "ls") return `查看 ${stringValue(args.path) || "目录"}`;
-    if (name === "todo") return "更新 Todo";
     if (name === "plan") return "创建执行计划";
     if (name === "terminal") return `运行 ${stringValue(args.command) || stringValue(args.action) || "终端命令"}`;
+    if (name === "monitor") return `监控 ${stringValue(args.command) || stringValue(args.terminalId) || stringValue(args.action) || "后台任务"}`;
     return `调用 ${name.replace(/[_-]+/g, " ")}`;
   }
 
@@ -300,7 +295,7 @@ export abstract class RuntimeToolState extends RuntimeSessions {
         this.publishSubagents();
       }
     }
-    if (isShellToolName(call.name) || (call.name === "terminal" && call.args.action === "start")) {
+    if (isShellCommandCall(call.name, call.args)) {
       const terminal = active.terminals.get(tool.id);
       active.terminals.set(tool.id, {
         id: tool.id,

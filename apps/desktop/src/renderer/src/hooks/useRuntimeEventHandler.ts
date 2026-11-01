@@ -16,9 +16,9 @@ import type {
 } from "@coilcoil/runtime-protocol";
 import type { SessionActivityState } from "../features/workspaces/WorkspaceSidebar";
 import { upsertSessionSummary } from "../features/workspaces/sessionList";
-import type { conversationMessagesReducer } from "../features/conversation/conversationMessages";
+import type { conversationMessagesReducer, MessageDeltaPart } from "../features/conversation/conversationMessages";
 import { diagnostics } from "../diagnostics";
-import { toastError, toastInfo, toastSuccess } from "../ui/toast";
+import { toastError, toastInfo, toastSuccess } from "../ui/toast/toastStore";
 
 type ConversationMessageAction = Parameters<typeof conversationMessagesReducer>[1];
 type AgentPhase = "思考" | "回复" | "工具" | "重试";
@@ -65,8 +65,8 @@ export function useRuntimeEventHandler({
   setTools: Dispatch<SetStateAction<ToolRun[]>>;
   setProjectState: Dispatch<SetStateAction<ProjectSnapshot>>;
   setSubagents: Dispatch<SetStateAction<SubagentActivity[]>>;
-}): (event: RuntimeEvent, runtimeId?: string) => void {
-  return useCallback((event: RuntimeEvent, runtimeId?: string): void => {
+}): (event: RuntimeEvent, runtimeId?: string, deltaParts?: readonly MessageDeltaPart[]) => void {
+  return useCallback((event: RuntimeEvent, runtimeId?: string, deltaParts?: readonly MessageDeltaPart[]): void => {
     if (event.type === "session_snapshot") {
       const path = event.snapshot.session.path;
       if (path) snapshotCacheRef.current.set(path, event.snapshot);
@@ -127,6 +127,15 @@ export function useRuntimeEventHandler({
           return next;
         });
         break;
+      case "background_wait_updated":
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = { ...current, backgroundWait: event.backgroundWait };
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
+        break;
       case "prompt_queue_updated":
         dispatchConversationMessages({
           type: "prompt_queue",
@@ -157,6 +166,7 @@ export function useRuntimeEventHandler({
         setAgentPhase(event.field === "thinking" ? "思考" : "回复");
         dispatchConversationMessages({
           ...event,
+          deltaParts,
           timestamp: Date.now(),
           sessionPath: runtimeId ? runtimeSessionRef.current.get(runtimeId) : snapshotRef.current?.session.path,
           runtimeId,
@@ -195,9 +205,6 @@ export function useRuntimeEventHandler({
       case "tool_finished":
         setTools((current) => upsertTool(current, event.tool));
         if (event.type === "tool_finished") setAgentPhase("思考");
-        break;
-      case "plan_updated":
-        setProjectState((current) => ({ ...current, plan: event.plan }));
         break;
       case "plan_approval_updated":
         setProjectState((current) => ({ ...current, planApproval: event.plan }));
@@ -272,7 +279,13 @@ export function useRuntimeEventHandler({
         else toastInfo(event.message);
         break;
       case "run_state":
-        setSnapshot((current) => current ? { ...current, running: event.running, aborting: event.aborting } : current);
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = { ...current, running: event.running, aborting: event.aborting };
+          snapshotRef.current = next;
+          if (next.session.path) snapshotCacheRef.current.set(next.session.path, next);
+          return next;
+        });
         setAgentPhase(event.running ? "思考" : undefined);
         break;
       case "runtime_error":

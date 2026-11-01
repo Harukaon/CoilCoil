@@ -2,11 +2,8 @@ import {
   ArrowUp,
   Brain,
   Cable,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Circle,
-  CircleDot,
   Clock,
   LoaderCircle,
   Sparkles,
@@ -15,12 +12,12 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, GoalState, SubagentActivity, TodoItem } from "@coilcoil/runtime-protocol";
+import type { ChatMessage, GoalState, SubagentActivity } from "@coilcoil/runtime-protocol";
 import type { SlashMenuItem } from "../composer/useSlashSkills";
 import { SubagentCard } from "../subagents/SubagentActivity";
 import { goalStatusLine, goalToggleLabel } from "./goalPresentation";
 
-type PermanentTab = "goal" | "queue" | "todo" | "subagents";
+type PermanentTab = "goal" | "queue" | "subagents";
 type ActivityTab = PermanentTab | "commands";
 
 function commandIcon(item: SlashMenuItem): React.JSX.Element {
@@ -32,7 +29,6 @@ function commandIcon(item: SlashMenuItem): React.JSX.Element {
 
 export function ActivityPanel({
   goal,
-  todo,
   subagents,
   queued,
   commands,
@@ -46,7 +42,6 @@ export function ActivityPanel({
   onResumeSubagent,
 }: {
   goal?: GoalState;
-  todo: TodoItem[];
   subagents: SubagentActivity[];
   /** Accepted but not yet sent, oldest first. */
   queued?: ChatMessage[];
@@ -68,17 +63,16 @@ export function ActivityPanel({
   const permanentTabs = useMemo<PermanentTab[]>(() => [
     ...(goalLive ? ["goal" as const] : []),
     ...(queuedItems.length ? ["queue" as const] : []),
-    ...(todo.length ? ["todo" as const] : []),
     ...(subagents.length ? ["subagents" as const] : []),
-  ], [goalLive, queuedItems.length, subagents.length, todo.length]);
+  ], [goalLive, queuedItems.length, subagents.length]);
   const availableTabs = useMemo<ActivityTab[]>(() => [
     ...permanentTabs,
     ...(commandsActive ? ["commands" as const] : []),
   ], [permanentTabs, commandsActive]);
 
-  const [tab, setTab] = useState<ActivityTab>(availableTabs[0] ?? "todo");
+  const [tab, setTab] = useState<ActivityTab>(availableTabs[0] ?? "subagents");
   const [expanded, setExpanded] = useState(true);
-  const previousPermanentTab = useRef<PermanentTab>(permanentTabs[0] ?? "todo");
+  const previousPermanentTab = useRef<PermanentTab>(permanentTabs[0] ?? "subagents");
   const activeCommandRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -119,12 +113,12 @@ export function ActivityPanel({
       const fallback = permanentTabs.includes(previousPermanentTab.current)
         ? previousPermanentTab.current
         : permanentTabs[0];
-      return fallback ?? "todo";
+      return fallback ?? "subagents";
     });
   }, [permanentTabs, commandsActive]);
 
   useEffect(() => {
-    if (!availableTabs.includes(tab)) setTab(availableTabs[0] ?? "todo");
+    if (!availableTabs.includes(tab)) setTab(availableTabs[0] ?? "subagents");
   }, [availableTabs, tab]);
 
   useEffect(() => {
@@ -148,28 +142,25 @@ export function ActivityPanel({
 
   if (!availableTabs.length) return null;
 
-  const completed = todo.filter((item) => item.status === "completed").length;
   const runningAgents = subagents.filter((item) => item.status === "pending" || item.status === "running").length;
   const failedAgents = subagents.filter((item) => item.status === "failed").length;
   const stoppedAgents = subagents.filter((item) => item.status === "stopped").length;
   const showTabs = availableTabs.length > 1;
-  const title = tab === "commands" ? "命令" : tab === "goal" ? "目标" : tab === "subagents" ? "代理" : tab === "queue" ? "队列" : "Todo";
+  const title = tab === "commands" ? "命令" : tab === "goal" ? "目标" : tab === "queue" ? "队列" : "代理";
   const toggleExpanded = (): void => setExpanded((value) => !value);
   const toggleLabel = tab === "commands"
     ? `${commandItems.length}`
     : tab === "goal" && goal
       ? goalToggleLabel(goal)
-    : tab === "queue"
-      ? `${queuedItems.length} 条待发`
-    : tab === "subagents"
-      ? runningAgents
-        ? `${runningAgents} 个运行中`
-        : failedAgents
-          ? `${failedAgents} 个失败`
-          : stoppedAgents
-            ? "已结束"
-            : "全部完成"
-      : `${completed}/${todo.length}`;
+      : tab === "queue"
+        ? `${queuedItems.length} 条待发`
+        : runningAgents
+          ? `${runningAgents} 个运行中`
+          : failedAgents
+            ? `${failedAgents} 个失败`
+            : stoppedAgents
+              ? "已结束"
+              : "全部完成";
 
   return (
     <section className={`composer-activity ${expanded ? "expanded" : "collapsed"}`} aria-label="Agent 活动">
@@ -197,9 +188,6 @@ export function ActivityPanel({
             ) : null}
             {permanentTabs.includes("queue") ? (
               <button className={tab === "queue" ? "active" : ""} type="button" role="tab" aria-selected={tab === "queue"} onClick={() => { setTab("queue"); setExpanded(true); }}>队列 <small>{queuedItems.length}</small></button>
-            ) : null}
-            {permanentTabs.includes("todo") ? (
-              <button className={tab === "todo" ? "active" : ""} type="button" role="tab" aria-selected={tab === "todo"} onClick={() => { setTab("todo"); setExpanded(true); }}>Todo</button>
             ) : null}
             {permanentTabs.includes("subagents") ? (
               <button className={tab === "subagents" ? "active" : ""} type="button" role="tab" aria-selected={tab === "subagents"} onClick={() => { setTab("subagents"); setExpanded(true); }}>代理</button>
@@ -289,13 +277,6 @@ export function ActivityPanel({
               );
             })}
             <li className="composer-queue-hint"><Clock size={10} />当前回复结束后按顺序发送；↑ 立即介入这一轮</li>
-          </ol>
-        ) : tab === "todo" ? (
-          <ol className="composer-todo-list">
-            {todo.map((item, index) => <li className={item.status} key={`${index}-${item.text}`}>
-              {item.status === "completed" ? <CheckCircle2 size={14} /> : item.status === "in_progress" ? <CircleDot size={14} /> : <Circle size={14} />}
-              <span>{item.text}</span>
-            </li>)}
           </ol>
         ) : (
           <ol className="composer-subagent-list">

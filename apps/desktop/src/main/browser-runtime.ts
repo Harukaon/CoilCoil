@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { app, BrowserWindow, dialog, session, sharedTexture, shell, type Session, type WebContents } from "electron";
 import type { BrowserCaret, BrowserElementSelection, BrowserPageEvent, BrowserStateSnapshot, BrowserTabSnapshot } from "../shared/desktop-api";
 import { AGENT_TAB_LIMIT, agentTabsToRecycle, RecycledAgentTabs, type BrowserTabOwner } from "./browser-agent-tabs";
@@ -143,7 +143,11 @@ export class BrowserRuntimeManager {
       },
     });
     this.cdp = new BrowserCdpBridge({
-      onAgentActivated: (scopeId) => this.onAgentActivated(scopeId),
+      onAgentActivated: (scopeId) => {
+        // Before a session exists, external clients use the workspace's draft scope.
+        if (isAbsolute(scopeId)) this.noteScopeWorkspace(scopeId, scopeId);
+        this.onAgentActivated(scopeId);
+      },
       ensureActiveTab: (scopeId) => this.ensureAgentTab(scopeId),
       createTab: (rawUrl, activate, scopeId) => this.createCdpTab(rawUrl, activate, scopeId, false, "agent"),
       tabList: (scopeId) => this.tabList(scopeId),

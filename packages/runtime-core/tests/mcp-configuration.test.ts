@@ -134,6 +134,184 @@ test("an idle MCP configuration change waits for the live session reload", async
   assert.equal(returned, true);
 });
 
+test("a queued resource reload is discarded once the conversation prompt is locked", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const active = { session: { isStreaming: false }, subagents: new Map(), bridgeState: { promptLocked: false } };
+  const runtime = Object.create(CoilCoilRuntime.prototype) as {
+    active: typeof active;
+    resourceReloadTimer?: ReturnType<typeof setTimeout>;
+    canReloadActiveSession(value: typeof active, userToolChange?: boolean): boolean;
+    reloadActiveSessionResources(): void;
+    reloadActiveSessionNow(value: typeof active, userToolChange?: boolean): Promise<void>;
+    reloadMcpExtensionNow(): Promise<void>;
+  };
+  runtime.active = active;
+  let reloads = 0;
+  runtime.reloadActiveSessionNow = async (_active, userToolChange) => {
+    assert.equal(userToolChange, true, "only an explicit user tool change may reload a locked conversation");
+    reloads++;
+  };
+  runtime.reloadActiveSessionResources();
+  assert.ok(runtime.resourceReloadTimer);
+  active.bridgeState.promptLocked = true;
+  t.mock.timers.tick(750);
+  await Promise.resolve();
+  assert.equal(reloads, 0);
+  assert.equal(runtime.resourceReloadTimer, undefined, "a locked conversation must not reschedule reload forever");
+  assert.equal(runtime.canReloadActiveSession(active), false);
+  assert.equal(runtime.canReloadActiveSession(active, true), true);
+  await runtime.reloadMcpExtensionNow();
+  assert.equal(reloads, 1, "the user's explicit MCP change must still apply");
+  assert.equal(runtime.resourceReloadTimer, undefined);
+});
+
+test("a user tool change waits for streaming to settle without being discarded by the prompt lock", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const active = { session: { isStreaming: true }, subagents: new Map(), bridgeState: { promptLocked: true } };
+  const runtime = Object.create(CoilCoilRuntime.prototype) as {
+    active: typeof active;
+    resourceReloadTimer?: ReturnType<typeof setTimeout>;
+    reloadMcpExtensionNow(): Promise<void>;
+    reloadActiveSessionNow(value: typeof active, userToolChange?: boolean): Promise<void>;
+  };
+  runtime.active = active;
+  let reloads = 0;
+  runtime.reloadActiveSessionNow = async (_active, userToolChange) => { assert.equal(userToolChange, true); reloads++; };
+  await runtime.reloadMcpExtensionNow();
+  t.mock.timers.tick(750);
+  assert.equal(reloads, 0);
+  active.session.isStreaming = false;
+  t.mock.timers.tick(750);
+  await Promise.resolve();
+  assert.equal(reloads, 1);
+  assert.equal(runtime.resourceReloadTimer, undefined);
+});
+
+test("background refreshes preserve a user's pending tool change while compaction is active", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const active = { session: { isStreaming: false, isCompacting: true }, subagents: new Map(), bridgeState: { promptLocked: true } };
+  const runtime = Object.create(CoilCoilRuntime.prototype) as {
+    active: typeof active;
+    resourceReloadTimer?: ReturnType<typeof setTimeout>;
+    reloadMcpExtensionNow(): Promise<void>;
+    reloadActiveSessionResources(): void;
+    reloadActiveSessionNow(value: typeof active, userToolChange?: boolean): Promise<void>;
+  };
+  runtime.active = active;
+  let reloads = 0;
+  runtime.reloadActiveSessionNow = async (_active, userToolChange) => { assert.equal(userToolChange, true); reloads++; };
+  await runtime.reloadMcpExtensionNow();
+  const pending = runtime.resourceReloadTimer;
+  assert.ok(pending);
+  runtime.reloadActiveSessionResources();
+  assert.equal(runtime.resourceReloadTimer, pending, "a blocked background refresh must not cancel the user's queued update");
+  t.mock.timers.tick(750);
+  assert.equal(reloads, 0, "schemas must remain stable while a summary request is running");
+  active.session.isCompacting = false;
+  t.mock.timers.tick(750);
+  await Promise.resolve();
+  assert.equal(reloads, 1);
+  assert.equal(runtime.resourceReloadTimer, undefined);
+});
+
+test("a background refresh cannot downgrade a user tool change queued before the first prompt locks", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const active = { session: { isStreaming: true }, subagents: new Map(), bridgeState: { promptLocked: false } };
+  const runtime = Object.create(CoilCoilRuntime.prototype) as {
+    active: typeof active;
+    resourceReloadTimer?: ReturnType<typeof setTimeout>;
+    reloadMcpExtensionNow(): Promise<void>;
+    reloadActiveSessionResources(): void;
+    reloadActiveSessionNow(value: typeof active, userToolChange?: boolean): Promise<void>;
+  };
+  runtime.active = active;
+  let reloads = 0;
+  runtime.reloadActiveSessionNow = async (session, userToolChange) => {
+    assert.equal(session, active);
+    assert.equal(userToolChange, true);
+    reloads++;
+  };
+  await runtime.reloadMcpExtensionNow();
+  const pending = runtime.resourceReloadTimer;
+  runtime.reloadActiveSessionResources();
+  assert.equal(runtime.resourceReloadTimer, pending);
+  active.bridgeState.promptLocked = true;
+  active.session.isStreaming = false;
+  t.mock.timers.tick(750);
+  await Promise.resolve();
+  assert.equal(reloads, 1);
+});
+
+test("a queued user tool change belongs to its original session", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const session = () => ({ session: { isStreaming: true }, subagents: new Map(), bridgeState: { promptLocked: false } });
+  const previous = session(), next = session();
+  const runtime = Object.create(CoilCoilRuntime.prototype) as {
+    active: typeof previous;
+    userToolReloadPending?: typeof previous;
+    reloadMcpExtensionNow(): Promise<void>;
+    reloadActiveSessionResources(): void;
+    reloadActiveSessionNow(value: typeof previous, userToolChange?: boolean): Promise<void>;
+  };
+  runtime.active = previous;
+  const reloaded: boolean[] = [];
+  runtime.reloadActiveSessionNow = async (active, userToolChange) => {
+    assert.equal(active, next);
+    reloaded.push(Boolean(userToolChange));
+  };
+  await runtime.reloadMcpExtensionNow();
+  runtime.active = next;
+  next.session.isStreaming = false;
+  runtime.reloadActiveSessionResources();
+  assert.equal(runtime.userToolReloadPending, undefined, "replacing the old timer must also release its old session reference");
+  t.mock.timers.tick(750);
+  await Promise.resolve();
+  assert.deepEqual(reloaded, [false], "the next session must not inherit explicit-refresh authorization");
+});
+
+test("configuration reads recheck the session and streaming state before replacing extensions", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const change of ["streaming", "session"] as const) {
+    let release!: () => void, finishReload!: () => void;
+    const reading = new Promise<void>((resolve) => { release = resolve; });
+    const reloaded = new Promise<void>((resolve) => { finishReload = resolve; });
+    let reloads = 0, refreshEntries = 0;
+    const active = { cwd: "/tmp", eventBus: {}, subagents: new Map(), bridgeState: { promptLocked: true },
+      session: { sessionId: "old", isStreaming: false, isCompacting: false,
+        sessionManager: { appendCustomEntry: () => { refreshEntries++; } },
+        reload: async () => { reloads++; finishReload(); } } };
+    const runtime = Object.create(CoilCoilRuntime.prototype) as {
+      active: typeof active;
+      resourceReloadTimer?: ReturnType<typeof setTimeout>;
+      refreshAgentMcpConfiguration(): Promise<void>;
+      reloadActiveSessionNow(value: typeof active, userToolChange?: boolean): Promise<void>;
+      snapshot(): Promise<object>;
+      refreshRuntimeInspectionSources(): Promise<void>;
+      emitEvent(): void;
+    };
+    runtime.active = active;
+    runtime.refreshAgentMcpConfiguration = async () => reading;
+    runtime.snapshot = async () => ({});
+    runtime.refreshRuntimeInspectionSources = async () => {};
+    runtime.emitEvent = () => {};
+    const reload = runtime.reloadActiveSessionNow(active, true);
+    if (change === "streaming") active.session.isStreaming = true;
+    else runtime.active = { ...active, session: { ...active.session, sessionId: "new" } };
+    release();
+    await reload;
+    assert.equal(reloads, 0);
+    assert.equal(refreshEntries, 0, "a busy or replaced session must not receive a schema refresh marker");
+    if (change === "streaming") {
+      assert.ok(runtime.resourceReloadTimer);
+      active.session.isStreaming = false;
+      t.mock.timers.tick(750);
+      await reloaded;
+      assert.equal(reloads, 1);
+      assert.equal(refreshEntries, 1);
+    } else assert.equal(runtime.resourceReloadTimer, undefined);
+  }
+});
+
 test("a workspace's own servers are stored in the agent directory, not in the workspace", async () => {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-mcp-workspace-"));
   const agentDir = join(root, "agent");

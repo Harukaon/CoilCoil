@@ -180,7 +180,7 @@ export function ConversationPane({
     onReplaceTextRange,
     onOpenSettings,
   });
-  const hasComposerActivity = projectState.plan.length > 0 || subagents.length > 0 || queuedPrompts.length > 0 || slashMenu.slashActive || snapshot?.goal !== undefined;
+  const hasComposerActivity = subagents.length > 0 || queuedPrompts.length > 0 || slashMenu.slashActive || snapshot?.goal !== undefined;
 
   useEffect(() => {
     setEditingMessageId(undefined);
@@ -375,7 +375,6 @@ export function ConversationPane({
           <div className="composer-overlays">
             <ActivityPanel
               goal={snapshot?.goal}
-              todo={projectState.plan}
               subagents={subagents}
               queued={queuedPrompts}
               commands={slashMenu.slashActive ? slashMenu.filteredItems : undefined}
@@ -393,6 +392,7 @@ export function ConversationPane({
             variant="footer"
             project={project}
             running={running}
+            backgroundWaiting={snapshot?.backgroundWait?.waiting}
             aborting={snapshot?.aborting}
             goalActive={snapshot?.goal?.status === "running"}
             loading={loading}

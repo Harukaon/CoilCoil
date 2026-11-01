@@ -50,8 +50,8 @@ const KEEP_RECENT_TOKENS = 20_000;
  * CoilCoil lets users set `contextWindow` per model in settings, so anyone on a
  * local model is one number away from it.
  *
- * An explicitly configured `keepRecentTokens` is left alone even then: that is a
- * deliberate choice, and silently overriding it would be its own surprise.
+ * Explicit budgets are preserved when they fit. The accessor below rejects
+ * impossible explicit budgets before a request can enter a compaction loop.
  */
 export function compactionSettingsForWindow(
   settings: CompactionSettings,
@@ -88,16 +88,33 @@ export function installCompactionSettings(
   marked[INSTALLED] = true;
 
   const original = settingsManager.getCompactionSettings.bind(settingsManager);
-  settingsManager.getCompactionSettings = (() => {
-    const settings = original();
-    if (userConfiguredKeepRecent(settingsManager)) return settings;
-    return compactionSettingsForWindow(settings, contextWindowOf());
+  settingsManager.getCompactionSettings = ((model) => {
+    let settings = original(model);
+    if (!settings.enabled) return settings;
+    const routedWindow = model && "contextWindow" in model ? model.contextWindow : undefined;
+    const window = typeof routedWindow === "number" ? routedWindow : contextWindowOf();
+    if (!window || !Number.isFinite(window) || window <= 0) return settings;
+    if (settings.reserveTokens >= window) {
+      if (userConfiguredTokenSetting(settingsManager, "reserveTokens", model)) {
+        throw new Error(`压缩预留量 ${settings.reserveTokens} 必须小于模型上下文窗口 ${window}，请调整 compaction.reserveTokens。`);
+      }
+      settings = { ...settings, reserveTokens: Math.floor(window / 4) };
+    }
+    if (userConfiguredTokenSetting(settingsManager, "keepRecentTokens", model)) {
+      if (settings.keepRecentTokens >= window - settings.reserveTokens) {
+        throw new Error(`压缩保留量 ${settings.keepRecentTokens} 必须小于可用上下文 ${window - settings.reserveTokens}，请调整 compaction.keepRecentTokens。`);
+      }
+      return settings;
+    }
+    return compactionSettingsForWindow(settings, window);
   }) as SettingsManager["getCompactionSettings"];
 
   return settingsManager;
 }
 
-function userConfiguredKeepRecent(settingsManager: SettingsManager): boolean {
+function userConfiguredTokenSetting(settingsManager: SettingsManager, field: "reserveTokens" | "keepRecentTokens", model?: Parameters<SettingsManager["getCompactionSettings"]>[0]): boolean {
   const scopes = [settingsManager.getProjectSettings?.(), settingsManager.getGlobalSettings?.()];
-  return scopes.some((scope) => typeof scope?.compaction?.keepRecentTokens === "number");
+  const key = model ? `${model.provider}/${model.id}` : undefined;
+  return scopes.some((scope) => typeof scope?.compaction?.[field] === "number"
+    || (key !== undefined && typeof scope?.compaction?.modelOverrides?.[key]?.[field] === "number"));
 }

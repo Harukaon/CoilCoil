@@ -1,6 +1,8 @@
 import { attachProcessIpc } from "@coilcoil/runtime-server";
 import { chmodSync, existsSync, linkSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { installMcpCli } from "./mcp-cli-launcher.js";
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -27,6 +29,7 @@ function installHeadlessNodeExecutable(): void {
     }
     Object.defineProperty(process, "execPath", { configurable: true, value: target });
     process.env.PATH = `${binDir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`;
+    installMcpCli(binDir, target, join(dirname(fileURLToPath(import.meta.url)), "mcp-cli.js"));
   } catch {
     // Foreground workers can still use Electron's node mode; the packaged smoke
     // test verifies that supported platforms install the headless helper link.

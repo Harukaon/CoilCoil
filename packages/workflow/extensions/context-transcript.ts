@@ -99,6 +99,9 @@ export function renderTranscript(messages: readonly AgentMessage[]): string {
       content?: unknown;
       toolName?: string;
       customType?: string;
+      command?: string;
+      output?: string;
+      summary?: string;
     };
     switch (record.role) {
       case "user":
@@ -114,13 +117,13 @@ export function renderTranscript(messages: readonly AgentMessage[]): string {
         lines.push(`### 结果 ${record.toolName ?? "?"}`, truncate(textOf(record.content), MAX_RESULT_CHARS));
         break;
       case "bashExecution":
-        lines.push("### 终端", truncate(textOf(record.content), MAX_RESULT_CHARS));
+        lines.push("### 终端", record.command ?? "", truncate(record.output ?? textOf(record.content), MAX_RESULT_CHARS));
         break;
       // A summary of an earlier stretch is itself worth keeping: it is how a
       // second compaction leaves a trace of the first one.
       case "branchSummary":
       case "compactionSummary":
-        lines.push(`## 上一轮总结（${record.role}）`, truncate(textOf(record.content), MAX_RESULT_CHARS));
+        lines.push(`## 上一轮总结（${record.role}）`, truncate(record.summary ?? textOf(record.content), MAX_RESULT_CHARS));
         break;
       case "custom":
         lines.push(`### ${record.customType ?? "custom"}`, truncate(textOf(record.content), MAX_ARGUMENT_CHARS));
@@ -195,19 +198,13 @@ export const TRANSCRIPT_NOTE_MARKER = "<compacted_transcript>";
  * So: state where the archive is and how to page through it, and say plainly
  * that using it needs no announcement.
  */
-export function transcriptNote(path: string, sections: readonly TranscriptSection[]): string | undefined {
-  if (!sections.length) return undefined;
-  const index = sections.map((section, order) => {
-    const when = section.at ? new Date(section.at).toISOString().slice(0, 16).replace("T", " ") : "未知时间";
-    return `  ${order + 1}. 第 ${section.fromLine}–${section.toLine} 行 · ${section.messageCount} 条 · 压缩于 ${when}`;
-  });
+export function transcriptNote(path: string): string {
   return [
     TRANSCRIPT_NOTE_MARKER,
-    "这个会话压缩过。被压缩掉的对话原文没有丢，完整存在这个文件里：",
+    "本会话压缩后的对话原文存档路径（首次压缩成功前文件可能不存在）：",
     path,
     "",
-    "分段索引（行号可直接用 read 的 offset/limit 翻页，也可以先用 grep 搜关键词）：",
-    ...index,
+    "每段开头的 <!-- coilcoil:compaction 标记包含时间、消息数和结束行号。需要索引时用 grep 查这些标记，或按关键词搜索。",
     "",
     "这是一份需要时可查的存档。按行段取，不要一次读回太多；用不上就不用管它，也不必在回复里交代自己读没读。",
     "</compacted_transcript>",
@@ -216,7 +213,6 @@ export function transcriptNote(path: string, sections: readonly TranscriptSectio
 
 export default function contextTranscriptExtension(pi: ExtensionAPI): void {
   let transcriptPath: string | undefined;
-  let sections: TranscriptSection[] = [];
   let pendingArchive: { path: string; body: string; at: number; messageCount: number } | undefined;
 
   const locate = (ctx: ExtensionContext): string | undefined => {
@@ -224,24 +220,20 @@ export default function contextTranscriptExtension(pi: ExtensionAPI): void {
     const sessionFile = ctx.sessionManager?.getSessionFile?.();
     if (!sessionFile) return undefined;
     transcriptPath = transcriptPathFor(sessionFile);
-    sections = readSections(transcriptPath);
     return transcriptPath;
   };
 
   const reset = (_event: unknown, ctx: ExtensionContext): void => {
     transcriptPath = undefined;
-    sections = [];
     pendingArchive = undefined;
     locate(ctx);
   };
 
   pi.on("session_start", reset);
-  // A different branch has its own history; the transcript follows the session
-  // file, so re-reading it is what keeps the index honest after a fork.
+  // A different branch or fork can have a different session file.
   pi.on("session_tree", reset);
   pi.on("session_shutdown", () => {
     transcriptPath = undefined;
-    sections = [];
     pendingArchive = undefined;
   });
 
@@ -257,7 +249,7 @@ export default function contextTranscriptExtension(pi: ExtensionAPI): void {
   pi.on("session_before_compact", (event, ctx) => {
     pendingArchive = undefined;
     const path = locate(ctx);
-    const messages = event.preparation?.messagesToSummarize ?? [];
+    const messages = [...(event.preparation?.messagesToSummarize ?? []), ...(event.preparation?.turnPrefixMessages ?? [])];
     if (!path || !messages.length) return undefined;
     try {
       pendingArchive = { path, body: renderTranscript(messages), at: Date.now(), messageCount: messages.length };
@@ -278,7 +270,6 @@ export default function contextTranscriptExtension(pi: ExtensionAPI): void {
       const marker = `${SECTION_MARKER}${JSON.stringify({ at: archive.at, messageCount: archive.messageCount, toLine })} -->`;
       mkdirSync(dirname(archive.path), { recursive: true });
       appendFileSync(archive.path, `${marker}\n${archive.body}\n`, "utf8");
-      sections.push({ fromLine, toLine, at: archive.at, messageCount: archive.messageCount });
     } catch {
       // The transcript is a convenience; compaction is not.
     }
@@ -286,25 +277,11 @@ export default function contextTranscriptExtension(pi: ExtensionAPI): void {
 
   pi.on("session_compact_failed", () => { pendingArchive = undefined; });
 
-  /**
-   * Re-state the pointer on every request once there is something to point at.
-   *
-   * It has to be re-stated rather than written once: the note itself would be
-   * summarized away by the next compaction, taking the way back with it.
-   */
-  /**
-   * Stated once per run in the system prompt, not appended to every request.
-   *
-   * It used to be pushed onto the end of the message list on every `context`
-   * event — the last thing the model saw before answering, every turn. That
-   * reads as a fresh instruction rather than as reference material, and the
-   * model acknowledged it each time. The system prompt is the right home: it is
-   * rebuilt for every run, so it survives compaction without being restated
-   * inside the conversation itself.
-   */
+  // Include the same pointer from the first turn. A changing archive index in
+  // the system layer would invalidate the full history after every compaction.
   pi.on("before_agent_start", (event, ctx) => {
     locate(ctx);
-    const note = transcriptPath ? transcriptNote(transcriptPath, sections) : undefined;
+    const note = transcriptPath ? transcriptNote(transcriptPath) : undefined;
     if (!note || event.systemPrompt.includes(TRANSCRIPT_NOTE_MARKER)) return undefined;
     return { systemPrompt: `${event.systemPrompt}\n\n${note}` };
   });

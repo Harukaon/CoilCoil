@@ -78,6 +78,7 @@ function createHarness() {
     registerTool() {
       registeredTools++;
     },
+    appendEntry() {},
     events: {
       on(channel: string, listener: (value: unknown) => void) {
         const listeners = eventHandlers.get(channel) ?? new Set();
@@ -359,7 +360,7 @@ test("extension injects global project-scoped memory without creating project .p
   assert.equal(await pathMissing(join(project, ".pi")), true);
 });
 
-test("settled sessions are summarized in the background and injected into later prompts", async (t) => {
+test("background memory completed before the first turn is available for the initial prompt", async (t) => {
   const root = await temporaryDirectory(t);
   const project = join(root, "A");
   const memoryRoot = join(root, ".pi", "agent", "memory");
@@ -520,6 +521,36 @@ test("background memory completion never reads a stale extension context", async
     (harness.emittedEvents.filter((event) => event.channel === PROJECT_MEMORY_STATUS_EVENT).at(-1)?.value as { cwd: string }).cwd,
     project,
   );
+});
+
+test("memory workers completing after extension shutdown save state without using the retired event bus or UI", async (t) => {
+  const root = await temporaryDirectory(t);
+  const project = join(root, "A");
+  const memoryRoot = join(root, "memory");
+  const sessionFile = join(root, "session.jsonl");
+  await mkdir(project, { recursive: true });
+  await writeFile(sessionFile, "session", "utf8");
+  const child = new FakeWorker();
+  const harness = createHarness();
+  const context = contextFor(project, sessionFile);
+  projectMemoryExtension(harness.pi as never, {
+    env: { PI_PROJECT_MEMORY_DIR: memoryRoot, PI_MEMORY_WORKER_BIN: "/fake/pi" },
+    spawnWorker: () => child,
+  });
+  await harness.commands.get("memory")!.handler("", context);
+  await harness.handlers.get("session_shutdown")![0]({}, context);
+  let retiredCalls = 0;
+  harness.pi.events.emit = () => { retiredCalls++; throw new Error("STALE_EXTENSION_BUS"); };
+  context.ui.notify = () => { retiredCalls++; throw new Error("STALE_EXTENSION_UI"); };
+  const failures: unknown[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => { failures.push(args); });
+  const paths = await resolveProjectMemoryPaths(project, memoryRoot);
+  await writeFile(paths.memoryFile, "memory completed after shutdown", "utf8");
+  child.emit("exit", 0, null);
+  await waitFor(() => pathMissing(paths.workerLockFile));
+  assert.equal(retiredCalls, 0);
+  assert.deepEqual(failures, []);
+  assert.deepEqual((await readPersistedMemoryState(paths)).processedSessions, [await realpath(sessionFile)]);
 });
 
 test("failed workers do not mark their session as successfully processed", async (t) => {

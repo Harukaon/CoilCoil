@@ -1,0 +1,280 @@
+{
+  "checked_at_utc": "2026-10-28T16:11:41.093343+00:00",
+  "method": "Read pinned official source checkouts and primary provider docs; compare existing CoilCoil source.",
+  "external_repository_code_executed": false,
+  "live_model_api_requests_made": 0,
+  "application_behavior_changed": false,
+  "projects": [
+    {
+      "name": "Codex CLI",
+      "repository": "https://github.com/openai/codex",
+      "branch": "main",
+      "commit": "5c0e42161ee26af222eb3e9853f9c898706b375b",
+      "commit_date": "2026-10-28T16:00:30Z",
+      "license_spdx": "Apache-2.0",
+      "files": [
+        {
+          "path": "codex-rs/core/src/client.rs",
+          "sha256": "6a2e95e2b7014c480f5c543b95f112d79c23551c281050cffaad85d32a9847db",
+          "line_range": [
+            703,
+            737
+          ],
+          "source_url": "https://github.com/openai/codex/blob/5c0e42161ee26af222eb3e9853f9c898706b375b/codex-rs/core/src/client.rs#L703-L737",
+          "finding": "Stable cache-key policy and subscription session affinity."
+        },
+        {
+          "path": "codex-rs/core/src/session/reasoning_effort.rs",
+          "sha256": "69d94db93aaa9d9e7c8e7c97e40a9be53fba715c5d98138e40a8d2512cf4bd07",
+          "line_range": [
+            137,
+            156
+          ],
+          "source_url": "https://github.com/openai/codex/blob/5c0e42161ee26af222eb3e9853f9c898706b375b/codex-rs/core/src/session/reasoning_effort.rs#L137-L156",
+          "finding": "Capability-gated reasoning-effort updates appended to history."
+        },
+        {
+          "path": "codex-rs/core/tests/suite/prompt_caching.rs",
+          "sha256": "f339bfddff884fe6efea304fefbac0e02843db4591214d73adc8fbcf39102bd4",
+          "line_range": [
+            473,
+            558
+          ],
+          "source_url": "https://github.com/openai/codex/blob/5c0e42161ee26af222eb3e9853f9c898706b375b/codex-rs/core/tests/suite/prompt_caching.rs#L473-L558",
+          "finding": "Mock-server prefix-preservation regression with context overrides."
+        },
+        {
+          "path": "codex-rs/core/tests/suite/prompt_cache_key.rs",
+          "sha256": "45f24510feb30d8c5ad0645e8ee0db5990db280a0bb38821d4616361b70dc47d",
+          "line_range": [
+            190,
+            199
+          ],
+          "source_url": "https://github.com/openai/codex/blob/5c0e42161ee26af222eb3e9853f9c898706b375b/codex-rs/core/tests/suite/prompt_cache_key.rs#L190-L199",
+          "finding": "API-key child and root inherit the same cache-key policy."
+        }
+      ]
+    },
+    {
+      "name": "OpenCode",
+      "repository": "https://github.com/anomalyco/opencode",
+      "branch": "dev",
+      "commit": "b6c43a524265496086fc0fdd83180bfa47d4d22e",
+      "commit_date": "2026-10-28T10:17:47-05:00",
+      "license_spdx": "MIT",
+      "files": [
+        {
+          "path": "packages/ai/src/cache-policy.ts",
+          "sha256": "7b308d1abdd4d2c108f508fb116312c22a8d5d1b66644b78d20750ff77785d34",
+          "line_range": [
+            17,
+            31
+          ],
+          "source_url": "https://github.com/anomalyco/opencode/blob/b6c43a524265496086fc0fdd83180bfa47d4d22e/packages/ai/src/cache-policy.ts#L17-L31",
+          "finding": "Four-slot automatic budget; tools, first/last system, message tail; existing manual hints counted."
+        },
+        {
+          "path": "packages/core/src/session/model-request.ts",
+          "sha256": "5be2bbcd33888f906ad0892dad3507df955b794dd5f15e7ddf1cabb13a552be4",
+          "line_range": [
+            276,
+            293
+          ],
+          "source_url": "https://github.com/anomalyco/opencode/blob/b6c43a524265496086fc0fdd83180bfa47d4d22e/packages/core/src/session/model-request.ts#L276-L293",
+          "finding": "Session affinity; nested root lineage persistence is still a TODO."
+        },
+        {
+          "path": "packages/core/src/session/runner/llm.ts",
+          "sha256": "e446e465d0c337aff83f8853c812d512d1fb59f3b23e6c006bd0f3bb0d84db05",
+          "line_range": [
+            235,
+            250
+          ],
+          "source_url": "https://github.com/anomalyco/opencode/blob/b6c43a524265496086fc0fdd83180bfa47d4d22e/packages/core/src/session/runner/llm.ts#L235-L250",
+          "finding": "Retains tool definitions on the final step."
+        },
+        {
+          "path": "packages/core/src/session/compaction.ts",
+          "sha256": "a21e040bdc9d41595b546562304b601d35bba86bcaa2b2600db80e7be7faf0a8",
+          "line_range": [
+            259,
+            265
+          ],
+          "source_url": "https://github.com/anomalyco/opencode/blob/b6c43a524265496086fc0fdd83180bfa47d4d22e/packages/core/src/session/compaction.ts#L259-L265",
+          "finding": "Background summary precompute defaults to false; lines 330-387 hold optional summaries until compaction is due."
+        },
+        {
+          "path": "packages/ai/test/provider/anthropic-messages-cache.recorded.test.ts",
+          "sha256": "66db171eda4a8639f615a4a7261aae1c81a9e3b020d2df582780022bbec1f28b",
+          "line_range": [
+            72,
+            110
+          ],
+          "source_url": "https://github.com/anomalyco/opencode/blob/b6c43a524265496086fc0fdd83180bfa47d4d22e/packages/ai/test/provider/anthropic-messages-cache.recorded.test.ts#L72-L110",
+          "finding": "Recorded cache-read tests; not a live API benchmark run by this audit."
+        }
+      ]
+    },
+    {
+      "name": "DeepSeek Harness",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "branch": "master",
+      "commit": "f3803c96974ad4a94195fb97e5c637e9c2a3afe3",
+      "commit_date": "2026-10-28T02:17:58+08:00",
+      "license_spdx": "MIT",
+      "files": [
+        {
+          "path": "packages/core/system-prompt/src/index.ts",
+          "sha256": "fa4334c2398a9286a2f24e36aa74b014faa82373687a632f7ee54144a1777284",
+          "line_range": [
+            231,
+            243
+          ],
+          "source_url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/core/system-prompt/src/index.ts#L231-L243",
+          "finding": "Deterministic tool ordering; section ordering also at line 657."
+        },
+        {
+          "path": "packages/core/agent-loop/src/runtime-context.ts",
+          "sha256": "7da577d2f50da7059e1fd830a393681c15b0810b6506c36b3f6e58cb3f73383c",
+          "line_range": [
+            85,
+            114
+          ],
+          "source_url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/core/agent-loop/src/runtime-context.ts#L85-L114",
+          "finding": "Capable continuing routes append changed system text; other branches can replace the head."
+        },
+        {
+          "path": "packages/compaction/compaction-basic/src/summarizer.ts",
+          "sha256": "03ef6eb0b6a011530829820e30ff709c2c1b34cfa37a98c19c0037432b9d2f55",
+          "line_range": [
+            130,
+            164
+          ],
+          "source_url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/compaction/compaction-basic/src/summarizer.ts#L130-L164",
+          "finding": "Summary reuses original messages and tools and appends instructions."
+        },
+        {
+          "path": "packages/llm/llm-deepseek/src/adapter.ts",
+          "sha256": "40aa0cc4730d9dc31c66e1e62e84dcaba787b4f6fa956fd6c2185f799bb538c7",
+          "line_range": [
+            137,
+            155
+          ],
+          "source_url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/llm/llm-deepseek/src/adapter.ts#L137-L155",
+          "finding": "Stable session metadata in HTTP headers; native cache matching is provider-owned."
+        },
+        {
+          "path": "packages/llm/llm-deepseek/src/translate.ts",
+          "sha256": "254f4b8fe292dadc5c24df3375b01920f5e5b345be09eae4290e91e9e810c1ba",
+          "line_range": [
+            25,
+            53
+          ],
+          "source_url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/llm/llm-deepseek/src/translate.ts#L25-L53",
+          "finding": "Native Messages usage maps ordinary input, cache read and cache write separately."
+        },
+        {
+          "path": "packages/core/agent-loop/tests/request-cache.e2e.ts",
+          "sha256": "548a4e9cc63f698c1e2089f80a7f701c5cd0411aa9ce7535bca4cfb31d066520",
+          "line_range": [
+            76,
+            100
+          ],
+          "source_url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/core/agent-loop/tests/request-cache.e2e.ts#L76-L100",
+          "finding": "Live cache-read test requires DEEPSEEK_API_KEY; not executed by this audit."
+        }
+      ]
+    },
+    {
+      "name": "Grok Build",
+      "repository": "https://github.com/xai-org/grok-build",
+      "branch": "main",
+      "commit": "2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8",
+      "commit_date": "2026-09-29T16:57:09Z",
+      "license_spdx": "Apache-2.0",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "322066de9f5bc136295bd0ae4f1752cef3d8dcb1a8f9d88044609e7b6d7abcf7",
+          "line_range": [
+            1,
+            24
+          ],
+          "source_url": "https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/README.md#L1-L24",
+          "finding": "Actual CLI/TUI agent harness; periodically synced from monorepo."
+        },
+        {
+          "path": "crates/codegen/xai-grok-sampling-types/src/conversation/messages.rs",
+          "sha256": "4c88b9fcd05086d0a6e14f2ab2dce99d7654e75aa7f043076386921ef2a08f93",
+          "line_range": [
+            1,
+            77
+          ],
+          "source_url": "https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-sampling-types/src/conversation/messages.rs#L1-L77",
+          "finding": "System, latest content and heuristic previous user breakpoint; fourth slot reserved for gateway automatic caching."
+        },
+        {
+          "path": "crates/codegen/xai-grok-sampling-types/src/conversation/responses.rs",
+          "sha256": "0e7325bcdaf5fe140d1d4d1d8642c38138f37e8bee2f9ed8edd840d46315d483",
+          "line_range": [
+            133,
+            140
+          ],
+          "source_url": "https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-sampling-types/src/conversation/responses.rs#L133-L140",
+          "finding": "Responses cache key falls back to conversation ID."
+        },
+        {
+          "path": "crates/codegen/xai-chat-state/src/actor/request_builder.rs",
+          "sha256": "8b5468a03a09a705d2f37d01f225ba2567489eaf4d692576f72df7911172c726",
+          "line_range": [
+            125,
+            198
+          ],
+          "source_url": "https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-chat-state/src/actor/request_builder.rs#L125-L198",
+          "finding": "Conditional old-tool pruning and system-memory upsert change old input; excluded by user immutable-context policy."
+        },
+        {
+          "path": "crates/codegen/xai-chat-state/src/actor/tests.rs",
+          "sha256": "73190f4c7b91842a171a668dcaad47153f0c1966fdb8636d48e083f9816ff3e7",
+          "line_range": [
+            4708,
+            4755
+          ],
+          "source_url": "https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-chat-state/src/actor/tests.rs#L4708-L4755",
+          "finding": "Prefix helper compares only input array, not model or tool definitions."
+        },
+        {
+          "path": "crates/codegen/xai-chat-state/src/compaction_utils.rs",
+          "sha256": "61d3cf810e91e22c97954bf5627f388a9acd6c96bae3adbeb54bbf6511169fac",
+          "line_range": [
+            131,
+            161
+          ],
+          "source_url": "https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-chat-state/src/compaction_utils.rs#L131-L161",
+          "finding": "Cache-aligned summary keeps original tool I/O and images where permitted."
+        },
+        {
+          "path": "crates/codegen/xai-grok-sampler/src/stream/messages_tests.rs",
+          "sha256": "ce5daa067ae757b541a00ff50d2c500529932b300197582dd9bbb09d77461cda",
+          "line_range": [
+            898,
+            947
+          ],
+          "source_url": "https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-sampler/src/stream/messages_tests.rs#L898-L947",
+          "finding": "Usage tests: I+R+W, delta overrides and zero ordinary input."
+        }
+      ]
+    }
+  ],
+  "official_protocol_docs": [
+    "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+    "https://developers.openai.com/api/docs/guides/prompt-caching",
+    "https://api-docs.deepseek.com/guides/kv_cache/"
+  ],
+  "interpretation": [
+    "Mock and recorded tests establish request shape; live usage establishes actual reads.",
+    "Native provider caching policies differ; an OpenAI key does not replace Anthropic breakpoints.",
+    "The supplied two CoilCoil Claude logs preserved prior cached prefixes across 46 adjacent valid requests. Source differences do not identify the root cause of subscription durability differences.",
+    "User policy excludes background rewrites of old system/history outside explicit compaction and user rewind."
+  ]
+}

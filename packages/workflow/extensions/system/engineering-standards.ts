@@ -23,10 +23,13 @@ function gitSafetyRules(audience: "main" | "subagent"): string {
 
 /**
  * What a subagent that can change files gets for Git (see `childPromptAdditions`). It cannot take
- * the whole standards block: that block tells the agent to use a todo tool a subagent does not have
- * and to ask the user, whom a subagent cannot reach.
+ * the whole standards block: that block tells the agent to ask the user, whom a subagent cannot
+ * reach.
  */
 export const COILCOIL_SUBAGENT_GIT_SAFETY = gitSafetyRules("subagent");
+
+/** Shared by the main agent and children that have the monitor tool. */
+export const COILCOIL_BACKGROUND_WAIT_STANDARDS = "- Use monitor for long-running tasks and suspend when no independent work remains; resume on events instead of polling, sleeping, or guessing timeoutMs.";
 
 /**
  * Added to the system prompt of the main agent every turn, as an
@@ -39,7 +42,6 @@ export const COILCOIL_SUBAGENT_GIT_SAFETY = gitSafetyRules("subagent");
  * too: it follows the user's own preferences, which live in their memory.
  */
 export const COILCOIL_ENGINEERING_STANDARDS = `Execution and communication:
-- For complex tasks, use the todo tool to maintain a complete, ordered plan. Keep at most one item in progress and update item statuses promptly as work advances.
 - Do not open with generic filler, repeatedly ask permission for safe in-scope work, over-explain, or send progress updates that contain no useful information.
 - Do not stop at analysis when the task calls for action. Whenever practical, complete investigation, implementation, verification, and handoff in one pass.
 - Verify facts with available tools instead of relying on guesses. When uncertain, investigate and gather evidence before deciding.
@@ -51,6 +53,8 @@ export const COILCOIL_ENGINEERING_STANDARDS = `Execution and communication:
 - Technical accuracy takes precedence over agreeing with the user. Do not endorse an incorrect assumption merely to be agreeable.
 - Do not use shell commands, source comments, or temporary files as a substitute for user-facing process communication.
 - Do not busy-poll or issue meaningless sleep or wait commands.
+
+${COILCOIL_BACKGROUND_WAIT_STANDARDS}
 
 Ask the user only when at least one of these conditions applies:
 - An ambiguity would materially change the implementation and cannot be resolved from the codebase.
@@ -69,5 +73,5 @@ ${gitSafetyRules("main")}`;
 export const COILCOIL_WINDOWS_SHELL_STANDARDS = `Windows shell usage:
 - This machine runs Windows and the powershell tool is available. Prefer it for shell work and write native PowerShell, not Bash.
 - Do not translate a command into Bash syntax or fight POSIX quoting and escaping rules; use PowerShell quoting, cmdlets, pipelines, and native Windows paths directly.
-- The powershell tool runs one command to completion and has no default timeout. Pass an explicit timeout for anything that may hang.
-- Use the bash tool only for work the powershell tool cannot do: long-running or background processes that need the managed terminal, interactive sessions, or a script that genuinely requires a POSIX shell.`;
+- The powershell tool runs one command to completion and has no default timeout. Use an explicit process timeout only as an execution limit, not as a waiting interval.
+- For long-running or background work, use the managed terminal with monitor so completion or readiness wakes you without polling. Use the bash tool for interactive managed sessions or a script that genuinely requires a POSIX shell.`;

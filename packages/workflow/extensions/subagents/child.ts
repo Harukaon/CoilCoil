@@ -13,10 +13,15 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import fileDiffExtension from "../file-diff.ts";
+import readCacheExtension from "../read-cache.ts";
+import runtimeBridgeExtension from "../runtime-bridge.ts";
+import { AnthropicCacheController } from "../cache/controller.ts";
+import { CACHE_LEDGER_ENTRY, cacheLedgerCheckpoint, restoreCacheLedger } from "../cache/ledger.ts";
 import coilcoilMcpTools, { MCP_MANAGER_CHANNEL } from "../mcp-tools.ts";
-import { COILCOIL_SUBAGENT_GIT_SAFETY, COILCOIL_WINDOWS_SHELL_STANDARDS } from "../system/engineering-standards.ts";
+import { COILCOIL_BACKGROUND_WAIT_STANDARDS, COILCOIL_SUBAGENT_GIT_SAFETY, COILCOIL_WINDOWS_SHELL_STANDARDS } from "../system/engineering-standards.ts";
 import terminalExtension from "../terminal/extension.ts";
 import { DEFAULT_CHILD_TOOLS } from "./profiles.ts";
+import { createChildRunDriver, type ChildRunDriver } from "./child-run.ts";
 import type { SubagentChildMeta } from "./types.ts";
 import { SUBAGENT_META_ENTRY_TYPE } from "./types.ts";
 
@@ -52,9 +57,8 @@ const FILE_CHANGING_TOOLS = ["edit", "write"];
  * 子会话不加载 default-tools，拿不到主会话那份工程规范，要靠这里补：
  * - 被授予 powershell 的（只会在 Windows 上）：Windows shell 规范。给了 powershell 却不说
  *   优先用它，模型照样会去用 bash、跟 POSIX 引号较劲。
- * - 能改文件的（有 edit 或 write）：Git 安全。整份规范不能原样给——它让模型用子 Agent 没有的
- *   todo 工具，还教它向用户提问，而子 Agent 没法直接问用户——所以只给 Git 安全，措辞改成
- *   「在报告里说明」。
+ * - 能改文件的（有 edit 或 write）：Git 安全。整份规范不能原样给——它教模型向用户提问，
+ *   而子 Agent 没法直接问用户——所以只给 Git 安全，措辞改成「在报告里说明」。
  * profile 的提示词放最后。
  */
 export function childPromptAdditions(
@@ -64,6 +68,7 @@ export function childPromptAdditions(
 ): string[] {
   const additions: string[] = [];
   if (platform === "win32" && tools.includes(POWERSHELL_TOOL)) additions.push(COILCOIL_WINDOWS_SHELL_STANDARDS);
+  if (tools.includes("monitor")) additions.push(COILCOIL_BACKGROUND_WAIT_STANDARDS);
   if (FILE_CHANGING_TOOLS.some((tool) => tools.includes(tool))) {
     additions.push(`<git_safety>\n${COILCOIL_SUBAGENT_GIT_SAFETY}\n</git_safety>`);
   }
@@ -92,8 +97,10 @@ export interface ParentEvents {
  * 也是按这个行为写的。
  */
 const CHILD_TOOL_EXTENSIONS: Record<string, { name: string; factory: ExtensionFactory }> = {
+  read: { name: "coilcoil-subagent-read-cache", factory: readCacheExtension },
   bash: { name: "coilcoil-subagent-terminal", factory: terminalExtension },
   terminal: { name: "coilcoil-subagent-terminal", factory: terminalExtension },
+  monitor: { name: "coilcoil-subagent-terminal", factory: terminalExtension },
   mcp: { name: "coilcoil-subagent-mcp", factory: coilcoilMcpTools },
   // edit / write 返回真实 diff，子 Agent 和主会话一样。
   edit: { name: "coilcoil-subagent-file-diff", factory: fileDiffExtension },
@@ -128,6 +135,7 @@ export interface CreateChildSessionOptions {
 export interface ChildSessionHandle {
   session: AgentSession;
   sessionFile?: string;
+  prompt(task: string, signal?: AbortSignal): Promise<void>;
   dispose: () => Promise<void>;
 }
 
@@ -203,7 +211,7 @@ async function buildChildSession(options: {
   tools?: string[];
   systemPrompt?: string;
   parentEvents?: ParentEvents;
-}): Promise<{ session: AgentSession }> {
+}): Promise<{ session: AgentSession; driver: ChildRunDriver }> {
   const settingsManager = SettingsManager.create(options.cwd, options.agentDir, { projectTrusted: true });
   // 平台调整放在这里而不只在派发时做：新建和恢复都经过这一处，恢复的运行可能是在
   // 另一个平台上保存的。
@@ -220,11 +228,13 @@ async function buildChildSession(options: {
       },
     });
   }
+  extensionFactories.push({ name: "coilcoil-subagent-prompt-snapshot", hidden: true, factory: runtimeBridgeExtension });
+  const eventBus = createChildEventBus(options.parentEvents);
   const loader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: options.agentDir,
     settingsManager,
-    eventBus: createChildEventBus(options.parentEvents),
+    eventBus,
     noExtensions: true,
     noThemes: true,
     extensionFactories,
@@ -240,32 +250,56 @@ async function buildChildSession(options: {
     tools,
     excludeTools: ["subagent"],
   });
-  await created.session.bindExtensions({});
-  return { session: created.session };
+  const cache = new AnthropicCacheController(restoreCacheLedger(created.session.sessionManager.getBranch()),
+    (state) => { created.session.sessionManager.appendCustomEntry(CACHE_LEDGER_ENTRY, cacheLedgerCheckpoint(state)); });
+  const stream = created.session.agent.streamFunction;
+  created.session.agent.streamFunction = (selected, context, options) => {
+    if (selected.api !== "anthropic-messages") return stream(selected, context, options);
+    const purpose = options?.sessionId === created.session.sessionId ? "conversation" : "branch_summary";
+    const prepared = cache.options(selected, options, purpose);
+    return cache.observe(stream(selected, context, prepared.options), prepared.pending, purpose);
+  };
+  const driver = createChildRunDriver(created.session, eventBus);
+  await created.session.bindExtensions({ onError: (error) => driver.onExtensionError(error) });
+  return { session: created.session, driver };
 }
 
-function wrapHandle(session: AgentSession, onEvent: (event: AgentSessionEvent) => void): ChildSessionHandle {
+function wrapHandle(session: AgentSession, driver: ChildRunDriver, onEvent: (event: AgentSessionEvent) => void): ChildSessionHandle {
   const unsubscribe = session.subscribe(onEvent);
   let disposePromise: Promise<void> | undefined;
+  const dispose = (): Promise<void> => {
+    disposePromise ??= (async () => {
+      driver.dispose();
+      unsubscribe();
+      const failures: unknown[] = [];
+      try { await session.abort(); } catch (error) { failures.push(error); }
+      // Disposing Pi alone does not emit shutdown; managed monitors must release their processes first.
+      try {
+        const runner = session.extensionRunner;
+        if (runner.hasHandlers("session_shutdown")) await runner.emit({ type: "session_shutdown", reason: "quit" });
+      } catch (error) { failures.push(error); }
+      failures.push(...driver.shutdownErrors);
+      try { session.dispose(); } catch (error) { failures.push(error); }
+      if (failures.length) throw new AggregateError(failures, `子 Agent 会话清理失败：${failures.map((error) => error instanceof Error ? error.message : String(error)).join("；")}`);
+    })();
+    return disposePromise;
+  };
   return {
     session,
     sessionFile: session.sessionFile,
-    dispose: () => {
-      disposePromise ??= (async () => {
-        unsubscribe();
-        await session.abort().catch(() => undefined);
-        // `session.dispose()` 不会通知扩展。terminal 扩展要靠 session_shutdown 才会
-        // 停掉子 Agent 转入后台的进程，不先发这一下，子 Agent 结束后那些进程就没人管了。
-        try {
-          const runner = session.extensionRunner;
-          if (runner.hasHandlers("session_shutdown")) await runner.emit({ type: "session_shutdown", reason: "quit" });
-        } catch {
-          // 扩展清理失败不能挡住会话释放。
+    prompt: async (task, signal) => {
+      try { await driver.prompt(task, signal); }
+      catch (error) {
+        if (signal?.aborted) {
+          try { await dispose(); }
+          catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], `${error instanceof Error ? error.message : String(error)}\n子 Agent 清理失败：${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+          }
         }
-        session.dispose();
-      })();
-      return disposePromise;
+        throw error;
+      }
     },
+    dispose,
   };
 }
 
@@ -293,7 +327,7 @@ export async function createChildSession(options: CreateChildSessionOptions): Pr
     systemPrompt: options.systemPrompt,
     parentEvents: options.parentEvents,
   });
-  return wrapHandle(created.session, options.onEvent);
+  return wrapHandle(created.session, created.driver, options.onEvent);
 }
 
 export interface ReopenChildSessionOptions {
@@ -316,7 +350,7 @@ export async function reopenChildSession(options: ReopenChildSessionOptions): Pr
     systemPrompt: options.systemPrompt,
     parentEvents: options.parentEvents,
   });
-  return wrapHandle(created.session, options.onEvent);
+  return wrapHandle(created.session, created.driver, options.onEvent);
 }
 
 export interface ResumableChild {

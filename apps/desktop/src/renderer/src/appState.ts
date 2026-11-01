@@ -10,7 +10,6 @@ export const EMPTY_PROJECT: ProjectSnapshot = {
   files: [],
   changes: [],
   terminals: [],
-  plan: [],
   refreshedAt: 0,
 };
 

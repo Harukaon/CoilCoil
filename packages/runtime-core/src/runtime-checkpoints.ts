@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import type { AgentSession, InlineExtension, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { DiagnosticLog } from "@coilcoil/diagnostics";
 import type { GitCommitFile, RewindPreview } from "@coilcoil/runtime-protocol";
@@ -28,6 +28,8 @@ interface FileBackup {
   messageEntryId: string;
   /** 绝对路径：Agent 可以改工作区外面的文件。 */
   path: string;
+  /** 备份时父目录的真实路径，防止后来目录链接改向另一个项目。 */
+  parentPath?: string;
   /** 改之前的内容；absent 表示改之前这个文件不存在（回退就是删掉它）。 */
   blob?: string;
   absent?: true;
@@ -79,14 +81,30 @@ function toolPath(input: Record<string, unknown>, cwd: string): string | undefin
 
 type Snapshot = { content: Buffer } | { absent: true } | { skipped: FileBackup["skipped"] };
 
+/** 新建文件的父目录可能还不存在：解析最近的已有祖先，再接回缺失的目录。 */
+function resolvedParent(path: string): string | undefined {
+  let parent = dirname(resolve(path));
+  const suffix: string[] = [];
+  for (;;) {
+    try { return resolve(realpathSync(parent), ...suffix); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
+      const next = dirname(parent);
+      if (next === parent) return undefined;
+      suffix.unshift(basename(parent));
+      parent = next;
+    }
+  }
+}
+
 function readSnapshot(path: string): Snapshot {
   try {
-    if (!existsSync(path)) return { absent: true };
-    const stat = statSync(path);
+    // 不跟随后来替换的符号链接，否则回退会覆盖另一个文件，甚至另一个项目。
+    const stat = lstatSync(path);
     if (!stat.isFile()) return { skipped: "unreadable" };
     if (stat.size > MAX_BACKUP_BYTES) return { skipped: "too_large" };
     return { content: readFileSync(path) };
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { absent: true };
     return { skipped: "unreadable" };
   }
 }
@@ -117,7 +135,7 @@ export function fileHistoryExtension(agentDir: string, log: DiagnosticLog): Inli
       if (claimed.has(key)) return;
       claimed.add(key);
       const snapshot = readSnapshot(path);
-      const backup: FileBackup = { messageEntryId, path };
+      const backup: FileBackup = { messageEntryId, path, parentPath: resolvedParent(path) };
       if ("absent" in snapshot) backup.absent = true;
       else if ("skipped" in snapshot) backup.skipped = snapshot.skipped;
       else {
@@ -135,6 +153,7 @@ export function fileHistoryExtension(agentDir: string, log: DiagnosticLog): Inli
 
 interface PlannedChange {
   path: string;
+  parentPath: string;
   state: "modified" | "added" | "deleted";
   /** 要写回的内容；undefined 是删掉。 */
   blob?: string;
@@ -156,17 +175,28 @@ function planRestore(store: FileHistoryStore, branch: readonly SessionEntry[], e
   const changes: PlannedChange[] = [];
   const skipped: string[] = [];
   for (const backup of earliest.values()) {
+    const parentPath = resolvedParent(backup.path);
+    // 旧备份没有目录身份时，只接受未经过目录链接的路径。
+    if (!parentPath || parentPath !== (backup.parentPath ?? dirname(resolve(backup.path)))) {
+      skipped.push(backup.path);
+      continue;
+    }
     const current = readSnapshot(backup.path);
+    // 当前版本也必须能完整备份，才能在取消导航或写入失败时撤销。
+    if ("skipped" in current) {
+      skipped.push(backup.path);
+      continue;
+    }
     if (backup.absent) {
-      if (!("absent" in current)) changes.push({ path: backup.path, state: "added" });
+      if (!("absent" in current)) changes.push({ path: backup.path, parentPath, state: "added" });
       continue;
     }
     if (!backup.blob || !store.has(backup.blob)) {
       skipped.push(backup.path);
       continue;
     }
-    if ("absent" in current) changes.push({ path: backup.path, state: "deleted", blob: backup.blob });
-    else if (!("content" in current) || blobHash(current.content) !== backup.blob) changes.push({ path: backup.path, state: "modified", blob: backup.blob });
+    if ("absent" in current) changes.push({ path: backup.path, parentPath, state: "deleted", blob: backup.blob });
+    else if (blobHash(current.content) !== backup.blob) changes.push({ path: backup.path, parentPath, state: "modified", blob: backup.blob });
   }
   return { changes, skipped };
 }
@@ -187,10 +217,24 @@ export function previewRewind(agentDir: string, cwd: string, branch: readonly Se
   };
 }
 
-type Restorable = { path: string; blob?: string };
+type Restorable = { path: string; parentPath: string; blob?: string };
+type FileContents = { path: string; parentPath: string; content?: Buffer };
+
+function writeContents(target: FileContents): void {
+  if (resolvedParent(target.path) !== target.parentPath) throw new Error(`${target.path} 的父目录已改向，已停止回退。`);
+  const current = readSnapshot(target.path);
+  if ("skipped" in current) throw new Error(`${target.path} 的当前版本无法安全备份，已停止回退。`);
+  if (target.content !== undefined) {
+    if ("content" in current && current.content.equals(target.content)) return;
+    mkdirSync(dirname(target.path), { recursive: true });
+    writeFileSync(target.path, target.content);
+  } else if (!("absent" in current)) {
+    rmSync(target.path, { force: true });
+  }
+}
 
 /** 按计划写回（或删掉）文件；返回写之前它们的样子，撤销用。 */
-async function applyRestore(store: FileHistoryStore, targets: Restorable[]): Promise<Restorable[]> {
+async function applyRestore(store: FileHistoryStore, targets: Restorable[]): Promise<{ previous: Restorable[]; undo: () => void }> {
   // 先把要写的内容都读出来，读不全就一个文件也不动。
   const contents = new Map<string, Buffer>();
   for (const target of targets) {
@@ -200,21 +244,38 @@ async function applyRestore(store: FileHistoryStore, targets: Restorable[]): Pro
     contents.set(target.path, content);
   }
   const previous: Restorable[] = [];
+  const snapshots: FileContents[] = [];
   for (const target of targets) {
+    if (resolvedParent(target.path) !== target.parentPath) throw new Error(`${target.path} 的父目录已改向，没有回退任何文件。`);
     const current = readSnapshot(target.path);
-    if ("content" in current) previous.push({ path: target.path, blob: await store.save(current.content) });
-    else if ("absent" in current) previous.push({ path: target.path });
-  }
-  for (const target of targets) {
-    const content = contents.get(target.path);
-    if (content) {
-      mkdirSync(dirname(target.path), { recursive: true });
-      writeFileSync(target.path, content);
+    if ("skipped" in current) throw new Error(`${target.path} 的当前版本无法安全备份，没有回退任何文件。`);
+    if ("content" in current) {
+      previous.push({ path: target.path, parentPath: target.parentPath, blob: await store.save(current.content) });
+      snapshots.push({ path: target.path, parentPath: target.parentPath, content: current.content });
     } else {
-      rmSync(target.path, { force: true });
+      previous.push({ path: target.path, parentPath: target.parentPath });
+      snapshots.push({ path: target.path, parentPath: target.parentPath });
     }
   }
-  return previous;
+  let attempted = 0;
+  const undo = (): void => {
+    const errors: unknown[] = [];
+    for (const snapshot of snapshots.slice(0, attempted).reverse()) {
+      try { writeContents(snapshot); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw new AggregateError(errors, `有 ${errors.length} 个文件撤销回退失败，原内容仍保存在文件历史中。`);
+  };
+  try {
+    for (const target of targets) {
+      // 写入本身也可能在截断后失败，因此失败的当前文件同样需要撤销。
+      attempted += 1;
+      writeContents({ path: target.path, parentPath: target.parentPath, content: contents.get(target.path) });
+    }
+  } catch (error) {
+    try { undo(); } catch (undoError) { throw new AggregateError([error, undoError], "文件回退失败，且部分文件撤销失败。", { cause: error }); }
+    throw error;
+  }
+  return { previous, undo };
 }
 
 /**
@@ -233,19 +294,20 @@ export async function navigateWithCheckpoint(options: {
   const store = fileHistoryStore(options.agentDir);
   const plan = planRestore(store, session.sessionManager.getBranch(), entryId);
   if (!plan) throw new Error("找不到这条消息，没法回退代码。");
-  const previous = await applyRestore(store, plan.changes);
-  const undo = (): Promise<unknown> => applyRestore(store, previous).catch(() => undefined);
+  const { previous, undo } = await applyRestore(store, plan.changes);
+  let result: { cancelled: boolean };
   try {
-    const result = await session.navigateTree(entryId, { summarize: false });
-    if (result.cancelled) {
-      await undo();
-      return result;
-    }
-    session.sessionManager.appendCustomEntry(FILE_RESTORE_ENTRY_TYPE, { restored: entryId, files: previous });
-    options.log.info("checkpoint", "restored", { files: plan.changes.length, skipped: plan.skipped.length });
-    return result;
+    result = await session.navigateTree(entryId, { summarize: false });
   } catch (error) {
-    await undo();
+    try { undo(); } catch (undoError) { throw new AggregateError([error, undoError], "会话回退失败，且部分文件撤销失败。", { cause: error }); }
     throw error;
   }
+  if (result.cancelled) {
+    undo();
+    return result;
+  }
+  // 到这里会话已经切换成功，记录失败也不能只把文件撤销成另一个会话的状态。
+  session.sessionManager.appendCustomEntry(FILE_RESTORE_ENTRY_TYPE, { restored: entryId, files: previous });
+  options.log.info("checkpoint", "restored", { files: plan.changes.length, skipped: plan.skipped.length });
+  return result;
 }

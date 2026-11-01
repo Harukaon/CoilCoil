@@ -168,3 +168,58 @@ test("a disposed dispatcher stops sending", async () => {
   await settle();
   assert.equal(sent.length, 0);
 });
+
+test("incremental monitor events held during independent work retain every changed line", async () => {
+  const { sent, dispatcher } = createRecorder();
+  dispatcher.setAgentRunning(true);
+  for (const output of ["STATE_A", "STATE_B", "STATE_C"]) {
+    dispatcher.enqueue({ ...event("term-monitor"), monitorId: "monitor-1", mode: "output", output });
+  }
+  dispatcher.setAgentRunning(false);
+  await settle();
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]!.payload.content, /STATE_A\nSTATE_B\nSTATE_C/);
+  dispatcher.dispose();
+});
+
+test("ready monitor results can consume all queued events without a later duplicate wake-up", async () => {
+  const { sent, dispatcher } = createRecorder();
+  dispatcher.setAgentRunning(true);
+  for (const output of ["EVENT_A", "EVENT_B"]) {
+    dispatcher.enqueue({ ...event("term-monitor"), monitorId: "monitor-1", mode: "output", output });
+  }
+  const ready = dispatcher.take(["term-monitor"]);
+  assert.equal(ready.length, 1);
+  assert.equal(ready[0]!.output, "EVENT_A\nEVENT_B");
+  dispatcher.setAgentRunning(false);
+  await settle();
+  assert.equal(sent.length, 0);
+  dispatcher.dispose();
+});
+
+test("committing a new monitor drops old notices and keeps its synchronously captured result", async () => {
+  const { sent, dispatcher } = createRecorder();
+  dispatcher.setAgentRunning(true);
+  dispatcher.enqueue(event("term-1"));
+  dispatcher.enqueue({ ...event("term-1"), monitorId: "monitor-2", output: "new result" });
+  dispatcher.markObserved("term-1", "monitor-2");
+  dispatcher.setAgentRunning(false);
+  await settle();
+  assert.equal(sent.length, 1);
+  assert.equal((sent[0]!.payload.details.notices as Array<{ monitorId?: string }>)[0]?.monitorId, "monitor-2");
+  assert.match(sent[0]!.payload.content, /new result/);
+  dispatcher.dispose();
+});
+
+test("user cancellation clears held notices while preserving the dispatcher for a later run", async () => {
+  const { sent, dispatcher } = createRecorder();
+  dispatcher.enqueue(event("old"));
+  dispatcher.clear();
+  await settle();
+  assert.equal(sent.length, 0);
+  dispatcher.enqueue(event("new"));
+  await settle();
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]!.payload.content, /Terminal new/);
+  dispatcher.dispose();
+});

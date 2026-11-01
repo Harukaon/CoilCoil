@@ -11,7 +11,6 @@ import {
   type SessionSummary,
   type SubagentActivity,
   type SubagentTimelineEntry,
-  type TodoItem,
   promptDocumentText,
 } from "@coilcoil/runtime-protocol";
 import {
@@ -573,27 +572,6 @@ export function sessionSummary(info: SessionSummarySource): SessionSummary {
     updatedAt: info.modified.toISOString(),
     messageCount: info.messageCount,
   };
-}
-
-export function normalizeTodoPlan(value: unknown): TodoItem[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const result: TodoItem[] = [];
-  for (const item of value) {
-    if (!isRecord(item)) return undefined;
-    const rawText = typeof item.text === "string" ? item.text : typeof item.step === "string" ? item.step : undefined;
-    const status = item.status;
-    if (!rawText || (status !== "pending" && status !== "in_progress" && status !== "completed")) {
-      return undefined;
-    }
-    result.push({ text: rawText, status });
-  }
-  return result;
-}
-
-export function planFromResult(result: unknown): TodoItem[] | undefined {
-  if (!isRecord(result)) return undefined;
-  const details = isRecord(result.details) ? result.details : undefined;
-  return normalizeTodoPlan(details?.plan);
 }
 
 export function extractExitCode(result: unknown): number | undefined {

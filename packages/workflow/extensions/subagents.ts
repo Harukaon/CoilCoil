@@ -460,20 +460,23 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     void (async () => {
       let promptError: unknown;
       try {
-        await handle.session.prompt(task, { source: "extension" });
+        await handle.prompt(task);
       } catch (error) {
         promptError = error;
       }
       collectStats(run, handle.session);
-      if (run.stopRequested) failRun(run, "stopped");
-      else if (promptError) failRun(run, "failed", errorMessage(promptError));
+      const promptFailure = promptError === undefined || (promptError instanceof Error && promptError.name === "AbortError")
+        ? undefined : errorMessage(promptError);
+      if (promptFailure !== undefined) failRun(run, "failed", promptFailure);
+      else if (run.stopRequested || promptError !== undefined) failRun(run, "stopped");
       else {
         run.status = "completed";
         run.finishedAt = Date.now();
         markDirty(run.runId);
         flushNow();
       }
-      await handle.dispose().catch(() => undefined);
+      try { await handle.dispose(); }
+      catch (error) { failRun(run, run.status === "stopped" ? "stopped" : "failed", [run.error, `子 Agent 清理失败：${errorMessage(error)}`].filter(Boolean).join("\n")); }
       run.session = undefined;
       run.dispose = undefined;
       markDirty(run.runId);
@@ -494,23 +497,18 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     markDirty(run.runId);
     flushNow();
 
-    const abortListener = (): void => {
-      void handle.session.abort().catch(() => undefined);
-    };
-    signal?.addEventListener("abort", abortListener, { once: true });
-
     let promptError: unknown;
     try {
-      await handle.session.prompt(task, { source: "extension" });
+      await handle.prompt(task, signal);
     } catch (error) {
       promptError = error;
     }
-    signal?.removeEventListener("abort", abortListener);
-
     collectStats(run, handle.session);
 
-    if (signal?.aborted || run.stopRequested) failRun(run, "stopped");
-    else if (promptError) failRun(run, "failed", errorMessage(promptError));
+    const promptFailure = promptError === undefined || (promptError instanceof Error && promptError.name === "AbortError")
+      ? undefined : errorMessage(promptError);
+    if (promptFailure !== undefined) failRun(run, "failed", promptFailure);
+    else if (signal?.aborted || run.stopRequested || promptError !== undefined) failRun(run, "stopped");
     else {
       run.status = "completed";
       run.finishedAt = Date.now();
@@ -519,7 +517,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       flushNow();
     }
 
-    await handle.dispose().catch(() => undefined);
+    try { await handle.dispose(); }
+    catch (error) { failRun(run, run.status === "stopped" ? "stopped" : "failed", [run.error, `子 Agent 清理失败：${errorMessage(error)}`].filter(Boolean).join("\n")); }
     run.session = undefined;
     run.dispose = undefined;
 
@@ -580,7 +579,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     try {
       if (!runIsLive(run)) return;
       run.stopRequested = true;
-      await run.session?.abort().catch(() => undefined);
+      if (run.dispose) await run.dispose();
+      else await run.session?.abort();
       await sleep(STOP_SETTLE_WAIT_MS);
       if (runIsLive(run)) failRun(run, "stopped");
       if (run.status === "stopped" && run.worktreePath && run.worktreeRepoRoot) {

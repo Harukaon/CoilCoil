@@ -5,19 +5,22 @@
   "description": "CoilCoil terminal coding agent",
   "type": "module",
   "bin": {
-    "coilcoil": "dist/index.js"
+    "coilcoil": "dist/index.js",
+    "coilcoil-mcp": "dist/mcp.js"
   },
   "files": [
     "dist"
   ],
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsup src/index.ts --format esm --platform node --target node22 --clean",
-    "check": "tsc --noEmit"
+    "build": "tsup",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@coilcoil/runtime-core": "0.1.0",
     "@coilcoil/runtime-protocol": "0.1.0",
+    "@coilcoil/runtime-server": "0.1.0",
     "@coilcoil/workflow": "0.1.0"
   },
   "devDependencies": {

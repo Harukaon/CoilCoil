@@ -58,7 +58,7 @@ function snapshot(session: ModelSessionDouble): SessionSnapshot {
     steering: [],
     tools: [],
     subagents: [],
-    project: { cwd: "/tmp", files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
+    project: { cwd: "/tmp", files: [], changes: [], terminals: [], refreshedAt: 0 },
     model: session.model ? {
       provider: session.model.provider,
       id: session.model.id,

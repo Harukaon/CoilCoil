@@ -150,10 +150,9 @@ test("参数小到还不如占位句，就别动它", () => {
   assert.deepEqual(planToolResultClearing(messages, new Set()).callIds, []);
 });
 
-test("todo 和 goal 的结果是当前状态，永远不清", () => {
+test("goal 的结果是当前状态，永远不清", () => {
   const messages = [
     ...history(3),
-    toolCall("todo-1", "todo"), toolResult("todo-1", "todo", 40_000),
     toolCall("goal-1", "goal"), toolResult("goal-1", "goal", 40_000),
     ...recentTail(),
   ];
@@ -314,14 +313,14 @@ test("交给 pi 去摘要的那一段，工具内容全清掉", () => {
   assert.match(result.content[0].text, /上下文已清理/);
 });
 
-test("摘要那一段里，todo 和 goal 照样留着", () => {
+test("摘要那一段里，goal 照样留着", () => {
   const messages = [
     ...history(2),
-    toolCall("todo-1", "todo"), toolResult("todo-1", "todo", 40_000),
+    toolCall("goal-1", "goal"), toolResult("goal-1", "goal", 40_000),
   ];
   clearForSummary(messages as never[]);
-  const todo = messages[5] as unknown as { content: Array<{ text: string }> };
-  assert.equal(todo.content[0].text.length, 40_000, "当前状态不能在摘要里丢掉");
+  const goal = messages[5] as unknown as { content: Array<{ text: string }> };
+  assert.equal(goal.content[0].text.length, 40_000, "当前状态不能在摘要里丢掉");
 });
 
 test("压缩之前先把那一段瘦下来，pi 自己的逻辑一行不动", () => {

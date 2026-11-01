@@ -1486,14 +1486,14 @@ async function main() {
     })`);
     assert.ok(narrowConversation.conversation <= 316, `Conversation pane stopped at ${narrowConversation.conversation}px instead of 315px.`);
     assert.ok(narrowConversation.inspector >= 800);
-    const narrowTodoOverlay = await client.evaluate(`(() => {
+    const narrowActivityOverlay = await client.evaluate(`(() => {
       const conversation = document.querySelector(".conversation-pane");
       const overlays = document.querySelector(".composer-overlays");
       const composer = document.querySelector(".composer");
       if (!conversation || !overlays || !composer) return null;
       const activity = document.createElement("section");
       activity.className = "composer-activity expanded";
-      activity.innerHTML = '<div class="composer-activity-header"><strong>Todo</strong></div><div class="composer-activity-body"><ol><li>一条很长、足以验证窄布局不会越过右侧面板边界的任务文本</li></ol></div>';
+      activity.innerHTML = '<div class="composer-activity-header"><strong>代理</strong></div><div class="composer-activity-body"><ol><li>一条很长、足以验证窄布局不会越过右侧面板边界的任务文本</li></ol></div>';
       overlays.append(activity);
       const bounds = (element) => {
         const rect = element.getBoundingClientRect();
@@ -1507,9 +1507,9 @@ async function main() {
       activity.remove();
       return result;
     })()`);
-    assert.ok(narrowTodoOverlay, "The narrow Todo overlay fixture did not render.");
-    assert.ok(narrowTodoOverlay.composer.right <= narrowTodoOverlay.conversation.right + 1, `Composer overflowed the narrow conversation pane: ${JSON.stringify(narrowTodoOverlay)}`);
-    assert.ok(narrowTodoOverlay.activity.right <= narrowTodoOverlay.conversation.right + 1, `Todo overflowed the narrow conversation pane: ${JSON.stringify(narrowTodoOverlay)}`);
+    assert.ok(narrowActivityOverlay, "The narrow activity overlay fixture did not render.");
+    assert.ok(narrowActivityOverlay.composer.right <= narrowActivityOverlay.conversation.right + 1, `Composer overflowed the narrow conversation pane: ${JSON.stringify(narrowActivityOverlay)}`);
+    assert.ok(narrowActivityOverlay.activity.right <= narrowActivityOverlay.conversation.right + 1, `Activity panel overflowed the narrow conversation pane: ${JSON.stringify(narrowActivityOverlay)}`);
     const expandedHandle = await client.evaluate(`(() => {
       const bounds = document.querySelector(".right-resizer")?.getBoundingClientRect();
       return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.height / 2 } : null;
@@ -1543,27 +1543,27 @@ async function main() {
     assert.ok(Math.abs(chatComposerAlignment.chatLeft - chatComposerAlignment.composerLeft) <= 5);
     assert.ok(Math.abs(chatComposerAlignment.chatRight - chatComposerAlignment.composerRight) <= 5);
 
-    const todoOverlayLayout = await client.evaluate(`(() => {
+    const activityOverlayLayout = await client.evaluate(`(() => {
       const stack = document.querySelector(".composer-stack");
       const overlays = stack?.querySelector(".composer-overlays");
       const composer = stack?.querySelector(".composer");
       if (!stack || !overlays || !composer) return null;
       const before = stack.getBoundingClientRect().height;
-      const plan = document.createElement("section");
-      plan.className = "composer-activity expanded";
-      plan.innerHTML = '<div class="composer-activity-header"><strong>Todo</strong></div><div class="composer-activity-body"><ol><li>测试</li></ol></div>';
-      overlays.append(plan);
+      const activity = document.createElement("section");
+      activity.className = "composer-activity expanded";
+      activity.innerHTML = '<div class="composer-activity-header"><strong>代理</strong></div><div class="composer-activity-body"><ol><li>测试</li></ol></div>';
+      overlays.append(activity);
       const after = stack.getBoundingClientRect().height;
-      const position = getComputedStyle(plan).position;
+      const position = getComputedStyle(activity).position;
       const composerRect = composer.getBoundingClientRect();
       const hit = document.elementFromPoint(composerRect.left + composerRect.width / 2, composerRect.top + 4);
       const composerOwnsOverlap = Boolean(hit?.closest(".composer"));
-      plan.remove();
+      activity.remove();
       return { before, after, position, composerOwnsOverlap };
     })()`);
-    assert.equal(todoOverlayLayout?.position, "relative");
-    assert.equal(todoOverlayLayout?.after, todoOverlayLayout?.before);
-    assert.equal(todoOverlayLayout?.composerOwnsOverlap, true, "Todo/Agent activity rendered above the composer instead of behind it.");
+    assert.equal(activityOverlayLayout?.position, "relative");
+    assert.equal(activityOverlayLayout?.after, activityOverlayLayout?.before);
+    assert.equal(activityOverlayLayout?.composerOwnsOverlap, true, "Agent activity rendered above the composer instead of behind it.");
 
     await client.evaluate(`(() => {
       const project = ${JSON.stringify({
@@ -1988,17 +1988,11 @@ async function main() {
         });
         return true;
       })()`);
-      const planToken = `DESKTOP_PLAN_OK_${Date.now()}`;
       const fileToken = `DESKTOP_FILE_OK_${Date.now()}`;
       const terminalToken = `DESKTOP_TERMINAL_OK_${Date.now()}`;
       const subagentToken = `DESKTOP_SUBAGENT_OK_${Date.now()}`;
       const stoppedSubagentToken = `DESKTOP_SUBAGENT_STOP_${Date.now()}`;
       const fileName = "coilcoil-desktop-smoke.txt";
-      await submitPrompt(
-        client,
-        `You must call the todo tool once before replying. Set exactly two short plan items and mark both completed. Do not call another tool. Then reply exactly ${planToken}.`,
-        "todo",
-      );
       await submitPromptWithScrollPause(
         client,
         `You must call the write tool before replying. Create ${fileName} in the current project with exactly this content: ${fileToken}. Do not use bash or edit. Then reply exactly ${fileToken}.`,
@@ -2117,13 +2111,12 @@ async function main() {
       const eventState = await client.evaluate(`window.__coilcoilSmokeEvents`);
       const eventTypes = new Set(eventState.map((event) => event.type));
       const toolNames = new Set(eventState.map((event) => event.toolName).filter(Boolean));
-      for (const eventType of ["message_delta", "tool_started", "tool_finished", "plan_updated", "project_updated", "metrics_updated", "run_state"]) {
+      for (const eventType of ["message_delta", "tool_started", "tool_finished", "project_updated", "metrics_updated", "run_state"]) {
         assert.equal(eventTypes.has(eventType), true, `Missing streamed runtime event: ${eventType}`);
       }
       assert.equal(eventState.some((event) => event.type === "message_delta" && event.field === "text"), true);
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === true), true);
       assert.equal(eventState.some((event) => event.type === "run_state" && event.running === false), true);
-      assert.equal(toolNames.has("todo"), true, "The live Agent did not emit the todo tool lifecycle.");
       assert.equal(toolNames.has("write"), true, "The live Agent did not emit the write tool lifecycle.");
       assert.equal(toolNames.has("subagent"), true, "The packaged Agent did not emit the bundled subagent lifecycle.");
       assert.equal([...toolNames].some((name) => name === "bash" || name.startsWith("terminal")), true, "The live Agent did not emit a terminal tool lifecycle.");

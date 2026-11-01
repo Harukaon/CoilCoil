@@ -12,6 +12,7 @@ import { ToolRunIds } from "../src/tool-run-ids.js";
 interface RuntimeInternals {
   active?: Record<string, unknown>;
   handleSessionEvent(event: unknown): void;
+  reconstructState(session: AgentSession): { terminals: Map<string, TerminalRun> };
 }
 
 interface ActiveForTest {
@@ -56,8 +57,7 @@ function startRuntime(root: string, events: RuntimeEvent[]): { internals: Runtim
     tools: new Map(),
     subagents: new Map(),
     terminals: new Map(),
-    plan: [],
-    project: { cwd: root, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
+    project: { cwd: root, files: [], changes: [], terminals: [], refreshedAt: 0 },
     messageIds: new WeakMap(),
     messageRevision: 0,
     pendingUserPrompts: [],
@@ -72,6 +72,39 @@ function startRuntime(root: string, events: RuntimeEvent[]): { internals: Runtim
   };
   return { internals, active: internals.active as unknown as ActiveForTest, manager };
 }
+
+test("monitor controls and observation never create a second shell card", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "coilcoil-monitor-shell-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const { internals, active, manager } = startRuntime(root, []);
+  const calls = [
+    { id: "launch", args: { action: "start", command: "printf READY" } },
+    { id: "default-launch", args: { command: "printf DONE" } },
+    { id: "observe", args: { action: "start", terminalId: "managed-1" } },
+    { id: "wait", args: { action: "wait", command: "ignored for this action" } },
+    { id: "list", args: { action: "list" } },
+    { id: "stop", args: { action: "stop" } },
+  ];
+  for (const call of calls) {
+    internals.handleSessionEvent({ type: "tool_execution_start", toolCallId: call.id, toolName: "monitor", args: call.args });
+  }
+  assert.deepEqual([...active.terminals.keys()], ["launch", "default-launch"], "only a monitor that launches a command owns a terminal");
+  assert.equal(active.tools.size, calls.length, "every monitor action still owns its tool card");
+
+  manager.appendMessage({ role: "assistant", timestamp: Date.now(), stopReason: "toolUse",
+    content: calls.map((call) => ({ type: "toolCall", id: call.id, name: "monitor", arguments: call.args })) } as never);
+  const session = internals.active!.session as AgentSession;
+  assert.deepEqual([...internals.reconstructState(session).terminals.keys()], ["launch", "default-launch"], "incomplete restored monitor controls do not become abandoned shells");
+  for (const call of calls) {
+    manager.appendMessage({ role: "toolResult", toolName: "monitor", toolCallId: call.id, timestamp: Date.now(),
+      content: [{ type: "text", text: "registered" }], details: call.id === "launch" || call.id === "default-launch"
+        ? { background_shell_id: call.id === "launch" ? "managed-1" : "managed-2", is_running_in_background: true }
+        : { id: `watch-${call.id}` } } as never);
+  }
+  const restored = internals.reconstructState(session);
+  assert.deepEqual([...restored.terminals.keys()], ["managed-1", "managed-2"], "restored subscriptions reuse the launched terminal");
+  assert.equal(restored.terminals.get("managed-1")?.command, "printf READY");
+});
 
 test("a tool call from a dropped stream is closed instead of spinning forever", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "coilcoil-abandoned-tool-"));

@@ -24,6 +24,7 @@ export const MAX_BATCH_NOTICES = 30;
 
 export interface TerminalNoticeEvent {
   terminalId: string;
+  monitorId?: string;
   mode: TerminalNotifyOn;
   status: TerminalStatus;
   /** One-line reason, without the `Terminal <id>：` prefix. */
@@ -55,11 +56,15 @@ export interface NoticeDispatcher {
    * Drop this terminal's held events because a tool call just returned its
    * state to the Agent. The tool result already carries what the event says.
    */
-  markObserved(terminalId: string): void;
+  markObserved(terminalId: string, keepMonitorId?: string): void;
+  /** Consume queued events when an already-ready monitor returns them in its tool result. */
+  take(terminalIds: readonly string[]): TerminalNoticeEvent[];
   setAgentRunning(running: boolean): void;
   /** Send whatever is held right now; used by shutdown and by tests. */
   flush(): void;
   pendingCount(): number;
+  /** Discard queued events when the user stops a run; future runs may still use the dispatcher. */
+  clear(): void;
   dispose(): void;
 }
 
@@ -84,6 +89,7 @@ export function formatNotices(events: TerminalNoticeEvent[], omitted = 0): Notic
   const budget = tailBudgetFor(events.length);
   const notices = events.map((event) => ({
     terminalId: event.terminalId,
+    ...(event.monitorId ? { monitorId: event.monitorId } : {}),
     mode: event.mode,
     status: event.status,
     reason: event.reason,
@@ -178,9 +184,11 @@ export function createNoticeDispatcher(options: NoticeDispatcherOptions): Notice
     enqueue(event) {
       if (disposed) return;
       const index = pending.findIndex((held) => (
-        held.terminalId === event.terminalId && held.mode === event.mode
+        held.terminalId === event.terminalId && held.mode === event.mode && held.monitorId === event.monitorId
       ));
-      if (index >= 0) pending[index] = event;
+      if (index >= 0) pending[index] = event.monitorId
+        ? { ...event, output: [pending[index]!.output, event.output].filter(Boolean).join("\n").slice(-NOTICE_TAIL_MAX) }
+        : event;
       else pending.push(event);
       while (pending.length > MAX_BATCH_NOTICES) {
         pending.shift();
@@ -188,11 +196,18 @@ export function createNoticeDispatcher(options: NoticeDispatcherOptions): Notice
       }
       schedule();
     },
-    markObserved(terminalId) {
-      const kept = pending.filter((held) => held.terminalId !== terminalId);
+    markObserved(terminalId, keepMonitorId) {
+      const kept = pending.filter((held) => held.terminalId !== terminalId || (keepMonitorId !== undefined && held.monitorId === keepMonitorId));
       if (kept.length === pending.length) return;
       pending = kept;
       if (pending.length === 0 && omitted === 0) clearTimer();
+    },
+    take(terminalIds) {
+      const ids = new Set(terminalIds);
+      const selected = pending.filter((held) => ids.has(held.terminalId));
+      pending = pending.filter((held) => !ids.has(held.terminalId));
+      if (pending.length === 0) { clearTimer(); omitted = 0; }
+      return selected;
     },
     setAgentRunning(running) {
       agentRunning = running;
@@ -208,6 +223,12 @@ export function createNoticeDispatcher(options: NoticeDispatcherOptions): Notice
     },
     pendingCount() {
       return pending.length;
+    },
+    clear() {
+      clearTimer();
+      pending = [];
+      omitted = 0;
+      wakeSentAt = undefined;
     },
     dispose() {
       disposed = true;

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile, rm, stat } from "node:fs/promises";
 import test from "node:test";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
-import {
+import coilcoilMcpTools, {
   MCP_MANAGER_CHANNEL,
+  MCP_TOOLS_REFRESH_ENTRY,
+  MCP_TOOLS_SNAPSHOT_ENTRY,
   describeServerTools,
   describeServers,
   directToolName,
@@ -85,17 +88,232 @@ test("直接注册的工具名字带着服务器，横杠换成下划线", () =>
 });
 
 test("MCP 工具报错（返回 isError）时，mcp 工具如实标成失败", async () => {
-  const { default: coilcoilMcpTools } = await import("../extensions/mcp-tools.ts");
   const tools = new Map<string, { execute: (...args: unknown[]) => Promise<{ isError: boolean; content: Array<{ text: string }> }> }>();
   const manager = {
     callTool: async () => ({ content: [{ type: "text", text: "Error: No page found" }], isError: true }),
     directTools: async () => [],
   };
   coilcoilMcpTools({
+    on: () => () => undefined,
     events: { emit: (channel: string, data: { manager?: unknown }) => { if (channel === MCP_MANAGER_CHANNEL) data.manager = manager; } },
     registerTool: (tool: never) => { const entry = tool as { name: string; execute: never }; tools.set(entry.name, entry); },
   } as never);
   const result = await tools.get("mcp")!.execute("t", { action: "call", server: "some-server", tool: "x" }, undefined, undefined, undefined);
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /No page found/);
+});
+
+type ToolResult = {
+  content: Array<{ type: string; text?: string }>;
+  details: Record<string, unknown>;
+  isError: boolean;
+};
+
+type SavedEntry = { type: "custom"; customType: string; data: unknown };
+function lifecycle(manager: unknown, entries: SavedEntry[] = [], sessionId = "session-a") {
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  const tools = new Map<string, { name: string; description: string; parameters: unknown;
+    execute: (id: string, params: Record<string, unknown>) => Promise<ToolResult> }>();
+  let active: string[] = [];
+  coilcoilMcpTools({
+    on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { handlers.set(name, handler); },
+    events: { emit: (name: string, data: { manager?: unknown }) => { if (name === MCP_MANAGER_CHANNEL) data.manager = manager; } },
+    registerTool: (tool: never) => { const entry = tool as { name: string; description: string; parameters: unknown; execute: never };
+      tools.set(entry.name, entry); if (!active.includes(entry.name)) active.push(entry.name); },
+    getActiveTools: () => [...active],
+    setActiveTools: (names: string[]) => { active = [...names]; },
+    appendEntry: (customType: string, data: unknown) => { entries.push({ type: "custom", customType, data }); },
+  } as never);
+  const ctx = { sessionManager: { getBranch: () => entries, getSessionId: () => sessionId } };
+  return { tools, entries, active: () => [...active], emit: (name: string) => handlers.get(name)?.({}, ctx) };
+}
+
+async function registerMcpResult(result: unknown) {
+  const manager = {
+    callTool: async () => result,
+    directTools: async () => [{ server: "test-server", tool: { name: "query" } }],
+  };
+  const harness = lifecycle(manager);
+  harness.emit("session_start");
+  // Direct tools register after the runtime's asynchronous discovery.
+  await Promise.resolve();
+  return (direct = false) => harness.tools.get(direct ? "mcp__test_server__query" : "mcp")!.execute("t", {
+    action: "call", server: "test-server", tool: "query",
+  });
+}
+
+const MCP_TEXT_LIMIT = 20 * 1024;
+
+for (const direct of [false, true]) {
+  test(`${direct ? "直接注册" : "mcp 调用"}的超大单行结果截断入模，完整原文仍可读取`, async (context) => {
+    // Regression: two 1,491,600-character query results overflowed the live context.
+    const original = `BEGIN${"x".repeat(1_491_592)}END`;
+    const run = await registerMcpResult({ content: [{ type: "text", text: original }] });
+    const result = await run(direct);
+    const text = result.content.map((part) => part.text ?? "").join("\n");
+    assert.ok(Buffer.byteLength(text) < MCP_TEXT_LIMIT + 1024, "model-facing output must stay bounded");
+    assert.match(text, /BEGIN/);
+    assert.match(text, /END/);
+    assert.match(text, /truncated/);
+    assert.equal(result.isError, false);
+    assert.equal(result.details.server, "test-server");
+    assert.equal(result.details.tool, "query");
+    const fullOutputPath = result.details.fullOutputPath;
+    assert.equal(typeof fullOutputPath, "string");
+    context.after(() => rm(fullOutputPath as string, { force: true }));
+    assert.ok(text.includes(fullOutputPath as string), "the model needs the path to read the full result");
+    assert.match(text, /offset\/limit/);
+    assert.equal(await readFile(fullOutputPath as string, "utf8"), original);
+    if (process.platform !== "win32") assert.equal((await stat(fullOutputPath as string)).mode & 0o777, 0o600);
+  });
+}
+
+test("MCP 返回刚好 20KB 时保持原样", async () => {
+  const original = "x".repeat(MCP_TEXT_LIMIT);
+  const run = await registerMcpResult({ content: [{ type: "text", text: original }] });
+  const result = await run();
+  assert.equal(result.content[0].text, original);
+  assert.equal(result.details.fullOutputPath, undefined);
+});
+
+test("首轮不等待 MCP 网络；迟到或已关闭的发现不能回填会话工具", async () => {
+  for (const mode of ["ready", "late", "shutdown"] as const) {
+    let release!: (tools: unknown[]) => void;
+    const pending = new Promise<unknown[]>((resolve) => { release = resolve; });
+    const harness = lifecycle({ directTools: () => pending });
+    harness.emit("session_start");
+    assert.deepEqual(harness.active(), ["mcp"]);
+    if (mode === "late") assert.equal(harness.emit("before_agent_start"), undefined, "the turn must proceed without waiting for discovery");
+    if (mode === "shutdown") harness.emit("session_shutdown");
+    release([{ server: "local", tool: { name: "query", description: "Query" } }]);
+    await pending;
+    await Promise.resolve();
+    if (mode === "ready") harness.emit("before_agent_start");
+    assert.deepEqual(harness.active(), mode === "ready" ? ["mcp", "mcp__local__query"] : ["mcp"]);
+  }
+});
+
+test("MCP direct schemas and order survive resume; an explicit user refresh adopts the new schemas", async () => {
+  const original = [
+    { server: "z", tool: { name: "query", description: "Original query", inputSchema: { type: "object", required: ["filter"],
+      properties: { filter: { type: "object", required: ["id"], properties: { id: { type: "integer" } } } } } } },
+    { server: "a", tool: { name: "read", description: "Original read", inputSchema: { type: "object", properties: {} } } },
+  ];
+  let discoveryCalls = 0;
+  let available = original;
+  const manager = { directTools: async () => { discoveryCalls++; return available; } };
+  const first = lifecycle(manager);
+  first.emit("session_start");
+  await Promise.resolve();
+  first.emit("before_agent_start");
+  assert.deepEqual(first.active(), ["mcp", "mcp__a__read", "mcp__z__query"]);
+  const schema = structuredClone(first.tools.get("mcp__z__query")!.parameters);
+  first.emit("session_shutdown");
+  available = [{ ...original[0], tool: { ...original[0].tool, description: "Changed query", inputSchema: { type: "object", properties: {} } } }];
+  const resumed = lifecycle(manager, first.entries);
+  resumed.emit("session_start");
+  await Promise.resolve();
+  assert.equal(discoveryCalls, 1, "resume must replay persisted definitions without discovering a changed schema");
+  assert.deepEqual(resumed.active(), first.active());
+  assert.equal(resumed.tools.get("mcp__z__query")!.description, "Original query");
+  assert.deepEqual(resumed.tools.get("mcp__z__query")!.parameters, schema);
+  resumed.emit("before_agent_start");
+  assert.equal(first.entries.filter((entry) => entry.customType === MCP_TOOLS_SNAPSHOT_ENTRY).length, 1);
+
+  first.entries.push({ type: "custom", customType: MCP_TOOLS_REFRESH_ENTRY, data: { version: 1 } });
+  resumed.emit("session_tree");
+  await Promise.resolve();
+  resumed.emit("before_agent_start");
+  assert.equal(discoveryCalls, 2);
+  assert.deepEqual(resumed.active(), ["mcp", "mcp__z__query"]);
+  assert.equal(resumed.tools.get("mcp__z__query")!.description, "Changed query");
+  assert.deepEqual(resumed.tools.get("mcp__z__query")!.parameters, available[0].tool.inputSchema);
+});
+
+test("an empty first-turn direct tool snapshot remains empty on resume and a prior branch's discovery is discarded", async () => {
+  let release!: (value: unknown[]) => void;
+  const pending = new Promise<unknown[]>((resolve) => { release = resolve; });
+  const first = lifecycle({ directTools: () => pending });
+  first.emit("session_start");
+  first.emit("before_agent_start");
+  const restored = lifecycle({ directTools: async () => { throw new Error("must not discover on resume"); } }, first.entries);
+  restored.emit("session_start");
+  assert.deepEqual(restored.active(), ["mcp"]);
+  first.emit("session_tree");
+  release([{ server: "late", tool: { name: "tool" } }]);
+  await pending;
+  await Promise.resolve();
+  assert.deepEqual(first.active(), ["mcp"]);
+});
+
+test("MCP 多个文本块共享输出预算", async (context) => {
+  const parts = ["a".repeat(16 * 1024), "b".repeat(16 * 1024)];
+  const run = await registerMcpResult({ content: parts.map((text) => ({ type: "text", text })) });
+  const result = await run();
+  const fullOutputPath = result.details.fullOutputPath;
+  assert.equal(typeof fullOutputPath, "string");
+  context.after(() => rm(fullOutputPath as string, { force: true }));
+  assert.ok(Buffer.byteLength(result.content[0].text ?? "") < MCP_TEXT_LIMIT + 1024);
+  assert.equal(await readFile(fullOutputPath as string, "utf8"), parts.join("\n"));
+});
+
+test("中文和 emoji 的 MCP 结果按字节限制，截断不破坏字符", async (context) => {
+  const original = "汉字🙂".repeat(4096);
+  const run = await registerMcpResult({ content: [{ type: "text", text: original }] });
+  const result = await run();
+  const fullOutputPath = result.details.fullOutputPath;
+  assert.equal(typeof fullOutputPath, "string");
+  context.after(() => rm(fullOutputPath as string, { force: true }));
+  assert.ok(Buffer.byteLength(result.content[0].text ?? "") < MCP_TEXT_LIMIT + 1024);
+  assert.doesNotMatch(result.content[0].text ?? "", /\uFFFD/);
+  assert.equal(await readFile(fullOutputPath as string, "utf8"), original);
+});
+
+test("直接注册的 MCP 工具保留服务器返回的失败状态", async () => {
+  const run = await registerMcpResult({ content: [{ type: "text", text: "Error: No page found" }], isError: true });
+  const result = await run(true);
+  assert.equal(result.isError, true);
+  assert.equal(result.content[0].text, "Error: No page found");
+});
+
+test("MCP 工具清单提供完整参数 schema，包含必填字段和嵌套约束", () => {
+  const inputSchema = {
+    type: "object",
+    required: ["filters"],
+    properties: { filters: { type: "object", required: ["status"], properties: { status: { enum: ["open", "closed"] } } } },
+  };
+  const rendered = describeServerTools("test-server", {
+    status: "connected",
+    tools: [{ name: "query", description: "Query records", inputSchema }],
+  });
+  assert.ok(rendered.includes(JSON.stringify(inputSchema)), "listing names alone makes the model guess required arguments");
+});
+
+for (const direct of [false, true]) {
+  test(`${direct ? "直接注册" : "mcp 调用"}保留截图，同时限制附带的超长文本`, async (context) => {
+    const image = { type: "image", data: "aW1hZ2U=", mimeType: "image/png" };
+    const original = "snapshot".repeat(10_000);
+    const run = await registerMcpResult({ content: [{ type: "text", text: original }, image] });
+    const result = await run(direct);
+    assert.deepEqual(result.content.find((part) => part.type === "image"), image, "screenshots must reach the model as images");
+    const fullOutputPath = result.details.fullOutputPath;
+    assert.equal(typeof fullOutputPath, "string");
+    context.after(() => rm(fullOutputPath as string, { force: true }));
+    const text = result.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+    assert.ok(Buffer.byteLength(text) < MCP_TEXT_LIMIT + 1024);
+    assert.equal(await readFile(fullOutputPath as string, "utf8"), original);
+  });
+
+  test(`${direct ? "直接注册" : "mcp 调用"}不丢弃只有 structuredContent 的结果`, async () => {
+    const structuredContent = { rows: [{ id: 42 }], total: 1 };
+    const run = await registerMcpResult({ content: [], structuredContent });
+    const result = await run(direct);
+    assert.deepEqual(JSON.parse(result.content[0].text ?? ""), structuredContent);
+  });
+}
+
+test("MCP 返回的内嵌文本资源交给模型", async () => {
+  const run = await registerMcpResult({ content: [{ type: "resource", resource: { uri: "docs://report", mimeType: "text/plain", text: "report content" } }] });
+  const result = await run();
+  assert.match(result.content.map((part) => part.text ?? "").join("\n"), /report content/);
 });

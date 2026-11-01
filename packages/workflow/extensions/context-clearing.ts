@@ -84,7 +84,7 @@ const KEEP_RECENT_TOKENS = 20_000;
  * Tools whose result *is* live state rather than a lookup: the model has to
  * keep seeing the latest one, and re-running the tool would not reproduce it.
  */
-const STATE_TOOLS = new Set(["todo", "goal"]);
+const STATE_TOOLS = new Set(["goal"]);
 
 const CLEARED_PREFIX = "[上下文已清理]";
 /**
@@ -311,7 +311,7 @@ export function planToolResultClearing(
       const result = message as ToolResultMessage;
       const key = resultKey(result);
       if (cleared.has(key)) continue;
-      // todo / goal 是「当前状态」，不是查阅内容：清掉它模型就不知道自己在做什么了。
+      // goal 是「当前状态」，不是查阅内容：清掉它模型就不知道自己在做什么了。
       if (STATE_TOOLS.has(result.toolName)) continue;
       toolCallIds.push(key);
       freedTokens += resultTokens(result);

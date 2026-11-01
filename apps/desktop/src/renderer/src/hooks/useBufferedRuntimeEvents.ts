@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { RuntimeEvent } from "@coilcoil/runtime-protocol";
 import { diagnostics } from "../diagnostics";
+import type { MessageDeltaPart } from "../features/conversation/conversationMessages";
 
 /** One runtime event with the session runtime it came from. */
 export interface BufferedRuntimeEvent {
   event: RuntimeEvent;
   runtimeId?: string;
+  deltaParts?: readonly MessageDeltaPart[];
 }
 
 /**
@@ -62,8 +64,13 @@ export function coalesceRuntimeEvents(events: readonly BufferedRuntimeEvent[]): 
     ) {
       folded[folded.length - 1] = {
         runtimeId: entry.runtimeId,
+        deltaParts: [
+          ...previous.deltaParts ?? [{ revision: previous.event.revision, delta: previous.event.delta }],
+          ...entry.deltaParts ?? [{ revision: entry.event.revision, delta: entry.event.delta }],
+        ],
         event: {
           ...entry.event,
+          revision: Math.max(previous.event.revision, entry.event.revision),
           delta: `${previous.event.delta}${entry.event.delta}`,
         },
       };
@@ -91,7 +98,7 @@ export function coalesceRuntimeEvents(events: readonly BufferedRuntimeEvent[]): 
  * idle app stays as responsive as it was.
  */
 export function useBufferedRuntimeEvents(
-  apply: (event: RuntimeEvent, runtimeId?: string) => void,
+  apply: (event: RuntimeEvent, runtimeId?: string, deltaParts?: readonly MessageDeltaPart[]) => void,
   flushIntervalMs = RUNTIME_EVENT_FLUSH_MS,
 ): (event: RuntimeEvent, runtimeId?: string) => void {
   const queue = useRef<BufferedRuntimeEvent[]>([]);
@@ -119,8 +126,8 @@ export function useBufferedRuntimeEvents(
       });
     }
     const startedAt = performance.now();
-    for (const { event, runtimeId } of folded) {
-      applyRef.current(event, runtimeId);
+    for (const { event, runtimeId, deltaParts } of folded) {
+      applyRef.current(event, runtimeId, deltaParts);
     }
     const applyMs = performance.now() - startedAt;
     if (applyMs >= SLOW_FLUSH_LAG_MS) {

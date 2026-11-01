@@ -34,6 +34,7 @@ export default defineConfig({
           "@coilcoil/runtime-core",
           "@coilcoil/runtime-protocol",
           "@coilcoil/runtime-server",
+          "@coilcoil/workflow",
         ],
       }),
     ],
@@ -42,6 +43,7 @@ export default defineConfig({
         input: {
           index: resolve("src/main/index.ts"),
           runtime: resolve("src/runtime/index.ts"),
+          "mcp-cli": resolve("../cli/src/mcp.ts"),
         },
       },
     },

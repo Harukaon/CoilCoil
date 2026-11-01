@@ -240,7 +240,7 @@ async function main() {
       pane.style.setProperty("--chat-content-width", "360px");
       const activity = document.createElement("section");
       activity.className = "composer-activity expanded";
-      activity.innerHTML = '<div class="composer-activity-header"><strong>Todo</strong><button class="composer-activity-toggle"><small>0/6</small></button></div>';
+      activity.innerHTML = '<div class="composer-activity-header"><strong>代理</strong><button class="composer-activity-toggle"><small>1 个运行中</small></button></div>';
       overlays.append(activity);
       const stackWidth = stack.getBoundingClientRect().width;
       const expandedWidth = activity.getBoundingClientRect().width;

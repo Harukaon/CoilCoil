@@ -1,7 +1,7 @@
 ---
 name: worker
 description: Coding agent that carries out concrete code writing and modification tasks
-tools: [read, bash, terminal, edit, write, grep, ls, mcp]
+tools: [read, bash, terminal, monitor, edit, write, grep, ls, mcp]
 worktree: true
 ---
 

@@ -87,10 +87,27 @@ test("第 1 层只有压完 ≤ 窗口 35% 才采用", () => {
   assert.ok(!accumulated.accept, "整理稿越积越多、单靠第 1 层压不下去时，自然升级到第 2 层");
 });
 
+test("第 1 层必须低于实际压缩线，避免高 reserve 配置下刚压完又触发", () => {
+  const plan = planLayer1({ messages: [{ role: "user", content: "中".repeat(4_000) }], files: "",
+    keptTokens: 0, overheadTokens: 0, contextWindow: 20_000, reserveTokens: 16_384 });
+  assert.ok(plan.estimatedAfter < 20_000 * 0.35);
+  assert.ok(plan.estimatedAfter > 20_000 - 16_384);
+  assert.equal(plan.accept, false);
+});
+
 test("按预算切块，单条超大的按字切开", () => {
   const chunks = chunkUnits(["短".repeat(100), "长".repeat(5000), "短".repeat(100)], 1000);
   assert.ok(chunks.length >= 5, `应切成多块，实际 ${chunks.length}`);
   for (const chunk of chunks) assert.ok(estimateTextTokens(chunk) <= 1000);
+});
+
+test("分块预算按每一块计算，中文集中在开头也不超限且原文完整", () => {
+  const material = "中".repeat(2000) + "a".repeat(8000);
+  const chunks = chunkUnits([material], 2000);
+  assert.equal(chunks.join(""), material);
+  for (const chunk of chunks) {
+    assert.ok(estimateTextTokens(chunk) <= 2000, `一块实际有 ${estimateTextTokens(chunk)} token，超过 2000`);
+  }
 });
 
 function fakeRequest(options: { tooLong?: (request: SummaryRequest) => boolean } = {}) {
@@ -124,6 +141,33 @@ test("第 2 层：装不下就分块同时写，再合并成一份", async () =>
   assert.ok(result.text.startsWith("摘要(合并"));
 });
 
+test("第 2 层：一块失败就取消同批请求，停止后续排队并等待在途请求退出", async () => {
+  const started: string[] = [];
+  let stopped = false;
+  await assert.rejects(summarize({
+    units: Array.from({ length: 8 }, () => "中".repeat(4_000)), contextWindow: 8_000, modelMaxTokens: 1_024, concurrency: 2,
+    request: async (request) => {
+      started.push(request.label);
+      if (started.length === 1) throw new Error("invalid credentials");
+      await new Promise<void>((resolve) => {
+        if (request.signal?.aborted) resolve();
+        else request.signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      stopped = true;
+      throw new Error("sibling cancelled");
+    },
+  }), /invalid credentials/);
+  assert.equal(started.length, 2, "queued chunks must not start after failure");
+  assert.equal(stopped, true, "the failed compaction must not leave a request running");
+});
+
+test("第 2 层：小输出模型的分块与合并请求都遵守输出上限", async () => {
+  const { calls, request } = fakeRequest();
+  const result = await summarize({ units: ["中".repeat(20_000)], contextWindow: 8_000, modelMaxTokens: 1_024, request });
+  assert.ok(result.chunks > 1);
+  assert.ok(calls.every((call) => call.maxTokens <= 1_024));
+});
+
 test("第 2 层：某一块模型说太长，就把这块对半切开重来", async () => {
   let refused = 0;
   let refusedLabel = "";
@@ -138,6 +182,29 @@ test("第 2 层：某一块模型说太长，就把这块对半切开重来", as
   assert.equal(refused, 1);
   assert.equal(calls.filter((call) => call.label === refusedLabel).length, 3, "被拒一次，拆成两半各写一次");
   assert.ok(result.text.startsWith("摘要(合并"));
+});
+
+test("第 2 层：旧摘要超过新模型窗口时，旧摘要本身也要分块压缩", async () => {
+  const seen = new Set<string>();
+  const markers = ["旧目标必须保留", "旧约束必须保留", "最新进度必须保留"];
+  const previousSummary = `${markers[0]}\n${"旧".repeat(10_000)}\n${markers[1]}`;
+  const result = await summarize({
+    units: [markers[2]],
+    previousSummary,
+    contextWindow: 8000,
+    modelMaxTokens: 2000,
+    request: async (req) => {
+      const inputTokens = estimateTextTokens(req.system) + estimateTextTokens(req.prompt);
+      if (inputTokens + req.maxTokens > 8000) throw new InputTooLongError("prompt is too long");
+      const contained = markers.filter((marker) => req.prompt.includes(marker));
+      for (const marker of contained) seen.add(marker);
+      return { text: contained.join("\n") || "历史细节摘要", inputTokens, outputTokens: 20 };
+    },
+  });
+  for (const marker of markers) {
+    assert.ok(seen.has(marker), `${marker} 应交给摘要模型`);
+    assert.ok(result.text.includes(marker), `${marker} 应保留到最终合并`);
+  }
 });
 
 test("认得出各家「输入太长」的报错", () => {
@@ -155,9 +222,11 @@ interface Handler { (event: unknown, ctx: unknown): Promise<unknown> }
 function harness() {
   const handlers = new Map<string, Handler>();
   const events: Array<Record<string, unknown>> = [];
+  const notices: string[] = [];
+  let aborts = 0;
   const pi = {
     on: (name: string, handler: Handler) => { handlers.set(name, handler); },
-    events: { emit: (channel: string, data: unknown) => { if (channel === COMPACTION_EVENT) events.push(data as Record<string, unknown>); } },
+    events: { on: () => () => {}, emit: (channel: string, data: unknown) => { if (channel === COMPACTION_EVENT) events.push(data as Record<string, unknown>); } },
     getActiveTools: () => ["read"],
     getAllTools: () => [{ name: "read", description: "读文件", parameters: { type: "object" } }],
   };
@@ -170,8 +239,10 @@ function harness() {
     },
     sessionManager: { getSessionFile: () => "/tmp/s.jsonl" },
     getSystemPrompt: () => "系统提示",
+    abort: () => { aborts++; },
+    ui: { notify: (message: string) => { notices.push(message); } },
   });
-  return { handler: handlers.get("session_before_compact")!, events, ctx };
+  return { handler: handlers.get("session_before_compact")!, events, ctx, notices, aborts: () => aborts };
 }
 
 function compactEvent(messages: LlmMessage[], reason = "threshold") {
@@ -230,4 +301,52 @@ test("保留区大小按原样发送的量算；文件清单接上上一次压�
   const merged = mergedFileOps({ read: new Set(["new.ts"]), written: new Set<string>(), edited: new Set<string>() }, branch as never);
   assert.deepEqual([...merged.read].sort(), ["new.ts", "old.ts"]);
   assert.deepEqual([...merged.edited], ["gone.ts"]);
+});
+
+test("扩展：阈值压缩失败的冷却不能阻止上下文溢出恢复", async () => {
+  const { handler, events, ctx } = harness();
+  const long = [{ role: "user", content: [{ type: "text", text: "需求说明".repeat(1500) }] }, ...conversation()];
+  await handler(compactEvent(long), ctx(8_000, false));
+  const before = events.length;
+  await handler(compactEvent(long, "overflow"), ctx(8_000, false));
+  const recovery = events.slice(before);
+  assert.ok(recovery.some((event) => event.phase === "failed" && event.reason === "overflow"), "overflow must attempt recovery even during threshold cooldown");
+  assert.ok(!recovery.some((event) => event.phase === "skipped"));
+});
+
+test("扩展：切换模型或调整窗口后不沿用旧模型的压缩失败冷却", async () => {
+  const { handler, events, ctx } = harness();
+  const long = [{ role: "user", content: [{ type: "text", text: "需求说明".repeat(1500) }] }, ...conversation()];
+  await handler(compactEvent(long), ctx(8_000, false));
+  const changedModel = ctx(8_000, false);
+  changedModel.model.id = "another-model";
+  const before = events.length;
+  await handler(compactEvent(long), changedModel);
+  await handler(compactEvent(long), ctx(9_000, false));
+  const attempts = events.slice(before);
+  assert.equal(attempts.filter((event) => event.phase === "failed").length, 2, "the new model and window each need their own attempt");
+  assert.ok(!attempts.some((event) => event.phase === "skipped"));
+});
+
+test("扩展：压缩失败或冷却跳过时，阻止仍超窗口的旧上下文发给上游", async () => {
+  const { handler, events, ctx, notices, aborts } = harness();
+  const long = [{ role: "user", content: [{ type: "text", text: "需求说明".repeat(1500) }] }, ...conversation()];
+  await handler(compactEvent(long), ctx(8_000, false));
+  assert.equal(aborts(), 1);
+  assert.ok(notices.some((message) => message.includes("已暂停本轮")));
+  await handler(compactEvent(long), ctx(8_000, false));
+  assert.equal(aborts(), 2, "cooldown must not allow an oversized request through either");
+  assert.equal(events.filter((event) => event.phase === "blocked").length, 2);
+});
+
+test("扩展：手动压缩失败、以及仍能装入窗口的自动压缩失败不终止当前运行", async () => {
+  const long = [{ role: "user", content: [{ type: "text", text: "需求说明".repeat(1500) }] }, ...conversation()];
+  const manual = harness();
+  await manual.handler(compactEvent(long, "manual"), manual.ctx(8_000, false));
+  assert.equal(manual.aborts(), 0);
+  const automatic = harness();
+  const event = compactEvent(long);
+  event.preparation.tokensBefore = 7_500;
+  await automatic.handler(event, automatic.ctx(8_000, false));
+  assert.equal(automatic.aborts(), 0);
 });

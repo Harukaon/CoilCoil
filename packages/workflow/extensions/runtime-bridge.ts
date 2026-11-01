@@ -1,4 +1,4 @@
-import type { ContextEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { UNRESTRICTED_SYSTEM_PROMPT } from "./unrestricted-system-prompt.ts";
 
 type AgentMessage = ContextEvent["messages"][number];
@@ -8,6 +8,16 @@ export const RUNTIME_BRIDGE_COMMAND_EVENT = "coilcoil:runtime-bridge:command:v1"
 export const RUNTIME_BRIDGE_REPLY_PREFIX = "coilcoil:runtime-bridge:reply:v1:";
 export const RUNTIME_BRIDGE_STATE_EVENT = "coilcoil:runtime-bridge:state:v1";
 export const RUNTIME_BRIDGE_POLICY_ENTRY = "coilcoil-runtime-bridge-policy";
+export const SESSION_PROMPT_SNAPSHOT_ENTRY = "coilcoil-session-prompt-snapshot";
+
+interface SessionPromptSnapshot {
+  version: 1;
+  sessionId: string;
+  systemPrompt: string;
+  agentMode: AgentMode;
+  systemPromptOverride?: string;
+  disabledSkills: string[];
+}
 
 interface RuntimeBridgeCommand {
   version: 1;
@@ -24,6 +34,7 @@ export interface RuntimeBridgeState {
   agentMode: AgentMode;
   effectiveSystemPrompt?: string;
   systemPromptOverride?: string;
+  promptLocked: boolean;
   disabledSkills: string[];
   readSkills: string[];
   contextMessages?: AgentMessage[];
@@ -81,6 +92,21 @@ function restorePolicy(entries: readonly unknown[]): {
   return { agentMode: "standard", disabledSkills: [] };
 }
 
+function restorePromptSnapshot(ctx: ExtensionContext): SessionPromptSnapshot | undefined {
+  const sessionId = ctx.sessionManager.getSessionId();
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (entry.type !== "custom" || entry.customType !== SESSION_PROMPT_SNAPSHOT_ENTRY || !isRecord(entry.data)) continue;
+    const value = entry.data;
+    if (value.version !== 1 || value.sessionId !== sessionId || typeof value.systemPrompt !== "string") continue;
+    if (value.agentMode !== "standard" && value.agentMode !== "unrestricted") continue;
+    if (!Array.isArray(value.disabledSkills) || !value.disabledSkills.every((path) => typeof path === "string")) continue;
+    return { version: 1, sessionId, systemPrompt: value.systemPrompt, agentMode: value.agentMode,
+      systemPromptOverride: typeof value.systemPromptOverride === "string" ? value.systemPromptOverride : undefined,
+      disabledSkills: [...value.disabledSkills] };
+  }
+  return undefined;
+}
+
 export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   let effectiveSystemPrompt: string | undefined;
   let baseSystemPrompt: string | undefined;
@@ -88,27 +114,23 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
   let agentMode: AgentMode = "standard";
   let systemPromptOverride: string | undefined;
   let contextMessages: AgentMessage[] | undefined;
+  let promptSnapshot: SessionPromptSnapshot | undefined;
   const disabledSkills = new Set<string>();
   const readSkills = new Set<string>();
 
-  /**
-   * Re-read the prompt the session would actually start from.
-   *
-   * `session_start` fires before the session is finished being configured, and
-   * the prompt keeps changing afterwards — the MCP adapter discovers its
-   * servers asynchronously and activates their tools, which rebuilds it. A
-   * value cached at session start therefore describes a session that no longer
-   * exists, and the runtime inspector was reporting it as the effective prompt.
-   *
-   * During a turn Pi's own `systemPrompt` is already the per-turn one, so this
-   * stays correct there too and does not fight `before_agent_start`.
-   */
+  // Discovery may still finish before the first turn. After that, even the
+  // inspector must describe the saved prompt rather than a rebuilt preview.
   const refreshBaseSystemPrompt = (): void => {
+    if (promptSnapshot) return;
     const live = sessionContext?.getSystemPrompt();
     if (live) baseSystemPrompt = live;
   };
 
   const recomputeEffectiveSystemPrompt = (): void => {
+    if (promptSnapshot) {
+      effectiveSystemPrompt = promptSnapshot.systemPrompt;
+      return;
+    }
     if (agentMode === "unrestricted") {
       effectiveSystemPrompt = UNRESTRICTED_SYSTEM_PROMPT;
       return;
@@ -124,6 +146,7 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     agentMode,
     effectiveSystemPrompt,
     systemPromptOverride,
+    promptLocked: Boolean(promptSnapshot),
     disabledSkills: [...disabledSkills],
     readSkills: [...readSkills],
     contextMessages,
@@ -142,6 +165,9 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     try {
       const command = commandFrom(raw);
       requestId = command.requestId;
+      if (command.method !== "get" && promptSnapshot) {
+        throw new Error("会话开始后系统提示和 Skill 配置已固定，请新建对话后修改。");
+      }
       if (command.method === "set-agent-mode") {
         if (command.agentMode !== "standard" && command.agentMode !== "unrestricted") {
           throw new Error("会话模式无效。");
@@ -171,12 +197,20 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("before_agent_start", async (event) => {
-    baseSystemPrompt = event.systemPrompt;
-    recomputeEffectiveSystemPrompt();
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (!promptSnapshot) {
+      baseSystemPrompt = event.systemPrompt;
+      recomputeEffectiveSystemPrompt();
+      promptSnapshot = { version: 1, sessionId: ctx.sessionManager.getSessionId(),
+        systemPrompt: effectiveSystemPrompt ?? event.systemPrompt, agentMode, systemPromptOverride,
+        disabledSkills: [...disabledSkills].sort() };
+      pi.appendEntry(SESSION_PROMPT_SNAPSHOT_ENTRY, promptSnapshot);
+    }
+    effectiveSystemPrompt = promptSnapshot.systemPrompt;
     publish();
-    if (effectiveSystemPrompt !== event.systemPrompt) return { systemPrompt: effectiveSystemPrompt };
-    return undefined;
+    // This bridge runs after all bundled prompt contributors. Always force the
+    // same final text, including across reload, compaction and session resume.
+    return { systemPrompt: effectiveSystemPrompt };
   });
 
   pi.on("context", async (event) => {
@@ -195,28 +229,22 @@ export default function runtimeBridgeExtension(pi: ExtensionAPI): void {
     return undefined;
   });
 
-  pi.on("session_start", async (_event, context) => {
-    const restored = restorePolicy(context.sessionManager.getBranch());
+  const restoreSession = (_event: unknown, context: ExtensionContext): void => {
+    promptSnapshot = restorePromptSnapshot(context);
+    const restored = promptSnapshot ?? restorePolicy(context.sessionManager.getBranch());
     agentMode = restored.agentMode;
     systemPromptOverride = restored.systemPromptOverride;
     disabledSkills.clear();
     for (const path of restored.disabledSkills) disabledSkills.add(path);
+    contextMessages = undefined;
+    baseSystemPrompt = undefined;
     sessionContext = context;
     refreshBaseSystemPrompt();
     recomputeEffectiveSystemPrompt();
     publish();
-  });
-  pi.on("session_tree", async (_event, context) => {
-    const restored = restorePolicy(context.sessionManager.getBranch());
-    agentMode = restored.agentMode;
-    systemPromptOverride = restored.systemPromptOverride;
-    disabledSkills.clear();
-    for (const path of restored.disabledSkills) disabledSkills.add(path);
-    sessionContext = context;
-    refreshBaseSystemPrompt();
-    recomputeEffectiveSystemPrompt();
-    publish();
-  });
+  };
+  pi.on("session_start", restoreSession);
+  pi.on("session_tree", restoreSession);
   pi.on("session_shutdown", async () => {
     sessionContext = undefined;
     unsubscribe();

@@ -39,7 +39,9 @@ class GitCommandError extends Error {
 
 export function runGit(cwd: string, args: string[], options: { timeout?: number; allowExitCodes?: number[]; env?: Record<string, string> } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("git", ["-C", cwd, ...args], {
+    // `--` 只终止选项解析；文件名里的 *、[]、:(...) 仍会被 Git 当作路径表达式。
+    // 面板传入的都是选中的真实路径，必须按字面匹配。
+    execFile("git", ["--literal-pathspecs", "-C", cwd, ...args], {
       encoding: "utf8",
       maxBuffer: 32 * 1024 * 1024,
       timeout: options.timeout ?? LOCAL_TIMEOUT_MS,

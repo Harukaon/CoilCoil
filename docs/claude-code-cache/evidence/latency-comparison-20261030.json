@@ -1,0 +1,975 @@
+{
+  "capturedAtUTC": "2026-10-30T15:38:22.865919+00:00",
+  "method": "Read existing session logs over SSH and local disk; correlate actual HTTP dispatch/cache ledger with response metrics by exact usage buckets. Inspect source and installed app archive. No model requests made.",
+  "coil": {
+    "capturedAtUTC": "2026-10-30T15:37:08.534302+00:00",
+    "file": "/Users/hao/Library/Application Support/@coilcoil/desktop/sessions/2026-10-30T15-18-56-301Z_01a18d64-802d-737c-a971-7cd701394cbf.jsonl",
+    "method": "Freeze first 22 response-metrics records, correlate by exact I/R/W/O buckets with cache ledger and response IDs. Ledger timestamp is actual HTTP dispatch. Request start reconstructed from completion wall clock and monotonic duration; millisecond alignment is approximate.",
+    "metadata": {
+      "thinkingLevel": "max"
+    },
+    "summary": {
+      "pairedCount": 21,
+      "firstDeltaMedianMs": 6575.946750000119,
+      "firstDeltaMinMs": 2188.7809170000255,
+      "firstDeltaMaxMs": 12960.22899999842,
+      "preDispatchMedianMs": 4.409,
+      "preDispatchMinMs": 1.198,
+      "preDispatchMaxMs": 6.4
+    },
+    "unpairedMetrics": [
+      {
+        "metricIndex": 18,
+        "line": 124,
+        "usageKey": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "firstTokenMs": null
+      }
+    ],
+    "rows": [
+      {
+        "request": 1,
+        "metricLine": 12,
+        "cacheResponseId": "msg_011CgYeRSuuwgbwJTxq94WfG",
+        "requestStartedApproxAtMs": 1793373536567.1567,
+        "httpDispatchAtMs": 1793373536569,
+        "preDispatchMs": 1.843,
+        "firstNonemptyDeltaMs": 11212.329459000379,
+        "firstDeltaAfterDispatchMs": 11210.486,
+        "totalMs": 13274.843209000304,
+        "input": 4,
+        "cacheRead": 0,
+        "cacheWrite": 23095,
+        "output": 779,
+        "assistant": {
+          "line": 13,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 2,
+        "metricLine": 21,
+        "cacheResponseId": "msg_011CgYeS4R6vTjTdudWnA5WD",
+        "requestStartedApproxAtMs": 1793373549889.8018,
+        "httpDispatchAtMs": 1793373549891,
+        "preDispatchMs": 1.198,
+        "firstNonemptyDeltaMs": 3728.700458999723,
+        "firstDeltaAfterDispatchMs": 3727.502,
+        "totalMs": 3742.1982090007514,
+        "input": 2,
+        "cacheRead": 23095,
+        "cacheWrite": 45309,
+        "output": 197,
+        "assistant": {
+          "line": 22,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 3,
+        "metricLine": 26,
+        "cacheResponseId": "msg_011CgYeSM4Dg6hRqcPebaXpS",
+        "requestStartedApproxAtMs": 1793373553654.5586,
+        "httpDispatchAtMs": 1793373553656,
+        "preDispatchMs": 1.441,
+        "firstNonemptyDeltaMs": 2234.7127909995615,
+        "firstDeltaAfterDispatchMs": 2233.271,
+        "totalMs": 2791.441499998793,
+        "input": 2,
+        "cacheRead": 68404,
+        "cacheWrite": 20805,
+        "output": 162,
+        "assistant": {
+          "line": 27,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 4,
+        "metricLine": 31,
+        "cacheResponseId": "msg_011CgYeSZ7mChxBs1KcTqsj6",
+        "requestStartedApproxAtMs": 1793373556471.207,
+        "httpDispatchAtMs": 1793373556473,
+        "preDispatchMs": 1.793,
+        "firstNonemptyDeltaMs": 2188.7809170000255,
+        "firstDeltaAfterDispatchMs": 2186.988,
+        "totalMs": 2745.7930000014603,
+        "input": 2,
+        "cacheRead": 89209,
+        "cacheWrite": 20990,
+        "output": 162,
+        "assistant": {
+          "line": 32,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 5,
+        "metricLine": 36,
+        "cacheResponseId": "msg_011CgYeSmFWYyojCo39gMS9Y",
+        "requestStartedApproxAtMs": 1793373559242.4434,
+        "httpDispatchAtMs": 1793373559246,
+        "preDispatchMs": 3.557,
+        "firstNonemptyDeltaMs": 2780.4364580009133,
+        "firstDeltaAfterDispatchMs": 2776.88,
+        "totalMs": 3363.556750001386,
+        "input": 2,
+        "cacheRead": 110199,
+        "cacheWrite": 20364,
+        "output": 163,
+        "assistant": {
+          "line": 37,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 6,
+        "metricLine": 41,
+        "cacheResponseId": "msg_011CgYeT2Kcs5ftfeebPqaVL",
+        "requestStartedApproxAtMs": 1793373562631.4033,
+        "httpDispatchAtMs": 1793373562635,
+        "preDispatchMs": 3.597,
+        "firstNonemptyDeltaMs": 2676.416458999738,
+        "firstDeltaAfterDispatchMs": 2672.82,
+        "totalMs": 3308.5966250002384,
+        "input": 2,
+        "cacheRead": 130563,
+        "cacheWrite": 21035,
+        "output": 157,
+        "assistant": {
+          "line": 42,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 7,
+        "metricLine": 46,
+        "cacheResponseId": "msg_011CgYeTFnzTdRAV2zTtwwq7",
+        "requestStartedApproxAtMs": 1793373565964.4214,
+        "httpDispatchAtMs": 1793373565968,
+        "preDispatchMs": 3.579,
+        "firstNonemptyDeltaMs": 4881.136334000155,
+        "firstDeltaAfterDispatchMs": 4877.558,
+        "totalMs": 61950.578666999936,
+        "input": 2,
+        "cacheRead": 151598,
+        "cacheWrite": 2741,
+        "output": 5863,
+        "assistant": {
+          "line": 47,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 8,
+        "metricLine": 53,
+        "cacheResponseId": "msg_011CgYeaSg2mX6a8kzAU3EDE",
+        "requestStartedApproxAtMs": 1793373657968.9888,
+        "httpDispatchAtMs": 1793373657975,
+        "preDispatchMs": 6.011,
+        "firstNonemptyDeltaMs": 10469.553958998993,
+        "firstDeltaAfterDispatchMs": 10463.543,
+        "totalMs": 12387.011208999902,
+        "input": 2,
+        "cacheRead": 154339,
+        "cacheWrite": 12335,
+        "output": 600,
+        "assistant": {
+          "line": 54,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 9,
+        "metricLine": 64,
+        "cacheResponseId": "msg_011CgYeayVvtvqwruqFpkqzk",
+        "requestStartedApproxAtMs": 1793373670510.6995,
+        "httpDispatchAtMs": 1793373670515,
+        "preDispatchMs": 4.301,
+        "firstNonemptyDeltaMs": 7878.591750001535,
+        "firstDeltaAfterDispatchMs": 7874.291,
+        "totalMs": 10098.300584001467,
+        "input": 2,
+        "cacheRead": 166674,
+        "cacheWrite": 11917,
+        "output": 974,
+        "assistant": {
+          "line": 65,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 10,
+        "metricLine": 71,
+        "cacheResponseId": "msg_011CgYebwsyJQ3cBtdvr4KkA",
+        "requestStartedApproxAtMs": 1793373683666.196,
+        "httpDispatchAtMs": 1793373683669,
+        "preDispatchMs": 2.804,
+        "firstNonemptyDeltaMs": 5538.885958001018,
+        "firstDeltaAfterDispatchMs": 5536.082,
+        "totalMs": 73203.80404100008,
+        "input": 2,
+        "cacheRead": 178591,
+        "cacheWrite": 3621,
+        "output": 7754,
+        "assistant": {
+          "line": 72,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 11,
+        "metricLine": 80,
+        "cacheResponseId": "msg_011CgYehM4dhPPGdt3zRuGSR",
+        "requestStartedApproxAtMs": 1793373756942.3447,
+        "httpDispatchAtMs": 1793373756945,
+        "preDispatchMs": 2.655,
+        "firstNonemptyDeltaMs": 5581.350540999323,
+        "firstDeltaAfterDispatchMs": 5578.695,
+        "totalMs": 39456.655332999304,
+        "input": 2,
+        "cacheRead": 182212,
+        "cacheWrite": 13837,
+        "output": 3806,
+        "assistant": {
+          "line": 81,
+          "stopReason": "stop",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 12,
+        "metricLine": 87,
+        "cacheResponseId": "msg_011CgYetBSFVUgF1Twin14T3",
+        "requestStartedApproxAtMs": 1793373898521.5908,
+        "httpDispatchAtMs": 1793373898526,
+        "preDispatchMs": 4.409,
+        "firstNonemptyDeltaMs": 11758.179541999474,
+        "firstDeltaAfterDispatchMs": 11753.77,
+        "totalMs": 54324.409207999706,
+        "input": 4,
+        "cacheRead": 196049,
+        "cacheWrite": 3954,
+        "output": 4749,
+        "assistant": {
+          "line": 88,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 13,
+        "metricLine": 96,
+        "cacheResponseId": "msg_011CgYewoUWaY266w4ReE8tR",
+        "requestStartedApproxAtMs": 1793373952906.7485,
+        "httpDispatchAtMs": 1793373952912,
+        "preDispatchMs": 5.251,
+        "firstNonemptyDeltaMs": 5689.986750001088,
+        "firstDeltaAfterDispatchMs": 5684.735,
+        "totalMs": 17220.251459000632,
+        "input": 2,
+        "cacheRead": 200003,
+        "cacheWrite": 12492,
+        "output": 1147,
+        "assistant": {
+          "line": 97,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 14,
+        "metricLine": 101,
+        "cacheResponseId": "msg_011CgYey7WVXnV2yerJPW5Wx",
+        "requestStartedApproxAtMs": 1793373970216.5996,
+        "httpDispatchAtMs": 1793373970223,
+        "preDispatchMs": 6.4,
+        "firstNonemptyDeltaMs": 4184.070749999955,
+        "firstDeltaAfterDispatchMs": 4177.67,
+        "totalMs": 5252.4003750011325,
+        "input": 2,
+        "cacheRead": 212495,
+        "cacheWrite": 1490,
+        "output": 244,
+        "assistant": {
+          "line": 102,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 15,
+        "metricLine": 106,
+        "cacheResponseId": "msg_011CgYf17QMfcyrpWtTQAv3F",
+        "requestStartedApproxAtMs": 1793373992263.0608,
+        "httpDispatchAtMs": 1793373992268,
+        "preDispatchMs": 4.939,
+        "firstNonemptyDeltaMs": 10596.519709000364,
+        "firstDeltaAfterDispatchMs": 10591.581,
+        "totalMs": 14177.939124999568,
+        "input": 2,
+        "cacheRead": 213985,
+        "cacheWrite": 10057,
+        "output": 528,
+        "assistant": {
+          "line": 107,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 16,
+        "metricLine": 111,
+        "cacheResponseId": "msg_011CgYf3MxWpmsZkstZikPok",
+        "requestStartedApproxAtMs": 1793374022839.2297,
+        "httpDispatchAtMs": 1793374022845,
+        "preDispatchMs": 5.77,
+        "firstNonemptyDeltaMs": 12960.22899999842,
+        "firstDeltaAfterDispatchMs": 12954.459,
+        "totalMs": 14241.770291998982,
+        "input": 2,
+        "cacheRead": 224042,
+        "cacheWrite": 11792,
+        "output": 745,
+        "assistant": {
+          "line": 112,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 17,
+        "metricLine": 118,
+        "cacheResponseId": "msg_011CgYf4tCE3vT6LaqYJX8A5",
+        "requestStartedApproxAtMs": 1793374043337.9348,
+        "httpDispatchAtMs": 1793374043344,
+        "preDispatchMs": 6.065,
+        "firstNonemptyDeltaMs": 11522.27808399871,
+        "firstDeltaAfterDispatchMs": 11516.213,
+        "totalMs": 18101.06520899944,
+        "input": 2,
+        "cacheRead": 235834,
+        "cacheWrite": 3449,
+        "output": 1188,
+        "assistant": {
+          "line": 119,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 19,
+        "metricLine": 129,
+        "cacheResponseId": "msg_011CgYf7izfrEeVj98DgiRNz",
+        "requestStartedApproxAtMs": 1793374081727.0735,
+        "httpDispatchAtMs": 1793374081732,
+        "preDispatchMs": 4.927,
+        "firstNonemptyDeltaMs": 11730.837124999613,
+        "firstDeltaAfterDispatchMs": 11725.911,
+        "totalMs": 163387.92662499845,
+        "input": 4,
+        "cacheRead": 239283,
+        "cacheWrite": 15342,
+        "output": 14029,
+        "assistant": {
+          "line": 130,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 20,
+        "metricLine": 135,
+        "cacheResponseId": "msg_011CgYfKNmpW3qVDryZibKVg",
+        "requestStartedApproxAtMs": 1793374245165.5955,
+        "httpDispatchAtMs": 1793374245171,
+        "preDispatchMs": 5.405,
+        "firstNonemptyDeltaMs": 6575.946750000119,
+        "firstDeltaAfterDispatchMs": 6570.542,
+        "totalMs": 14971.404625000432,
+        "input": 2,
+        "cacheRead": 254625,
+        "cacheWrite": 15463,
+        "output": 1271,
+        "assistant": {
+          "line": 136,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 21,
+        "metricLine": 140,
+        "cacheResponseId": "msg_011CgYfLWM24nCjv7xcRZmLD",
+        "requestStartedApproxAtMs": 1793374260211.3345,
+        "httpDispatchAtMs": 1793374260216,
+        "preDispatchMs": 4.666,
+        "firstNonemptyDeltaMs": 6588.168750001118,
+        "firstDeltaAfterDispatchMs": 6583.503,
+        "totalMs": 11311.665458001196,
+        "input": 2,
+        "cacheRead": 270088,
+        "cacheWrite": 1865,
+        "output": 932,
+        "assistant": {
+          "line": 141,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      },
+      {
+        "request": 22,
+        "metricLine": 145,
+        "cacheResponseId": "msg_011CgYfMKs1TKJmvVSTMC1LB",
+        "requestStartedApproxAtMs": 1793374271644.349,
+        "httpDispatchAtMs": 1793374271650,
+        "preDispatchMs": 5.651,
+        "firstNonemptyDeltaMs": 6783.756624998525,
+        "firstDeltaAfterDispatchMs": 6778.106,
+        "totalMs": 30389.650832999498,
+        "input": 2,
+        "cacheRead": 271953,
+        "cacheWrite": 2358,
+        "output": 2849,
+        "assistant": {
+          "line": 146,
+          "stopReason": "toolUse",
+          "thinkingLevel": "max",
+          "providerThinkingLevel": "max"
+        }
+      }
+    ]
+  },
+  "orb": {
+    "capturedAtUTC": "2026-10-30T15:38:22.865919+00:00",
+    "file": "/home/hao/.claude/projects/-home-hao-feedmob/661e1d89-be15-4847-a575-3f927f88ef72.jsonl",
+    "definition": "Request timestamp to the first completed block containing nonempty text/thinking or a named tool call, matched by requestRef; empty thinking blocks excluded. This is completion of a content block, not first-token arrival; no latency ratio against Coil is computed.",
+    "summary": {
+      "count": 21,
+      "medianMs": 4428,
+      "minMs": 1608,
+      "maxMs": 35497
+    },
+    "rows": [
+      {
+        "request": 1,
+        "requestLine": 11,
+        "firstNonemptyBlockLine": 33,
+        "requestRef": "8ee17151-9d7b-4513-b03a-10fbc07f8e28",
+        "requestAt": "2026-10-23T07:43:39.136Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:43:43.341Z",
+        "requestToFirstNonemptyBlockRecordedMs": 4205,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 2,
+        "requestLine": 35,
+        "firstNonemptyBlockLine": 46,
+        "requestRef": "a4ecee80-ac1b-4f43-9068-1140f620558e",
+        "requestAt": "2026-10-23T07:43:43.587Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:43:45.241Z",
+        "requestToFirstNonemptyBlockRecordedMs": 1654,
+        "content": [
+          {
+            "type": "text",
+            "chars": 66
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 3,
+        "requestLine": 45,
+        "firstNonemptyBlockLine": 58,
+        "requestRef": "e1f340b2-e90b-40bb-a68f-9b117153144c",
+        "requestAt": "2026-10-23T07:43:46.624Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:43:56.575Z",
+        "requestToFirstNonemptyBlockRecordedMs": 9951,
+        "content": [
+          {
+            "type": "thinking",
+            "chars": 99
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 4,
+        "requestLine": 56,
+        "firstNonemptyBlockLine": 62,
+        "requestRef": "1b307931-7214-46ba-88c5-a22102eb77d6",
+        "requestAt": "2026-10-23T07:44:07.874Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:44:13.045Z",
+        "requestToFirstNonemptyBlockRecordedMs": 5171,
+        "content": [
+          {
+            "type": "text",
+            "chars": 69
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 5,
+        "requestLine": 65,
+        "firstNonemptyBlockLine": 67,
+        "requestRef": "c2f28c3a-8bcd-4b8f-9325-8a7dba28e97b",
+        "requestAt": "2026-10-23T07:44:15.177Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:44:18.615Z",
+        "requestToFirstNonemptyBlockRecordedMs": 3438,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 6,
+        "requestLine": 74,
+        "firstNonemptyBlockLine": 78,
+        "requestRef": "b50f6248-eed0-488c-af19-f25bc56673d3",
+        "requestAt": "2026-10-23T07:44:20.580Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:44:25.008Z",
+        "requestToFirstNonemptyBlockRecordedMs": 4428,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 7,
+        "requestLine": 77,
+        "firstNonemptyBlockLine": 81,
+        "requestRef": "1ad2bcd7-0a89-41db-b6d4-9308a57fa0cd",
+        "requestAt": "2026-10-23T07:44:25.152Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:44:35.613Z",
+        "requestToFirstNonemptyBlockRecordedMs": 10461,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 8,
+        "requestLine": 83,
+        "firstNonemptyBlockLine": 91,
+        "requestRef": "0897b2d2-7e10-4d93-b41c-631116cf218a",
+        "requestAt": "2026-10-23T07:44:35.753Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:44:45.600Z",
+        "requestToFirstNonemptyBlockRecordedMs": 9847,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 9,
+        "requestLine": 93,
+        "firstNonemptyBlockLine": 100,
+        "requestRef": "75f4f314-6264-4c86-973e-faa78dac5551",
+        "requestAt": "2026-10-23T07:44:45.725Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:45:00.282Z",
+        "requestToFirstNonemptyBlockRecordedMs": 14557,
+        "content": [
+          {
+            "type": "thinking",
+            "chars": 77
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 10,
+        "requestLine": 98,
+        "firstNonemptyBlockLine": 111,
+        "requestRef": "7cfc927e-152b-4f9a-aba7-1ba2f6dc7baf",
+        "requestAt": "2026-10-23T07:45:22.724Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:45:31.987Z",
+        "requestToFirstNonemptyBlockRecordedMs": 9263,
+        "content": [
+          {
+            "type": "text",
+            "chars": 74
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 11,
+        "requestLine": 114,
+        "firstNonemptyBlockLine": 116,
+        "requestRef": "38f8579d-6f81-4545-a105-209ca364196a",
+        "requestAt": "2026-10-23T07:45:48.528Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:45:51.860Z",
+        "requestToFirstNonemptyBlockRecordedMs": 3332,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 12,
+        "requestLine": 118,
+        "firstNonemptyBlockLine": 121,
+        "requestRef": "69042c64-5377-4b83-8eb9-11f1f8300dfc",
+        "requestAt": "2026-10-23T07:45:55.012Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:45:59.518Z",
+        "requestToFirstNonemptyBlockRecordedMs": 4506,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 13,
+        "requestLine": 123,
+        "firstNonemptyBlockLine": 130,
+        "requestRef": "ee4871db-b1d2-4712-a3f3-0ef145e6cd96",
+        "requestAt": "2026-10-23T07:46:08.969Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:46:13.252Z",
+        "requestToFirstNonemptyBlockRecordedMs": 4283,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 14,
+        "requestLine": 132,
+        "firstNonemptyBlockLine": 134,
+        "requestRef": "e948bf46-1162-4113-8289-12d4acbd41ee",
+        "requestAt": "2026-10-23T07:46:13.462Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:46:15.137Z",
+        "requestToFirstNonemptyBlockRecordedMs": 1675,
+        "content": [
+          {
+            "type": "text",
+            "chars": 21
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 15,
+        "requestLine": 137,
+        "firstNonemptyBlockLine": 140,
+        "requestRef": "318017ba-cb75-4238-ba34-dd35729589d9",
+        "requestAt": "2026-10-23T07:46:19.882Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:46:31.335Z",
+        "requestToFirstNonemptyBlockRecordedMs": 11453,
+        "content": [
+          {
+            "type": "thinking",
+            "chars": 110
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 16,
+        "requestLine": 143,
+        "firstNonemptyBlockLine": 153,
+        "requestRef": "5d801073-1ed9-43f4-9633-999e12ee7d67",
+        "requestAt": "2026-10-23T07:46:37.507Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:46:40.420Z",
+        "requestToFirstNonemptyBlockRecordedMs": 2913,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 17,
+        "requestLine": 152,
+        "firstNonemptyBlockLine": 163,
+        "requestRef": "79c42755-cd44-4122-8eef-ba0fadd7a2a0",
+        "requestAt": "2026-10-23T07:46:41.599Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:47:17.096Z",
+        "requestToFirstNonemptyBlockRecordedMs": 35497,
+        "content": [
+          {
+            "type": "thinking",
+            "chars": 103
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 18,
+        "requestLine": 161,
+        "firstNonemptyBlockLine": 184,
+        "requestRef": "c8280cd5-a963-4d05-a2a0-b4a1bc5a419f",
+        "requestAt": "2026-10-23T07:47:40.073Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:47:48.867Z",
+        "requestToFirstNonemptyBlockRecordedMs": 8794,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 5
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 19,
+        "requestLine": 182,
+        "firstNonemptyBlockLine": 192,
+        "requestRef": "a254503b-65c0-4eab-a917-4aea05cf4f94",
+        "requestAt": "2026-10-23T07:47:55.109Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:47:57.283Z",
+        "requestToFirstNonemptyBlockRecordedMs": 2174,
+        "content": [
+          {
+            "type": "text",
+            "chars": 85
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 20,
+        "requestLine": 206,
+        "firstNonemptyBlockLine": 208,
+        "requestRef": "1766d764-6a4c-4abf-87e1-5079c2043aa0",
+        "requestAt": "2026-10-23T07:48:14.145Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:48:15.971Z",
+        "requestToFirstNonemptyBlockRecordedMs": 1826,
+        "content": [
+          {
+            "type": "text",
+            "chars": 15
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      },
+      {
+        "request": 21,
+        "requestLine": 211,
+        "firstNonemptyBlockLine": 212,
+        "requestRef": "dc4e28ce-f61d-4e0c-a3a5-096d00c8c6b4",
+        "requestAt": "2026-10-23T07:48:24.477Z",
+        "firstNonemptyBlockRecordedAt": "2026-10-23T07:48:26.085Z",
+        "requestToFirstNonemptyBlockRecordedMs": 1608,
+        "content": [
+          {
+            "type": "tool_use",
+            "nameChars": 4
+          }
+        ],
+        "effort": "high",
+        "perTurnEffort": "high",
+        "thinkingDisplay": "updates",
+        "updatesBeta": true,
+        "speed": "standard"
+      }
+    ]
+  },
+  "installedApplication": {
+    "version": "0.1.0-beta.163.local.20261028.3",
+    "archive": "/Applications/CoilCoil.app/Contents/Resources/app.asar",
+    "verifiedSource": "node_modules/@earendil-works/pi-ai/src/api/anthropic-messages.ts",
+    "thinkingDisplayDefault": "summarized",
+    "thinkingDisplayUpdatesSupported": false
+  },
+  "sourceFindings": [
+    {
+      "path": "packages/workflow/extensions/response-metrics.ts",
+      "lines": [
+        53,
+        81
+      ],
+      "finding": "firstTokenMs counts the first nonempty text, thinking or tool-argument delta; it is not separately measured first visible answer text."
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/hooks/useBufferedRuntimeEvents.ts",
+      "lines": [
+        22,
+        22
+      ],
+      "finding": "60ms rendering batch budget; leading edge uses next task when idle."
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/features/conversation/ActivityGroupView.tsx",
+      "lines": [
+        122,
+        143
+      ],
+      "finding": "Thinking-only groups start closed; reasoning rows are details elements without open."
+    },
+    {
+      "path": "vendor/pi/packages/ai/src/api/anthropic-messages.ts",
+      "lines": [
+        1271,
+        1277
+      ],
+      "finding": "Managed-effort requests default thinking.display to summarized; actual desired effort can be carried in a system output_config message, not just the top-level baseline."
+    }
+  ],
+  "sameTimeRendererWarnings": [
+    {
+      "at": 1793373796354,
+      "received": 124,
+      "applied": 1,
+      "lagMs": 0
+    },
+    {
+      "at": 1793374316081,
+      "received": 124,
+      "applied": 1,
+      "lagMs": 0
+    }
+  ],
+  "officialDocs": "https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display",
+  "conclusions": [
+    "Coil uses max effort in both stored selection and returned providerThinkingLevel; selected Orb Claude Code sample uses high in actual perTurnEffort and system effort override, standard speed.",
+    "Measured Coil delay mostly occurs after HTTP dispatch and before the first nonempty output delta. Network, provider processing and reasoning are not individually timed by current records.",
+    "Orb records completed content blocks; its median is not exact first-token latency and no speed multiplier is calculated.",
+    "Request display policy differs: Coil summarized versus Claude Code updates with thinking-display-updates-2026-08-18 beta.",
+    "Rendering budget is not an observed end-to-end paint delay; existing records do not contain correlated first-paint timestamps."
+  ],
+  "applicationBehaviorChanged": false,
+  "newModelAPIRequestsMade": 0
+}

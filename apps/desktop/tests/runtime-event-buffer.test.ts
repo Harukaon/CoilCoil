@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { coalesceRuntimeEvents, type BufferedRuntimeEvent } from "../src/renderer/src/hooks/useBufferedRuntimeEvents.ts";
+import { conversationMessagesReducer, EMPTY_CONVERSATION_MESSAGES } from "../src/renderer/src/features/conversation/conversationMessages.ts";
 
 function delta(id: string, text: string, revision: number, runtimeId = "runtime-a"): BufferedRuntimeEvent {
   return { runtimeId, event: { type: "message_delta", id, field: "text", delta: text, revision } };
@@ -40,4 +41,28 @@ test("不同会话运行时的增量各自成批", () => {
 
 test("没有事件时返回空批次", () => {
   assert.deepEqual(coalesceRuntimeEvents([]), []);
+});
+
+test("快照先于缓冲增量落地时，合并批次只追加快照之后的正文", () => {
+  let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, {
+    type: "snapshot", sessionPath: "/a", runtimeId: "runtime-a", revision: 2,
+    messages: [{ id: "m1", role: "assistant", text: "ab", order: 1, timestamp: 1, status: "running" }],
+  });
+  for (const entry of coalesceRuntimeEvents([delta("m1", "a", 1), delta("m1", "b", 2), delta("m1", "c", 3)])) {
+    if (entry.event.type !== "message_delta") continue;
+    state = conversationMessagesReducer(state, { ...entry.event, timestamp: 1, sessionPath: "/a", runtimeId: entry.runtimeId,
+      deltaParts: entry.deltaParts });
+  }
+  assert.equal(state.committed[0].text, "abc");
+});
+
+test("重复投递同一 revision 的增量只生效一次", () => {
+  let state = conversationMessagesReducer(EMPTY_CONVERSATION_MESSAGES, {
+    type: "snapshot", sessionPath: "/a", runtimeId: "runtime-a", revision: 0, messages: [],
+  });
+  const action = { type: "message_delta" as const, id: "m1", field: "text" as const, delta: "a", revision: 1,
+    timestamp: 1, sessionPath: "/a", runtimeId: "runtime-a" };
+  state = conversationMessagesReducer(state, action);
+  state = conversationMessagesReducer(state, action);
+  assert.equal(state.committed[0].text, "a");
 });

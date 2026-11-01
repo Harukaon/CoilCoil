@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { FormEvent } from "react";
 import type {
   AgentMode,
   ChatMessage,
@@ -18,7 +17,9 @@ import type {
   WorkspaceSnapshot,
   ToolRun,
 } from "@coilcoil/runtime-protocol";
-import { manualCompactionCommand, SESSION_OPEN_SUPERSEDED_ERROR } from "@coilcoil/runtime-protocol";
+import { SESSION_OPEN_SUPERSEDED_ERROR } from "@coilcoil/runtime-protocol";
+import { createPromptSubmissionHandler } from "./features/conversation/submitConversationPrompt";
+import { SessionRestoreController } from "./features/conversation/sessionRestore";
 import { buildConversationTimeline } from "./features/conversation/buildConversationTimeline";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { AppView } from "./AppView";
@@ -30,7 +31,7 @@ import {
 } from "./features/conversation/conversationMessages";
 import { useBubbleHandoff } from "./hooks/useBubbleHandoff";
 import type { SessionActivityState } from "./features/workspaces/WorkspaceSidebar";
-import { titleFromPrompt, upsertSessionSummary } from "./features/workspaces/sessionList";
+import { upsertSessionSummary } from "./features/workspaces/sessionList";
 import { useDockBadge } from "./features/workspaces/useDockBadge";
 import { useSessionControls } from "./hooks/useSessionControls";
 import { useConversationActions } from "./features/workspaces/useConversationActions";
@@ -86,6 +87,7 @@ export default function App(): React.JSX.Element {
   const [pendingAgentMode, setPendingAgentMode] = useState<AgentMode>("standard");
   const [expandedSessionLimits, setExpandedSessionLimits] = useState<Record<string, number>>({});
   const [startingSession, setStartingSession] = useState(false);
+  const [restoringSession, setRestoringSession] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const { leftOpen, leftWidth, rightWidth, setLeftOpen, beginResize } = usePanelLayout({
     rightOpen: inspector.state.rightOpen,
@@ -127,12 +129,11 @@ export default function App(): React.JSX.Element {
     modelChanging,
     restoreDraft,
     restoreDocument,
-    setImages: setDraftImages,
+    restoreSubmission,
     setModelMenuOpen,
     reset: resetComposer,
     focus: focusComposer,
     insertPaths: insertComposerPaths,
-    setDocument: setDraftDocument,
   } = composer;
   const timelineRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -141,6 +142,7 @@ export default function App(): React.JSX.Element {
   const runtimeSessionRef = useRef(new Map<string, string>());
   const optimisticSessionsRef = useRef(new Map<string, SessionSummary>());
   const selectionRequestRef = useRef(0);
+  const sessionRestoreRef = useRef<SessionRestoreController>(undefined);
   useEffect(() => window.coilcoil.onBrowserAgentActivated((scopeId) => {
     if (scopeId !== snapshotRef.current?.session.id) return; // 浏览器作用域就是会话 id
     inspector.openBrowserTab();
@@ -184,6 +186,8 @@ export default function App(): React.JSX.Element {
   }, []);
 
   const startPendingConversation = useCallback((selection: ProjectSelection): void => {
+    sessionRestoreRef.current?.cancel();
+    setRestoringSession(false);
     selectionRequestRef.current += 1;
     projectRef.current = selection;
     setProject(selection);
@@ -224,9 +228,19 @@ export default function App(): React.JSX.Element {
   });
   // Streaming arrives token by token; applying it token by token is what used to
   // starve the renderer in long conversations. See useBufferedRuntimeEvents.
-  const handleRuntimeEvent = useBufferedRuntimeEvents(applyRuntimeEvent);
+  const runtimeEventHandlerRef = useRef(applyRuntimeEvent);
+  runtimeEventHandlerRef.current = applyRuntimeEvent;
+  sessionRestoreRef.current ??= new SessionRestoreController(
+    ({ event, runtimeId, deltaParts }) => runtimeEventHandlerRef.current(event, runtimeId, deltaParts),
+    (runtimeId) => runtimeSessionRef.current.get(runtimeId),
+  );
+  const handleRuntimeEvent = useBufferedRuntimeEvents(useCallback((event, runtimeId, deltaParts) => {
+    sessionRestoreRef.current!.handle({ event, runtimeId, deltaParts });
+  }, []));
 
   const activateProject = useCallback(async (selection: ProjectSelection): Promise<void> => {
+    sessionRestoreRef.current?.cancel();
+    setRestoringSession(false);
     const requestId = ++selectionRequestRef.current;
     projectRef.current = selection;
     setProject(selection);
@@ -292,7 +306,7 @@ export default function App(): React.JSX.Element {
         setLoading(false);
       }
     })();
-    return unsubscribe;
+    return () => { unsubscribe(); sessionRestoreRef.current?.cancel(false); };
   }, [activateProject, handleRuntimeEvent]);
 
   const activityLine = useAgentActivityLine(snapshot?.running ?? false, agentPhase);
@@ -391,10 +405,11 @@ export default function App(): React.JSX.Element {
   const openConversation = async (owner: ProjectSelection, session: SessionSummary): Promise<void> => {
     shouldAutoScrollRef.current = true;
     setWorkspaceSurface("conversation");
-    if (owner.path === project?.path && session.id === activeConversation?.id) return;
+    sessionRestoreRef.current?.cancel();
     const requestId = ++selectionRequestRef.current;
     const cached = snapshotCacheRef.current.get(session.path);
     setLoading(!cached);
+    setRestoringSession(true);
     setPendingProjectPath(undefined);
     shouldAutoScrollRef.current = true;
     try {
@@ -402,13 +417,22 @@ export default function App(): React.JSX.Element {
       setProject(owner);
       window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, owner.path);
       if (cached) applySnapshot(cached);
-      const opened = await window.coilcoil.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path });
-      if (requestId === selectionRequestRef.current) applySnapshot(opened);
+      else {
+        snapshotRef.current = undefined;
+        setSnapshot(undefined);
+        dispatchConversationMessages({ type: "reset" });
+        setTools([]);
+        setSubagents([]);
+        setProjectState({ ...EMPTY_PROJECT, cwd: owner.path });
+      }
+      await sessionRestoreRef.current!.restore(session.path, cached?.runtimeId,
+        () => window.coilcoil.request<SessionSnapshot>({ type: "open_session", cwd: owner.path, sessionPath: session.path }),
+        (opened) => { if (requestId === selectionRequestRef.current) applySnapshot(opened); });
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
       if (requestId === selectionRequestRef.current && message !== SESSION_OPEN_SUPERSEDED_ERROR) toastError(message);
     } finally {
-      if (requestId === selectionRequestRef.current) setLoading(false);
+      if (requestId === selectionRequestRef.current) { setLoading(false); setRestoringSession(false); }
     }
   };
   // The bubble hands its conversation over by path; the runtime is already shared.
@@ -470,134 +494,40 @@ export default function App(): React.JSX.Element {
     return plan;
   };
 
-  /**
-   * Send the draft.
-   *
-   * `intent: "steer"` interjects it into the turn already running instead of
-   * queueing it behind that turn; the runtime falls back to the queue when
-   * nothing is streaming, so the caller never has to check first.
-   * An `override` sends on the user's behalf (the task board), composer untouched.
-   */
-  const submitPrompt = async (event: FormEvent | undefined, intent: "queue" | "steer" = "queue", override?: string, overrideImages?: PromptImage[]): Promise<void> => {
-    event?.preventDefault();
-    const fromComposer = override === undefined;
-    const prompt = (override ?? draft).trim();
-    const promptDocument = fromComposer ? draftDocument : undefined;
-    const images = overrideImages ?? (fromComposer ? draftImages : []);
-    // Two commands never become messages: `/memory` reports itself in the
-    // runtime panel, `/compact` draws its own rule across the transcript.
-    const memoryCommand = prompt === "/memory" && images.length === 0;
-    const compaction = images.length === 0 ? manualCompactionCommand(prompt) : undefined;
-    const runtimeCommand = memoryCommand || Boolean(compaction);
-    if ((!prompt && !images.length) || !project || startingSession) return;
-    if (runtimeCommand && (
-      !snapshotRef.current
-      || pendingProjectPath === project.path
-      || snapshotRef.current.messages.length === 0
-    )) {
-      toastError(compaction ? "当前会话还没有可压缩的上下文。" : "当前会话还没有可供整理的历史记录。");
-      return;
-    }
-    if (!modelConfigured) {
-      toastError(configuration ? "发送第一条消息前，请先选择并配置模型。" : "正在读取模型配置，请稍等一下再发送。");
-      if (configuration) setSettingsOpen(true);
-      return;
-    }
-    if (images.length && !selectedModel?.supportsImages) {
-      toastError("当前模型不支持图片输入，请切换到支持图片的模型。");
-      return;
-    }
-    if (fromComposer) resetComposer();
-    // Only the memory run has nowhere else to report from; a compaction is
-    // already visible where the user is looking.
-    if (memoryCommand) {
-      inspector.openRuntimeTab();
-    }
-    shouldAutoScrollRef.current = true;
-    const clientMessageId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const pendingMessage: ChatMessage | undefined = runtimeCommand ? undefined : {
-      id: clientMessageId,
-      order: Date.now(),
-      role: "user",
-      text: prompt,
-      promptDocument,
-      images,
-      timestamp: Date.now(),
-      status: "succeeded",
-    };
-    if (pendingMessage) {
-      dispatchConversationMessages({
-        type: "queue",
-        message: pendingMessage,
-        sessionPath: snapshotRef.current?.session.path,
-      });
-    }
-    let createdSessionPath: string | undefined;
-    try {
-      let target = snapshotRef.current;
-      if (!target || pendingProjectPath === project.path) {
-        setStartingSession(true);
-        const created = await window.coilcoil.request<SessionSnapshot>({
-          type: "create_session",
-          cwd: project.path,
-          agentMode: pendingAgentMode,
-          model: selectedModel && configuration ? {
-            provider: selectedModel.provider,
-            modelId: selectedModel.id,
-            thinkingLevel: configuration.thinkingLevel,
-          } : undefined,
-        });
-        const now = new Date().toISOString();
-        const optimisticSession: SessionSummary = {
-          ...created.session,
-          title: runtimeCommand ? (created.session.title || "新对话") : titleFromPrompt(prompt, images.length > 0),
-          updatedAt: now,
-          messageCount: runtimeCommand ? created.session.messageCount : Math.max(1, created.session.messageCount),
-        };
-        const activeSnapshot = { ...created, session: optimisticSession };
-        createdSessionPath = optimisticSession.path;
-        if (pendingMessage) dispatchConversationMessages({ type: "bind_session", id: clientMessageId, sessionPath: optimisticSession.path });
-        if (optimisticSession.path) optimisticSessionsRef.current.set(optimisticSession.path, optimisticSession);
-        snapshotRef.current = activeSnapshot;
-        if (created.runtimeId && created.session.path) runtimeSessionRef.current.set(created.runtimeId, created.session.path);
-        setSnapshot(activeSnapshot);
-        setSessionsByProject((current) => ({
-          ...current,
-          [project.path]: upsertSessionSummary(current[project.path] ?? [], optimisticSession),
-        }));
-        if (optimisticSession.path) {
-          setSessionActivity((current) => ({
-            ...current,
-            [optimisticSession.path]: { runtimeId: created.runtimeId, running: true, unread: false },
-          }));
-        }
-        setTools(created.tools);
-        setProjectState(created.project);
-        setPendingProjectPath(undefined);
-        target = activeSnapshot;
+  const submitPrompt = createPromptSubmissionHandler({
+    project, pendingProjectPath, pendingAgentMode, startingSession, loading: loading || restoringSession, modelConfigured,
+    configuration, selectedModel, draft, draftDocument, draftImages, composerSessionKey,
+    snapshotRef, selectionRequestRef,
+  }, {
+    request: (command, runtimeId) => window.coilcoil.request(command, runtimeId),
+    resetComposer, restoreSubmission, setSettingsOpen, setStartingSession,
+    openRuntimeTab: () => inspector.openRuntimeTab(),
+    scrollToBottom: () => { shouldAutoScrollRef.current = true; },
+    queue: (message, sessionPath) => dispatchConversationMessages({ type: "queue", message, sessionPath }),
+    reject: (id) => dispatchConversationMessages({ type: "reject", id }),
+    created: (created, summary, clientMessageId, selected) => {
+      const path = summary.path;
+      if (path) {
+        snapshotCacheRef.current.set(path, created);
+        optimisticSessionsRef.current.set(path, summary);
+        if (created.runtimeId) runtimeSessionRef.current.set(created.runtimeId, path);
+        setSessionActivity((current) => ({ ...current, [path]: { runtimeId: created.runtimeId, running: true, unread: false } }));
       }
-      if (compaction) await window.coilcoil.request({ type: "run_compaction_now", instructions: compaction.instructions }, target.runtimeId);
-      else if (memoryCommand) await window.coilcoil.request({ type: "run_memory_now" }, target.runtimeId);
-      else if (intent === "steer") await window.coilcoil.request({ type: "steer", text: prompt, promptDocument, images, clientMessageId }, target.runtimeId);
-      else await window.coilcoil.request({ type: "prompt", text: prompt, promptDocument, images, clientMessageId }, target.runtimeId);
-    } catch (caught) {
-      if (fromComposer) {
-        setDraftDocument(promptDocument ?? { version: 1, parts: [] });
-        setDraftImages(images);
-      }
-      dispatchConversationMessages({ type: "reject", id: clientMessageId });
-      if (createdSessionPath) {
-        const failedSessionPath = createdSessionPath;
-        setSessionActivity((current) => ({
-          ...current,
-          [failedSessionPath]: { ...current[failedSessionPath], running: false, unread: false },
-        }));
-      }
-      toastError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setStartingSession(false);
-    }
-  };
+      setSessionsByProject((current) => ({ ...current, [summary.cwd]: upsertSessionSummary(current[summary.cwd] ?? [], summary) }));
+      if (!selected) return;
+      dispatchConversationMessages({ type: "bind_session", id: clientMessageId, sessionPath: path });
+      snapshotRef.current = created;
+      setSnapshot(created);
+      setTools(created.tools);
+      setSubagents(created.subagents);
+      setProjectState(created.project);
+      setPendingProjectPath(undefined);
+    },
+    creationFailed: (path) => setSessionActivity((current) => ({
+      ...current, [path]: { ...current[path], running: false, unread: false },
+    })),
+    error: toastError,
+  });
 
   if (onboarding.active) {
     return <OnboardingScreen
@@ -623,7 +553,7 @@ export default function App(): React.JSX.Element {
         sessionActivity, expandedProjects, expandedSessionLimits, snapshot,
         leftOpen, leftWidth, rightOpen, rightWidth, workspaceSurface, loading,
         timeline, queuedPrompts, running, activityLine, projectState, subagents,
-        startingSession, configuration, selectedModel, fileDragActive, timelineRef,
+        startingSession: startingSession || restoringSession, configuration, selectedModel, fileDragActive, timelineRef,
         agentMode: snapshot?.agentMode ?? pendingAgentMode, agentModeLocked: Boolean(snapshot) || startingSession, setPendingAgentMode,
         shouldAutoScrollRef, composer, inspector, setExpandedProjects,
         setExpandedSessionLimits, setSessionsByProject, setWorkspaceSurface,

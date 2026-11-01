@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import { McpConnection } from "../src/connection.ts";
 const here = dirname(fileURLToPath(import.meta.url));
 const SMOKE_SERVER = resolve(here, "../../../scripts/fixtures/mcp-smoke-server.mjs");
 const SLOW_SERVER = resolve(here, "../../../scripts/fixtures/mcp-slow-server.mjs");
+const LIFECYCLE_SERVER = resolve(here, "../../../scripts/fixtures/mcp-lifecycle-server.mjs");
 
 function server(overrides: Partial<McpServerConfiguration> = {}): McpServerConfiguration {
   return {
@@ -172,6 +173,84 @@ async function until(condition: () => boolean, timeoutMs = 5_000): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
+
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+test("握手超时会结束已启动的 MCP 子进程", async (t) => {
+  const pidFile = join(mkdtempSync(join(tmpdir(), "coilcoil-mcp-timeout-")), "pid");
+  const link = connection(server({ args: [LIFECYCLE_SERVER, "hang", pidFile], requestTimeoutMs: 700 }));
+  t.after(async () => {
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      if (processAlive(pid)) process.kill(pid, "SIGKILL");
+    }
+    await link.close();
+  });
+  assert.equal(await link.connect(), "failed");
+  assert.match(link.failure ?? "", /超时/);
+  assert.ok(existsSync(pidFile), "服务确实已启动并收到握手");
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  await until(() => !processAlive(pid), 1000);
+});
+
+test("握手期间关闭连接，迟到的握手不能把它重新标成已连接", async (t) => {
+  const pidFile = join(mkdtempSync(join(tmpdir(), "coilcoil-mcp-close-")), "pid");
+  const link = connection(server({ args: [LIFECYCLE_SERVER, "delayed", pidFile] }));
+  t.after(() => link.close());
+  const pending = link.connect();
+  await until(() => existsSync(pidFile));
+  await link.close();
+  await pending;
+  assert.equal(link.status, "not connected");
+  assert.deepEqual(link.tools, []);
+});
+
+test("握手期间关闭后立即重连，旧连接的收尾不能清掉新连接", async (t) => {
+  const pidFile = join(mkdtempSync(join(tmpdir(), "coilcoil-mcp-reconnect-")), "pid");
+  const link = connection(server({ args: [LIFECYCLE_SERVER, "delayed", pidFile] }));
+  t.after(() => link.close());
+  const first = link.connect();
+  await until(() => existsSync(pidFile));
+  const oldPid = Number(readFileSync(pidFile, "utf8"));
+  const closing = link.close();
+  const second = link.connect();
+  await Promise.all([first, closing]);
+  assert.equal(await second, "connected");
+  assert.equal(link.status, "connected");
+  assert.notEqual(childPid(link), oldPid);
+  assert.deepEqual(link.tools.map((tool) => tool.name), ["first", "second"]);
+});
+
+test("工具发现读取后续分页，并对所有页应用排除规则", async (t) => {
+  const link = connection(server({ args: [LIFECYCLE_SERVER, "paged"], excludeTools: ["first"] }));
+  t.after(() => link.close());
+  assert.equal(await link.connect(), "connected");
+  assert.deepEqual(link.tools.map((tool) => tool.name), ["second"]);
+});
+
+test("资源发现读取后续分页", async (t) => {
+  const link = connection(server({ args: [LIFECYCLE_SERVER, "paged"], exposeResources: true }));
+  t.after(() => link.close());
+  assert.equal(await link.connect(), "connected");
+  assert.deepEqual(link.resources.map((resource) => resource.uri), ["test:///first", "test:///second"]);
+});
+
+test("服务器返回重复分页游标时明确失败，不无限读取", async (t) => {
+  const link = connection(server({ args: [LIFECYCLE_SERVER, "cursor-loop"] }));
+  t.after(() => link.close());
+  assert.equal(await link.connect(), "failed");
+  assert.match(link.failure ?? "", /重复.*游标/);
+});
+
+test("发现资源时服务器断开，不能报告已连接或留下工具缓存", async (t) => {
+  const link = connection(server({ args: [LIFECYCLE_SERVER, "drop-resources"], exposeResources: true }));
+  t.after(() => link.close());
+  assert.equal(await link.connect(), "failed");
+  assert.deepEqual(link.tools, []);
+  assert.deepEqual(link.resources, []);
+});
 
 test("服务器在背后死掉，状态就说断了，不接着报已连接", async (t) => {
   // 真实的事故：内置浏览器的 MCP 半路断了，而这一层照旧说「已连接」，工具清单还

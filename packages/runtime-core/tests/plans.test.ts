@@ -48,7 +48,6 @@ function project(planApproval?: PlanApprovalState): ProjectSnapshot {
     files: [],
     changes: [],
     terminals: [],
-    plan: [],
     planApproval,
     refreshedAt: 1,
   };

@@ -12,6 +12,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createStreamRequest } from "./compaction/request.ts";
 import { summarize } from "./compaction/summarize.ts";
+import { summaryPrefix } from "./compaction/prefix.ts";
+import { nativeSummaryModel } from "./compaction/model.ts";
+import { CACHED_SESSION_REQUEST, type CachedSessionRequest } from "./anthropic-cache-policy.ts";
+import { requestCacheController } from "#cache/controller";
 import {
   cleanedBody,
   composeCleaned,
@@ -46,7 +50,7 @@ export const COMPACTION_EVENT = "coilcoil:compaction:v1";
 export const LAYER1_TARGET_RATIO = 0.35;
 /** Pi 把摘要包成一条消息时加的前后缀，大约这么多。 */
 const SUMMARY_WRAPPER_TOKENS = 80;
-/** 同一处压缩失败后，多久之内自动压缩不再重试（手动 /compact 不受限）。 */
+/** 相同模型和预算在同一处压缩失败后，阈值触发暂不重试；溢出恢复和手动压缩不受限。 */
 const FAILURE_COOLDOWN_MS = 10 * 60_000;
 
 type Entry = SessionBeforeCompactEvent["branchEntries"][number];
@@ -111,6 +115,7 @@ export function planLayer1(options: {
   keptTokens: number;
   overheadTokens: number;
   contextWindow: number;
+  reserveTokens?: number;
 }): Layer1Plan {
   const previousBody = options.previousSummary ? cleanedBody(options.previousSummary) : undefined;
   const text = composeCleaned({
@@ -120,7 +125,7 @@ export function planLayer1(options: {
     files: options.files,
   });
   const estimatedAfter = options.overheadTokens + options.keptTokens + estimateTextTokens(text) + SUMMARY_WRAPPER_TOKENS;
-  const targetTokens = Math.floor(options.contextWindow * LAYER1_TARGET_RATIO);
+  const targetTokens = Math.min(Math.floor(options.contextWindow * LAYER1_TARGET_RATIO), options.contextWindow - (options.reserveTokens ?? 0) - 1);
   return { text, estimatedAfter, targetTokens, accept: estimatedAfter <= targetTokens };
 }
 
@@ -142,19 +147,18 @@ function summarizationModel(ctx: ExtensionContext): Model<Api> | undefined {
   return ctx.model as Model<Api> | undefined;
 }
 
-function usageOf(input: number, output: number) {
-  return {
-    input,
-    output,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: input + output,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
-}
-
 export default function compactionExtension(pi: ExtensionAPI): void {
   const failures = new Map<string, number>();
+  let cachedRequest: CachedSessionRequest | undefined;
+  const unsubscribe = pi.events.on(CACHED_SESSION_REQUEST, (value) => {
+    const request = value as CachedSessionRequest | undefined;
+    cachedRequest = request && typeof request.at === "number" && Array.isArray(request.context?.messages)
+      && typeof request.model?.provider === "string" && typeof request.model.id === "string"
+      ? request : undefined;
+  });
+  pi.on("session_start", () => { cachedRequest = undefined; });
+  pi.on("session_tree", () => { cachedRequest = undefined; });
+  pi.on("session_shutdown", () => { cachedRequest = undefined; unsubscribe(); });
 
   const report = (ctx: ExtensionContext, data: Record<string, unknown>): void => {
     try {
@@ -185,7 +189,12 @@ export default function compactionExtension(pi: ExtensionAPI): void {
     const model = ctx.model as Model<Api> | undefined;
     if (!model || !(model.contextWindow > 0)) return undefined;
     const contextWindow = model.contextWindow;
-    const failureKey = `${ctx.sessionManager.getSessionFile?.() ?? ""}:${preparation.firstKeptEntryId}`;
+    const summaryModel = summarizationModel(ctx) ?? model;
+    const failureKey = JSON.stringify([
+      ctx.sessionManager.getSessionFile?.(), preparation.firstKeptEntryId,
+      model.provider, model.id, contextWindow, preparation.settings.reserveTokens,
+      summaryModel.provider, summaryModel.id, summaryModel.contextWindow, summaryModel.maxTokens,
+    ]);
 
     const messages = convertToLlm([...preparation.messagesToSummarize, ...preparation.turnPrefixMessages]) as LlmMessage[];
     const fileOps = mergedFileOps(preparation.fileOps, event.branchEntries);
@@ -197,9 +206,18 @@ export default function compactionExtension(pi: ExtensionAPI): void {
       readFiles: [...fileOps.read].slice(-200),
       modifiedFiles: [...new Set([...fileOps.edited, ...fileOps.written])].slice(-200),
     });
+    const stopOversizedRequest = (): void => {
+      if (event.reason !== "threshold" || preparation.tokensBefore < contextWindow) return;
+      // Pi treats a cancelled preflight as permission to continue with the old projection.
+      // Abort this run when that projection is already too large to send.
+      report(ctx, { phase: "blocked", reason: event.reason, tokensBefore: preparation.tokensBefore, contextWindow });
+      ctx.abort();
+      ctx.ui.notify("上下文压缩未完成，当前内容仍超过模型窗口，已暂停本轮。请手动 /compact 或调整模型窗口后重试。", "error");
+    };
 
     // 第 1 层。用户手动 /compact 时写了额外要求，那是要模型写的摘要，直接走第 2 层。
-    const layer1 = planLayer1({ messages, previousSummary: preparation.previousSummary, files, keptTokens: kept, overheadTokens: overhead, contextWindow });
+    const layer1 = planLayer1({ messages, previousSummary: preparation.previousSummary, files, keptTokens: kept, overheadTokens: overhead, contextWindow,
+      reserveTokens: preparation.settings.reserveTokens });
     report(ctx, {
       phase: "layer1_planned",
       reason: event.reason,
@@ -211,7 +229,8 @@ export default function compactionExtension(pi: ExtensionAPI): void {
       targetTokens: layer1.targetTokens,
       accept: layer1.accept && !event.customInstructions,
     });
-    if (layer1.accept && !event.customInstructions) {
+    const threshold = contextWindow - preparation.settings.reserveTokens;
+    if (layer1.accept && layer1.estimatedAfter < threshold && !event.customInstructions) {
       failures.delete(failureKey);
       report(ctx, { phase: "done", layer: 1, estimatedAfter: layer1.estimatedAfter, ms: Date.now() - startedAt });
       return {
@@ -227,11 +246,11 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 
     // 第 2 层。
     const failedAt = failures.get(failureKey);
-    if (event.reason !== "manual" && failedAt !== undefined && Date.now() - failedAt < FAILURE_COOLDOWN_MS) {
+    if (event.reason === "threshold" && failedAt !== undefined && Date.now() - failedAt < FAILURE_COOLDOWN_MS) {
       report(ctx, { phase: "skipped", reason: event.reason, why: "同一处刚压失败过，十分钟内不自动重试" });
+      stopOversizedRequest();
       return { cancel: true };
     }
-    const summaryModel = summarizationModel(ctx) ?? model;
     const modelName = `${summaryModel.provider}/${summaryModel.id}`;
     try {
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(summaryModel);
@@ -240,19 +259,25 @@ export default function compactionExtension(pi: ExtensionAPI): void {
       const units = [...(previousBody ? [previousBody] : []), ...renderForSummary(messages)];
       report(ctx, { phase: "layer2_started", reason: event.reason, model: modelName, units: units.length });
       const onProgress = (data: Record<string, unknown>): void => report(ctx, { ...data, model: modelName });
+      const requestModel = nativeSummaryModel(summaryModel, auth.apiKey);
+      const prefix = summaryPrefix(cachedRequest, requestModel, event.branchEntries, Date.now(), preparation.firstKeptEntryId);
+      report(ctx, { phase: "cache_prefix", eligible: Boolean(prefix), cacheRetention: prefix?.cacheRetention });
+      const requestOptions = { model: requestModel, auth, signal: event.signal, onProgress,
+        cache: cachedRequest?.cache ?? requestCacheController(pi.events),
+        stream: ctx.modelRegistry.streamSimple.bind(ctx.modelRegistry) };
       const result = await summarize({
         units,
         previousSummary: previousBody === undefined ? preparation.previousSummary : undefined,
         customInstructions: event.customInstructions,
         contextWindow: summaryModel.contextWindow > 0 ? summaryModel.contextWindow : contextWindow,
         modelMaxTokens: summaryModel.maxTokens,
-        request: createStreamRequest({ model: summaryModel, auth, signal: event.signal, onProgress }),
+        request: createStreamRequest(requestOptions),
+        prefixRequest: prefix ? createStreamRequest({ ...requestOptions, prefix }) : undefined,
         onProgress,
         signal: event.signal,
       });
       const summary = files ? `${result.text}\n\n${files}` : result.text;
       const estimatedAfter = overhead + kept + estimateTextTokens(summary) + SUMMARY_WRAPPER_TOKENS;
-      const threshold = contextWindow - preparation.settings.reserveTokens;
       if (estimatedAfter >= threshold) {
         throw new Error(`压完估计仍有 ${estimatedAfter} token，超过自动压缩线 ${threshold}：模型窗口太小，或最近保留的内容本身就太大`);
       }
@@ -264,7 +289,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
           firstKeptEntryId: preparation.firstKeptEntryId,
           tokensBefore: preparation.tokensBefore,
           estimatedTokensAfter: estimatedAfter,
-          usage: usageOf(result.inputTokens, result.outputTokens),
+          usage: result.usage,
           details: details(2, estimatedAfter, layer1.targetTokens, { chunks: result.chunks, calls: result.calls, model: modelName }),
         },
       };
@@ -273,6 +298,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
       const cancelled = event.signal.aborted;
       if (!cancelled) failures.set(failureKey, Date.now());
       report(ctx, { phase: cancelled ? "cancelled" : "failed", reason: event.reason, error: message.slice(0, 500), ms: Date.now() - startedAt, model: modelName });
+      if (!cancelled) stopOversizedRequest();
       // 明确取消：会话保持原样。不返回 undefined——那样 Pi 会拿原始历史自己再压一遍。
       return { cancel: true };
     }

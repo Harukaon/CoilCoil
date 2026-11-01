@@ -7,6 +7,7 @@
     "pi-package"
   ],
   "type": "module",
+  "imports": { "#cache/*": "./extensions/cache/*.ts" },
   "scripts": {
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts"
@@ -29,8 +30,8 @@
       "./extensions/subagents.ts",
       "./extensions/plan.ts",
       "./extensions/terminal.ts",
-      "./extensions/todo.ts",
       "./extensions/zh-cn.ts",
+      "./extensions/read-cache.ts",
       "./extensions/runtime-bridge.ts",
       "./extensions/setup-tool.ts"
     ]

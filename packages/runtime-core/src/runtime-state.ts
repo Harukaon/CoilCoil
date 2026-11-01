@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   type AgentMode,
+  type BackgroundWaitState,
   type ChatMessage,
   type GoalState,
   type McpRuntimeStatus,
@@ -22,7 +23,6 @@ import {
   type SteeringMessage,
   type SubagentActivity,
   type TerminalRun,
-  type TodoItem,
   type ToolRun,
 } from "@coilcoil/runtime-protocol";
 import {
@@ -75,7 +75,6 @@ export interface ActiveSession {
   tools: Map<string, ToolRun>;
   subagents: Map<string, SubagentActivity>;
   terminals: Map<string, TerminalRun>;
-  plan: TodoItem[];
   project: ProjectSnapshot;
   messageIds: WeakMap<object, string>;
   /** Documents waiting for Pi to append the corresponding user entry. */
@@ -122,6 +121,7 @@ export interface ActiveSession {
   planApproval?: PlanApprovalState;
   /** Live `/goal` loop state, mirrored from the workflow extension. */
   goal?: GoalState;
+  backgroundWait?: BackgroundWaitState;
   /** 配置的总结模型当前解析不出来，这个会话的总结已回退到会话模型。 */
   summarizationModelUnavailable?: boolean;
   /**
@@ -137,6 +137,8 @@ export interface ActiveSession {
   aborting?: boolean;
   /** The underlying Pi abort is still settling, even if it already emitted agent_settled. */
   abortInFlight?: Promise<void>;
+  /** The agent abort itself, distinct from background watcher cleanup. */
+  agentAbortInFlight?: Promise<void>;
   /** A stop that arrived before the run existed; it lands when the run starts. */
   abortOnStart?: boolean;
   /** Model selected while a turn was already running; applied before the next prompt. */
@@ -156,6 +158,7 @@ export interface RuntimeBridgeState {
   agentMode: AgentMode;
   effectiveSystemPrompt?: string;
   systemPromptOverride?: string;
+  promptLocked?: boolean;
   disabledSkills: string[];
   readSkills: string[];
   contextMessages?: unknown[];
@@ -167,7 +170,6 @@ export interface ReconstructedSessionState {
   tools: Map<string, ToolRun>;
   subagents: Map<string, SubagentActivity>;
   terminals: Map<string, TerminalRun>;
-  plan: TodoItem[];
   nextTimelineOrder: number;
   /** Seeded by the replay so live calls keep counting from the restored runs. */
   toolRunIds: ToolRunIds;
@@ -198,6 +200,7 @@ export function runtimeBridgeState(value: unknown): RuntimeBridgeState | undefin
     agentMode: value.agentMode === "unrestricted" ? "unrestricted" : "standard",
     effectiveSystemPrompt: optionalString(value, "effectiveSystemPrompt"),
     systemPromptOverride: optionalString(value, "systemPromptOverride"),
+    promptLocked: value.promptLocked === true,
     disabledSkills: stringArray(value.disabledSkills),
     readSkills: stringArray(value.readSkills),
     contextMessages: Array.isArray(value.contextMessages) ? value.contextMessages : undefined,

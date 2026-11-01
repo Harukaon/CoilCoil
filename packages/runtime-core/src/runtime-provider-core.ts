@@ -141,7 +141,7 @@ export abstract class RuntimeProviderCore extends RuntimeBase {
     writeFileSync(temporaryPath, `${JSON.stringify({ ...current, toolPurposeAuditEnabled: enabled }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     renameSync(temporaryPath, path);
     setGlobalToolPurposeAuditEnabled(enabled);
-    this.reloadActiveSessionResources("工具调用意图设置重新加载失败");
+    this.reloadActiveSessionResources("工具调用意图设置重新加载失败", true);
     const configuration = await this.getConfiguration();
     this.emitEvent({ type: "configuration_updated", configuration });
     return configuration;

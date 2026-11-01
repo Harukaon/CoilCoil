@@ -34,6 +34,7 @@ import {
   sessionCacheInspection,
   sessionUsage,
 } from "./session-values.js";
+import { sessionCacheLedger } from "./session-request-policy.js";
 
 export function buildRuntimeInspectionSnapshot(active: ActiveSession): RuntimeInspectionSnapshot {
   const base = buildRuntimeInspection(
@@ -99,6 +100,7 @@ export function buildRuntimeInspectionSnapshot(active: ActiveSession): RuntimeIn
   const { cacheHitRate, cache } = sessionCacheInspection(active.session, active.responseMetrics);
   const sharedMemoryStatus = projectMemoryStatusByCwd.get(safeRealPath(active.cwd));
   const memoryStatus = memoryStatusForInspection(active.memoryStatus, sharedMemoryStatus);
+  const ledger = sessionCacheLedger(active.session);
   return {
     ...base,
     effectiveSystemPrompt,
@@ -111,6 +113,9 @@ export function buildRuntimeInspectionSnapshot(active: ActiveSession): RuntimeIn
     },
     cacheHitRate,
     cache,
+    cacheDiagnostics: ledger ? { requests: ledger.requests, hits: ledger.hits, misses: ledger.misses,
+      expected: ledger.expected, cold: ledger.cold, input: ledger.input, read: ledger.read,
+      write: ledger.write, write1h: ledger.write1h, recent: ledger.recent } : undefined,
     tokenBreakdown,
     tools,
     skills,
@@ -118,7 +123,11 @@ export function buildRuntimeInspectionSnapshot(active: ActiveSession): RuntimeIn
     mcp: active.mcpStatus,
     memory: memoryStatus ? hydrateProjectMemoryStatus(memoryStatus) : undefined,
     capabilities: {
-      editSystemPrompt: active.bridgeState?.agentMode !== "unrestricted",
+      editSystemPrompt: active.bridgeState?.agentMode !== "unrestricted" && active.bridgeState?.promptLocked !== true,
+      editSystemPromptReason: active.bridgeState?.promptLocked
+        ? "会话开始后系统提示和 Skill 配置已固定，修改请新建对话。"
+        : active.bridgeState?.agentMode === "unrestricted" ? "Unrestricted 模式使用固定的 System Prompt。" : undefined,
+      editSessionSkills: active.bridgeState?.promptLocked !== true,
       removeOriginalSessionItems: false,
       removeOriginalSessionItemsReason: ORIGINAL_SESSION_MUTATION_UNSUPPORTED,
     },

@@ -175,6 +175,7 @@ export class McpManager {
   private readonly failedAt = new Map<string, number>();
   /** When each connection was last actually used, for the idle sweep. */
   private readonly lastUsedAt = new Map<string, number>();
+  private readonly activeCalls = new WeakMap<McpConnection, number>();
   private idleSweep?: ReturnType<typeof setInterval>;
   private readonly flows = new Map<string, AuthFlow>();
   /** Servers switched off for the current conversation only. */
@@ -239,6 +240,7 @@ export class McpManager {
       const minutes = definition.idleTimeout;
       if (!minutes || minutes <= 0) continue;
       if (connection.status !== "connected") continue;
+      if ((this.activeCalls.get(connection) ?? 0) > 0) continue;
       const since = this.lastUsedAt.get(name) ?? now;
       if (now - since < minutes * 60_000) continue;
       void this.drop(name);
@@ -665,13 +667,24 @@ export class McpManager {
     // for exactly the same reason as above.
     if (this.supportsOAuth(definition)) await this.ensureCallbackServer();
     // 旧工具名别名：命中直接转调，诊断里记一笔，模型不用撞墙重试。
-    const resolvedTool = BROWSER_TOOL_ALIASES[tool] ?? tool;
+    const resolvedTool = server === "coilcoil-browser" && Object.hasOwn(BROWSER_TOOL_ALIASES, tool)
+      ? BROWSER_TOOL_ALIASES[tool]! : tool;
     if (resolvedTool !== tool) {
       this.options.diagnostic?.("info", "mcp_tool_alias", { server, tool, resolvedTool });
     }
     // pageId 自愈："1" → 1，只动浏览器类 server，不碰别的 server 的同名参数。
     const resolvedArgs = server === "coilcoil-browser" ? coercePageId(args) : args;
-    return this.connectionFor(server).callTool(resolvedTool, resolvedArgs, signal);
+    const connection = this.connectionFor(server);
+    this.activeCalls.set(connection, (this.activeCalls.get(connection) ?? 0) + 1);
+    try {
+      return await connection.callTool(resolvedTool, resolvedArgs, signal);
+    } finally {
+      const remaining = (this.activeCalls.get(connection) ?? 1) - 1;
+      if (remaining > 0) this.activeCalls.set(connection, remaining);
+      else this.activeCalls.delete(connection);
+      // A replaced connection must not refresh the new one's idle clock.
+      if (this.connections.get(server) === connection) this.lastUsedAt.set(server, Date.now());
+    }
   }
 
   /**

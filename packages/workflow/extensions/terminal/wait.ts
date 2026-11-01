@@ -7,6 +7,7 @@ export async function waitForTerminalExit(
   signal: AbortSignal | undefined,
 ): Promise<WaitOutcome> {
   if (!isRunning(session)) return "exit";
+  if (signal?.aborted) return "aborted";
   if (timeoutMs <= 0) return "timeout";
   return new Promise<WaitOutcome>((resolveWait) => {
     let settled = false;

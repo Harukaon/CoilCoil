@@ -169,3 +169,10 @@ export const SHELL_TOOL_NAMES: readonly string[] = ["bash", "powershell"];
 export function isShellToolName(name: string): boolean {
   return SHELL_TOOL_NAMES.includes(name);
 }
+
+/** Only calls that launch a command own a terminal card. Observing an existing terminal does not. */
+export function isShellCommandCall(name: string, args: Record<string, unknown>): boolean {
+  return isShellToolName(name) || (name === "terminal" && args.action === "start")
+    || (name === "monitor" && (args.action === undefined || args.action === "start")
+      && typeof args.command === "string" && args.command.trim().length > 0);
+}

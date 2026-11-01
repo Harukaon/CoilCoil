@@ -1,4 +1,6 @@
 import { chunkUnits, estimateTextTokens } from "./text.ts";
+import type { Usage } from "@earendil-works/pi-ai";
+import { addUsage, emptyUsage } from "./usage.ts";
 
 /**
  * 第 2 层：让模型写交接摘要。
@@ -18,21 +20,27 @@ export interface SummaryRequest {
   maxTokens: number;
   /** 这一次是第几块、哪一步，只用于日志。 */
   label: string;
+  /** Cancels sibling requests when another summary chunk fails. */
+  signal?: AbortSignal;
 }
 
 export interface SummaryResponse {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  usage?: Usage;
 }
 
 /** 发一次请求。模型说输入太长时抛 InputTooLongError，其余失败抛普通错误。 */
 export type RequestSummary = (request: SummaryRequest) => Promise<SummaryResponse>;
 
 export class InputTooLongError extends Error {
-  constructor(message: string) {
+  usage?: Usage;
+
+  constructor(message: string, usage?: Usage) {
     super(message);
     this.name = "InputTooLongError";
+    this.usage = usage;
   }
 }
 
@@ -48,6 +56,8 @@ export interface SummarizeOptions {
   /** 写摘要的模型单次最多能输出多少。 */
   modelMaxTokens: number;
   request: RequestSummary;
+  /** An exact copy of a recent Claude request can share its conversation cache. */
+  prefixRequest?: RequestSummary;
   concurrency?: number;
   onProgress?: (event: Record<string, string | number | boolean | undefined>) => void;
   signal?: AbortSignal;
@@ -59,6 +69,7 @@ export interface SummarizeResult {
   calls: number;
   inputTokens: number;
   outputTokens: number;
+  usage: Usage;
 }
 
 export const SUMMARY_SYSTEM = [
@@ -124,9 +135,12 @@ function mergePrompt(parts: string[], previousSummary: string | undefined, custo
   ].filter(Boolean).join("\n");
 }
 
-/** 一次请求最多放多少材料：窗口的一半（留出提示、上一份摘要和输出），且不超过 12 万——再大一次也太慢。 */
+/** Pi reserves this room before clamping output; budget material before that clamp reaches one token. */
+const CONTEXT_RESERVE = 4096;
+
+/** 一次请求的材料预算，另给系统指令、摘要格式和输出留出空间。 */
 export function requestBudget(contextWindow: number): number {
-  return Math.max(4000, Math.min(Math.floor(contextWindow * 0.5), 120_000));
+  return Math.max(1, Math.min(Math.floor((contextWindow - CONTEXT_RESERVE) * 0.5), 120_000));
 }
 
 /** 按预算把若干段分组，保持顺序。 */
@@ -148,35 +162,70 @@ export function groupByBudget(parts: readonly string[], budgetTokens: number): s
   return groups;
 }
 
-async function mapLimit<T, R>(items: readonly T[], limit: number, run: (item: T, index: number) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(items: readonly T[], limit: number, run: (item: T, index: number) => Promise<R>, onError: (error: unknown) => void): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
+  let failure: { error: unknown } | undefined;
+  const workers = Array.from({ length: Math.min(Math.max(1, Math.floor(limit) || 1), items.length) }, async () => {
+    while (!failure && next < items.length) {
       const index = next++;
-      results[index] = await run(items[index], index);
+      try {
+        results[index] = await run(items[index], index);
+      } catch (error) {
+        if (!failure) {
+          failure = { error };
+          onError(error);
+        }
+      }
     }
   });
   await Promise.all(workers);
+  if (failure) throw failure.error;
   return results;
 }
 
 export async function summarize(options: SummarizeOptions): Promise<SummarizeResult> {
+  if (options.contextWindow <= CONTEXT_RESERVE) throw new Error("摘要模型的上下文窗口过小，无法同时容纳摘要指令和输出，请选择更大窗口的摘要模型");
   const budget = requestBudget(options.contextWindow);
-  const finalMax = Math.max(2000, Math.min(options.modelMaxTokens || 16_000, 16_000));
-  const partMax = Math.max(2000, Math.min(options.modelMaxTokens || 8000, 8000));
-  const stats = { calls: 0, inputTokens: 0, outputTokens: 0 };
+  const finalMax = Math.max(1, Math.min(options.modelMaxTokens || 16_000, 16_000));
+  const partMax = Math.max(1, Math.min(options.modelMaxTokens || 8000, 8000, Math.floor((options.contextWindow - CONTEXT_RESERVE) / 5)));
+  const batch = new AbortController();
+  const signal = options.signal ? AbortSignal.any([options.signal, batch.signal]) : batch.signal;
+  const abortBatch = (error: unknown): void => batch.abort(error);
+  const stats = { calls: 0, inputTokens: 0, outputTokens: 0, usage: emptyUsage() };
   const progress = options.onProgress ?? (() => undefined);
 
-  const call = async (request: SummaryRequest): Promise<string> => {
-    if (options.signal?.aborted) throw new Error("压缩已取消");
+  const call = async (request: SummaryRequest, send = options.request): Promise<string> => {
+    if (signal.aborted) throw new Error("压缩已取消");
+    if (send === options.request) {
+      // Use the larger of our CJK-aware estimate and the SDK's chars/3.5
+      // estimate. Count the actual complete prompt, including old summaries
+      // and user instructions, before choosing a useful output allowance.
+      const tokens = (text: string): number => Math.max(estimateTextTokens(text), Math.ceil(text.length / 3.5));
+      const available = options.contextWindow - tokens(request.system) - tokens(request.prompt) - CONTEXT_RESERVE - 32;
+      if (available < Math.min(1024, request.maxTokens)) throw new InputTooLongError(`${request.label}：输入和摘要输出超过模型窗口，需要进一步分块`);
+      request = { ...request, maxTokens: Math.min(request.maxTokens, available) };
+    }
     stats.calls++;
     const startedAt = Date.now();
     progress({ phase: "request_started", label: request.label, promptTokens: estimateTextTokens(request.prompt) });
-    const response = await options.request(request);
+    let response: SummaryResponse;
+    try {
+      response = await send({ ...request, signal });
+    } catch (error) {
+      if (error instanceof InputTooLongError && error.usage) {
+        stats.inputTokens += error.usage.input;
+        stats.outputTokens += error.usage.output;
+        addUsage(stats.usage, error.usage);
+      }
+      throw error;
+    }
     stats.inputTokens += response.inputTokens;
     stats.outputTokens += response.outputTokens;
-    progress({ phase: "request_completed", label: request.label, ms: Date.now() - startedAt, outputChars: response.text.length });
+    const usage = response.usage ?? { ...emptyUsage(), input: response.inputTokens, output: response.outputTokens, totalTokens: response.inputTokens + response.outputTokens };
+    addUsage(stats.usage, usage);
+    progress({ phase: "request_completed", label: request.label, ms: Date.now() - startedAt, outputChars: response.text.length,
+      inputTokens: usage.input, outputTokens: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite });
     if (!response.text.trim()) throw new Error(`${request.label}：模型返回了空摘要`);
     return response.text.trim();
   };
@@ -199,7 +248,7 @@ export async function summarize(options: SummarizeOptions): Promise<SummarizeRes
   /** 把几段总结合成一份；合并的材料本身也装不下，就先分组合并（最多两轮，每轮段数必须变少）。 */
   const merge = async (parts: string[], previous: string | undefined, round = 0): Promise<string> => {
     const prompt = mergePrompt(parts, previous, options.customInstructions, 10_000);
-    const groups = groupByBudget(parts, Math.floor(budget / 2));
+    const groups = groupByBudget(parts, budget);
     if (estimateTextTokens(prompt) <= budget || parts.length <= 2 || round >= 2 || groups.length >= parts.length) {
       return call({ system: SUMMARY_SYSTEM, prompt, maxTokens: finalMax, label: `合并 ${parts.length} 段` });
     }
@@ -209,9 +258,29 @@ export async function summarize(options: SummarizeOptions): Promise<SummarizeRes
       prompt: mergePrompt(group, undefined, undefined, 6000),
       maxTokens: partMax,
       label: `分组合并 ${index + 1}/${groups.length}`,
-    }));
+    }), abortBatch);
     return merge(merged, previous, round + 1);
   };
+
+  if (options.prefixRequest) {
+    try {
+      const text = await call({
+        system: SUMMARY_SYSTEM,
+        prompt: [
+          "请根据上面的对话写一份交接摘要。最近的一段对话还会原样保留，重点整理更早的目标、约束、决定和未完成工作。",
+          SECTIONS, STYLE, "- 总长控制在 10000 字以内。",
+          options.customInstructions ? `用户额外要求：${options.customInstructions}` : "",
+        ].filter(Boolean).join("\n"),
+        maxTokens: finalMax,
+        label: "复用会话缓存",
+      }, options.prefixRequest);
+      return { text, chunks: 1, ...stats };
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      if (!(error instanceof InputTooLongError) && !/signature|prefix.mismatch|thinking.block|tool_use|tool_result/i.test(String(error))) throw error;
+      progress({ phase: "prefix_fallback", reason: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300) });
+    }
+  }
 
   const material = options.units.join("\n\n");
   const previousTokens = estimateTextTokens(options.previousSummary ?? "");
@@ -231,11 +300,16 @@ export async function summarize(options: SummarizeOptions): Promise<SummarizeRes
     }
   }
 
-  const chunks = chunkUnits(options.units, Math.max(2000, budget - previousTokens));
-  const effectiveChunks = chunks.length > 1 ? chunks : chunkUnits(options.units, Math.floor(budget / 2));
+  // 旧摘要也可能大于新模型的窗口。分块时把它放在最前面一起处理，
+  // 不能只压新消息，最后合并时又把超长旧摘要原样塞回去。
+  const units = options.previousSummary
+    ? [`【更早内容的摘要】\n${options.previousSummary}`, ...options.units]
+    : options.units;
+  const chunks = chunkUnits(units, budget);
+  const effectiveChunks = chunks.length > 1 ? chunks : chunkUnits(units, Math.floor(budget / 2));
   progress({ phase: "chunked", chunks: effectiveChunks.length, budgetTokens: budget });
-  const partsNested = await mapLimit(effectiveChunks, options.concurrency ?? 4, (chunk, index) => summarizePart(chunk, index + 1, effectiveChunks.length));
+  const partsNested = await mapLimit(effectiveChunks, options.concurrency ?? 4, (chunk, index) => summarizePart(chunk, index + 1, effectiveChunks.length), abortBatch);
   const parts = partsNested.flat();
-  const text = await merge(parts, options.previousSummary);
+  const text = await merge(parts, undefined);
   return { text, chunks: effectiveChunks.length, ...stats };
 }

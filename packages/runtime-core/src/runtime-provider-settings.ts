@@ -493,8 +493,10 @@ export abstract class RuntimeProviderSettings extends RuntimeProviderCore {
     }
     try {
       await modelRuntime.logout(id);
-    } catch {
-      // A malformed/removed provider may not expose a logout handler; config removal still proceeds.
+    } catch (error) {
+      // The SDK deletes credentials directly, even for an unknown provider.
+      // Storage/synchronization failures must not be disguised as successful removal.
+      throw new Error(`无法移除此服务商，未删除配置：${errorMessage(error)}`, { cause: error });
     }
     if (existing) {
       delete privateConfiguration.providers[id];

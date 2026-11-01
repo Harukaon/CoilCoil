@@ -45,8 +45,7 @@ function createAbortHarness(root: string) {
     tools: new Map(),
     subagents: new Map(),
     terminals: new Map(),
-    plan: [],
-    project: { cwd: root, files: [], changes: [], terminals: [], plan: [], refreshedAt: 0 },
+    project: { cwd: root, files: [], changes: [], terminals: [], refreshedAt: 0 },
     messageIds: new WeakMap(),
     messageRevision: 0,
     pendingUserPrompts: [],
@@ -57,7 +56,7 @@ function createAbortHarness(root: string) {
     toolRunIds: new ToolRunIds(),
     responseMetricsHistory: [],
     sessionRevision: 1,
-    eventBus: { on: () => undefined } as never,
+    eventBus: { on: () => undefined, emit: () => undefined } as never,
   };
   return { runtime, internals, events, calls, session };
 }

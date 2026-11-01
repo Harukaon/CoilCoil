@@ -50,6 +50,8 @@ import {
   withBundledBrowserMcp,
 } from "./browser-mcp.js";
 import { RuntimeProviderAuth } from "./runtime-provider-auth.js";
+import { expectCacheChange } from "./session-request-policy.js";
+import { MCP_TOOLS_REFRESH_ENTRY } from "@coilcoil/workflow/extensions/mcp-session-state.js";
 import {
   ActiveSession,
 } from "./runtime-state.js";
@@ -72,6 +74,7 @@ import {
 } from "./skill-overrides.js";
 
 export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
+  private userToolReloadPending?: ActiveSession;
   private static readonly defaultMemoryGenerationRules = "只记录跨会话仍会复用的稳定事实、项目约定和用户长期偏好；不要记录临时进度、一次性错误、通用知识或任何密码、API Key、Token、Cookie、私钥和 Authorization。";
 
   private memorySettingsPath(): string {
@@ -267,10 +270,9 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     const adapter = await loadMcpAdapterConfigModule();
     const resolvedCwd = this.mcpCwd(cwd);
     this.cleanRemovedMcpServerState(adapter, resolvedCwd);
-    const configPath = adapter.getPiGlobalConfigPath(join(this.agentDir, "mcp.json"));
     // The workspace's own servers live in CoilCoil's agent directory, so they are
     // merged here rather than read back out of the workspace by the adapter.
-    const configuration = this.withWorkspaceMcpServers(adapter.loadMcpConfig(configPath, resolvedCwd), resolvedCwd);
+    const configuration = this.loadEffectiveMcpConfiguration(adapter, resolvedCwd);
     const hiddenNames = new Set([
       ...this.readRemovedMcpServers(),
       ...this.readDisabledMcpServers(),
@@ -293,8 +295,19 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
     }
   }
 
-  protected async reloadActiveSessionNow(active: ActiveSession): Promise<void> {
+  protected async reloadActiveSessionNow(active: ActiveSession, userToolChange = false): Promise<void> {
+    if (this.active !== active || (active.bridgeState?.promptLocked && !userToolChange)) return;
     await this.refreshAgentMcpConfiguration(active.eventBus, active.cwd, active.session.sessionId);
+    if (this.active !== active) return;
+    if (!this.canReloadActiveSession(active, userToolChange)) {
+      this.reloadActiveSessionResources("资源重新加载失败", userToolChange);
+      return;
+    }
+    if (userToolChange) {
+      expectCacheChange(active.session, "user_tools_changed");
+      this.log?.info("cache", "user_tools_changed", {}, { sessionPath: active.session.sessionFile ?? undefined });
+    }
+    if (userToolChange) active.session.sessionManager.appendCustomEntry(MCP_TOOLS_REFRESH_ENTRY, { version: 1 });
     await active.session.reload();
     if (this.active !== active) return;
     this.emitEvent({ type: "session_snapshot", snapshot: await this.snapshot() });
@@ -304,36 +317,51 @@ export abstract class RuntimeResourcesController extends RuntimeProviderAuth {
   protected async reloadMcpExtensionNow(): Promise<void> {
     const active = this.active;
     if (!active) return;
-    if (!this.canReloadActiveSession(active)) {
-      this.reloadMcpExtension();
+    if (!this.canReloadActiveSession(active, true)) {
+      this.reloadActiveSessionResources("MCP 扩展重新加载失败", true);
       return;
     }
     if (this.resourceReloadTimer) clearTimeout(this.resourceReloadTimer);
     this.resourceReloadTimer = undefined;
-    await this.reloadActiveSessionNow(active);
+    this.userToolReloadPending = undefined;
+    await this.reloadActiveSessionNow(active, true);
   }
 
-  protected canReloadActiveSession(active: ActiveSession): boolean {
-    if (active.session.isStreaming) return false;
+  protected canReloadActiveSession(active: ActiveSession, userToolChange = false): boolean {
+    if (active.bridgeState?.promptLocked && !userToolChange) return false;
+    if (active.session.isStreaming || active.session.isCompacting) return false;
     return ![...active.subagents.values()].some((subagent) =>
       (subagent.status === "pending" || subagent.status === "running") && subagent.controlReady === true,
     );
   }
 
-  protected reloadActiveSessionResources(errorLabel = "资源重新加载失败"): void {
+  protected reloadActiveSessionResources(errorLabel = "资源重新加载失败", userToolChange = false): void {
+    const active = this.active;
+    if (this.userToolReloadPending !== active) this.userToolReloadPending = undefined;
+    if (!active) return;
+    if (this.userToolReloadPending === active) {
+      if (!userToolChange && this.resourceReloadTimer) return;
+      userToolChange = true;
+    }
+    if (active.bridgeState?.promptLocked && !userToolChange) return;
+    if (userToolChange) this.userToolReloadPending = active;
     if (this.resourceReloadTimer) clearTimeout(this.resourceReloadTimer);
+    this.resourceReloadTimer = undefined;
     if (this.mcpReloadTimer) clearTimeout(this.mcpReloadTimer);
     this.mcpReloadTimer = undefined;
-    const active = this.active;
-    if (!active) return;
     const attemptReload = (): void => {
       this.resourceReloadTimer = undefined;
-      if (this.active !== active) return;
-      if (!this.canReloadActiveSession(active)) {
+      if (this.active !== active) {
+        if (this.userToolReloadPending === active) this.userToolReloadPending = undefined;
+        return;
+      }
+      if (active.bridgeState?.promptLocked && !userToolChange) return;
+      if (!this.canReloadActiveSession(active, userToolChange)) {
         this.resourceReloadTimer = setTimeout(attemptReload, 750);
         return;
       }
-      void this.reloadActiveSessionNow(active)
+      if (this.userToolReloadPending === active) this.userToolReloadPending = undefined;
+      void this.reloadActiveSessionNow(active, userToolChange)
         .catch((error) => {
           this.emitEvent({ type: "runtime_error", message: `${errorLabel}：${errorMessage(error)}`, detail: errorDetail(error) });
         });

@@ -461,7 +461,7 @@ export default function planExtension(pi: ExtensionAPI): void {
     label: "Plan",
     description: [
       "Create an execution plan for a complex task. The plan is written to disk and waits for the user's approval; nothing runs until the user approves it.",
-      "Use it when the task has several clear steps and the user should confirm the approach first; do not use it for ordinary Todo progress updates.",
+      "Use it when the task has several clear steps and the user should confirm the approach first; do not use it for ordinary progress updates.",
       "It takes a single markdown parameter: submit the complete Markdown document directly, and do not split the plan into extra title, goal, step or acceptance fields. The structure is up to the task and no fixed sections are required.",
       "The plan file is plain Markdown that can be viewed and edited with the native read, write and edit tools; do not leave the plan only in your reply text.",
       "After creating it, stop and wait for the user to choose, in the interface, the main agent or a specific subagent to carry it out.",

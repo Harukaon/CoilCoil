@@ -1,6 +1,8 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { BACKGROUND_WAIT_CANCEL_CHANNEL, BACKGROUND_WAIT_STATE_CHANNEL, BACKGROUND_WAKE_FAILURE_CHANNEL,
+  type BackgroundWaitCancelRequest } from "./background-wait.ts";
 
 /** Public event channel consumed by CoilCoil's bundled runtime. */
 export const GOAL_STATE_CHANNEL = "coilcoil:goal:state:v1";
@@ -144,13 +146,13 @@ export function buildGoalPrompt(state: GoalState, round: number): string {
   if (round === 1) {
     lines.push(
       "请按下面的方式开始：",
-      "1. 先用 todo 工具写出完成该目标的计划；",
+      "1. 先明确完成该目标的步骤与验收标准；",
       "2. 立刻执行计划里的第一步，不要只做汇报；",
     );
   } else {
     lines.push(
       "请按下面的方式继续：",
-      "1. 先检查上一轮的实际结果，更新 todo 计划；",
+      "1. 先检查上一轮的实际结果，确认剩余工作；",
       "2. 继续执行计划里未完成的下一步，本轮必须有实际进展；",
     );
   }
@@ -170,6 +172,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
   /** When the round now in flight was handed to Pi, until its run begins. */
   let roundSentAt: number | undefined;
   let lastTurnFailed = false;
+  let backgroundWaiting = false;
+  // Clearing a wait delivers an external wake-up; it must not also schedule a
+  // Goal round. Only a new run after that wake-up may resume automatic rounds.
+  let waitingForWakeRun = false;
 
   const publish = (): void => {
     const reported = reportedGoalState(state);
@@ -189,14 +195,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
     });
   };
 
-  const setGoalTool = (enabled: boolean): void => {
-    const active = new Set(pi.getActiveTools());
-    if (enabled === active.has(GOAL_TOOL_NAME)) return;
-    if (enabled) active.add(GOAL_TOOL_NAME);
-    else active.delete(GOAL_TOOL_NAME);
-    pi.setActiveTools([...active]);
-  };
-
   const stopTicker = (): void => {
     if (!ticker) return;
     clearInterval(ticker);
@@ -204,7 +202,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
   };
 
   const sendRound = (repeat = false): void => {
-    if (!state || state.status !== "running") return;
+    if (!state || state.status !== "running" || backgroundWaiting || waitingForWakeRun) return;
     if (!repeat) state.iteration += 1;
     state.updatedAt = Date.now();
     nextSendAt = undefined;
@@ -219,6 +217,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
       stopTicker();
       return;
     }
+    if (backgroundWaiting || waitingForWakeRun) return;
     const ctx = currentContext;
     if (!ctx) return;
     // Pi reports the session busy for the whole run, however long the provider
@@ -254,7 +253,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
     lastTurnFailed = false;
     roundSentAt = undefined;
     currentContext = ctx;
-    setGoalTool(true);
     persist();
     startTicker();
     sendRound();
@@ -268,11 +266,26 @@ export default function goalExtension(pi: ExtensionAPI): void {
     nextSendAt = undefined;
     roundSentAt = undefined;
     lastTurnFailed = false;
+    backgroundWaiting = false;
+    waitingForWakeRun = false;
     stopTicker();
-    setGoalTool(false);
-    persist();
-    publish();
+    try {
+      persist();
+    } finally {
+      // The loop has stopped even if its journal cannot be written.
+      publish();
+    }
   };
+
+  const unsubscribeBackgroundWait = pi.events.on(BACKGROUND_WAIT_STATE_CHANNEL, (value) => {
+    if (!isRecord(value) || typeof value.waiting !== "boolean") return;
+    backgroundWaiting = value.waiting;
+    if (!backgroundWaiting) return;
+    waitingForWakeRun = true;
+    nextSendAt = undefined;
+    roundSentAt = undefined;
+    stopTicker();
+  });
 
   pi.registerCommand("goal", {
     description: "设定一个必须完成的目标，进入不会自行停止的 Agent 循环",
@@ -285,7 +298,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
           return;
         }
         const rounds = state.iteration;
-        endLoop("stopped");
+        try {
+          endLoop("stopped");
+        } finally {
+          const cancellation: BackgroundWaitCancelRequest = {};
+          pi.events.emit(BACKGROUND_WAIT_CANCEL_CHANNEL, cancellation);
+          void cancellation.completion?.catch((error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            pi.events.emit(BACKGROUND_WAKE_FAILURE_CHANNEL, { error: `取消后台监控时清理失败：${message}` });
+          });
+        }
         ctx.ui.notify(`目标循环已停止（共 ${rounds} 轮）`, "info");
         return;
       }
@@ -304,7 +326,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
           state.updatedAt = Date.now();
           lastTurnFailed = false;
           roundSentAt = undefined;
-          setGoalTool(true);
           persist();
           nextSendAt = Date.now();
           startTicker();
@@ -383,10 +404,17 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_start", (_event, ctx) => {
     currentContext = ctx;
+    if (!backgroundWaiting) waitingForWakeRun = false;
     // The run began: the loop now waits for the turn, not for the clock.
     if (state?.status !== "running") return;
     roundSentAt = undefined;
     nextSendAt = undefined;
+  });
+
+  pi.on("before_provider_request", () => {
+    // A monitor can steer into an existing run when the registering batch also
+    // contained other tools. That continuation has no second agent_start.
+    if (!backgroundWaiting) waitingForWakeRun = false;
   });
 
   pi.on("agent_end", (event, ctx) => {
@@ -407,6 +435,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
     currentContext = ctx;
     if (!state || state.status !== "running") return;
     roundSentAt = undefined;
+    if (backgroundWaiting || waitingForWakeRun) {
+      nextSendAt = undefined;
+      stopTicker();
+      publish();
+      return;
+    }
     nextSendAt = Date.now() + (lastTurnFailed ? RETRY_DELAY_MS : LOOP_DELAY_MS);
     startTicker();
     publish();
@@ -418,8 +452,13 @@ export default function goalExtension(pi: ExtensionAPI): void {
     nextSendAt = undefined;
     roundSentAt = undefined;
     lastTurnFailed = false;
+    backgroundWaiting = false;
+    waitingForWakeRun = false;
     state = restoredGoalState(ctx.sessionManager.getBranch());
-    setGoalTool(state?.status === "running");
+    // Keep the schema available throughout the session. Eligibility is checked
+    // in execute; completing/pausing a goal must never rewrite the tool prefix.
+    const active = new Set(pi.getActiveTools());
+    if (!active.has(GOAL_TOOL_NAME)) pi.setActiveTools([...active, GOAL_TOOL_NAME]);
     publish();
   };
 
@@ -427,6 +466,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
   pi.on("session_tree", (_event, ctx) => restore(ctx));
   pi.on("session_shutdown", () => {
     stopTicker();
+    unsubscribeBackgroundWait();
+    backgroundWaiting = false;
+    waitingForWakeRun = false;
     state = undefined;
     currentContext = undefined;
   });

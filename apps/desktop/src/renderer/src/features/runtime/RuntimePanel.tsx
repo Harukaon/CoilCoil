@@ -19,6 +19,7 @@ import { Tooltip } from "../../ui/tooltip";
 import { tokenNumber, toolDisplayName } from "./runtimePresentation";
 import { RuntimeSection } from "./RuntimeSection";
 import { SubagentSection } from "./SubagentSection";
+import { CacheSection } from "./CacheSection";
 import {
   mcpSectionBadge,
   mcpTogglePlan,
@@ -324,6 +325,8 @@ export function RuntimePanel({
         </div>
       </section>
 
+      <CacheSection value={inspection?.cacheDiagnostics} />
+
       <button className="runtime-entry-card" type="button" onClick={() => setPromptOpen(true)}>
         <span><BrainCircuit size={14} /><strong>系统提示词</strong></span>
         <small>{inspection?.systemPromptOverride ? "当前会话已修改" : inspection?.estimates.systemPrompt ? `${tokenNumber(inspection.estimates.systemPrompt)} Token` : "等待捕获"}</small>
@@ -464,7 +467,7 @@ export function RuntimePanel({
           <Tooltip content={skill.description} key={skill.filePath}>
             <button
               className={`runtime-chip toggle ${skill.sessionEnabled ? "active" : "inactive"}`}
-              disabled={!skill.globallyEnabled || busyAction === `skill:${skill.filePath}`}
+              disabled={!skill.globallyEnabled || inspection.capabilities.editSessionSkills === false || busyAction === `skill:${skill.filePath}`}
               type="button"
               onClick={() => { void setSkillEnabled(skill.filePath, !skill.sessionEnabled); }}
             >
@@ -473,7 +476,7 @@ export function RuntimePanel({
             </button>
           </Tooltip>
         ))}</div> : <p className="runtime-muted">当前工作区没有发现可用 Skill。</p>}
-        <p className="runtime-section-footnote">设置页控制工作区是否启用；这里的开关只影响当前会话。</p>
+        <p className="runtime-section-footnote">会话开始后 Skill 配置固定；设置页的修改将在新对话生效。</p>
       </RuntimeSection>
 
       <RuntimeSection title="MCP" icon={<PlugZap size={14} />} badge={mcpSectionBadge(inspection?.mcp?.servers, mcpOverrides)}>
@@ -498,7 +501,7 @@ export function RuntimePanel({
 
       <RuntimeSection title="项目记忆" icon={<Sparkles size={14} />} badge={inspection?.memory ? ({ idle: "就绪", running: "整理中", busy: "正忙", succeeded: "已完成", failed: "失败", disabled: "已停用" }[inspection.memory.state]) : undefined} open={inspection?.memory?.state === "running" || inspection?.memory?.state === "failed"}>
         {inspection?.memory ? <div className="runtime-memory-card">
-          <p className="runtime-section-footnote">这是工作区级记忆；切换或回溯会话不会回滚磁盘上的记忆文件。</p>
+          <p className="runtime-section-footnote">这里显示工作区当前记忆文件；已开始的会话继续使用原有记忆，更新将在新对话生效。</p>
           {inspection.memory.message ? <p>{inspection.memory.message}</p> : null}
           {inspection.memory.error ? <p className="runtime-summary-error">{inspection.memory.error}</p> : null}
           <dl>
@@ -526,8 +529,8 @@ export function RuntimePanel({
         open={promptOpen}
         title="当前会话的系统提示词"
         description={canEditSystemPrompt
-          ? "查看真正生效的 System Prompt；修改只影响当前会话，并可能降低提示缓存命中率。"
-          : "Unrestricted 模式使用固定的 System Prompt，当前会话中仅可查看。"}
+          ? "首次发送消息前可编辑；会话开始后系统提示词固定。"
+          : inspection?.capabilities.editSystemPromptReason ?? "当前会话的系统提示词已固定，仅可查看。"}
         size="lg"
         onClose={() => { setPromptOpen(false); setEditingPrompt(false); }}
         footer={canEditSystemPrompt ? <>

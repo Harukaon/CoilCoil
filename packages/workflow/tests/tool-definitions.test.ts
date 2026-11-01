@@ -61,11 +61,12 @@ function schemaDescriptions(schema: unknown, path: string, found: Array<{ path: 
 test("the recorder sees the tools of every extension", async () => {
   const names = (await registeredTools()).map((tool) => tool.name);
   for (const expected of [
-    "bash", "terminal", "mcp", "coilcoil", "subagent", "plan", "todo", "goal_complete",
+    "bash", "terminal", "monitor", "mcp", "coilcoil", "subagent", "plan", "goal_complete",
     "browser_open", "browser_navigate", "browser_click", "browser_type", "browser_tabs",
   ]) {
     assert.ok(names.includes(expected), `${expected} was not registered; the checks below would be vacuous`);
   }
+  assert.ok(!names.includes("todo"), "the removed Todo tool must not be registered");
 });
 
 test("CoilCoil tools add nothing to the system prompt on their own", async () => {

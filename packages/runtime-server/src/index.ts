@@ -9,10 +9,12 @@ import {
   type SessionSnapshot,
   type SessionSummary,
   type RuntimeWireMessage,
+  type McpAccessRequest,
+  type McpAccessContext,
 } from "@coilcoil/runtime-protocol";
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
   DIAGNOSTIC_LEVEL_ENV,
@@ -23,9 +25,13 @@ import {
   processStartupData,
 } from "@coilcoil/diagnostics";
 import { selectWorkspaceSessionPath } from "./workspace-session.js";
+import { startLocalMcpServer, type LocalMcpServer } from "./local-mcp-server.js";
 
 type WireSink = (message: RuntimeWireMessage) => void;
 type RuntimeFactory = (options: CoilCoilRuntimeOptions) => CoilCoilRuntime;
+type SessionMutationCommand = Extract<RuntimeCommand, { type:
+  "archive_session" | "delete_session" | "move_session" | "restore_session" | "rename_session" | "pin_session" | "fork_session"
+}>;
 
 const MAX_RETAINED_IDLE_SESSION_RUNTIMES = 6;
 
@@ -86,13 +92,14 @@ function answersFromWorkspaceConfiguration(command: RuntimeCommand): boolean {
 
 function eventChangesSnapshot(event: RuntimeEvent): boolean {
   return event.type === "message_started"
+    || event.type === "message_steering"
+    || event.type === "message_rejected"
     || event.type === "prompt_queue_updated"
     || event.type === "message_delta"
     || event.type === "message_finished"
     || event.type === "tool_started"
     || event.type === "tool_updated"
     || event.type === "tool_finished"
-    || event.type === "plan_updated"
     || event.type === "plan_approval_updated"
     || event.type === "goal_updated"
     || event.type === "subagents_updated"
@@ -115,6 +122,9 @@ export class RuntimeServer {
   private readonly runtimes = new Map<string, CoilCoilRuntime>();
   private readonly sessionPaths = new Map<string, string>();
   private readonly runtimePaths = new Map<string, string>();
+  private readonly runtimeWorkspaces = new Map<string, string>();
+  private readonly deletingWorkspaces = new Set<string>();
+  private readonly sessionMutations = new Map<string, string[]>();
   private readonly runtimeAccess = new Map<string, number>();
   private readonly runningRuntimes = new Set<string>();
   private readonly memoryBusyRuntimes = new Set<string>();
@@ -126,6 +136,10 @@ export class RuntimeServer {
   private desiredSessionPath?: string;
   private defaultRuntimeId?: string;
   private disposed = false;
+  private disposing?: Promise<void>;
+  private localMcp?: Promise<LocalMcpServer>;
+  private readonly mcpBusyRuntimes = new Map<string, number>();
+  private readonly commandBusyRuntimes = new Map<string, number>();
 
   constructor(options: CoilCoilRuntimeOptions, send: WireSink, dependencies: RuntimeServerDependencies = {}) {
     this.send = send;
@@ -152,6 +166,57 @@ export class RuntimeServer {
     }
   }
 
+  /** External access does not open a conversation or change the desktop's selected session. */
+  startLocalMcpAccess(registryDirectory?: string): Promise<LocalMcpServer> {
+    if (this.disposed) return Promise.reject(new Error("CoilCoil 运行时已关闭。"));
+    return this.localMcp ??= startLocalMcpServer({
+      dataDir: dirname(this.options.agentDir),
+      registryDirectory,
+      handle: (request, signal) => this.accessMcp(request, signal),
+    });
+  }
+
+  async accessMcp(request: McpAccessRequest, signal?: AbortSignal): Promise<unknown> {
+    if (this.disposed) throw new Error("CoilCoil 运行时已关闭。");
+    signal?.throwIfAborted();
+    if (request.action === "contexts") {
+      return { contexts: [...this.runtimeSnapshots.entries()].map(([runtimeId, snapshot]): McpAccessContext => ({
+        runtimeId, sessionId: snapshot.session.id, cwd: snapshot.session.cwd, title: snapshot.session.title,
+      })) };
+    }
+    if (!isAbsolute(request.cwd)) throw new Error("cwd 必须是工作目录的绝对路径。");
+    const cwd = normalizeSessionPath(request.cwd);
+    let runtimeId = request.runtimeId;
+    if (runtimeId) {
+      this.runtimeById(runtimeId);
+      const snapshot = this.runtimeSnapshots.get(runtimeId);
+      if (!snapshot || normalizeSessionPath(snapshot.session.cwd) !== cwd) {
+        throw new Error("所选会话不属于请求的工作目录。");
+      }
+    } else {
+      const candidates = [...this.runtimeSnapshots.entries()].filter(([, snapshot]) => normalizeSessionPath(snapshot.session.cwd) === cwd);
+      candidates.sort(([a], [b]) => (a === this.defaultRuntimeId ? -1 : b === this.defaultRuntimeId ? 1
+        : (this.runtimeAccess.get(b) ?? 0) - (this.runtimeAccess.get(a) ?? 0)));
+      runtimeId = candidates[0]?.[0];
+    }
+    const runtime = runtimeId ? this.runtimeById(runtimeId) : this.runtime;
+    if (runtimeId) {
+      this.touchRuntime(runtimeId);
+      this.mcpBusyRuntimes.set(runtimeId, (this.mcpBusyRuntimes.get(runtimeId) ?? 0) + 1);
+    }
+    try { return await runtime.accessMcp({ ...request, cwd }, signal); }
+    finally {
+      if (runtimeId) {
+        const pending = (this.mcpBusyRuntimes.get(runtimeId) ?? 1) - 1;
+        if (pending) this.mcpBusyRuntimes.set(runtimeId, pending);
+        else {
+          this.mcpBusyRuntimes.delete(runtimeId);
+          if (!this.disposed) this.retireExcessIdleRuntimes(runtimeId);
+        }
+      }
+    }
+  }
+
   private createManagedRuntime(runtimeId?: string, modelRuntimePromise?: CoilCoilRuntimeOptions["modelRuntimePromise"]): CoilCoilRuntime {
     return this.createRuntime({
       ...this.options,
@@ -162,6 +227,7 @@ export class RuntimeServer {
   }
 
   private sendRuntimeEvent(runtimeId: string | undefined, event: RuntimeEvent): void {
+    if (this.disposed) return;
     if (runtimeId && !this.runtimes.has(runtimeId)) return;
     if (runtimeId && eventChangesSnapshot(event)) this.dirtyRuntimes.add(runtimeId);
     if (runtimeId && event.type === "run_state") {
@@ -211,6 +277,7 @@ export class RuntimeServer {
 
   private decorateSnapshot(runtimeId: string, snapshot: SessionSnapshot): SessionSnapshot {
     const decorated = { ...snapshot, runtimeId };
+    this.runtimeWorkspaces.set(runtimeId, normalizeSessionPath(snapshot.session.cwd));
     this.runtimeSnapshots.set(runtimeId, decorated);
     this.dirtyRuntimes.delete(runtimeId);
     if (snapshot.running) this.runningRuntimes.add(runtimeId);
@@ -233,18 +300,40 @@ export class RuntimeServer {
     this.runtimeAccess.set(runtimeId, Date.now());
   }
 
+  /** Async setup/configuration is live work even before run_state becomes true. */
+  private async withRuntimeCommand<T>(runtimeId: string, action: () => Promise<T>, complete?: (result: T) => T): Promise<T> {
+    this.touchRuntime(runtimeId);
+    this.commandBusyRuntimes.set(runtimeId, (this.commandBusyRuntimes.get(runtimeId) ?? 0) + 1);
+    try {
+      const result = await action();
+      if (this.disposed) throw new Error("CoilCoil 运行时已关闭。");
+      this.runtimeById(runtimeId);
+      // Publish setup results while still pinned: several completions can share
+      // a microtask turn, and unpinning before registration lets LRU remove one
+      // whose delayed continuation would then recreate stale snapshot indexes.
+      return complete ? complete(result) : result;
+    } finally {
+      const pending = (this.commandBusyRuntimes.get(runtimeId) ?? 1) - 1;
+      if (pending > 0) this.commandBusyRuntimes.set(runtimeId, pending);
+      else this.commandBusyRuntimes.delete(runtimeId);
+      if (!this.disposed) this.retireExcessIdleRuntimes(runtimeId);
+    }
+  }
+
   private removeRuntimeReferences(runtimeId: string): CoilCoilRuntime | undefined {
     const runtime = this.runtimes.get(runtimeId);
     if (runtime) this.send({ runtimeId, event: { type: "runtime_released" } });
     this.runtimes.delete(runtimeId);
     this.runtimeAccess.delete(runtimeId);
     this.runningRuntimes.delete(runtimeId);
+    this.commandBusyRuntimes.delete(runtimeId);
     this.memoryBusyRuntimes.delete(runtimeId);
     this.subagentBusyRuntimes.delete(runtimeId);
     this.dirtyRuntimes.delete(runtimeId);
     this.runtimeSnapshots.delete(runtimeId);
     const sessionPath = this.runtimePaths.get(runtimeId);
     this.runtimePaths.delete(runtimeId);
+    this.runtimeWorkspaces.delete(runtimeId);
     if (sessionPath && this.sessionPaths.get(sessionPath) === runtimeId) this.sessionPaths.delete(sessionPath);
     if (this.defaultRuntimeId === runtimeId) this.defaultRuntimeId = undefined;
     return runtime;
@@ -252,9 +341,7 @@ export class RuntimeServer {
 
   private retireExcessIdleRuntimes(protectedRuntimeId: string): void {
     const idleRuntimeIds = [...this.runtimes.keys()]
-      .filter((runtimeId) => !this.runningRuntimes.has(runtimeId)
-        && !this.memoryBusyRuntimes.has(runtimeId)
-        && !this.subagentBusyRuntimes.has(runtimeId))
+      .filter((runtimeId) => !this.isRuntimeBusy(runtimeId))
       .sort((left, right) => (this.runtimeAccess.get(left) ?? 0) - (this.runtimeAccess.get(right) ?? 0));
     let excess = idleRuntimeIds.length - MAX_RETAINED_IDLE_SESSION_RUNTIMES;
     if (excess <= 0) return;
@@ -282,7 +369,74 @@ export class RuntimeServer {
     return this.runtime;
   }
 
+  private assertWorkspaceAvailable(cwd: string): string {
+    const workspace = normalizeSessionPath(cwd);
+    if (this.deletingWorkspaces.has(workspace)) throw new Error("正在删除该工作区的会话记录，请稍后再试。");
+    return workspace;
+  }
+
+  private isRuntimeBusy(id: string): boolean {
+    return this.runningRuntimes.has(id) || this.commandBusyRuntimes.has(id) || this.mcpBusyRuntimes.has(id)
+      || this.memoryBusyRuntimes.has(id) || this.subagentBusyRuntimes.has(id);
+  }
+
+  private assertSessionAvailable(sessionPath: string): string {
+    const path = normalizeSessionPath(sessionPath);
+    if (this.sessionMutations.has(path)) throw new Error("该会话正在修改，请稍后再试。");
+    return path;
+  }
+
+  private async mutateSession(command: SessionMutationCommand, addressedId?: string): Promise<unknown> {
+    const workspaces = [this.assertWorkspaceAvailable(command.cwd)];
+    if (command.type === "move_session") workspaces.push(this.assertWorkspaceAvailable(command.targetCwd));
+    const path = this.assertSessionAvailable(command.sessionPath);
+    if (this.openingSessions.has(path)) throw new Error("该会话正在打开，请稍后再试。");
+    const writerId = this.sessionPaths.get(path);
+    if (writerId && this.runtimeWorkspaces.get(writerId) !== workspaces[0]) throw new Error("所选会话不属于当前工作区。");
+    const release = command.type === "archive_session" || command.type === "delete_session" || command.type === "move_session";
+    if (release && writerId && this.isRuntimeBusy(writerId)) throw new Error("该会话仍在运行，请先停止后再修改。");
+    this.sessionMutations.set(path, workspaces);
+    try {
+      // Hold the path through shutdown and disk I/O: reopening it in either gap
+      // would leave another live writer on the file being removed or relocated.
+      if (release) await this.releaseSession(path);
+      if (this.disposed) throw new Error("CoilCoil 运行时已关闭。");
+      const selectedId = release || command.type === "restore_session" ? undefined : addressedId ?? this.defaultRuntimeId;
+      const runtime = selectedId ? this.runtimeById(selectedId) : this.runtime;
+      return await (selectedId
+        ? this.withRuntimeCommand(selectedId, () => this.dispatchTo(runtime, command))
+        : this.dispatchTo(runtime, command));
+    } finally {
+      this.sessionMutations.delete(path);
+    }
+  }
+
+  private async deleteWorkspaceSessions(cwd: string): Promise<{ deleted: number }> {
+    const workspace = this.assertWorkspaceAvailable(cwd);
+    this.deletingWorkspaces.add(workspace);
+    try {
+      if ([...this.sessionMutations.values()].some((workspaces) => workspaces.includes(workspace))) {
+        throw new Error("该工作区的会话记录正在修改，请稍后再删除。");
+      }
+      const runtimeIds = [...this.runtimeWorkspaces.keys()].filter((id) => this.runtimeWorkspaces.get(id) === workspace);
+      if (runtimeIds.some((id) => this.isRuntimeBusy(id))) {
+        throw new Error("该工作区里还有正在运行的会话，请先停止后再删除。");
+      }
+      // Release every writer before deleting files, including archived sessions
+      // retained in memory. Keep the workspace locked across asynchronous dispose.
+      const closing = runtimeIds.map((id) => this.removeRuntimeReferences(id)?.dispose());
+      const results = await Promise.allSettled(closing);
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+      if (this.disposed) throw new Error("CoilCoil 运行时已关闭。");
+      return await this.runtime.deleteWorkspaceSessions(cwd);
+    } finally {
+      this.deletingWorkspaces.delete(workspace);
+    }
+  }
+
   private async openWorkspace(cwd: string): Promise<{ sessions: SessionSummary[]; snapshot?: SessionSnapshot }> {
+    this.assertWorkspaceAvailable(cwd);
     const sessions = await this.runtime.listSessions(cwd);
     const current = this.defaultRuntimeId ? this.runtimeSnapshots.get(this.defaultRuntimeId) : undefined;
     const sessionPath = selectWorkspaceSessionPath(sessions, current, cwd, normalizeSessionPath);
@@ -302,26 +456,32 @@ export class RuntimeServer {
     model?: Extract<RuntimeCommand, { type: "create_session" }>["model"],
     agentMode?: Extract<RuntimeCommand, { type: "create_session" }>["agentMode"],
   ): Promise<SessionSnapshot> {
+    const workspace = this.assertWorkspaceAvailable(cwd);
     // Creating a blank conversation is a newer navigation intent than any
     // historical restore that may still be queued or running.
     this.desiredSessionPath = undefined;
     const runtimeId = this.createRuntimeId();
     const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
     this.runtimes.set(runtimeId, runtime);
+    this.runtimeWorkspaces.set(runtimeId, workspace);
     try {
-      const snapshot = this.decorateSnapshot(runtimeId, await runtime.createSession(cwd, model, agentMode));
-      this.defaultRuntimeId = runtimeId;
-      this.retireExcessIdleRuntimes(runtimeId);
-      return snapshot;
+      return await this.withRuntimeCommand(runtimeId, () => runtime.createSession(cwd, model, agentMode), (snapshot) => {
+        const decorated = this.decorateSnapshot(runtimeId, snapshot);
+        this.defaultRuntimeId = runtimeId;
+        return decorated;
+      });
     } catch (error) {
       this.removeRuntimeReferences(runtimeId);
-      await runtime.dispose().catch(() => undefined);
+      await runtime.dispose().catch((cleanupError) => {
+        this.log.error("process", "session_initialization_cleanup_failed", cleanupError, { command: "create_session", cwd }, { runtimeId });
+      });
       throw error;
     }
   }
 
   private async openSession(cwd: string, sessionPath: string): Promise<SessionSnapshot> {
-    const normalizedPath = normalizeSessionPath(sessionPath);
+    const workspace = this.assertWorkspaceAvailable(cwd);
+    const normalizedPath = this.assertSessionAvailable(sessionPath);
     this.desiredSessionPath = normalizedPath;
     const existingId = this.sessionPaths.get(normalizedPath);
     if (existingId && this.runtimes.has(existingId)) {
@@ -329,7 +489,7 @@ export class RuntimeServer {
       this.touchRuntime(existingId);
       const cached = this.runtimeSnapshots.get(existingId);
       if (cached && !this.dirtyRuntimes.has(existingId)) return cached;
-      return this.decorateSnapshot(existingId, await this.runtimeById(existingId).snapshot());
+      return this.withRuntimeCommand(existingId, () => this.runtimeById(existingId).snapshot(), (snapshot) => this.decorateSnapshot(existingId, snapshot));
     }
     const opening = this.openingSessions.get(normalizedPath);
     if (opening) return opening;
@@ -345,22 +505,25 @@ export class RuntimeServer {
       if (this.disposed || this.desiredSessionPath !== normalizedPath) {
         throw new Error(SESSION_OPEN_SUPERSEDED_ERROR);
       }
+      this.assertWorkspaceAvailable(cwd);
+      this.assertSessionAvailable(sessionPath);
 
       const runtimeId = this.createRuntimeId();
       const runtime = this.createManagedRuntime(runtimeId, this.runtime.sharedModelRuntime());
       this.runtimes.set(runtimeId, runtime);
+      this.runtimeWorkspaces.set(runtimeId, workspace);
       this.touchRuntime(runtimeId);
       try {
-        const snapshot = this.decorateSnapshot(runtimeId, await runtime.openSession(cwd, sessionPath));
-        if (this.disposed) {
-          throw new Error(SESSION_OPEN_SUPERSEDED_ERROR);
-        }
-        if (this.desiredSessionPath === normalizedPath) this.defaultRuntimeId = runtimeId;
-        this.retireExcessIdleRuntimes(runtimeId);
-        return snapshot;
+        return await this.withRuntimeCommand(runtimeId, () => runtime.openSession(cwd, sessionPath), (snapshot) => {
+          const decorated = this.decorateSnapshot(runtimeId, snapshot);
+          if (this.desiredSessionPath === normalizedPath) this.defaultRuntimeId = runtimeId;
+          return decorated;
+        });
       } catch (error) {
         this.removeRuntimeReferences(runtimeId);
-        await runtime.dispose().catch(() => undefined);
+        await runtime.dispose().catch((cleanupError) => {
+          this.log.error("process", "session_initialization_cleanup_failed", cleanupError, { command: "open_session", cwd }, { runtimeId, sessionPath });
+        });
         throw error;
       }
     })().finally(() => {
@@ -382,31 +545,22 @@ export class RuntimeServer {
   }
 
   private async dispatch(command: RuntimeCommand, runtimeId?: string): Promise<unknown> {
+    if (this.disposed) throw new Error("CoilCoil 运行时已关闭。");
+    if (command.type === "delete_workspace_sessions") return this.deleteWorkspaceSessions(command.cwd);
     if (command.type === "create_session") return this.createSession(command.cwd, command.model, command.agentMode);
     // Git 面板的操作只认工作区，不借用任何会话的运行时：会话被回收了也照样能用。
     if (command.type === "git") return runGitAction(command.cwd, command.action);
     if (command.type === "open_session") return this.openSession(command.cwd, command.sessionPath);
     if (command.type === "open_workspace") return this.openWorkspace(command.cwd);
-    if (command.type === "move_session") {
-      // Relocating rewrites the session header on disk, so the live runtime has
-      // to let go of the file first; a still-open SessionManager would append
-      // over the move. Releasing also tells the renderer to drop this session's
-      // cached snapshot and workspace-scoped panels.
-      const runtimeId = this.sessionPaths.get(normalizeSessionPath(command.sessionPath));
-      if (runtimeId && this.runningRuntimes.has(runtimeId)) {
-        throw new Error("请先停止正在运行的会话，再移动到其他工作区。");
-      }
-      await this.releaseSession(command.sessionPath);
-      return this.dispatchTo(this.runtime, command);
+    switch (command.type) {
+      case "archive_session": case "delete_session": case "move_session": case "restore_session":
+      case "rename_session": case "pin_session": case "fork_session":
+        return this.mutateSession(command, runtimeId);
     }
 
     const alwaysControl = command.type === "bootstrap"
       || command.type === "list_sessions"
       || command.type === "list_archived_sessions"
-      || command.type === "archive_session"
-      || command.type === "delete_session"
-      || command.type === "delete_workspace_sessions"
-      || command.type === "restore_session"
       || command.type === "configure_model"
       || command.type === "create_subscription_account"
       || command.type === "remove_model_provider_configuration"
@@ -421,10 +575,10 @@ export class RuntimeServer {
     const useControlRuntime = alwaysControl
       || (addressedRuntimeGone && answersFromWorkspaceConfiguration(command));
     const runtime = useControlRuntime ? this.runtime : this.selectedRuntime(runtimeId);
-    const result = await this.dispatchTo(runtime, command);
-    if (command.type === "archive_session" || command.type === "delete_session") {
-      await this.releaseSession(command.sessionPath);
-    }
+    const selectedId = useControlRuntime ? undefined : runtimeId ?? this.defaultRuntimeId;
+    const result = await (selectedId
+      ? this.withRuntimeCommand(selectedId, () => this.dispatchTo(runtime, command))
+      : this.dispatchTo(runtime, command));
     if (
       command.type === "save_openai_responses_ws_configuration"
       || command.type === "save_model_provider_configuration"
@@ -646,11 +800,19 @@ export class RuntimeServer {
   }
 
   async warmup(): Promise<void> {
+    if (this.disposed) throw new Error("CoilCoil 运行时已关闭。");
     await this.runtime.initialize();
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    return this.disposing ??= this.disposeRuntimes();
+  }
+
+  private async disposeRuntimes(): Promise<void> {
     this.disposed = true;
+    await this.localMcp?.then((access) => access.close()).catch((error) => {
+      this.log.warn("mcp", "local_access_close_failed", { message: errorMessage(error) });
+    });
     this.desiredSessionPath = undefined;
     for (const runtimeId of this.runtimes.keys()) {
       // Telling clients is a courtesy; closing the runtimes is the job. A sink
@@ -669,8 +831,11 @@ export class RuntimeServer {
     this.runtimes.clear();
     this.sessionPaths.clear();
     this.runtimePaths.clear();
+    this.runtimeWorkspaces.clear();
     this.runtimeAccess.clear();
     this.runningRuntimes.clear();
+    this.commandBusyRuntimes.clear();
+    this.mcpBusyRuntimes.clear();
     this.memoryBusyRuntimes.clear();
     this.subagentBusyRuntimes.clear();
     this.dirtyRuntimes.clear();
@@ -724,6 +889,10 @@ export function attachProcessIpc(options = runtimeOptionsFromEnvironment()): Run
   // "runtime exited with code 1"; keep that ending, and add the reason.
   installProcessErrorHandlers(server.log, { exitOnUncaught: true });
   server.log.info("process", "runtime_started", processStartupData({ agentDir: options.agentDir }));
+  void server.startLocalMcpAccess().catch((error) => {
+    server.log.error("mcp", "local_access_start_failed", error);
+    process.stderr.write(`[coilcoil-runtime] local MCP access failed: ${errorMessage(error)}\n`);
+  });
   void server.warmup().catch((error) => {
     server.log.error("process", "warmup_failed", error);
     process.stderr.write(`[coilcoil-runtime] warmup failed: ${errorMessage(error)}\n`);
@@ -749,6 +918,10 @@ export function attachJsonlStdio(options = runtimeOptionsFromEnvironment()): Run
     process.stdout.write(`${JSON.stringify(message)}\n`);
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  void server.startLocalMcpAccess().catch((error) => {
+    server.log.error("mcp", "local_access_start_failed", error);
+    process.stderr.write(`[coilcoil-runtime] local MCP access failed: ${errorMessage(error)}\n`);
+  });
   input.on("line", (line) => {
     try {
       void server.receive(JSON.parse(line));

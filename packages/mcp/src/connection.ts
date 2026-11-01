@@ -161,6 +161,22 @@ function isRequestTimeout(error: unknown): boolean {
   return error instanceof Error && /request timed out|maximum total timeout exceeded/i.test(error.message);
 }
 
+async function collectPages<T>(list: (cursor: string | undefined) => Promise<{ items: T[]; nextCursor?: string }>): Promise<T[]> {
+  const items: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await list(cursor);
+    items.push(...page.items);
+    cursor = page.nextCursor;
+    if (cursor !== undefined) {
+      if (seen.has(cursor)) throw new Error("MCP 服务器返回了重复的分页游标。");
+      seen.add(cursor);
+    }
+  } while (cursor !== undefined);
+  return items;
+}
+
 export class McpConnection {
   private client?: Client;
   private transport?: Transport;
@@ -184,6 +200,8 @@ export class McpConnection {
   private stderrTail = "";
   /** One connect at a time; a second press must join the first, not race it. */
   private inFlight?: Promise<McpConnectionStatus>;
+  /** Closing invalidates any handshake or discovery still awaiting a response. */
+  private generation = 0;
 
   constructor(private readonly options: McpConnectionOptions) {}
 
@@ -307,11 +325,14 @@ export class McpConnection {
   async connect(): Promise<McpConnectionStatus> {
     if (this.inFlight) return this.inFlight;
     if (this.state === "connected") return this.state;
-    this.inFlight = this.runConnect().finally(() => { this.inFlight = undefined; });
-    return this.inFlight;
+    const pending = this.runConnect(++this.generation).finally(() => {
+      if (this.inFlight === pending) this.inFlight = undefined;
+    });
+    this.inFlight = pending;
+    return pending;
   }
 
-  private async runConnect(): Promise<McpConnectionStatus> {
+  private async runConnect(generation: number): Promise<McpConnectionStatus> {
     this.state = "connecting";
     this.lastFailure = undefined;
     this.lastFailureHttpStatus = undefined;
@@ -322,19 +343,26 @@ export class McpConnection {
         { capabilities: {} },
       );
       const transport = this.buildTransport();
+      // The handshake already owns resources (a process/socket), even before
+      // initialization succeeds. close() and timeout cleanup must see them.
+      this.client = client;
+      this.transport = transport;
+      this.watchForClose(client);
       await this.withTimeout(
         this.oauth ? this.oauth.withAuthContext(() => client.connect(transport)) : client.connect(transport),
         `连接 ${this.name} 超时（${Math.round(this.timeoutMs / 1000)} 秒）。`,
       );
-      this.client = client;
-      this.transport = transport;
-      this.watchForClose(client);
+      if (generation !== this.generation) return this.state;
       if (this.oauth) await this.oauth.withAuthContext(() => this.discover(client));
       else await this.discover(client);
+      if (generation !== this.generation) return this.state;
+      if (this.client !== client) throw new Error(`MCP Server「${this.name}」在发现工具和资源时断开了连接。`);
       this.state = "connected";
       return this.state;
     } catch (error) {
+      if (generation !== this.generation) return this.state;
       await this.dispose();
+      if (generation !== this.generation) return this.state;
       if (error instanceof UnauthorizedError) {
         this.state = "needs-auth";
         this.lastFailure = undefined;
@@ -436,9 +464,13 @@ export class McpConnection {
    */
   private async discover(client: Client): Promise<void> {
     const timeout = this.timeoutMs;
-    const tools = await client.listTools(undefined, { timeout });
+    const tools = await collectPages(async (cursor) => {
+      const page = await client.listTools(cursor === undefined ? undefined : { cursor }, { timeout });
+      return { items: page.tools, nextCursor: page.nextCursor };
+    });
+    if (this.client !== client) return;
     const excluded = new Set(this.options.definition.excludeTools);
-    this.discoveredTools = tools.tools
+    this.discoveredTools = tools
       .filter((tool) => !excluded.has(tool.name))
       .map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }));
     if (!this.options.definition.exposeResources) {
@@ -446,14 +478,18 @@ export class McpConnection {
       return;
     }
     try {
-      const resources = await client.listResources(undefined, { timeout });
-      this.discoveredResources = resources.resources.map((resource) => ({
+      const resources = await collectPages(async (cursor) => {
+        const page = await client.listResources(cursor === undefined ? undefined : { cursor }, { timeout });
+        return { items: page.resources, nextCursor: page.nextCursor };
+      });
+      if (this.client !== client) return;
+      this.discoveredResources = resources.map((resource) => ({
         uri: resource.uri,
         name: resource.name,
         mimeType: resource.mimeType,
       }));
     } catch {
-      this.discoveredResources = [];
+      if (this.client === client) this.discoveredResources = [];
     }
   }
 
@@ -548,9 +584,11 @@ export class McpConnection {
   }
 
   async close(): Promise<void> {
-    await this.dispose();
+    this.generation++;
+    this.inFlight = undefined;
     this.state = "not connected";
     this.discoveredTools = [];
     this.discoveredResources = [];
+    await this.dispose();
   }
 }

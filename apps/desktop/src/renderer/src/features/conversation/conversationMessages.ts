@@ -5,6 +5,8 @@ export interface PendingUserMessage {
   sessionPath?: string;
 }
 
+export interface MessageDeltaPart { revision: number; delta: string; }
+
 export interface ConversationMessagesState {
   sessionPath?: string;
   /**
@@ -26,7 +28,7 @@ export type ConversationMessagesAction =
   | { type: "snapshot"; sessionPath: string; messages: ChatMessage[]; promptQueue?: QueuedPrompt[]; steering?: SteeringMessage[]; revision: number; runtimeId?: string }
   | { type: "prompt_queue"; queue: QueuedPrompt[]; revision: number; sessionPath?: string; runtimeId?: string }
   | { type: "runtime_message"; message: ChatMessage; revision: number; sessionPath?: string; runtimeId?: string }
-  | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; timestamp: number; revision: number; sessionPath?: string; runtimeId?: string }
+  | { type: "message_delta"; id: string; field: "text" | "thinking"; delta: string; deltaParts?: readonly MessageDeltaPart[]; timestamp: number; revision: number; sessionPath?: string; runtimeId?: string }
   | { type: "reject"; id: string; revision?: number }
   | { type: "truncate"; order: number }
   | { type: "restore"; state: ConversationMessagesState };
@@ -195,24 +197,33 @@ export function conversationMessagesReducer(
     case "message_delta": {
       if (action.sessionPath && state.sessionPath && action.sessionPath !== state.sessionPath) return state;
       if (action.runtimeId && state.runtimeId && action.runtimeId !== state.runtimeId) return state;
-      if (action.runtimeId === state.runtimeId && action.revision < state.revision) return state;
+      let revision = state.revision;
+      let delta = "";
+      // A direct snapshot response can overtake the renderer's buffered stream.
+      // Retain each chunk's revision so only the unseen suffix is appended.
+      for (const part of action.deltaParts ?? [action]) {
+        if (action.runtimeId === state.runtimeId && part.revision <= revision) continue;
+        revision = Math.max(revision, part.revision);
+        delta += part.delta;
+      }
+      if (!delta) return state;
       const current = state.committed.find((message) => message.id === action.id);
       const message: ChatMessage = current
         ? {
             ...current,
-            [action.field]: `${action.field === "thinking" ? current.thinking ?? "" : current.text}${action.delta}`,
+            [action.field]: `${action.field === "thinking" ? current.thinking ?? "" : current.text}${delta}`,
             status: "running",
           }
         : {
             id: action.id,
             order: action.timestamp,
             role: "assistant",
-            text: action.field === "text" ? action.delta : "",
-            thinking: action.field === "thinking" ? action.delta : undefined,
+            text: action.field === "text" ? delta : "",
+            thinking: action.field === "thinking" ? delta : undefined,
             timestamp: action.timestamp,
             status: "running",
           };
-      return { ...state, revision: action.revision, committed: upsert(state.committed, message) };
+      return { ...state, revision, committed: upsert(state.committed, message) };
     }
     case "reject":
       return {

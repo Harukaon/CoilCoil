@@ -28,9 +28,25 @@ import {
 } from "./promptDocument";
 import type { PromptEditorHandle } from "./PromptEditor";
 
-interface CachedComposerDraft {
+export interface CachedComposerDraft {
   document: PromptDocument;
   images: PromptImage[];
+}
+
+/** Recover into the originating draft without replacing text typed since send. */
+export function recoverComposerSubmission(
+  cache: Map<string, CachedComposerDraft>, activeKey: string, current: CachedComposerDraft,
+  key: string, submitted: CachedComposerDraft,
+): CachedComposerDraft | undefined {
+  const existing = key === activeKey ? current : cache.get(key);
+  const previous = existing?.document ?? emptyPromptDocument();
+  const document = !promptDocumentHasContent(submitted.document) ? previous
+    : !promptDocumentHasContent(previous) || JSON.stringify(previous) === JSON.stringify(submitted.document) ? submitted.document
+    : { version: 1 as const, parts: [...submitted.document.parts, { type: "text" as const, text: "\n\n" }, ...previous.parts] };
+  const images = [...new Map([...submitted.images, ...(existing?.images ?? [])].map((image) => [image.id, { ...image }])).values()];
+  const restored = { document: clonePromptDocument(document), images };
+  cache.set(key, restored);
+  return key === activeKey ? restored : undefined;
 }
 
 export interface ComposerController {
@@ -44,6 +60,7 @@ export interface ComposerController {
   setDraft: (value: string) => void;
   restoreDraft: (value: string) => void;
   restoreDocument: (document: PromptDocument) => void;
+  restoreSubmission: (key: string, document: PromptDocument, images: PromptImage[]) => void;
   setImages: React.Dispatch<React.SetStateAction<PromptImage[]>>;
   setModelMenuOpen: (open: boolean) => void;
   reset: () => void;
@@ -120,10 +137,22 @@ export function useComposerController({
   }, []);
 
   const reset = useCallback((): void => {
-    setDocumentState(emptyPromptDocument());
+    documentRef.current = emptyPromptDocument();
+    imagesRef.current = [];
+    setDocumentState(documentRef.current);
     cacheRef.current.delete(activeSessionKeyRef.current);
     elementOrdinalsRef.current.delete(activeSessionKeyRef.current);
     setImages([]);
+  }, []);
+
+  const restoreSubmission = useCallback((key: string, document: PromptDocument, images: PromptImage[]): void => {
+    const restored = recoverComposerSubmission(cacheRef.current, activeSessionKeyRef.current,
+      { document: documentRef.current, images: imagesRef.current }, key, { document, images });
+    if (!restored) return;
+    documentRef.current = restored.document;
+    imagesRef.current = restored.images;
+    setDocumentState(restored.document);
+    setImages(restored.images);
   }, []);
 
   const restoreDraft = useCallback((value: string): void => {
@@ -295,6 +324,7 @@ export function useComposerController({
     setDraft: (value: string) => setDocumentState(promptDocumentFromText(value)),
     restoreDraft,
     restoreDocument,
+    restoreSubmission,
     setImages,
     setModelMenuOpen,
     reset,

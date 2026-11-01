@@ -12,7 +12,6 @@ import {
   extractExitCode,
   mapMessage,
   matchPendingUserPrompt,
-  planFromResult,
   preparePromptImages,
   subagentActivityFromDetails,
   titleFromText,
@@ -84,9 +83,9 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
           // fresh card later; the sweep itself covers every running card, including
           // any that no longer has an in-flight id.
           active.toolRunIds.endAll();
-          // The run this stop was aimed at is over, whatever the abort promise
-          // is still waiting on.
-          active.aborting = false;
+          // The model loop may settle before owned watcher processes finish
+          // stopping. Keep the stop state until the combined abort completes.
+          active.aborting = active.abortInFlight !== undefined;
           this.failAbandonedToolRuns(active, [...active.tools.keys()]);
           active.activeAssistantId = undefined;
           active.activeAssistantOrder = undefined;
@@ -460,13 +459,6 @@ export abstract class RuntimeSessionEvents extends RuntimeToolState {
             terminal.endedAt = status === "running" ? undefined : tool.endedAt;
             terminal.exitCode = extractExitCode(event.result);
             active.terminals.set(terminalId, terminal);
-          }
-          if (event.toolName === "todo") {
-            const plan = planFromResult(event.result);
-            if (plan) {
-              active.plan = plan;
-              this.emitEvent({ type: "plan_updated", plan: [...plan] });
-            }
           }
           if (event.toolName === "plan") {
             const details = isRecord(event.result) ? event.result.details : undefined;

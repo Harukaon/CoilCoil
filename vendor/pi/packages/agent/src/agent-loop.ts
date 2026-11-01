@@ -385,6 +385,7 @@ async function streamAssistantResponse(
 	emit: AgentEventSink,
 	streamFunction: StreamFn,
 ): Promise<AssistantMessage> {
+	if (signal?.aborted) return emitAbortedAssistantResponse(context, config, emit);
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
 	if (config.transformContext) {
@@ -399,6 +400,9 @@ async function streamAssistantResponse(
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =
 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
+	// Preparation, context transforms and credential resolution can all await long-running work.
+	// A stop received during any of them must not start another provider request.
+	if (signal?.aborted) return emitAbortedAssistantResponse(context, config, emit);
 
 	const response = await streamFunction(config.model, llmContext, {
 		...config,
@@ -466,6 +470,36 @@ async function streamAssistantResponse(
 	}
 	await emit({ type: "message_end", message: finalMessage });
 	return finalMessage;
+}
+
+async function emitAbortedAssistantResponse(
+	context: AgentContext,
+	config: AgentLoopConfig,
+	emit: AgentEventSink,
+): Promise<AssistantMessage> {
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		api: config.model.api,
+		provider: config.model.provider,
+		model: config.model.id,
+		thinkingLevel: config.reasoning ?? "off",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "aborted",
+		errorMessage: "Operation aborted",
+		timestamp: Date.now(),
+	};
+	context.messages.push(message);
+	await emit({ type: "message_start", message });
+	await emit({ type: "message_end", message });
+	return message;
 }
 
 /**

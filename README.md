@@ -17,8 +17,9 @@ CoilCoil Desktop does not require a user-installed Pi. The application starts it
 - CoilCoil-owned `OpenAI Response (WS)` Pi extension for ordinary proxy keys and persistent WebSocket transport
 - Project tools for reading, searching, editing, writing, and running commands
 - Bundled `pi-mcp-adapter` with CoilCoil-owned GUI configuration, plus CoilCoil's own subagent engine and typed runtime activity events
+- [MCP access for other local agents](docs/mcp-runtime-access.md) through the running CoilCoil runtime: discover servers, inspect schemas, and call tools with `coilcoil mcp`
 - `/goal <目标>` goal mode: an Agent loop that keeps working through errors until it calls the goal-completion tool or the user stops it
-- Structured todo plans, Git changes and patches, terminal output, and project file previews
+- Execution plans, Git changes and patches, terminal output, and project file previews
 - CoilCoil's bundled Simplified Chinese workflow, policies, project memory, and terminal support
 - Explicit development-only migration support for an existing Pi model configuration
 

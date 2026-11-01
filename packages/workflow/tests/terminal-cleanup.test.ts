@@ -9,7 +9,19 @@ function createHarness() {
   const tools = new Map<string, any>();
   const messages: any[] = [];
   const entries: any[] = [];
+  const eventHandlers = new Map<string, Set<(value: unknown) => void>>();
   const pi = {
+    events: {
+      on(channel: string, listener: (value: unknown) => void) {
+        let listeners = eventHandlers.get(channel);
+        if (!listeners) eventHandlers.set(channel, listeners = new Set());
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      },
+      emit(channel: string, value: unknown) {
+        for (const listener of [...eventHandlers.get(channel) ?? []]) listener(value);
+      },
+    },
     registerTool(tool: any) {
       tools.set(tool.name, tool);
     },
@@ -71,7 +83,7 @@ test("bash exposes bounded foreground wait instead of a default hard timeout", a
   context.after(shutdown);
 
   const properties = tools.get("bash").parameters.properties;
-  assert.equal(properties.block_until_ms.default, 30_000);
+  assert.equal(properties.block_until_ms.default, 1_000);
   assert.equal(properties.timeout_ms.default, undefined);
 
   const result = await runBash({
@@ -120,7 +132,10 @@ test("bash automatically hands a long command to the terminal manager", async (c
   assert.equal(result.details.wait, "timeout");
   assert.equal(result.details.popped_out_into_background, true);
   assert.equal(result.details.is_running_in_background, true);
-  assert.match(result.details.output, /READY/);
+  // The 50 ms foreground budget can expire before the OS schedules the shell.
+  // Its later output must remain readable through the handed-off terminal.
+  const ready = await run({ action: "read", id: terminalId, cursor: 0, waitFor: "READY", timeoutMs: 5_000 });
+  assert.match(ready.details.output, /READY/);
 
   const listed = await run({ action: "list" });
   assert.ok(listed.details.sessions.some((session: any) => session.id === terminalId && session.status === "running"));
@@ -143,7 +158,7 @@ test("is_background returns immediately without shell ampersands", async (contex
 });
 
 test("timeout_ms is a separate hard lifetime and reports failure", async (context) => {
-  const { run, runBash, shutdown } = createHarness();
+  const { run, runBash, shutdown, messages } = createHarness();
   context.after(shutdown);
 
   const started = await runBash({
@@ -151,14 +166,16 @@ test("timeout_ms is a separate hard lifetime and reports failure", async (contex
     is_background: true,
     timeout_ms: 100,
   });
-  const completed = await run({
+  const waiting = await run({
     action: "await",
     id: started.details.background_shell_id,
     timeoutMs: 5_000,
   });
-  assert.equal(completed.details.wait, "exit");
-  assert.equal(completed.details.status, "failed");
-  assert.equal(completed.details.is_running_in_background, false);
+  assert.equal(waiting.terminate, true);
+  await waitUntil(() => messages.length > 0);
+  const completed = (await run({ action: "list" })).details.sessions.find((session: any) => session.id === started.details.id);
+  assert.equal(completed.status, "failed");
+  assert.equal(completed.is_running_in_background, false);
 });
 
 test("background bash completion wakes the Agent and keeps a readable output file", async (context) => {
@@ -355,14 +372,14 @@ test("log output keeps carriage-return lines when requested", async (context) =>
   assert.equal(result.details.outputMode, "log");
 });
 
-test("await waits for exit without polling", async (context) => {
-  const { run, shutdown } = createHarness();
+test("await suspends immediately and receives exit without polling", async (context) => {
+  const { run, shutdown, messages } = createHarness();
   context.after(shutdown);
 
   const started = await run({
     action: "start",
     command: "sleep 0.15; printf DONE",
-    timeoutMs: 1_000,
+    timeoutMs: 0,
   });
   const result = await run({
     action: "await",
@@ -370,8 +387,10 @@ test("await waits for exit without polling", async (context) => {
     timeoutMs: 2_000,
   });
 
-  assert.equal(result.details.wait, "exit");
-  assert.match(result.details.output, /DONE/);
+  assert.equal(result.terminate, true);
+  assert.equal(result.details.waiting, true);
+  await waitUntil(() => messages.length > 0);
+  assert.match(messages[0].message.content, /DONE/);
 });
 
 test("notifyOn exit sends a follow-up event once the shell outlives its tool call", async (context) => {
@@ -395,11 +414,13 @@ test("notifyOn exit sends a follow-up event once the shell outlives its tool cal
   assert.match(messages[0].message.content, /FINISHED/);
 });
 
-test("an exit the Agent already awaited does not wake it again", async (context) => {
-  const { run, runBash, shutdown, messages } = createHarness();
+test("an exit already available when awaited does not wake the Agent again", async (context) => {
+  const { run, runBash, shutdown, messages, entries } = createHarness();
   context.after(shutdown);
 
   const started = await runBash({ command: "sleep 0.15; printf FINISHED", is_background: true });
+  await waitUntil(() => entries.some((entry) => entry.customType === "coilcoil-terminal-run"
+    && entry.data.id === started.details.id && entry.data.status === "succeeded"));
   const awaited = await run({
     action: "await",
     id: started.details.background_shell_id,
@@ -407,8 +428,9 @@ test("an exit the Agent already awaited does not wake it again", async (context)
   });
   await new Promise((resolve) => setTimeout(resolve, 400));
 
-  assert.equal(awaited.details.wait, "exit");
-  assert.match(awaited.details.output, /FINISHED/);
+  assert.equal(awaited.terminate, false);
+  assert.equal(awaited.details.waiting, false);
+  assert.match(awaited.details.monitors[0].lastEvent.output, /FINISHED/);
   assert.equal(messages.length, 0, "the await result already carries the exit");
 });
 

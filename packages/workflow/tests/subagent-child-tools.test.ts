@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { MCP_MANAGER_CHANNEL } from "../extensions/mcp-tools.ts";
-import { COILCOIL_SUBAGENT_GIT_SAFETY, COILCOIL_WINDOWS_SHELL_STANDARDS } from "../extensions/system/engineering-standards.ts";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
+import { MCP_MANAGER_CHANNEL, MCP_TOOLS_REFRESH_ENTRY } from "../extensions/mcp-tools.ts";
+import { COILCOIL_BACKGROUND_WAIT_STANDARDS, COILCOIL_SUBAGENT_GIT_SAFETY, COILCOIL_WINDOWS_SHELL_STANDARDS } from "../extensions/system/engineering-standards.ts";
 import {
   BROWSER_MCP_SERVER,
   type ChildSessionHandle,
@@ -13,6 +14,7 @@ import {
   childToolExtensions,
   childToolsForPlatform,
   createChildSession,
+  reopenChildSession,
   DEFAULT_CHILD_TOOLS,
   type ParentEvents,
 } from "../extensions/subagents/child.ts";
@@ -63,13 +65,16 @@ function processAlive(pid: number): boolean {
 test("default child tools include MCP", () => {
   assert.ok(DEFAULT_CHILD_TOOLS.includes("mcp"));
   assert.ok(DEFAULT_CHILD_TOOLS.includes("terminal"));
+  assert.ok(DEFAULT_CHILD_TOOLS.includes("monitor"));
 });
 
 test("child tool extensions load once per extension and only for granted tools", () => {
-  assert.deepEqual(childToolExtensions(["read", "grep"]), []);
-  const names = childToolExtensions(["bash", "terminal", "mcp"]).map((extension) =>
+  assert.deepEqual(childToolExtensions(["read", "grep"]).map((extension) =>
+    typeof extension === "function" ? "<anonymous>" : extension.name), ["coilcoil-subagent-read-cache"]);
+  const names = childToolExtensions(["bash", "terminal", "monitor", "mcp"]).map((extension) =>
     typeof extension === "function" ? "<anonymous>" : extension.name);
   assert.deepEqual(names, ["coilcoil-subagent-terminal", "coilcoil-subagent-mcp"]);
+  assert.equal(childToolExtensions(["monitor"]).length, 1, "monitor uses the same managed terminal extension");
 });
 
 test("a child session actually gets the extension-provided tools it is granted", async (context) => {
@@ -86,6 +91,13 @@ test("a child session actually gets the extension-provided tools it is granted",
 test("a child session without the grant gets no MCP tool", async (context) => {
   const { handle } = await openChild(context, { tools: ["read", "grep", "ls"] });
   assert.deepEqual(handle.session.getActiveToolNames().sort(), ["grep", "ls", "read"]);
+});
+
+test("a monitor-only grant exposes monitoring without granting other shell tools", async (context) => {
+  const { handle } = await openChild(context, { tools: ["read", "monitor"] });
+  assert.deepEqual(handle.session.getActiveToolNames().sort(), ["monitor", "read"]);
+  assert.ok(handle.session.getToolDefinition("monitor"));
+  assert.deepEqual(childPromptAdditions(["monitor"], "profile", "darwin"), [COILCOIL_BACKGROUND_WAIT_STANDARDS, "profile"]);
 });
 
 test("the child's MCP tool reaches the parent runtime's MCP client", async (context) => {
@@ -245,4 +257,63 @@ test("a child session never gets the browser interaction tools", async (context)
   const { handle } = await openChild(context, { tools: [...DEFAULT_CHILD_TOOLS, "browser_open", "browser_click"] });
   const active = handle.session.getActiveToolNames();
   assert.ok(!active.some((tool) => tool.startsWith("browser_")), `got ${active.join(",")}`);
+});
+
+test("child request prefixes survive restart and instruction or MCP schema edits; explicit MCP refresh applies", async (context) => {
+  const workspace = childWorkspace(context);
+  mkdirSync(workspace.agentDir, { recursive: true });
+  writeFileSync(join(workspace.agentDir, "auth.json"), JSON.stringify({ anthropic: { type: "api_key", key: "offline-key" } }));
+  writeFileSync(join(workspace.cwd, "AGENTS.md"), "original child project instructions");
+  const model = getBuiltinModels("anthropic").find((entry) => entry.id === "claude-sonnet-5-5")!;
+  const bodies: Array<{ system: unknown; tools: Array<{ name: string; description?: string }> }> = [];
+  let description = "original direct schema";
+  const manager = { directTools: async () => [{ server: "database", tool: { name: "query", description,
+    inputSchema: { type: "object", required: ["filter"], properties: { filter: { type: "string" } } } } }] };
+  const parentEvents: ParentEvents = { emit(channel, data) {
+    if (channel === MCP_MANAGER_CHANNEL) (data as { manager?: unknown }).manager = manager;
+  } };
+  context.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
+    bodies.push(JSON.parse(String(init.body)));
+    const event = (type: string, data: unknown) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+    return new Response(
+      event("message_start", { type: "message_start", message: { id: `msg_${bodies.length}`, type: "message", role: "assistant", model: model.id,
+        content: [], usage: { input_tokens: 100, output_tokens: 0 } } })
+      + event("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })
+      + event("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "offline response" } })
+      + event("content_block_stop", { type: "content_block_stop", index: 0 })
+      + event("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 10 } })
+      + event("message_stop", { type: "message_stop" }), { headers: { "Content-Type": "text/event-stream" } },
+    );
+  });
+  const first = await createChildSession({ ...workspace, parentSessionDir: workspace.sessionDir, parentSessionId: "parent-a",
+    model: model as never, tools: ["read", "mcp", "mcp__database__query"], parentEvents, systemPrompt: "original child profile", onEvent: () => undefined });
+  context.after(() => first.dispose());
+  await first.session.prompt("first question");
+  assert.equal(bodies.length, 1);
+  const original = bodies[0].system;
+  const originalTools = bodies[0].tools;
+  assert.ok(originalTools.some((tool) => tool.name === "mcp__database__query"), JSON.stringify({ tools: originalTools.map((tool) => tool.name), active: first.session.getActiveToolNames(), all: first.session.getAllTools().map((tool) => tool.name) }));
+  assert.match(JSON.stringify(original), /original child project instructions/);
+  assert.match(JSON.stringify(original), /original child profile/);
+  const sessionFile = first.sessionFile!;
+  await first.dispose();
+  writeFileSync(join(workspace.cwd, "AGENTS.md"), "updated child project instructions");
+  description = "updated direct schema";
+  const reopened = await reopenChildSession({ ...workspace, sessionFile, tools: ["read", "mcp", "mcp__database__query"], parentEvents,
+    systemPrompt: "updated child profile", onEvent: () => undefined });
+  context.after(() => reopened.dispose());
+  await reopened.session.prompt("continue the existing child");
+  assert.deepEqual(bodies.at(-1)!.system, original);
+  assert.deepEqual(bodies.at(-1)!.tools, originalTools);
+  reopened.session.sessionManager.appendCustomEntry(MCP_TOOLS_REFRESH_ENTRY, { version: 1 });
+  await reopened.session.reload();
+  await reopened.session.prompt("continue after an explicit MCP refresh");
+  assert.deepEqual(bodies.at(-1)!.system, original);
+  assert.equal(bodies.at(-1)!.tools.find((tool) => tool.name === "mcp__database__query")?.description, description);
+  const fresh = await createChildSession({ ...workspace, parentSessionDir: workspace.sessionDir, parentSessionId: "parent-a",
+    model: model as never, tools: ["read", "mcp", "mcp__database__query"], parentEvents, systemPrompt: "updated child profile", onEvent: () => undefined });
+  context.after(() => fresh.dispose());
+  await fresh.session.prompt("new child");
+  assert.match(JSON.stringify(bodies.at(-1)!.system), /updated child project instructions/);
+  assert.match(JSON.stringify(bodies.at(-1)!.system), /updated child profile/);
 });

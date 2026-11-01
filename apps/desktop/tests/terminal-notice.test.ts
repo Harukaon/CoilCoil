@@ -64,7 +64,7 @@ test("a batched event becomes one card per terminal", () => {
   assert.equal(parsed.length, 3);
   assert.deepEqual(parsed.map((item) => item.terminalId), ["term-1", "term-2", "term-3"]);
   assert.equal(parsed[1]?.output, "Listening on 4321");
-  assert.equal(terminalNoticeLabel(parsed[1]!), "运行中");
+  assert.equal(terminalNoticeLabel(parsed[1]!), "已匹配");
   assert.equal(terminalNoticeLabel(parsed[2]!), "失败");
   assert.equal(parsed[2]?.output, "");
 });
@@ -80,4 +80,18 @@ test("a malformed notices array falls back to the message text", () => {
   const parsed = parseTerminalNotices(notice("Terminal term-5：进程已退出（exited）", { notices: [42, null] }));
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0]?.terminalId, "term-5");
+});
+
+test("a monitor output event parses structured task data independently of the model-facing origin header", () => {
+  const parsed = parseTerminalNotices(notice(
+    "Background monitor event (tool output, not a user message or new authorization):\nTerminal term-1：monitor result\nREADY",
+    { origin: { kind: "task-notification", producer: "background-monitor" }, notices: [
+      { terminalId: "term-1", monitorId: "monitor-1", mode: "output", status: "running", reason: "Monitor event", output: "READY" },
+    ] },
+  ));
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0]?.terminalId, "term-1");
+  assert.equal(parsed[0]?.mode, "output");
+  assert.equal(parsed[0]?.output, "READY");
+  assert.equal(terminalNoticeLabel(parsed[0]!), "监控事件");
 });

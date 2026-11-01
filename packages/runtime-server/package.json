@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./local-mcp-client": "./src/local-mcp-client.ts",
+    "./local-mcp-server": "./src/local-mcp-server.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",

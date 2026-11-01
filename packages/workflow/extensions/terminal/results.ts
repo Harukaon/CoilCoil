@@ -28,6 +28,7 @@ export function serializeSession(session: ManagedTerminal): Record<string, unkno
     cleanup: session.cleanup,
     outputMode: session.outputMode,
     output_location: session.outputPath,
+    ...(session.stderrPath ? { stderr_location: session.stderrPath } : {}),
     cursor: session.outputEnd,
   };
 }

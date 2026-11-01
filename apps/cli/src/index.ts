@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { CoilCoilRuntime } from "@coilcoil/runtime-core";
+import type { CoilCoilRuntime } from "@coilcoil/runtime-core";
 import type { RuntimeConfiguration, RuntimeEvent, ThinkingLevel } from "@coilcoil/runtime-protocol";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { reportMcpError, runMcpCommand } from "./mcp-command.js";
+import { startLocalMcpServer, type LocalMcpServer } from "@coilcoil/runtime-server/local-mcp-server";
 
 interface CliOptions {
   cwd: string;
@@ -76,6 +78,7 @@ function printHelp(): void {
       "  --thinking <level>           off|minimal|low|medium|high|xhigh|max",
       "  -h, --help                   show this help",
       "  -v, --version                show the version",
+      "  mcp <command>                access MCP through a running CoilCoil (mcp --help)",
       "",
       "Commands:",
       "  /new                         start a new session",
@@ -140,6 +143,7 @@ async function ensureModel(
 }
 
 async function main(): Promise<void> {
+  if (process.argv[2] === "mcp") return runMcpCommand(process.argv.slice(3));
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     printHelp();
@@ -152,6 +156,7 @@ async function main(): Promise<void> {
   if (!existsSync(options.cwd)) throw new Error(`Project does not exist: ${options.cwd}`);
   const dataRoot = resolve(process.env.COILCOIL_DATA_DIR ?? join(homedir(), ".coilcoil"));
   let running = false;
+  const { CoilCoilRuntime } = await import("@coilcoil/runtime-core");
   const runtime = new CoilCoilRuntime({
     agentDir: join(dataRoot, "agent"),
     sessionDir: join(dataRoot, "sessions"),
@@ -161,6 +166,7 @@ async function main(): Promise<void> {
     },
   });
   const terminal = createInterface({ input: stdin, output: stdout });
+  let localMcp: LocalMcpServer | undefined;
 
   try {
     const bootstrap = await runtime.initialize();
@@ -168,6 +174,18 @@ async function main(): Promise<void> {
     let sessions = await runtime.listSessions(options.cwd);
     if (!options.fresh && sessions[0]) await runtime.openSession(options.cwd, sessions[0].path);
     else await runtime.createSession(options.cwd);
+
+    localMcp = await startLocalMcpServer({
+      dataDir: dataRoot,
+      async handle(request, signal) {
+        if (request.action === "contexts") {
+          const snapshot = await runtime.snapshot();
+          return { contexts: [{ sessionId: snapshot.session.id, cwd: snapshot.session.cwd, title: snapshot.session.title }] };
+        }
+        if (request.runtimeId) throw new Error("CLI 只有当前会话，无需提供 --runtime-id。");
+        return runtime.accessMcp(request, signal);
+      },
+    });
 
     stdout.write(`\nCoilCoil · ${basename(options.cwd)}\nType /help for commands.\n\n`);
     for (;;) {
@@ -214,11 +232,13 @@ async function main(): Promise<void> {
     }
   } finally {
     terminal.close();
+    await localMcp?.close();
     await runtime.dispose();
   }
 }
 
 main().catch((error: unknown) => {
+  if (process.argv[2] === "mcp") { reportMcpError(error); return; }
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`CoilCoil: ${message}\n`);
   process.exitCode = 1;

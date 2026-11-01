@@ -34,9 +34,6 @@ import {
   readGitChanges,
 } from "./project-helpers.js";
 import {
-  ABORT_STALL_NOTICE_MS,
-} from "./runtime-constants.js";
-import {
   buildRuntimeInspectionSnapshot,
 } from "./runtime-inspection-snapshot.js";
 import { RuntimeSessionEvents } from "./runtime-session-events.js";
@@ -54,6 +51,8 @@ import {
 import {
   sessionUsage,
 } from "./session-values.js";
+import { projectSnapshot } from "./project-snapshot.js";
+import { abortSession, cancelGoalBackgroundWait } from "./runtime-abort.js";
 
 export class CoilCoilRuntime extends RuntimeSessionEvents {
   async prompt(text: string, images?: PromptImage[], clientMessageId?: string, promptDocument?: PromptDocument): Promise<{ accepted: true; }> {
@@ -366,54 +365,17 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
    */
   async abort(): Promise<{ aborted: boolean; aborting: boolean; cancelledQueue: number; }> {
     const active = this.requireActive();
-    const requestedAt = Date.now();
-    this.log.info("abort", "abort_requested", {
-      streaming: active.session.isStreaming,
-      aborting: active.aborting === true,
-      queued: active.promptQueue.length,
-      runningTools: [...active.tools.values()].filter((tool) => tool.status === "running").map((tool) => tool.name),
+    return abortSession(active, {
+      promptStarting: () => this.promptStarting,
+      stopGoal: () => this.stopGoalIfRunning(active),
+      dropPrompts: () => this.dropQueuedPrompts(active) + this.clearSteeredQueue(active),
+      cancelSummary: () => this.cancelSummarization(active),
+      publish: () => this.publishRunState(active),
+      isCurrent: () => this.active === active,
+      reportSlow: () => this.reportSlowAbort(active),
+      reportError: (error) => this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) }),
+      log: (event, data) => this.log.info("abort", event, data),
     });
-    const stoppedGoal = await this.stopGoalIfRunning(active);
-    const cancelledQueue = this.dropQueuedPrompts(active) + this.clearSteeredQueue(active);
-    const cancelledSummary = this.cancelSummarization(active);
-    if (active.abortInFlight) {
-      return { aborted: true, aborting: true, cancelledQueue };
-    }
-    if (!active.session.isStreaming) {
-      const pending = this.promptStarting;
-      if (pending) {
-        active.abortOnStart = true;
-        active.aborting = true;
-      }
-      this.log.info("abort", "abort_without_live_run", { cancelledQueue, stoppedGoal, cancelledSummary, pending });
-      this.publishRunState(active);
-      return {
-        aborted: stoppedGoal || cancelledQueue > 0 || cancelledSummary || pending,
-        aborting: pending,
-        cancelledQueue,
-      };
-    }
-    active.aborting = true;
-    this.publishRunState(active);
-    const stallNotice = setTimeout(() => this.reportSlowAbort(active), ABORT_STALL_NOTICE_MS);
-    stallNotice.unref?.();
-    const abortInFlight = active.session.abort()
-      .catch((error) => {
-        this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) });
-      })
-      .finally(() => {
-        clearTimeout(stallNotice);
-        if (active.abortInFlight === abortInFlight) active.abortInFlight = undefined;
-        active.aborting = false;
-        // The gap between this and `abort_requested` is the whole of "I pressed
-        // stop and nothing happened": it is time spent inside a tool call that
-        // had already been dispatched, not a click that went missing.
-        this.log.info("abort", "abort_settled", { elapsedMs: Date.now() - requestedAt });
-        if (this.active === active) this.publishRunState(active);
-      });
-    active.abortInFlight = abortInFlight;
-    void abortInFlight;
-    return { aborted: true, aborting: true, cancelledQueue };
   }
 
   /**
@@ -518,6 +480,10 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   /** End the `/goal` loop of this session, if one is running. */
   async stopGoal(): Promise<{ stopped: boolean; }> {
     const active = this.requireActive();
+    if (active.goal?.status === "running") cancelGoalBackgroundWait(active, {
+      publish: () => this.publishRunState(active), isCurrent: () => this.active === active,
+      reportError: (error) => this.emitEvent({ type: "runtime_error", message: errorMessage(error), detail: errorDetail(error) }),
+    });
     return { stopped: await this.stopGoalIfRunning(active) };
   }
 
@@ -536,15 +502,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   async refreshProject(): Promise<ProjectSnapshot> {
     const active = this.requireActive();
     const [files, changes] = await Promise.all([directoryNodes(active.cwd), readGitChanges(active.cwd)]);
-    active.project = {
-      cwd: active.cwd,
-      files,
-      ...changes,
-      terminals: [...active.terminals.values()].sort((a, b) => b.startedAt - a.startedAt),
-      plan: [...active.plan],
-      planApproval: active.planApproval,
-      refreshedAt: Date.now(),
-    };
+    active.project = projectSnapshot(active, { files, ...changes });
     this.emitEvent({ type: "project_updated", project: active.project });
     return active.project;
   }
@@ -557,13 +515,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
   protected publishProjectFromMemory(): void {
     const active = this.active;
     if (!active) return;
-    active.project = {
-      ...active.project,
-      terminals: [...active.terminals.values()].sort((a, b) => b.startedAt - a.startedAt),
-      plan: [...active.plan],
-      planApproval: active.planApproval,
-      refreshedAt: Date.now(),
-    };
+    active.project = projectSnapshot(active);
     this.emitEvent({ type: "project_updated", project: active.project });
   }
 
@@ -652,6 +604,7 @@ export class CoilCoilRuntime extends RuntimeSessionEvents {
       thinkingLevel: active.session.thinkingLevel as ThinkingLevel,
       fast: active.fastState?.enabled ?? false,
       goal: active.goal,
+      backgroundWait: active.backgroundWait ? { waiting: active.backgroundWait.waiting, monitorIds: [...active.backgroundWait.monitorIds] } : undefined,
       aborting: active.aborting === true,
       responseMetrics: active.responseMetrics,
       responseMetricsHistory: active.responseMetricsHistory,

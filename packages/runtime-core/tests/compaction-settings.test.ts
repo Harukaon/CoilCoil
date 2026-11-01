@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SettingsManager } from "@earendil-works/pi-coding-agent";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
   type CompactionSettings,
   compactionSettingsForWindow,
@@ -72,11 +72,10 @@ test("the window is read at each call, so switching models is followed", () => {
   assert.equal(manager.getCompactionSettings().keepRecentTokens, 7_808);
 });
 
-test("an explicitly configured budget is left alone", () => {
-  // 连那条「压到能压缩的一半」的保险都不上：自己填的数字，就照自己填的来。
-  const manager = fakeSettingsManager({ compaction: { keepRecentTokens: 30_000 } });
+test("a valid explicitly configured budget is left alone", () => {
+  const manager = fakeSettingsManager({ compaction: { keepRecentTokens: 12_000 } });
   installCompactionSettings(manager, () => 32_000);
-  assert.equal(manager.getCompactionSettings().keepRecentTokens, 30_000);
+  assert.equal(manager.getCompactionSettings().keepRecentTokens, 12_000);
 });
 
 test("installing twice does not stack wrappers", () => {
@@ -85,4 +84,50 @@ test("installing twice does not stack wrappers", () => {
   const wrapped = manager.getCompactionSettings;
   installCompactionSettings(manager, () => 400_000);
   assert.equal(manager.getCompactionSettings, wrapped);
+});
+
+test("per-model reserve and survivor overrides reach the compaction trigger unchanged", () => {
+  const manager = SettingsManager.inMemory({ compaction: { modelOverrides: {
+    "anthropic/small": { reserveTokens: 4_096, keepRecentTokens: 0 },
+    "anthropic/large": { reserveTokens: 50_000, keepRecentTokens: 30_000 },
+  } } });
+  installCompactionSettings(manager, () => 32_000);
+  assert.deepEqual(manager.getCompactionSettings({ provider: "anthropic", id: "small" }), {
+    enabled: true, reserveTokens: 4_096, keepRecentTokens: 0,
+  });
+  const large = { provider: "anthropic", id: "large", contextWindow: 200_000 };
+  assert.deepEqual(manager.getCompactionSettings(large), {
+    enabled: true, reserveTokens: 50_000, keepRecentTokens: 30_000,
+  });
+});
+
+test("small windows receive a usable default reserve and survivor budget", () => {
+  const manager = SettingsManager.inMemory({});
+  installCompactionSettings(manager, () => 8_000);
+  assert.deepEqual(manager.getCompactionSettings(), { enabled: true, reserveTokens: 2_000, keepRecentTokens: 3_000 });
+});
+
+test("impossible explicit budgets fail clearly before repeated compaction attempts", () => {
+  for (const compaction of [{ reserveTokens: 8_000 }, { reserveTokens: 1_000, keepRecentTokens: 7_000 }]) {
+    const manager = SettingsManager.inMemory({ compaction });
+    installCompactionSettings(manager, () => 8_000);
+    assert.throws(() => manager.getCompactionSettings(), /必须小于/);
+  }
+});
+
+test("routed models use their own window when clamping the default survivor budget", () => {
+  const manager = SettingsManager.inMemory({});
+  installCompactionSettings(manager, () => 200_000);
+  const routed = { provider: "local", id: "small", contextWindow: 32_000 };
+  assert.equal(manager.getCompactionSettings(routed).keepRecentTokens, 7_808);
+});
+
+test("per-model reserve overrides also determine the default survivor budget", () => {
+  const manager = SettingsManager.inMemory({ compaction: { modelOverrides: {
+    "local/small": { reserveTokens: 4_000 },
+  } } });
+  installCompactionSettings(manager, () => 32_000);
+  assert.deepEqual(manager.getCompactionSettings({ provider: "local", id: "small" }), {
+    enabled: true, reserveTokens: 4_000, keepRecentTokens: 14_000,
+  });
 });

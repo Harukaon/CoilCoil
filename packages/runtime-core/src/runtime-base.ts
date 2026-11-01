@@ -27,6 +27,7 @@ import {
   resolve,
 } from "node:path";
 import {
+  type McpAdapterEffectiveConfig,
   McpAdapterConfigModule,
 } from "./browser-mcp.js";
 import {
@@ -179,9 +180,9 @@ export abstract class RuntimeBase {
 
   protected abstract refreshAgentMcpConfiguration(eventBus: EventBusController, cwd: string, browserScopeId: string): Promise<void>;
 
-  protected abstract canReloadActiveSession(active: ActiveSession): boolean;
+  protected abstract canReloadActiveSession(active: ActiveSession, userToolChange?: boolean): boolean;
 
-  protected abstract reloadActiveSessionResources(errorLabel?: string): void;
+  protected abstract reloadActiveSessionResources(errorLabel?: string, userToolChange?: boolean): void;
 
   protected abstract refreshRuntimeInspectionSources(active: ActiveSession): Promise<void>;
 
@@ -190,6 +191,8 @@ export abstract class RuntimeBase {
   protected abstract readDisabledMcpServers(): Set<string>;
 
   protected abstract cleanRemovedMcpServerState(adapter: McpAdapterConfigModule, cwd?: string): boolean;
+
+  protected abstract loadEffectiveMcpConfiguration(adapter: McpAdapterConfigModule, cwd?: string): McpAdapterEffectiveConfig;
 
   /** Lay the workspace's own MCP servers, stored in the agent directory, over the shared ones. */
   protected abstract withWorkspaceMcpServers<T extends { mcpServers: Record<string, Record<string, unknown>> }>(

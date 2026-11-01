@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -25,6 +25,39 @@ function repository(context: test.TestContext): { root: string; repo: string } {
 }
 
 const status = (cwd: string) => runGitAction(cwd, { op: "status" }) as Promise<GitStatus>;
+
+test("文件路径必须按字面处理：通配符、冒号、换行及前导破折号不扩大操作范围", async (context) => {
+  const { repo } = repository(context);
+  const names = ["*.txt", "other.txt", ":(glob)*", "line\nbreak.txt", "-option.txt"];
+  for (const name of names) writeFileSync(join(repo, name), `original ${name}\n`);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "init");
+  const initial = git(repo, "rev-parse", "HEAD").trim();
+  const historical = await runGitAction(repo, { op: "commit_diff", hash: initial, path: "*.txt" }) as GitDiff;
+  assert.equal((historical.patch.match(/^diff --git /gm) ?? []).length, 1);
+  assert.doesNotMatch(historical.patch, /other\.txt/);
+  for (const name of names) writeFileSync(join(repo, name), `changed ${name}\n`);
+  await runGitAction(repo, { op: "stage", paths: ["*.txt"] });
+  assert.deepEqual(git(repo, "diff", "--cached", "--name-only", "-z").split("\0").filter(Boolean), ["*.txt"]);
+  const diff = await runGitAction(repo, { op: "diff", path: "*.txt", staged: false }) as GitDiff;
+  assert.equal(diff.patch, "", "已暂存的目标没有工作区差异，其他文件的差异不应混入");
+  await runGitAction(repo, { op: "unstage", paths: ["*.txt"] });
+  await runGitAction(repo, { op: "discard", paths: ["*.txt"] });
+  assert.equal(readFileSync(join(repo, "*.txt"), "utf8"), "original *.txt\n");
+  assert.equal(readFileSync(join(repo, "other.txt"), "utf8"), "changed other.txt\n");
+  for (const name of names.slice(2)) {
+    await runGitAction(repo, { op: "stage", paths: [name] });
+    assert.deepEqual(git(repo, "diff", "--cached", "--name-only", "-z").split("\0").filter(Boolean), [name]);
+    await runGitAction(repo, { op: "unstage", paths: [name] });
+    await runGitAction(repo, { op: "discard", paths: [name] });
+    assert.equal(readFileSync(join(repo, name), "utf8"), `original ${name}\n`);
+  }
+  writeFileSync(join(repo, "?.new"), "selected");
+  writeFileSync(join(repo, "x.new"), "keep");
+  await runGitAction(repo, { op: "discard", paths: ["?.new"] });
+  assert.equal(existsSync(join(repo, "?.new")), false);
+  assert.equal(readFileSync(join(repo, "x.new"), "utf8"), "keep");
+});
 
 test("不在仓库里：repository 是 false", async (context) => {
   const dir = mkdtempSync(join(tmpdir(), "coilcoil-not-git-"));
@@ -61,7 +94,7 @@ test("暂存区和工作区分开列；改名带原路径；子目录里也按�
   writeFileSync(join(repo, "note md.txt"), "x\n");
 
   const current = await status(join(repo, "src"));
-  assert.equal(current.root, repo);
+  assert.equal(current.root, realpathSync(repo));
   const byPath = Object.fromEntries(current.files.map((file) => [file.path, file]));
   assert.deepEqual(byPath["src/a.txt"], { path: "src/a.txt", staged: "modified", unstaged: "modified" });
   assert.deepEqual(byPath["new.txt"], { path: "new.txt", staged: "renamed", unstaged: undefined, originalPath: "old.txt" });

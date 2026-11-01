@@ -119,6 +119,10 @@ test("guard permits the named session and the project Markdown tree", async (t) 
     (await harness.call(event("bash", { command: "pwd" }), harness.context)).block,
     true,
   );
+  for (const input of [{ action: "start", command: "pwd" }, { action: "start", terminalId: "term-1" }, { action: "list" }]) {
+    assert.equal((await harness.call(event("monitor", input), harness.context)).block, true,
+      "a file-only memory worker cannot acquire shell access through monitor");
+  }
   assert.equal(
     (await harness.call(event("powershell", { command: "Get-Location" }), harness.context)).block,
     true,

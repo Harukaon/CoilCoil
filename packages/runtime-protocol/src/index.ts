@@ -853,11 +853,6 @@ export interface RewindPreview {
   skipped?: string[];
 }
 
-export interface TodoItem {
-  text: string;
-  status: "pending" | "in_progress" | "completed";
-}
-
 /**
  * Status of the `/goal` loop this session is in.
  *
@@ -1043,11 +1038,11 @@ export interface RuntimeTokenBreakdown {
 export interface CacheUsageSummary {
   /** Full prompt volume. Pi exposes input/cacheRead/cacheWrite as non-overlapping buckets. */
   promptTokens: number;
-  /** Tokens the cache could not serve. Writes are not counted here: they are new. */
+  /** Ordinary input plus cache writes: all tokens not served by a cache read. */
   uncachedTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
-  /** Share of the reusable prompt that came from cache. Undefined when there was none. */
+  /** Cache reads divided by total input, including writes. Undefined for an empty prompt. */
   hitRate?: number;
 }
 
@@ -1058,11 +1053,8 @@ export interface CacheUsageSummary {
  * of the prompt the cache could not serve, `cacheRead` is what it did serve, and
  * `cacheWrite` is what this request put into the cache for later.
  *
- * The hit rate is therefore `cacheRead / (cacheRead + input)`, matching what
- * other agents report. Writes stay out of the denominator on purpose: a request
- * that fills the cache is the investment that makes the next ones cheap, and
- * charging it as a miss made a healthy session look broken every time the
- * context crossed a new cache breakpoint.
+ * The hit rate is `cacheRead / (cacheRead + cacheWrite + input)`. New tails and
+ * intentional rebuilds still count as writes; their cause is tracked separately.
  */
 export function summarizeCacheUsage(
   inputTokens: number | null | undefined,
@@ -1136,6 +1128,34 @@ export interface ContextClearingRecord {
   contextWindow?: number;
 }
 
+export interface PromptCacheDiagnostics {
+  requests: number;
+  hits: number;
+  misses: number;
+  expected: number;
+  cold: number;
+  input: number;
+  read: number;
+  write: number;
+  write1h: number;
+  recent: Array<{
+    at: number;
+    purpose: "conversation" | "compaction" | "branch_summary";
+    model: string;
+    outcome: "cold" | "hit" | "miss" | "expected" | "uncached";
+    reason: string;
+    input: number;
+    read: number;
+    write: number;
+    write1h: number;
+    output: number;
+    ttl: number;
+    parentPinned: boolean;
+    firstChangedBlock?: number;
+    diagnostic?: string;
+  }>;
+}
+
 export interface RuntimeInspectionSnapshot {
   sessionRevision: number;
   activeLeafId?: string;
@@ -1154,6 +1174,8 @@ export interface RuntimeInspectionSnapshot {
   cacheHitRate?: number;
   /** This session's model responses, added up. Context compaction is deliberately left out. */
   cache?: CacheUsageSummary;
+  /** Provider-confirmed usage and prefix diagnostics, including auxiliary summary calls. */
+  cacheDiagnostics?: PromptCacheDiagnostics;
   /** Estimated composition of the prompt currently sent to the model. */
   tokenBreakdown?: RuntimeTokenBreakdown;
   tools: RuntimeToolDefinition[];
@@ -1168,6 +1190,8 @@ export interface RuntimeInspectionSnapshot {
   summarizationModel?: SummarizationModelConfiguration;
   capabilities: {
     editSystemPrompt: boolean;
+    editSystemPromptReason?: string;
+    editSessionSkills?: boolean;
     removeOriginalSessionItems: false;
     removeOriginalSessionItemsReason: string;
   };
@@ -1518,7 +1542,6 @@ export interface ProjectSnapshot {
   /** 读 git 改动失败了（和「确实没有改动」区分开）；有值时 changes 不可信。 */
   changesError?: string;
   terminals: TerminalRun[];
-  plan: TodoItem[];
   planApproval?: PlanApprovalState;
   refreshedAt: number;
 }
@@ -1531,6 +1554,11 @@ export interface MoveSessionResult {
   sessions: SessionSummary[];
   targetSessions: SessionSummary[];
   session: SessionSummary;
+}
+
+export interface BackgroundWaitState {
+  waiting: boolean;
+  monitorIds: string[];
 }
 
 export interface SessionSnapshot {
@@ -1554,6 +1582,8 @@ export interface SessionSnapshot {
   fast: boolean;
   /** Present while this session is in a `/goal` loop; absent once it ends. */
   goal?: GoalState;
+  /** A background monitor owns the next wake-up; the model itself is idle. */
+  backgroundWait?: BackgroundWaitState;
   /** A stop was delivered; the turn is winding down and may still be finishing a tool. */
   aborting?: boolean;
   responseMetrics?: ResponseMetrics;
@@ -1705,9 +1735,9 @@ export type RuntimeEvent =
   | { type: "tool_started"; tool: ToolRun }
   | { type: "tool_updated"; tool: ToolRun }
   | { type: "tool_finished"; tool: ToolRun }
-  | { type: "plan_updated"; plan: TodoItem[] }
   | { type: "plan_approval_updated"; plan?: PlanApprovalState }
   | { type: "goal_updated"; goal?: GoalState }
+  | { type: "background_wait_updated"; backgroundWait: BackgroundWaitState }
   | { type: "subagents_updated"; subagents: SubagentActivity[] }
   | { type: "project_updated"; project: ProjectSnapshot }
   | {
@@ -1808,4 +1838,43 @@ export interface DiagnosticLogEntry {
 /** A batch of Renderer entries on its way to the process that owns the file. */
 export interface DiagnosticLogBatch {
   entries: DiagnosticLogEntry[];
+}
+
+/** Local agents discover capabilities without receiving launch secrets or OAuth tokens. */
+export type McpToolRequest = {
+  cwd: string;
+  runtimeId?: string;
+} & (
+  | { action: "list" }
+  | { action: "tools"; server: string }
+  | { action: "call"; server: string; tool: string; args: Record<string, unknown> }
+);
+
+export type McpAccessRequest = { action: "contexts" } | McpToolRequest;
+
+export interface McpAccessContext {
+  runtimeId?: string;
+  sessionId: string;
+  cwd: string;
+  title: string;
+}
+
+export function parseMcpAccessRequest(value: unknown): McpAccessRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("MCP 请求必须是对象。");
+  const raw = value as Record<string, unknown>;
+  if (raw.action === "contexts") return { action: "contexts" };
+  if (typeof raw.cwd !== "string" || !raw.cwd.trim()) throw new Error("MCP 请求缺少 cwd（工作目录）。");
+  if (raw.runtimeId !== undefined && (typeof raw.runtimeId !== "string" || !raw.runtimeId.trim())) {
+    throw new Error("runtimeId 必须是非空字符串。");
+  }
+  const context = { cwd: raw.cwd, runtimeId: raw.runtimeId as string | undefined };
+  if (raw.action === "list") return { ...context, action: "list" };
+  if (raw.action !== "tools" && raw.action !== "call") throw new Error("MCP action 仅支持 contexts、list、tools、call。");
+  if (typeof raw.server !== "string" || !raw.server.trim()) throw new Error("缺少 MCP server 名称。");
+  if (raw.action === "tools") return { ...context, action: "tools", server: raw.server.trim() };
+  if (typeof raw.tool !== "string" || !raw.tool.trim()) throw new Error("缺少 MCP tool 名称。");
+  if (raw.args !== undefined && (!raw.args || typeof raw.args !== "object" || Array.isArray(raw.args))) {
+    throw new Error("MCP args 必须是 JSON 对象。");
+  }
+  return { ...context, action: "call", server: raw.server.trim(), tool: raw.tool.trim(), args: (raw.args ?? {}) as Record<string, unknown> };
 }

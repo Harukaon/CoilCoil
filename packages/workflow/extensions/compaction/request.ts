@@ -1,6 +1,10 @@
-import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { InputTooLongError, type RequestSummary } from "./summarize.ts";
+import type { SummaryPrefix } from "./prefix.ts";
+import { addUsage, emptyUsage } from "./usage.ts";
+import { nativeSummaryModel } from "./model.ts";
+import type { AnthropicCacheController } from "../cache/controller.ts";
 
 /**
  * 真正发一次摘要请求（第 2 层用）。
@@ -30,6 +34,11 @@ export interface StreamRequestOptions {
   model: Model<Api>;
   auth: RequestAuth;
   signal?: AbortSignal;
+  prefix?: SummaryPrefix;
+  /** Include cold fallback/chunk calls in the same ledger without forcing prefix reuse. */
+  cache?: AnthropicCacheController;
+  /** Use the configured provider's account/model transforms, just like the main request. */
+  stream?: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream;
   /** 发出后多久没有任何返回算卡住。 */
   firstEventMs?: number;
   /** 开始返回以后，多久没有新内容算卡住。 */
@@ -42,6 +51,11 @@ const OVERFLOW = /context.{0,40}(length|window|limit|overflow|exceed)|input.{0,4
 
 export function isInputOverflow(message: string): boolean {
   return OVERFLOW.test(message);
+}
+
+/** Invalid credentials and malformed requests cannot improve by resending identical input. */
+function permanentRequestError(message: string): boolean {
+  return /\b(400|401|402|403|404|405|413|422)\b|invalid_request_error|authentication_error|permission_error|prefix.mismatch/i.test(message);
 }
 
 function textOf(message: AssistantMessage): string {
@@ -59,12 +73,13 @@ export function createStreamRequest(options: StreamRequestOptions): RequestSumma
   const firstEventMs = options.firstEventMs ?? 180_000;
   const idleMs = options.idleMs ?? 90_000;
   const attempts = options.attempts ?? 3;
-  const model = options.auth.baseUrl ? { ...options.model, baseUrl: options.auth.baseUrl } : options.model;
+  const nativeModel = nativeSummaryModel(options.model, options.auth.apiKey);
+  const model = options.auth.baseUrl ? { ...nativeModel, baseUrl: options.auth.baseUrl } : nativeModel;
   const progress = options.onProgress ?? (() => undefined);
 
-  const once = async (system: string, prompt: string, maxTokens: number, label: string, attempt: number): Promise<AssistantMessage> => {
+  const once = async (system: string, prompt: string, maxTokens: number, label: string, attempt: number, signal?: AbortSignal): Promise<AssistantMessage> => {
     const controller = new AbortController();
-    const outer = options.signal;
+    const outer = signal;
     const relay = (): void => controller.abort(outer?.reason);
     if (outer?.aborted) relay();
     outer?.addEventListener("abort", relay, { once: true });
@@ -81,18 +96,28 @@ export function createStreamRequest(options: StreamRequestOptions): RequestSumma
     };
     try {
       arm(firstEventMs);
-      const stream = streamSimple(model, {
+      const instruction = { role: "user" as const, content: [{ type: "text" as const, text: options.prefix ? `${system}\n\n${prompt}` : prompt }], timestamp: Date.now() };
+      const context = options.prefix ? {
+        ...options.prefix.context,
+        messages: [...options.prefix.context.messages, instruction],
+      } : {
         systemPrompt: system,
-        messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
-      }, {
-        maxTokens,
+        messages: [instruction],
+      };
+      const streamOptions = {
+        maxTokens: Math.max(1, Math.min(maxTokens, model.maxTokens > 0 ? model.maxTokens : maxTokens, options.prefix?.maxTokens ?? maxTokens)),
         signal: controller.signal,
         apiKey: options.auth.apiKey,
         headers: liveHeaders(options.auth.headers),
         env: options.auth.env,
-        cacheRetention: "none",
+        cacheRetention: options.prefix?.cacheRetention ?? "none",
+        maxRetries: 0,
         ...(model.reasoning ? { reasoning: "low" as const } : {}),
-      });
+      };
+      const cache = options.cache ?? options.prefix?.cache;
+      const prepared = cache?.options(model, streamOptions, "compaction", { requireParent: Boolean(options.prefix) });
+      const source = (options.stream ?? streamSimple)(model, context, prepared?.options ?? streamOptions);
+      const stream = cache && prepared ? cache.observe(source, prepared.pending, "compaction") : source;
       for await (const _event of stream) {
         events++;
         arm(idleMs);
@@ -109,34 +134,41 @@ export function createStreamRequest(options: StreamRequestOptions): RequestSumma
     }
   };
 
-  return async ({ system, prompt, maxTokens, label }) => {
+  return async ({ system, prompt, maxTokens, label, signal: requestSignal }) => {
+    const signal = options.signal && requestSignal ? AbortSignal.any([options.signal, requestSignal]) : requestSignal ?? options.signal;
+    const usage = emptyUsage();
     let tokens = maxTokens;
     let lengthRetried = false;
     let lastError = "未知错误";
     for (let attempt = 1; attempt <= attempts; attempt++) {
-      if (options.signal?.aborted) throw new Error("压缩已取消");
+      if (signal?.aborted) throw new Error("压缩已取消");
       let response: AssistantMessage;
       try {
-        response = await once(system, prompt, tokens, label, attempt);
+        response = await once(system, prompt, tokens, label, attempt, signal);
       } catch (error) {
-        if (options.signal?.aborted) throw new Error("压缩已取消");
+        if (signal?.aborted) throw new Error("压缩已取消");
         lastError = error instanceof Error ? error.message : String(error);
-        if (isInputOverflow(lastError)) throw new InputTooLongError(lastError);
+        if (isInputOverflow(lastError)) throw new InputTooLongError(lastError, usage);
+        if (permanentRequestError(lastError)) throw new Error(lastError);
         progress({ phase: "request_retry", label, attempt, error: lastError.slice(0, 300) });
-        await sleep(2000 * attempt, options.signal);
+        if (attempt < attempts) await sleep(2000 * attempt, signal);
         continue;
       }
-      if (response.stopReason === "aborted" && options.signal?.aborted) throw new Error("压缩已取消");
+      if (signal?.aborted) throw new Error("压缩已取消");
+      if (response.usage) addUsage(usage, response.usage);
+      progress({ phase: "request_usage", label, attempt, inputTokens: response.usage.input, outputTokens: response.usage.output,
+        cacheRead: response.usage.cacheRead, cacheWrite: response.usage.cacheWrite });
       if (response.stopReason === "error" || response.stopReason === "aborted") {
         lastError = response.errorMessage || "请求失败";
-        if (isInputOverflow(lastError)) throw new InputTooLongError(lastError);
+        if (isInputOverflow(lastError)) throw new InputTooLongError(lastError, usage);
+        if (permanentRequestError(lastError)) throw new Error(lastError);
         progress({ phase: "request_retry", label, attempt, error: lastError.slice(0, 300) });
-        await sleep(2000 * attempt, options.signal);
+        if (attempt < attempts) await sleep(2000 * attempt, signal);
         continue;
       }
       if (response.stopReason === "length") {
         // 写到一半被截断：给一次更大的输出额度；还不够，就让上一层把这块切小。
-        const larger = Math.min(tokens * 2, model.maxTokens > 0 ? model.maxTokens : tokens * 2);
+        const larger = Math.min(tokens * 2, model.maxTokens > 0 ? model.maxTokens : tokens * 2, options.prefix?.maxTokens ?? Infinity);
         if (!lengthRetried && larger > tokens) {
           lengthRetried = true;
           tokens = larger;
@@ -144,13 +176,13 @@ export function createStreamRequest(options: StreamRequestOptions): RequestSumma
           attempt--;
           continue;
         }
-        throw new InputTooLongError(`${label}：摘要写到一半被截断（输出额度 ${tokens}）`);
+        throw new InputTooLongError(`${label}：摘要写到一半被截断（输出额度 ${tokens}）`, usage);
       }
       if (response.content.some((block) => block.type === "toolCall")) {
         lastError = `${label}：模型想调用工具，没有写摘要`;
         continue;
       }
-      return { text: textOf(response), inputTokens: response.usage?.input ?? 0, outputTokens: response.usage?.output ?? 0 };
+      return { text: textOf(response), inputTokens: usage.input, outputTokens: usage.output, usage };
     }
     throw new Error(`${label} 失败（已试 ${attempts} 次）：${lastError}`);
   };
