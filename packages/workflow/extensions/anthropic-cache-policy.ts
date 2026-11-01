@@ -10,4 +10,4 @@ export interface CachedSessionRequest {
   cacheRetention: CacheRetention;
   at: number;
   cache?: AnthropicCacheController;
-}\n
+}
